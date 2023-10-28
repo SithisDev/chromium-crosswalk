@@ -139,6 +139,8 @@ vars = {
   'skia_git': 'https://skia.googlesource.com',
   'swiftshader_git': 'https://swiftshader.googlesource.com',
   'webrtc_git': 'https://webrtc.googlesource.com',
+  'gitee_git': 'https://gitee.com',
+
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling sfntly
   # and whatever else without interference from each other.
@@ -838,7 +840,7 @@ deps = {
     Var('chromium_git') + '/chromium/tools/depot_tools.git' + '@' + '3a98df0bdd49d64cb15a5dd0fbc6b43223856e7d',
 
   'src/third_party/devtools-node-modules':
-    https://gitee.com/mirrors_chromium_googlesource/devtools-node-modules.git' + '@' + '300c8063dda8f87348bca1643bc04c603a42453a',
+    Var('gitee_git') + '/mirrors_chromium_googlesource/devtools-node-modules.git' + '@' + '300c8063dda8f87348bca1643bc04c603a42453a',
 
   'src/third_party/dom_distiller_js/dist':
     Var('chromium_git') + '/chromium/dom-distiller/dist.git' + '@' + '3093c3e238768ab27ff756bd7563ccbb12129d9f',
