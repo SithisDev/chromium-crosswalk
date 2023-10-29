@@ -139,8 +139,6 @@ vars = {
   'skia_git': 'https://skia.googlesource.com',
   'swiftshader_git': 'https://swiftshader.googlesource.com',
   'webrtc_git': 'https://webrtc.googlesource.com',
-  'gitee_git': 'https://gitee.com',
-
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling sfntly
   # and whatever else without interference from each other.
@@ -840,7 +838,7 @@ deps = {
     Var('chromium_git') + '/chromium/tools/depot_tools.git' + '@' + '3a98df0bdd49d64cb15a5dd0fbc6b43223856e7d',
 
   'src/third_party/devtools-node-modules':
-    Var('gitee_git') + '/mirrors_chromium_googlesource/devtools-node-modules.git' + '@' + '300c8063dda8f87348bca1643bc04c603a42453a',
+    Var('chromium_git') + '/external/github.com/ChromeDevTools/devtools-node-modules' + '@' + Var('devtools_node_modules_revision'),
 
   'src/third_party/dom_distiller_js/dist':
     Var('chromium_git') + '/chromium/dom-distiller/dist.git' + '@' + '3093c3e238768ab27ff756bd7563ccbb12129d9f',
@@ -1088,6 +1086,9 @@ deps = {
 
   'src/third_party/libprotobuf-mutator/src':
     Var('chromium_git') + '/external/github.com/google/libprotobuf-mutator.git' + '@' +  Var('libprotobuf-mutator'),
+
+  'src/third_party/libsrtp':
+    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '650611720ecc23e0e6b32b0e3100f8b4df91696c',
 
   # Android Explicit Synchronization.
   'src/third_party/libsync/src': {
@@ -1348,10 +1349,7 @@ deps = {
   },
 
   'src/third_party/usrsctp/usrsctplib':
-    Var('chromium_git') + '/external/github.com/sctplab/usrsctp' + '@' + '7f9228152ab3d70e6848cc9c67389a0d4218740e',
-
-  'src/third_party/libsrtp':
-    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '0e0936f3013fe5884eac82f95e370c8d460a179f',
+    Var('chromium_git') + '/external/github.com/sctplab/usrsctp' + '@' + '7a8bc9a90ca96634aa56ee712856d97f27d903f8',
 
   # Display server protocol for Linux.
   'src/third_party/wayland/src': {
@@ -1379,10 +1377,6 @@ deps = {
 
   'src/third_party/webrtc':
     Var('webrtc_git') + '/src.git' + '@' + 'ad73985e75684cb4ac4dadb9d3d86ad0d66612a0',
-
-  'src/third_party/openmax_dl':
-    Var('chromium_git') + '/external/webrtc/deps/third_party/openmax.git' + '@' + '7acede9c039ea5d14cf326f44aad1245b9e674a7',
-
 
   'src/third_party/xdg-utils': {
       'url': Var('chromium_git') + '/chromium/deps/xdg-utils.git' + '@' + 'd80274d5869b17b8c9067a1022e4416ee7ed5e0d',
