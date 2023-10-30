@@ -1,48 +1,33 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/desktop_display_info.h"
 
 #include "base/location.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-// TODO(crbug.com/961064): Fix memory leaks in tests and re-enable on LSAN.
-#ifdef LEAK_SANITIZER
-#define MAYBE_SingleDisplay DISABLED_SingleDisplay
-#define MAYBE_DualDisplayRight_ReverseOrder \
-  DISABLED_DualDisplayRight_ReverseOrder
-#define MAYBE_DualDisplayLeft_ReverseOrder DISABLED_DualDisplayLeft_ReverseOrder
-#define MAYBE_DualDisplayRight DISABLED_DualDisplayRight
-#define MAYBE_DualDisplayLeft DISABLED_DualDisplayLeft
-#define MAYBE_Multimon3 DISABLED_Multimon3
-#define MAYBE_TripleDisplayMiddle DISABLED_TripleDisplayMiddle
-#define MAYBE_Multimon7 DISABLED_Multimon7
-#else
-#define MAYBE_SingleDisplay SingleDisplay
-#define MAYBE_DualDisplayRight_ReverseOrder DualDisplayRight_ReverseOrder
-#define MAYBE_DualDisplayLeft_ReverseOrder DualDisplayLeft_ReverseOrder
-#define MAYBE_DualDisplayRight DualDisplayRight
-#define MAYBE_DualDisplayLeft DualDisplayLeft
-#define MAYBE_Multimon3 Multimon3
-#define MAYBE_TripleDisplayMiddle TripleDisplayMiddle
-#define MAYBE_Multimon7 Multimon7
-#endif
 
 namespace remoting {
 
+// Depending on the platform the origin of the desktop is calculated relative to
+// the primary display, or relative to the upper-left of the entire desktop
+// region. See comment at DesktopDisplayInfo::CalcDisplayOffset() for more
+// information.
+#define OS_USES_PRIMARY_DISPLAY_AS_ORIGIN \
+  BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_CHROMEOS)
+
 class DesktopDisplayInfoTest : public testing::Test {
  public:
-  void AddDisplay(int x, int y, int width, int height) {
-    auto* display = new DisplayGeometry();
-    display->x = x;
-    display->y = y;
-    display->width = width;
-    display->height = height;
-    display->dpi = 96;
-    display->bpp = 24;
-    display->is_default = false;
-    info_.AddDisplay(display);
+  void AddDisplay(int x, int y, uint32_t width, uint32_t height) {
+    info_.AddDisplay({.id = 0,
+                      .x = x,
+                      .y = y,
+                      .width = width,
+                      .height = height,
+                      .dpi = 96,
+                      .bpp = 24,
+                      .is_default = false});
   }
 
   void VerifyDisplayOffset(const base::Location& from_here,
@@ -63,7 +48,7 @@ class DesktopDisplayInfoTest : public testing::Test {
 // | 300x200 |
 // +---------+
 // o = desktop origin
-TEST_F(DesktopDisplayInfoTest, MAYBE_SingleDisplay) {
+TEST_F(DesktopDisplayInfoTest, SingleDisplay) {
   AddDisplay(0, 0, 300, 200);
 
   VerifyDisplayOffset(FROM_HERE, 0, 0, 0);
@@ -74,7 +59,7 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_SingleDisplay) {
 // | 300x200 | 500x400    |
 // +---------+            |
 //           +------------+
-TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayRight) {
+TEST_F(DesktopDisplayInfoTest, DualDisplayRight) {
   AddDisplay(0, 0, 300, 200);
   AddDisplay(300, 0, 500, 400);
 
@@ -87,7 +72,7 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayRight) {
 // | 300x200 | 500x400    |
 // +---------+            |
 //           +------------+
-TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayRight_ReverseOrder) {
+TEST_F(DesktopDisplayInfoTest, DualDisplayRight_ReverseOrder) {
   AddDisplay(300, 0, 500, 400);
   AddDisplay(0, 0, 300, 200);
 
@@ -100,12 +85,17 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayRight_ReverseOrder) {
 // | 300x200 | 500x400    |
 // +---------+            |
 //           +------------+
-TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayLeft) {
+TEST_F(DesktopDisplayInfoTest, DualDisplayLeft) {
   AddDisplay(0, 0, 500, 400);
   AddDisplay(-300, 0, 300, 200);
 
+#if OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
+  VerifyDisplayOffset(FROM_HERE, 0, 0, 0);
+  VerifyDisplayOffset(FROM_HERE, 1, -300, 0);
+#else
   VerifyDisplayOffset(FROM_HERE, 0, 300, 0);
   VerifyDisplayOffset(FROM_HERE, 1, 0, 0);
+#endif  // OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
 }
 
 // +---------o------------+
@@ -113,12 +103,17 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayLeft) {
 // | 300x200 | 500x400    |
 // +---------+            |
 //           +------------+
-TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayLeft_ReverseOrder) {
+TEST_F(DesktopDisplayInfoTest, DualDisplayLeft_ReverseOrder) {
   AddDisplay(-300, 0, 300, 200);
   AddDisplay(0, 0, 500, 400);
 
+#if OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
+  VerifyDisplayOffset(FROM_HERE, 0, -300, 0);
+  VerifyDisplayOffset(FROM_HERE, 1, 0, 0);
+#else
   VerifyDisplayOffset(FROM_HERE, 0, 0, 0);
   VerifyDisplayOffset(FROM_HERE, 1, 300, 0);
+#endif  // OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
 }
 
 // +---------o------------+
@@ -126,14 +121,20 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_DualDisplayLeft_ReverseOrder) {
 // | 300x200 | 500x400    | 2       |
 // +---------+            | 400x350 |
 //           +------------+---------+
-TEST_F(DesktopDisplayInfoTest, MAYBE_TripleDisplayMiddle) {
+TEST_F(DesktopDisplayInfoTest, TripleDisplayMiddle) {
   AddDisplay(-300, 0, 300, 200);
   AddDisplay(0, 0, 500, 400);  // Default display.
   AddDisplay(500, 50, 400, 350);
 
+#if OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
+  VerifyDisplayOffset(FROM_HERE, 0, -300, 0);
+  VerifyDisplayOffset(FROM_HERE, 1, 0, 0);
+  VerifyDisplayOffset(FROM_HERE, 2, 500, 50);
+#else
   VerifyDisplayOffset(FROM_HERE, 0, 0, 0);
   VerifyDisplayOffset(FROM_HERE, 1, 300, 0);
   VerifyDisplayOffset(FROM_HERE, 2, 800, 50);
+#endif  // OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
 }
 
 //  x         o-----------+            - 0
@@ -145,14 +146,20 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_TripleDisplayMiddle) {
 //                    +-----------+    - 950
 //  |         |       |   |       |
 // -300       0      300 500     900
-TEST_F(DesktopDisplayInfoTest, MAYBE_Multimon3) {
+TEST_F(DesktopDisplayInfoTest, Multimon3) {
   AddDisplay(0, 0, 500, 400);  // Default display.
   AddDisplay(300, 400, 600, 450);
   AddDisplay(-300, 350, 300, 200);
 
+#if OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
+  VerifyDisplayOffset(FROM_HERE, 0, 0, 0);
+  VerifyDisplayOffset(FROM_HERE, 1, 300, 400);
+  VerifyDisplayOffset(FROM_HERE, 2, -300, 350);
+#else
   VerifyDisplayOffset(FROM_HERE, 0, 300, 0);
   VerifyDisplayOffset(FROM_HERE, 1, 600, 400);
   VerifyDisplayOffset(FROM_HERE, 2, 0, 350);
+#endif  // OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
 }
 
 //  x                     +-------+               -- -50
@@ -172,7 +179,7 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_Multimon3) {
 //  -       -       0     6 7 8   1  1  1     1
 //  7       4             0 0 0   2  3  5     9
 //  0       0                     0  5  0     0
-TEST_F(DesktopDisplayInfoTest, MAYBE_Multimon7) {
+TEST_F(DesktopDisplayInfoTest, Multimon7) {
   AddDisplay(80, -10, 70, 60);
   AddDisplay(60, -50, 60, 40);
   AddDisplay(-70, 40, 30, 60);
@@ -181,6 +188,16 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_Multimon7) {
   AddDisplay(70, 100, 65, 20);
   AddDisplay(0, 0, 80, 55);  // Default display.
 
+#if OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
+  // Relative to display 6.
+  VerifyDisplayOffset(FROM_HERE, 0, 80, -10);
+  VerifyDisplayOffset(FROM_HERE, 1, 60, -50);
+  VerifyDisplayOffset(FROM_HERE, 2, -70, 40);
+  VerifyDisplayOffset(FROM_HERE, 3, 135, 50);
+  VerifyDisplayOffset(FROM_HERE, 4, -40, -20);
+  VerifyDisplayOffset(FROM_HERE, 5, 70, 100);
+  VerifyDisplayOffset(FROM_HERE, 6, 0, 0);
+#else
   VerifyDisplayOffset(FROM_HERE, 0, 150, 40);
   VerifyDisplayOffset(FROM_HERE, 1, 130, 0);
   VerifyDisplayOffset(FROM_HERE, 2, 0, 90);
@@ -188,6 +205,7 @@ TEST_F(DesktopDisplayInfoTest, MAYBE_Multimon7) {
   VerifyDisplayOffset(FROM_HERE, 4, 30, 30);
   VerifyDisplayOffset(FROM_HERE, 5, 140, 150);
   VerifyDisplayOffset(FROM_HERE, 6, 70, 50);
+#endif  // OS_USES_PRIMARY_DISPLAY_AS_ORIGIN
 }
 
 }  // namespace remoting

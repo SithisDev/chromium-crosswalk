@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ void MockOAuthClient::GetCredentialsFromAuthCode(
     const std::string& auth_code,
     bool need_user_email,
     CompletionCallback on_done) {
-  on_done.Run(need_user_email ? user_email_ : "", refresh_token_);
+  std::move(on_done).Run(need_user_email ? user_email_ : "", refresh_token_);
 }
 
 }  // namespace remoting

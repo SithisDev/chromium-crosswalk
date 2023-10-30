@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,53 +12,59 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/values.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/ip_address.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy_resolution/pac_file_data.h"
-#include "net/proxy_resolution/pac_library.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "net/proxy_resolution/proxy_resolve_dns_operation.h"
 #include "net/proxy_resolution/proxy_resolver.h"
 #include "net/proxy_resolution/proxy_resolver_error_observer.h"
 #include "services/network/mojo_host_resolver_impl.h"
+#include "services/network/proxy_auto_config_library.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
+
+namespace net {
+class NetworkAnonymizationKey;
+}
 
 namespace network {
 
 namespace {
 
 base::Value NetLogErrorParams(int line_number, const std::string& message) {
-  base::DictionaryValue dict;
-  dict.SetInteger("line_number", line_number);
-  dict.SetString("message", message);
-  return std::move(dict);
+  base::Value::Dict dict;
+  dict.Set("line_number", line_number);
+  dict.Set("message", message);
+  return base::Value(std::move(dict));
 }
 
 // Implementation for myIpAddress() and myIpAddressEx() that is expected to run
 // on a worker thread. Will notify |client| on completion.
 void DoMyIpAddressOnWorker(
     bool is_ex,
-    proxy_resolver::mojom::HostResolverRequestClientPtrInfo client_info) {
+    mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+        client_remote) {
   // Resolve the list of IP addresses.
   std::vector<net::IPAddress> my_ip_addresses =
-      is_ex ? net::PacMyIpAddressEx() : net::PacMyIpAddress();
+      is_ex ? PacMyIpAddressEx() : PacMyIpAddress();
 
-  proxy_resolver::mojom::HostResolverRequestClientPtr client;
-  client.Bind(std::move(client_info));
+  mojo::Remote<proxy_resolver::mojom::HostResolverRequestClient> client(
+      std::move(client_remote));
 
   // TODO(eroman): Note that this code always returns a success response (with
   // loopback) rather than passing forward the error. This is to ensure that the
@@ -116,6 +122,7 @@ class ClientMixin : public ClientInterface {
   void ResolveDns(
       const std::string& hostname,
       net::ProxyResolveDnsOperation operation,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
           client) override {
     bool is_ex = operation == net::ProxyResolveDnsOperation::DNS_RESOLVE_EX ||
@@ -128,10 +135,8 @@ class ClientMixin : public ClientInterface {
           base::BindOnce(&DoMyIpAddressOnWorker, is_ex, std::move(client)));
     } else {
       // Request was for dnsResolve() or dnsResolveEx().
-      host_resolver_.Resolve(
-          hostname, is_ex,
-          proxy_resolver::mojom::HostResolverRequestClientPtr(
-              std::move(client)));
+      host_resolver_.Resolve(hostname, network_anonymization_key, is_ex,
+                             std::move(client));
     }
   }
 
@@ -149,15 +154,15 @@ class ClientMixin : public ClientInterface {
     //
     // However the better place to focus on is de-duplication and caching on the
     // proxy service side (which currently caches but doesn't de-duplicate).
-    return base::CreateSequencedTaskRunnerWithTraits(
+    return base::ThreadPool::CreateSequencedTaskRunner(
         {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN,
          base::TaskPriority::USER_VISIBLE});
   }
 
  private:
   MojoHostResolverImpl host_resolver_;
-  net::ProxyResolverErrorObserver* const error_observer_;
-  net::NetLog* const net_log_;
+  const raw_ptr<net::ProxyResolverErrorObserver> error_observer_;
+  const raw_ptr<net::NetLog> net_log_;
   const net::NetLogWithSource net_log_with_source_;
 };
 
@@ -171,41 +176,46 @@ class ClientMixin : public ClientInterface {
 class ProxyResolverMojo : public net::ProxyResolver {
  public:
   // Constructs a ProxyResolverMojo that connects to a mojo proxy resolver
-  // implementation using |resolver_ptr|. The implementation uses
+  // implementation using |resolver_remote|. The implementation uses
   // |host_resolver| as the DNS resolver, using |host_resolver_binding| to
   // communicate with it.
   ProxyResolverMojo(
-      proxy_resolver::mojom::ProxyResolverPtr resolver_ptr,
+      mojo::PendingRemote<proxy_resolver::mojom::ProxyResolver> resolver_remote,
       net::HostResolver* host_resolver,
       std::unique_ptr<net::ProxyResolverErrorObserver> error_observer,
       net::NetLog* net_log);
+
+  ProxyResolverMojo(const ProxyResolverMojo&) = delete;
+  ProxyResolverMojo& operator=(const ProxyResolverMojo&) = delete;
+
   ~ProxyResolverMojo() override;
 
   // ProxyResolver implementation:
-  int GetProxyForURL(const GURL& url,
-                     net::ProxyInfo* results,
-                     net::CompletionOnceCallback callback,
-                     std::unique_ptr<Request>* request,
-                     const net::NetLogWithSource& net_log) override;
+  int GetProxyForURL(
+      const GURL& url,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
+      net::ProxyInfo* results,
+      net::CompletionOnceCallback callback,
+      std::unique_ptr<Request>* request,
+      const net::NetLogWithSource& net_log) override;
 
  private:
   class Job;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  // Mojo error handler.
-  void OnConnectionError();
+  // Mojo disconnect handler.
+  void OnMojoDisconnect();
 
   // Connection to the Mojo proxy resolver.
-  proxy_resolver::mojom::ProxyResolverPtr mojo_proxy_resolver_ptr_;
+  mojo::Remote<proxy_resolver::mojom::ProxyResolver>
+      mojo_proxy_resolver_remote_;
 
-  net::HostResolver* host_resolver_;
+  raw_ptr<net::HostResolver> host_resolver_;
 
   std::unique_ptr<net::ProxyResolverErrorObserver> error_observer_;
 
-  net::NetLog* net_log_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyResolverMojo);
+  raw_ptr<net::NetLog> net_log_;
 };
 
 class ProxyResolverMojo::Job
@@ -214,17 +224,22 @@ class ProxyResolverMojo::Job
  public:
   Job(ProxyResolverMojo* resolver,
       const GURL& url,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       net::ProxyInfo* results,
       net::CompletionOnceCallback callback,
       const net::NetLogWithSource& net_log);
+
+  Job(const Job&) = delete;
+  Job& operator=(const Job&) = delete;
+
   ~Job() override;
 
   // Returns the LoadState of this job.
   net::LoadState GetLoadState() override;
 
  private:
-  // Mojo error handler.
-  void OnConnectionError();
+  // Mojo disconnection handler.
+  void OnMojoDisconnect();
 
   // Overridden from proxy_resolver::mojom::ProxyResolverRequestClient:
   void ReportResult(int32_t error, const net::ProxyInfo& proxy_info) override;
@@ -233,20 +248,21 @@ class ProxyResolverMojo::Job
   void CompleteRequest(int result);
 
   const GURL url_;
-  net::ProxyInfo* results_;
+  raw_ptr<net::ProxyInfo> results_;
   net::CompletionOnceCallback callback_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-  mojo::Binding<proxy_resolver::mojom::ProxyResolverRequestClient> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(Job);
+  mojo::Receiver<proxy_resolver::mojom::ProxyResolverRequestClient> receiver_{
+      this};
 };
 
-ProxyResolverMojo::Job::Job(ProxyResolverMojo* resolver,
-                            const GURL& url,
-                            net::ProxyInfo* results,
-                            net::CompletionOnceCallback callback,
-                            const net::NetLogWithSource& net_log)
+ProxyResolverMojo::Job::Job(
+    ProxyResolverMojo* resolver,
+    const GURL& url,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    net::ProxyInfo* results,
+    net::CompletionOnceCallback callback,
+    const net::NetLogWithSource& net_log)
     : ClientMixin<proxy_resolver::mojom::ProxyResolverRequestClient>(
           resolver->host_resolver_,
           resolver->error_observer_.get(),
@@ -254,13 +270,11 @@ ProxyResolverMojo::Job::Job(ProxyResolverMojo* resolver,
           net_log),
       url_(url),
       results_(results),
-      callback_(std::move(callback)),
-      binding_(this) {
-  mojo::PendingRemote<proxy_resolver::mojom::ProxyResolverRequestClient> client;
-  binding_.Bind(client.InitWithNewPipeAndPassReceiver());
-  resolver->mojo_proxy_resolver_ptr_->GetProxyForUrl(url_, std::move(client));
-  binding_.set_connection_error_handler(base::Bind(
-      &ProxyResolverMojo::Job::OnConnectionError, base::Unretained(this)));
+      callback_(std::move(callback)) {
+  resolver->mojo_proxy_resolver_remote_->GetProxyForUrl(
+      url_, network_anonymization_key, receiver_.BindNewPipeAndPassRemote());
+  receiver_.set_disconnect_handler(base::BindOnce(
+      &ProxyResolverMojo::Job::OnMojoDisconnect, base::Unretained(this)));
 }
 
 ProxyResolverMojo::Job::~Job() {}
@@ -270,16 +284,16 @@ net::LoadState ProxyResolverMojo::Job::GetLoadState() {
                                    : net::LOAD_STATE_RESOLVING_PROXY_FOR_URL;
 }
 
-void ProxyResolverMojo::Job::OnConnectionError() {
+void ProxyResolverMojo::Job::OnMojoDisconnect() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DVLOG(1) << "ProxyResolverMojo::Job::OnConnectionError";
+  DVLOG(1) << "ProxyResolverMojo::Job::OnMojoDisconnect";
   CompleteRequest(net::ERR_PAC_SCRIPT_TERMINATED);
 }
 
 void ProxyResolverMojo::Job::CompleteRequest(int result) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   net::CompletionOnceCallback callback = std::move(callback_);
-  binding_.Close();
+  receiver_.reset();
   std::move(callback).Run(result);
 }
 
@@ -297,42 +311,44 @@ void ProxyResolverMojo::Job::ReportResult(int32_t error,
 }
 
 ProxyResolverMojo::ProxyResolverMojo(
-    proxy_resolver::mojom::ProxyResolverPtr resolver_ptr,
+    mojo::PendingRemote<proxy_resolver::mojom::ProxyResolver> resolver_remote,
     net::HostResolver* host_resolver,
     std::unique_ptr<net::ProxyResolverErrorObserver> error_observer,
     net::NetLog* net_log)
-    : mojo_proxy_resolver_ptr_(std::move(resolver_ptr)),
+    : mojo_proxy_resolver_remote_(std::move(resolver_remote)),
       host_resolver_(host_resolver),
       error_observer_(std::move(error_observer)),
       net_log_(net_log) {
-  mojo_proxy_resolver_ptr_.set_connection_error_handler(base::Bind(
-      &ProxyResolverMojo::OnConnectionError, base::Unretained(this)));
+  mojo_proxy_resolver_remote_.set_disconnect_handler(base::BindOnce(
+      &ProxyResolverMojo::OnMojoDisconnect, base::Unretained(this)));
 }
 
 ProxyResolverMojo::~ProxyResolverMojo() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
-void ProxyResolverMojo::OnConnectionError() {
+void ProxyResolverMojo::OnMojoDisconnect() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DVLOG(1) << "ProxyResolverMojo::OnConnectionError";
+  DVLOG(1) << "ProxyResolverMojo::OnMojoDisconnect";
 
   // Disconnect from the Mojo proxy resolver service.
-  mojo_proxy_resolver_ptr_.reset();
+  mojo_proxy_resolver_remote_.reset();
 }
 
-int ProxyResolverMojo::GetProxyForURL(const GURL& url,
-                                      net::ProxyInfo* results,
-                                      net::CompletionOnceCallback callback,
-                                      std::unique_ptr<Request>* request,
-                                      const net::NetLogWithSource& net_log) {
+int ProxyResolverMojo::GetProxyForURL(
+    const GURL& url,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    net::ProxyInfo* results,
+    net::CompletionOnceCallback callback,
+    std::unique_ptr<Request>* request,
+    const net::NetLogWithSource& net_log) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!mojo_proxy_resolver_ptr_)
+  if (!mojo_proxy_resolver_remote_)
     return net::ERR_PAC_SCRIPT_TERMINATED;
 
-  *request =
-      std::make_unique<Job>(this, url, results, std::move(callback), net_log);
+  *request = std::make_unique<Job>(this, url, network_anonymization_key,
+                                   results, std::move(callback), net_log);
 
   return net::ERR_IO_PENDING;
 }
@@ -362,49 +378,47 @@ class ProxyResolverFactoryMojo::Job
         factory_(factory),
         resolver_(resolver),
         callback_(std::move(callback)),
-        binding_(this),
         error_observer_(std::move(error_observer)) {
-    mojo::PendingRemote<
-        proxy_resolver::mojom::ProxyResolverFactoryRequestClient>
-        client;
-    binding_.Bind(client.InitWithNewPipeAndPassReceiver());
     factory_->mojo_proxy_factory_->CreateResolver(
         base::UTF16ToUTF8(pac_script->utf16()),
-        mojo::MakeRequest(&resolver_ptr_), std::move(client));
-    binding_.set_connection_error_handler(
-        base::Bind(&ProxyResolverFactoryMojo::Job::OnConnectionError,
-                   base::Unretained(this)));
+        resolver_remote_.InitWithNewPipeAndPassReceiver(),
+        receiver_.BindNewPipeAndPassRemote());
+    receiver_.set_disconnect_handler(
+        base::BindOnce(&ProxyResolverFactoryMojo::Job::OnMojoDisconnect,
+                       base::Unretained(this)));
   }
 
-  void OnConnectionError() { ReportResult(net::ERR_PAC_SCRIPT_TERMINATED); }
+  void OnMojoDisconnect() { ReportResult(net::ERR_PAC_SCRIPT_TERMINATED); }
 
  private:
   void ReportResult(int32_t error) override {
     // Prevent any other messages arriving unexpectedly, in the case |this|
     // isn't destroyed immediately.
-    binding_.Close();
+    receiver_.reset();
 
     if (error == net::OK) {
       *resolver_ = std::make_unique<ProxyResolverMojo>(
-          std::move(resolver_ptr_), factory_->host_resolver_,
+          std::move(resolver_remote_), factory_->host_resolver_,
           std::move(error_observer_), factory_->net_log_);
     }
     std::move(callback_).Run(error);
   }
 
-  ProxyResolverFactoryMojo* const factory_;
-  std::unique_ptr<net::ProxyResolver>* resolver_;
+  const raw_ptr<ProxyResolverFactoryMojo> factory_;
+  raw_ptr<std::unique_ptr<net::ProxyResolver>> resolver_;
   net::CompletionOnceCallback callback_;
-  proxy_resolver::mojom::ProxyResolverPtr resolver_ptr_;
-  mojo::Binding<proxy_resolver::mojom::ProxyResolverFactoryRequestClient>
-      binding_;
+  mojo::PendingRemote<proxy_resolver::mojom::ProxyResolver> resolver_remote_;
+  mojo::Receiver<proxy_resolver::mojom::ProxyResolverFactoryRequestClient>
+      receiver_{this};
   std::unique_ptr<net::ProxyResolverErrorObserver> error_observer_;
 };
 
 ProxyResolverFactoryMojo::ProxyResolverFactoryMojo(
-    proxy_resolver::mojom::ProxyResolverFactoryPtr mojo_proxy_factory,
+    mojo::PendingRemote<proxy_resolver::mojom::ProxyResolverFactory>
+        mojo_proxy_factory,
     net::HostResolver* host_resolver,
-    const base::Callback<std::unique_ptr<net::ProxyResolverErrorObserver>()>&
+    const base::RepeatingCallback<
+        std::unique_ptr<net::ProxyResolverErrorObserver>()>&
         error_observer_factory,
     net::NetLog* net_log)
     : ProxyResolverFactory(true),

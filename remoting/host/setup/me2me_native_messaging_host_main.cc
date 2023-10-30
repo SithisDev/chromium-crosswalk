@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,43 +13,46 @@
 #include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/i18n/icu_util.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "mojo/core/embedder/embedder.h"
-#include "net/url_request/url_fetcher.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/gaia_oauth_client.h"
+#include "remoting/base/logging.h"
 #include "remoting/base/url_request_context_getter.h"
+#include "remoting/host/base/host_exit_codes.h"
+#include "remoting/host/base/switches.h"
 #include "remoting/host/chromoting_host_context.h"
-#include "remoting/host/host_exit_codes.h"
-#include "remoting/host/logging.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/setup/me2me_native_messaging_host.h"
-#include "remoting/host/switches.h"
 #include "remoting/host/usage_stats_consent.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/transitional_url_loader_factory_owner.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 #include "base/mac/scoped_nsautorelease_pool.h"
-#endif  // defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_APPLE)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/process/process_info.h"
 #include "base/win/registry.h"
 #include "remoting/host/pairing_registry_delegate_win.h"
-#endif  // defined(OS_WIN)
 
-#if defined(USE_GLIB) && !defined(OS_CHROMEOS)
+#include <windows.h>
+#endif  // BUILDFLAG(IS_WIN)
+
+#if defined(USE_GLIB) && !BUILDFLAG(IS_CHROMEOS_ASH)
 #include <glib-object.h>
-#endif  // defined(USE_GLIB) && !defined(OS_CHROMEOS)
+#endif  // defined(USE_GLIB) && !BUILDFLAG(IS_CHROMEOS_ASH)
 
 using remoting::protocol::PairingRegistry;
 
@@ -61,21 +64,24 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   base::AtExitManager exit_manager;
 
   base::CommandLine::Init(argc, argv);
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+
   remoting::InitHostLogging();
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
   // Needed so we don't leak objects when threads are created.
   base::mac::ScopedNSAutoreleasePool pool;
-#endif  // defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_APPLE)
 
-#if defined(USE_GLIB) && !defined(OS_CHROMEOS)
+#if defined(USE_GLIB) && !BUILDFLAG(IS_CHROMEOS_ASH)
 // g_type_init will be deprecated in 2.36. 2.35 is the development
 // version for 2.36, hence do not call g_type_init starting 2.35.
 // http://developer.gnome.org/gobject/unstable/gobject-Type-Information.html#g-type-init
 #if !GLIB_CHECK_VERSION(2, 35, 0)
   g_type_init();
 #endif
-#endif  // defined(USE_GLIB) && !defined(OS_CHROMEOS)
+#endif  // defined(USE_GLIB) && !BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Required to find the ICU data file, used by some file_util routines.
   base::i18n::InitializeICU();
@@ -96,19 +102,35 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   // An IO thread is needed for the pairing registry and URL context getter.
   base::Thread io_thread("io_thread");
   io_thread.StartWithOptions(
-      base::Thread::Options(base::MessagePump::Type::IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
 
-  base::SingleThreadTaskExecutor main_task_executor(
-      base::MessagePump::Type::UI);
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
   base::RunLoop run_loop;
 
   scoped_refptr<DaemonController> daemon_controller =
       DaemonController::Create();
 
+#if BUILDFLAG(IS_APPLE)
+  if (command_line->HasSwitch(kCheckPermissionSwitchName)) {
+    int exit_code;
+    daemon_controller->CheckPermission(
+        /* it2me */ false,
+        // base::BindOnce cannot bind a capturing lambda, so the "captured"
+        // parameters are bound manually. This is safe because the run-loop is
+        // run to completion within this scope.
+        base::BindOnce(
+            [](int* exit_code, base::RunLoop* run_loop, bool perm) {
+              *exit_code = (perm ? kSuccessExitCode : kNoPermissionExitCode);
+              run_loop->Quit();
+            },
+            &exit_code, &run_loop));
+    run_loop.Run();
+    return exit_code;
+  }
+#endif  // BUILDFLAG(IS_APPLE)
+
   // Pass handle of the native view to the controller so that the UAC prompts
   // are focused properly.
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
   int64_t native_view_handle = 0;
   if (command_line->HasSwitch(kParentWindowSwitchName)) {
     std::string native_view =
@@ -123,7 +145,7 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   base::File write_file;
   bool needs_elevation = false;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   needs_elevation = !base::IsCurrentProcessElevated();
 
   if (command_line->HasSwitch(kElevateSwitchName)) {
@@ -166,7 +188,7 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
     read_file = base::File(GetStdHandle(STD_INPUT_HANDLE));
     write_file = base::File(GetStdHandle(STD_OUTPUT_HANDLE));
 
-    // After the native messaging channel starts the native messaging reader
+    // After the native messaging channel starts, the native messaging reader
     // will keep doing blocking read operations on the input named pipe.
     // If any other thread tries to perform any operation on STDIN, it will also
     // block because the input named pipe is synchronous (non-overlapped).
@@ -177,7 +199,7 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
     SetStdHandle(STD_INPUT_HANDLE, nullptr);
     SetStdHandle(STD_OUTPUT_HANDLE, nullptr);
   }
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
   // The files will be automatically closed.
   read_file = base::File(STDIN_FILENO);
   write_file = base::File(STDOUT_FILENO);
@@ -193,12 +215,10 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   std::unique_ptr<OAuthClient> oauth_client(
       new GaiaOAuthClient(url_loader_factory_owner.GetURLLoaderFactory()));
 
-  net::URLFetcher::SetIgnoreCertificateRequests(true);
-
   // Create the pairing registry.
   scoped_refptr<PairingRegistry> pairing_registry;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::win::RegKey root;
   LONG result = root.Open(HKEY_LOCAL_MACHINE, kPairingRegistryKeyName,
                           KEY_READ);
@@ -239,10 +259,10 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
 
   pairing_registry =
       new PairingRegistry(io_thread.task_runner(), std::move(delegate));
-#else  // defined(OS_WIN)
+#else   // BUILDFLAG(IS_WIN)
   pairing_registry =
       CreatePairingRegistry(io_thread.task_runner());
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
   std::unique_ptr<NativeMessagingPipe> native_messaging_pipe(
       new NativeMessagingPipe());
@@ -250,6 +270,10 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   // Set up the native messaging channel.
   std::unique_ptr<extensions::NativeMessagingChannel> channel(
       new PipeMessagingChannel(std::move(read_file), std::move(write_file)));
+
+#if BUILDFLAG(IS_POSIX)
+  PipeMessagingChannel::ReopenStdinStdout();
+#endif  // BUILDFLAG(IS_POSIX)
 
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new remoting::AutoThreadTaskRunner(

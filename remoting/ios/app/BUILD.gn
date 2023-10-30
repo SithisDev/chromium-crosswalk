@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,14 +8,19 @@ import("//remoting/ios/app/remoting_ios_tmpl.gni")
 group("all") {
   testonly = true
 
-  deps = [
-    ":ios_remoting_app",
-  ]
+  deps = [ ":ios_remoting_app" ]
+}
+
+# TODO(crbug.com/1344830): Migrate away from deprecated MDC APIs.
+config("disable_deprecated_declarations") {
+  cflags = [ "-Wno-deprecated-declarations" ]
 }
 
 # source set to be used by both external and internal app.
 source_set("common_source_set") {
   sources = [
+    "account_manager.h",
+    "account_manager.mm",
     "app_delegate.h",
     "app_delegate.mm",
     "app_initializer.h",
@@ -51,6 +56,10 @@ source_set("common_source_set") {
     "host_view_controller.h",
     "host_view_controller.mm",
     "main.mm",
+    "notification_dialog_view_controller.h",
+    "notification_dialog_view_controller.mm",
+    "notification_presenter.h",
+    "notification_presenter.mm",
     "physical_keyboard_detector.h",
     "physical_keyboard_detector.mm",
     "pin_entry_view.h",
@@ -63,6 +72,12 @@ source_set("common_source_set") {
     "remoting_view_controller.mm",
     "session_reconnect_view.h",
     "session_reconnect_view.mm",
+    "settings/remoting_settings_view_controller.h",
+    "settings/remoting_settings_view_controller.mm",
+    "settings/setting_option.h",
+    "settings/setting_option.mm",
+    "settings/settings_view_cell.h",
+    "settings/settings_view_cell.mm",
     "side_menu_items.h",
     "side_menu_items.mm",
     "user_status_presenter.h",
@@ -75,13 +90,15 @@ source_set("common_source_set") {
 
   deps = [
     "//base",
+    "//base:i18n",
     "//google_apis",
     "//remoting/base",
+    "//remoting/base:authorization",
     "//remoting/client",
     "//remoting/client/input",
+    "//remoting/client/notification",
     "//remoting/ios:ios_core",
     "//remoting/ios/app/resources:assets",
-    "//remoting/ios/app/settings",
     "//remoting/ios/audio",
     "//remoting/ios/display",
     "//remoting/ios/domain",
@@ -92,6 +109,14 @@ source_set("common_source_set") {
     "//ui/base",
     "//ui/gfx",
     "//ui/resources",
+  ]
+
+  frameworks = [
+    "UIKit.framework",
+    "AVFoundation.framework",
+    "Foundation.framework",
+    "WebKit.framework",
+    "QuartzCore.framework",
   ]
 
   # TODO(crbug.com/875022) fix for OpenGLES deprecation.
@@ -105,13 +130,17 @@ source_set("common_source_set") {
     "//remoting/ios/facade",
   ]
 
-  configs += [ "//build/config/compiler:enable_arc" ]
+  configs += [
+    ":disable_deprecated_declarations",
+    "//build/config/compiler:enable_arc",
+  ]
 }
 
 source_set("app_source_set") {
   sources = [
+    "account_manager_chromium.h",
+    "account_manager_chromium.mm",
     "app_initializer_chromium.mm",
-    "app_view_controller_chromium.mm",
     "refresh_control_provider_chromium.h",
     "refresh_control_provider_chromium.mm",
     "remoting_menu_view_controller.h",
@@ -120,11 +149,18 @@ source_set("app_source_set") {
   deps = [
     ":common_source_set",
     "//base",
+    "//google_apis",
+    "//remoting/resources",
+    "//ui/base",
   ]
+  frameworks = [ "UIKit.framework" ]
 
   # TODO(crbug.com/875022) fix for OpenGLES deprecation.
   defines = [ "GLES_SILENCE_DEPRECATION" ]
-  configs += [ "//build/config/compiler:enable_arc" ]
+  configs += [
+    ":disable_deprecated_declarations",
+    "//build/config/compiler:enable_arc",
+  ]
 }
 
 ios_remoting_app_tmpl("ios_remoting_app") {
@@ -133,7 +169,12 @@ ios_remoting_app_tmpl("ios_remoting_app") {
   entitlements_path = "resources/Remoting.entitlements"
   deps = [
     ":app_source_set",
+    "//ios/third_party/material_components_ios:material_components_ios+link",
     "//remoting/ios/app/resources:launchscreen_assets",
     "//remoting/ios/app/resources:remoting_icons",
+  ]
+
+  bundle_deps = [
+    "//ios/third_party/material_components_ios:material_components_ios+bundle",
   ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/host/security_key/security_key_message.h"
 #include "remoting/host/security_key/security_key_message_writer.h"
@@ -19,7 +18,13 @@ namespace remoting {
 // members for testing.
 class FakeSecurityKeyMessageWriter : public SecurityKeyMessageWriter {
  public:
-  explicit FakeSecurityKeyMessageWriter(const base::Closure& write_callback);
+  explicit FakeSecurityKeyMessageWriter(
+      const base::RepeatingClosure& write_callback);
+
+  FakeSecurityKeyMessageWriter(const FakeSecurityKeyMessageWriter&) = delete;
+  FakeSecurityKeyMessageWriter& operator=(const FakeSecurityKeyMessageWriter&) =
+      delete;
+
   ~FakeSecurityKeyMessageWriter() override;
 
   // SecurityKeyMessageWriter interface.
@@ -48,11 +53,9 @@ class FakeSecurityKeyMessageWriter : public SecurityKeyMessageWriter {
   bool write_request_succeeded_ = true;
 
   // Signaled whenever a write is requested.
-  base::Closure write_callback_;
+  base::RepeatingClosure write_callback_;
 
-  base::WeakPtrFactory<FakeSecurityKeyMessageWriter> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeSecurityKeyMessageWriter);
+  base::WeakPtrFactory<FakeSecurityKeyMessageWriter> weak_factory_{this};
 };
 
 }  // namespace remoting

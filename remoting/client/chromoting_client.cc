@@ -1,11 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/client/chromoting_client.h"
 
+#include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "remoting/base/capabilities.h"
 #include "remoting/base/constants.h"
 #include "remoting/client/client_context.h"
@@ -20,8 +22,8 @@
 #include "remoting/protocol/transport_context.h"
 #include "remoting/protocol/video_renderer.h"
 #include "remoting/protocol/webrtc_connection_to_host.h"
-#include "remoting/signaling/jid_util.h"
 #include "remoting/signaling/signaling_address.h"
+#include "remoting/signaling/signaling_id_util.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 
 namespace remoting {
@@ -56,7 +58,8 @@ void ChromotingClient::set_host_experiment_config(
     const std::string& experiment_config) {
   DCHECK(!connection_)
       << "set_host_experiment_config() cannot be called after Start().";
-  host_experiment_sender_.reset(new HostExperimentSender(experiment_config));
+  host_experiment_sender_ =
+      std::make_unique<HostExperimentSender>(experiment_config);
 }
 
 void ChromotingClient::SetConnectionToHostForTests(
@@ -73,7 +76,7 @@ void ChromotingClient::Start(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!session_manager_);  // Start must not be called more than once.
 
-  host_jid_ = NormalizeJid(host_jid);
+  host_jid_ = NormalizeSignalingId(host_jid);
   local_capabilities_ = capabilities;
 
   if (!protocol_config_) {
@@ -82,15 +85,10 @@ void ChromotingClient::Start(
 
   if (!connection_) {
     if (protocol_config_->webrtc_supported()) {
-      DCHECK(!protocol_config_->ice_supported());
-#if !defined(ENABLE_WEBRTC_REMOTING_CLIENT)
       LOG(FATAL) << "WebRTC is not supported.";
-#else
-      connection_.reset(new protocol::WebrtcConnectionToHost());
-#endif
     } else {
       DCHECK(protocol_config_->ice_supported());
-      connection_.reset(new protocol::IceConnectionToHost());
+      connection_ = std::make_unique<protocol::IceConnectionToHost>();
     }
   }
   connection_->set_client_stub(this);
@@ -104,7 +102,8 @@ void ChromotingClient::Start(
     protocol_config_->DisableAudioChannel();
   }
 
-  session_manager_.reset(new protocol::JingleSessionManager(signal_strategy));
+  session_manager_ =
+      std::make_unique<protocol::JingleSessionManager>(signal_strategy);
   session_manager_->set_protocol_config(std::move(protocol_config_));
 
   client_auth_config_ = client_auth_config;
@@ -183,19 +182,26 @@ void ChromotingClient::SetVideoLayout(const protocol::VideoLayout& layout) {
   const protocol::VideoTrackLayout& track_layout = layout.video_track(0);
   int x_dpi = track_layout.has_x_dpi() ? track_layout.x_dpi() : kDefaultDpi;
   int y_dpi = track_layout.has_y_dpi() ? track_layout.y_dpi() : kDefaultDpi;
+  if (x_dpi != y_dpi) {
+    LOG(WARNING) << "Mismatched x,y dpi. x=" << x_dpi << " y=" << y_dpi;
+  }
 
   webrtc::DesktopSize size_dips(track_layout.width(), track_layout.height());
-  webrtc::DesktopSize size_pixels(size_dips.width() * x_dpi / kDefaultDpi,
-                                  size_dips.height() * y_dpi / kDefaultDpi);
-  user_interface_->SetDesktopSize(size_pixels,
-                                  webrtc::DesktopVector(x_dpi, y_dpi));
+  webrtc::DesktopSize size_px(size_dips.width() * x_dpi / kDefaultDpi,
+                              size_dips.height() * y_dpi / kDefaultDpi);
+  user_interface_->SetDesktopSize(size_px, webrtc::DesktopVector(x_dpi, y_dpi));
 
-  mouse_input_scaler_.set_input_size(webrtc::DesktopSize(size_pixels));
-  mouse_input_scaler_.set_output_size(
-      connection_->config().protocol() == protocol::SessionConfig::Protocol::ICE
-          ? webrtc::DesktopSize(size_pixels)
-          : webrtc::DesktopSize(size_dips));
+  mouse_input_scaler_.set_input_size(size_px.width(), size_px.height());
+  if (connection_->config().protocol() ==
+      protocol::SessionConfig::Protocol::ICE) {
+    mouse_input_scaler_.set_output_size(size_px.width(), size_px.height());
+  } else {
+    mouse_input_scaler_.set_output_size(size_dips.width(), size_dips.height());
+  }
 }
+
+void ChromotingClient::SetTransportInfo(
+    const protocol::TransportInfo& transport_info) {}
 
 void ChromotingClient::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
@@ -209,6 +215,13 @@ void ChromotingClient::SetCursorShape(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   user_interface_->GetCursorShapeStub()->SetCursorShape(cursor_shape);
+}
+
+void ChromotingClient::SetKeyboardLayout(
+    const protocol::KeyboardLayout& layout) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  user_interface_->GetKeyboardLayoutStub()->SetKeyboardLayout(layout);
 }
 
 void ChromotingClient::OnConnectionState(
@@ -240,7 +253,7 @@ void ChromotingClient::OnSignalStrategyStateChange(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (state == SignalStrategy::CONNECTED) {
-    VLOG(1) << "Connected as: " << signal_strategy_->GetLocalAddress().jid();
+    VLOG(1) << "Connected as: " << signal_strategy_->GetLocalAddress().id();
     // After signaling has been connected we can try connecting to the host.
     if (connection_ &&
         connection_->state() == protocol::ConnectionToHost::INITIALIZING) {

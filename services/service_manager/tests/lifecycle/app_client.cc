@@ -1,19 +1,20 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/service_manager/tests/lifecycle/app_client.h"
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "services/service_manager/public/cpp/service_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/service_manager/public/cpp/service_receiver.h"
 
 namespace service_manager {
 namespace test {
 
-AppClient::AppClient(service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)) {
-  bindings_.set_connection_error_handler(base::BindRepeating(
+AppClient::AppClient(
+    mojo::PendingReceiver<service_manager::mojom::Service> receiver)
+    : service_receiver_(this, std::move(receiver)) {
+  receivers_.set_disconnect_handler(base::BindRepeating(
       &AppClient::LifecycleControlBindingLost, base::Unretained(this)));
 
   registry_.AddInterface<mojom::LifecycleControl>(
@@ -29,13 +30,14 @@ void AppClient::OnBindInterface(const BindSourceInfo& source_info,
 }
 
 void AppClient::OnDisconnected() {
-  DCHECK(service_binding_.is_bound());
-  service_binding_.Close();
+  DCHECK(service_receiver_.is_bound());
+  service_receiver_.Close();
   Terminate();
 }
 
-void AppClient::Create(mojom::LifecycleControlRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void AppClient::Create(
+    mojo::PendingReceiver<mojom::LifecycleControl> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void AppClient::Ping(PingCallback callback) {
@@ -43,8 +45,8 @@ void AppClient::Ping(PingCallback callback) {
 }
 
 void AppClient::GracefulQuit() {
-  if (service_binding_.is_bound())
-    service_binding_.RequestClose();
+  if (service_receiver_.is_bound())
+    service_receiver_.RequestClose();
   else
     Terminate();
 }
@@ -57,12 +59,12 @@ void AppClient::Crash() {
 }
 
 void AppClient::CloseServiceManagerConnection() {
-  if (service_binding_.is_bound())
-    service_binding_.Close();
+  if (service_receiver_.is_bound())
+    service_receiver_.Close();
 }
 
 void AppClient::LifecycleControlBindingLost() {
-  if (!service_binding_.is_bound() && bindings_.empty())
+  if (!service_receiver_.is_bound() && receivers_.empty())
     Terminate();
 }
 

@@ -1,15 +1,17 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.services.media_session;
 
 import android.graphics.Rect;
-import android.support.annotation.NonNull;
 import android.text.TextUtils;
+
+import androidx.annotation.NonNull;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,7 +24,7 @@ import java.util.List;
 @JNINamespace("media_session")
 public final class MediaImage {
     @NonNull
-    private String mSrc;
+    private GURL mSrc;
 
     private String mType;
 
@@ -32,7 +34,7 @@ public final class MediaImage {
     /**
      * Creates a new MediaImage.
      */
-    public MediaImage(@NonNull String src, @NonNull String type, @NonNull List<Rect> sizes) {
+    public MediaImage(@NonNull GURL src, @NonNull String type, @NonNull List<Rect> sizes) {
         mSrc = src;
         mType = type;
         mSizes = sizes;
@@ -42,7 +44,7 @@ public final class MediaImage {
      * @return The URL of this MediaImage.
      */
     @NonNull
-    public String getSrc() {
+    public GURL getSrc() {
         return mSrc;
     }
 
@@ -63,7 +65,7 @@ public final class MediaImage {
     /**
      * Sets the URL of this MediaImage.
      */
-    public void setSrc(@NonNull String src) {
+    public void setSrc(@NonNull GURL src) {
         mSrc = src;
     }
 
@@ -87,7 +89,7 @@ public final class MediaImage {
         if (!(obj instanceof MediaImage)) return false;
 
         MediaImage other = (MediaImage) obj;
-        return TextUtils.equals(mSrc, other.mSrc) && TextUtils.equals(mType, other.mType)
+        return mSrc.equals(other.mSrc) && TextUtils.equals(mType, other.mType)
                 && mSizes.equals(other.mSizes);
     }
 
@@ -110,7 +112,7 @@ public final class MediaImage {
      * @param sizes The array of image sizes.
      */
     @CalledByNative
-    private static MediaImage create(String src, String type, Rect[] sizes) {
+    private static MediaImage create(GURL src, String type, Rect[] sizes) {
         return new MediaImage(src, type, Arrays.asList(sizes));
     }
 

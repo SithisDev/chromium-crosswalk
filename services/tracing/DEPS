@@ -1,6 +1,5 @@
 include_rules = [
   "+components/tracing/common",
-  "+services/service_manager/public",
   "+third_party/perfetto/include",
   "+third_party/perfetto/protos/perfetto",
   "+third_party/protobuf/src/google/protobuf/io/zero_copy_stream.h",
@@ -10,4 +9,7 @@ specific_include_rules = {
   'stack_unwinder_android_unittest.cc': [
     "+services/tracing/jni_headers",
   ],
+  'perfetto_traced_process.cc': [
+    "+chromeos/dbus/constants",
+  ]
 }

@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/resource_message_params.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -90,17 +90,6 @@ SerializedHandle ResourceMessageParams::TakeHandleOfTypeAtIndex(
   return handle;
 }
 
-bool ResourceMessageParams::TakeSharedMemoryHandleAtIndex(
-    size_t index,
-    base::SharedMemoryHandle* handle) const {
-  SerializedHandle serialized = TakeHandleOfTypeAtIndex(
-      index, SerializedHandle::SHARED_MEMORY);
-  if (!serialized.is_shmem())
-    return false;
-  *handle = serialized.shmem();
-  return true;
-}
-
 bool ResourceMessageParams::TakeReadOnlySharedMemoryRegionAtIndex(
     size_t index,
     base::ReadOnlySharedMemoryRegion* region) const {
@@ -147,15 +136,6 @@ bool ResourceMessageParams::TakeFileHandleAtIndex(
   return true;
 }
 
-void ResourceMessageParams::TakeAllSharedMemoryHandles(
-    std::vector<base::SharedMemoryHandle>* handles) const {
-  for (size_t i = 0; i < handles_->data().size(); ++i) {
-    base::SharedMemoryHandle handle;
-    if (TakeSharedMemoryHandleAtIndex(i, &handle))
-      handles->push_back(handle);
-  }
-}
-
 void ResourceMessageParams::TakeAllHandles(
     std::vector<SerializedHandle>* handles) const {
   std::vector<SerializedHandle>& data = handles_->data();
@@ -168,15 +148,11 @@ void ResourceMessageParams::AppendHandle(SerializedHandle handle) const {
 }
 
 ResourceMessageCallParams::ResourceMessageCallParams()
-    : ResourceMessageParams(),
-      has_callback_(0) {
-}
+    : ResourceMessageParams(), has_callback_(false) {}
 
 ResourceMessageCallParams::ResourceMessageCallParams(PP_Resource resource,
                                                      int32_t sequence)
-    : ResourceMessageParams(resource, sequence),
-      has_callback_(0) {
-}
+    : ResourceMessageParams(resource, sequence), has_callback_(false) {}
 
 ResourceMessageCallParams::~ResourceMessageCallParams() {
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,6 @@ void DestInfoDeleter::operator()(cups_dinfo_t* info) const {
 void OptionDeleter::operator()(cups_option_t* option) const {
   // Frees the name and value buffers then the struct itself
   cupsFreeOptions(1, option);
-}
-
-JobsDeleter::JobsDeleter(int num_jobs) : num_jobs_(num_jobs) {}
-
-void JobsDeleter::operator()(cups_job_t* jobs) const {
-  cupsFreeJobs(num_jobs_, jobs);
 }
 
 }  // namespace printing

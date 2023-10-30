@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,92 +8,83 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#if defined(OS_WIN)
-#include "services/shape_detection/barcode_detection_provider_impl.h"
-#include "services/shape_detection/face_detection_provider_win.h"
-#elif defined(OS_MACOSX)
-#include <dlfcn.h>
-#include "services/shape_detection/barcode_detection_provider_mac.h"
-#include "services/shape_detection/face_detection_provider_mac.h"
-#else
-#include "services/shape_detection/barcode_detection_provider_impl.h"
-#include "services/shape_detection/face_detection_provider_impl.h"
-#endif
+#include "build/branding_buildflags.h"
+#include "build/build_config.h"
 #include "services/shape_detection/text_detection_impl.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
 #include "services/shape_detection/shape_detection_jni_headers/InterfaceRegistrar_jni.h"
+#endif
+
+#if BUILDFLAG(IS_MAC)
+#include "services/shape_detection/barcode_detection_provider_mac.h"
+#elif BUILDFLAG(IS_ANDROID)
+// No C++ code, barcode detection comes from Java.
+#elif BUILDFLAG(GOOGLE_CHROME_BRANDING) && BUILDFLAG(IS_CHROMEOS)
+#include "services/shape_detection/barcode_detection_provider_barhopper.h"
+#else
+#include "services/shape_detection/barcode_detection_provider_impl.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
+#include "services/shape_detection/face_detection_provider_win.h"
+#elif BUILDFLAG(IS_MAC)
+#include "services/shape_detection/face_detection_provider_mac.h"
+#elif BUILDFLAG(IS_ANDROID)
+// No C++ code, face detection comes from Java.
+#else
+#include "services/shape_detection/face_detection_provider_impl.h"
 #endif
 
 namespace shape_detection {
 
 ShapeDetectionService::ShapeDetectionService(
-    service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)) {
-#if defined(OS_MACOSX)
-  if (__builtin_available(macOS 10.13, *)) {
-    vision_framework_ =
-        dlopen("/System/Library/Frameworks/Vision.framework/Vision", RTLD_LAZY);
-  }
-#endif
+    mojo::PendingReceiver<mojom::ShapeDetectionService> receiver)
+    : receiver_(this, std::move(receiver)) {
 }
 
-ShapeDetectionService::~ShapeDetectionService() {
-#if defined(OS_MACOSX)
-  if (__builtin_available(macOS 10.13, *)) {
-    if (vision_framework_)
-      dlclose(vision_framework_);
-  }
-#endif
-}
+ShapeDetectionService::~ShapeDetectionService() = default;
 
-void ShapeDetectionService::OnStart() {
-#if defined(OS_ANDROID)
-  registry_.AddInterface(
-      GetJavaInterfaces()
-          ->CreateInterfaceFactory<mojom::BarcodeDetectionProvider>());
-  registry_.AddInterface(
-      GetJavaInterfaces()
-          ->CreateInterfaceFactory<mojom::FaceDetectionProvider>());
-  registry_.AddInterface(
-      GetJavaInterfaces()->CreateInterfaceFactory<mojom::TextDetection>());
-#elif defined(OS_WIN)
-  registry_.AddInterface(base::Bind(&BarcodeDetectionProviderImpl::Create));
-  registry_.AddInterface(base::Bind(&TextDetectionImpl::Create));
-  registry_.AddInterface(base::Bind(&FaceDetectionProviderWin::Create));
-#elif defined(OS_MACOSX)
-  registry_.AddInterface(base::Bind(&BarcodeDetectionProviderMac::Create));
-  registry_.AddInterface(base::Bind(&TextDetectionImpl::Create));
-  registry_.AddInterface(base::Bind(&FaceDetectionProviderMac::Create));
+void ShapeDetectionService::BindBarcodeDetectionProvider(
+    mojo::PendingReceiver<mojom::BarcodeDetectionProvider> receiver) {
+#if BUILDFLAG(IS_ANDROID)
+  Java_InterfaceRegistrar_bindBarcodeDetectionProvider(
+      base::android::AttachCurrentThread(),
+      receiver.PassPipe().release().value());
+#elif BUILDFLAG(IS_MAC)
+  BarcodeDetectionProviderMac::Create(std::move(receiver));
+#elif BUILDFLAG(GOOGLE_CHROME_BRANDING) && BUILDFLAG(IS_CHROMEOS)
+  BarcodeDetectionProviderBarhopper::Create(std::move(receiver));
 #else
-  registry_.AddInterface(base::Bind(&BarcodeDetectionProviderImpl::Create));
-  registry_.AddInterface(base::Bind(&FaceDetectionProviderImpl::Create));
-  registry_.AddInterface(base::Bind(&TextDetectionImpl::Create));
+  BarcodeDetectionProviderImpl::Create(std::move(receiver));
 #endif
 }
 
-void ShapeDetectionService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(interface_name, std::move(interface_pipe));
+void ShapeDetectionService::BindFaceDetectionProvider(
+    mojo::PendingReceiver<mojom::FaceDetectionProvider> receiver) {
+#if BUILDFLAG(IS_ANDROID)
+  Java_InterfaceRegistrar_bindFaceDetectionProvider(
+      base::android::AttachCurrentThread(),
+      receiver.PassPipe().release().value());
+#elif BUILDFLAG(IS_MAC)
+  FaceDetectionProviderMac::Create(std::move(receiver));
+#elif BUILDFLAG(IS_WIN)
+  FaceDetectionProviderWin::Create(std::move(receiver));
+#else
+  FaceDetectionProviderImpl::Create(std::move(receiver));
+#endif
 }
 
-#if defined(OS_ANDROID)
-service_manager::InterfaceProvider* ShapeDetectionService::GetJavaInterfaces() {
-  if (!java_interface_provider_) {
-    service_manager::mojom::InterfaceProviderPtr provider;
-    Java_InterfaceRegistrar_createInterfaceRegistryForContext(
-        base::android::AttachCurrentThread(),
-        mojo::MakeRequest(&provider).PassMessagePipe().release().value());
-    java_interface_provider_ =
-        std::make_unique<service_manager::InterfaceProvider>();
-    java_interface_provider_->Bind(std::move(provider));
-  }
-  return java_interface_provider_.get();
-}
+void ShapeDetectionService::BindTextDetection(
+    mojo::PendingReceiver<mojom::TextDetection> receiver) {
+#if BUILDFLAG(IS_ANDROID)
+  Java_InterfaceRegistrar_bindTextDetection(
+      base::android::AttachCurrentThread(),
+      receiver.PassPipe().release().value());
+#else
+  TextDetectionImpl::Create(std::move(receiver));
 #endif
+}
 
 }  // namespace shape_detection

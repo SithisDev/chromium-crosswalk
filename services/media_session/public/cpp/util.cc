@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 namespace {
 
 constexpr base::TimeDelta kDefaultSeekTime =
-    base::TimeDelta::FromSeconds(media_session::mojom::kDefaultSeekTimeSeconds);
+    base::Seconds(media_session::mojom::kDefaultSeekTimeSeconds);
 
 }  // namespace
 
@@ -17,32 +17,52 @@ namespace media_session {
 
 void PerformMediaSessionAction(
     mojom::MediaSessionAction action,
-    const mojom::MediaControllerPtr& media_controller_ptr) {
+    const mojo::Remote<mojom::MediaController>& media_controller_remote) {
   switch (action) {
     case mojom::MediaSessionAction::kPreviousTrack:
-      media_controller_ptr->PreviousTrack();
+      media_controller_remote->PreviousTrack();
       break;
     case mojom::MediaSessionAction::kSeekBackward:
-      media_controller_ptr->Seek(kDefaultSeekTime * -1);
+      media_controller_remote->Seek(kDefaultSeekTime * -1);
       break;
     case mojom::MediaSessionAction::kPlay:
-      media_controller_ptr->Resume();
+      media_controller_remote->Resume();
       break;
     case mojom::MediaSessionAction::kPause:
-      media_controller_ptr->Suspend();
+      media_controller_remote->Suspend();
       break;
     case mojom::MediaSessionAction::kSeekForward:
-      media_controller_ptr->Seek(kDefaultSeekTime);
+      media_controller_remote->Seek(kDefaultSeekTime);
       break;
     case mojom::MediaSessionAction::kNextTrack:
-      media_controller_ptr->NextTrack();
+      media_controller_remote->NextTrack();
       break;
     case mojom::MediaSessionAction::kStop:
-      media_controller_ptr->Stop();
+      media_controller_remote->Stop();
       break;
+    case mojom::MediaSessionAction::kEnterPictureInPicture:
+      media_controller_remote->EnterPictureInPicture();
+      break;
+    case mojom::MediaSessionAction::kExitPictureInPicture:
+      media_controller_remote->ExitPictureInPicture();
+      break;
+    case mojom::MediaSessionAction::kToggleMicrophone:
+      media_controller_remote->ToggleMicrophone();
+      break;
+    case mojom::MediaSessionAction::kToggleCamera:
+      media_controller_remote->ToggleCamera();
+      break;
+    case mojom::MediaSessionAction::kHangUp:
+      media_controller_remote->HangUp();
+      break;
+    case mojom::MediaSessionAction::kRaise:
+      media_controller_remote->Raise();
+      break;
+    case mojom::MediaSessionAction::kSetMute:
     case mojom::MediaSessionAction::kSkipAd:
     case mojom::MediaSessionAction::kSeekTo:
     case mojom::MediaSessionAction::kScrubTo:
+    case mojom::MediaSessionAction::kSwitchAudioDevice:
       break;
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <cstdint>
 
-#include "base/macros.h"
 #include "sandbox/mac/seatbelt_export.h"
 
 namespace sandbox {
@@ -49,9 +48,11 @@ class SEATBELT_EXPORT Seatbelt {
 
   static const char* kProfilePureComputation;
 
+  Seatbelt(const Seatbelt& other) = delete;
+  Seatbelt& operator=(const Seatbelt& other) = delete;
+
  private:
   Seatbelt();
-  DISALLOW_COPY_AND_ASSIGN(Seatbelt);
 };
 
 }  // sandbox

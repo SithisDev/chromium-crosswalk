@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,7 @@
 #define SERVICES_DEVICE_TEST_USB_TEST_GADGET_H_
 
 #include <memory>
-#include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 
 namespace base {
@@ -20,6 +18,9 @@ namespace device {
 class UsbDevice;
 class UsbService;
 
+// Declared here so that the deprecated URLFetcher class can friend it.
+class UsbTestGadgetImpl;
+
 class UsbTestGadget {
  public:
   enum Type {
@@ -29,6 +30,9 @@ class UsbTestGadget {
     HID_ECHO,
     ECHO,
   };
+
+  UsbTestGadget(const UsbTestGadget&) = delete;
+  UsbTestGadget& operator=(const UsbTestGadget&) = delete;
 
   virtual ~UsbTestGadget() {}
 
@@ -46,9 +50,6 @@ class UsbTestGadget {
 
  protected:
   UsbTestGadget() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UsbTestGadget);
 };
 
 }  // namespace device

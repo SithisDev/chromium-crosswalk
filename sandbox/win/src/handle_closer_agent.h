@@ -1,12 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_HANDLE_CLOSER_AGENT_H_
-#define SANDBOX_SRC_HANDLE_CLOSER_AGENT_H_
+#ifndef SANDBOX_WIN_SRC_HANDLE_CLOSER_AGENT_H_
+#define SANDBOX_WIN_SRC_HANDLE_CLOSER_AGENT_H_
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
 #include "base/win/scoped_handle.h"
 #include "sandbox/win/src/handle_closer.h"
 #include "sandbox/win/src/sandbox_types.h"
@@ -18,6 +18,10 @@ namespace sandbox {
 class HandleCloserAgent {
  public:
   HandleCloserAgent();
+
+  HandleCloserAgent(const HandleCloserAgent&) = delete;
+  HandleCloserAgent& operator=(const HandleCloserAgent&) = delete;
+
   ~HandleCloserAgent();
 
   // Reads the serialized list from the broker and creates the lookup map.
@@ -32,15 +36,12 @@ class HandleCloserAgent {
 
  private:
   // Attempt to stuff a closed handle with a dummy Event.
-  bool AttemptToStuffHandleSlot(HANDLE closed_handle,
-                                const base::string16& type);
+  bool AttemptToStuffHandleSlot(HANDLE closed_handle, const std::wstring& type);
 
   HandleMap handles_to_close_;
   base::win::ScopedHandle dummy_handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(HandleCloserAgent);
 };
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_HANDLE_CLOSER_AGENT_H_
+#endif  // SANDBOX_WIN_SRC_HANDLE_CLOSER_AGENT_H_

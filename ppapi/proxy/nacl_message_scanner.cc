@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -50,7 +51,8 @@ struct ScanningResults {
   // so when we audit the nested message, we know which resource it is for.
   PP_Resource pp_resource;
   // Callback to receive the nested message in a resource message or reply.
-  base::Callback<void(PP_Resource, const IPC::Message&, SerializedHandle*)>
+  base::RepeatingCallback<
+      void(PP_Resource, const IPC::Message&, SerializedHandle*)>
       nested_msg_callback;
 };
 
@@ -59,19 +61,7 @@ void WriteHandle(int handle_index,
                  base::Pickle* msg) {
   SerializedHandle::WriteHeader(handle.header(), msg);
 
-  if (handle.type() == SerializedHandle::SHARED_MEMORY) {
-    // Now write the handle itself in POSIX style.
-    // This serialization must be kept in sync with
-    // ParamTraits<SharedMemoryHandle>::Write.
-    if (handle.shmem().IsValid()) {
-      msg->WriteBool(true);  // valid == true
-      msg->WriteInt(handle_index);
-      IPC::WriteParam(msg, handle.shmem().GetGUID());
-      msg->WriteUInt64(handle.shmem().GetSize());
-    } else {
-      msg->WriteBool(false);  // valid == false
-    }
-  } else if (handle.type() == SerializedHandle::SHARED_MEMORY_REGION) {
+  if (handle.type() == SerializedHandle::SHARED_MEMORY_REGION) {
     // Write the region in POSIX style.
     // This serialization must be kept in sync with
     // ParamTraits<PlatformSharedMemoryRegion>::Write.
@@ -117,8 +107,9 @@ void HandleWriter(int* handle_index,
 void ScanParam(SerializedVar&& var, ScanningResults* results) {
   // Rewrite the message and then copy any handles.
   if (results->new_msg)
-    var.WriteDataToMessage(results->new_msg.get(),
-                           base::Bind(&HandleWriter, &results->handle_index));
+    var.WriteDataToMessage(
+        results->new_msg.get(),
+        base::BindRepeating(&HandleWriter, &results->handle_index));
   for (SerializedHandle* var_handle : var.GetHandles())
     results->handles.push_back(std::move(*var_handle));
 }
@@ -365,7 +356,7 @@ bool NaClMessageScanner::ScanMessage(
   DCHECK(!new_msg_ptr->get());
 
   bool rewrite_msg =
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
       true;
 #else
       false;
@@ -376,9 +367,8 @@ bool NaClMessageScanner::ScanMessage(
   // that there are no handles, we can cancel the rewriting by clearing the
   // results.new_msg pointer.
   ScanningResults results;
-  results.nested_msg_callback =
-      base::Bind(&NaClMessageScanner::AuditNestedMessage,
-                 base::Unretained(this));
+  results.nested_msg_callback = base::BindRepeating(
+      &NaClMessageScanner::AuditNestedMessage, base::Unretained(this));
   switch (type) {
     CASE_FOR_MESSAGE(PpapiMsg_PPBAudio_NotifyAudioStreamCreated)
     CASE_FOR_MESSAGE(PpapiMsg_PPPMessaging_HandleMessage)
@@ -438,11 +428,9 @@ void NaClMessageScanner::ScanUntrustedMessage(
         // If the plugin is under-reporting, rewrite the message with the
         // trusted value.
         if (trusted_max_written_offset > file_growth.max_written_offset) {
-          new_msg_ptr->reset(
-              new PpapiHostMsg_ResourceCall(
-                  params,
-                  PpapiHostMsg_FileIO_Close(
-                      FileGrowth(trusted_max_written_offset, 0))));
+          *new_msg_ptr = std::make_unique<PpapiHostMsg_ResourceCall>(
+              params, PpapiHostMsg_FileIO_Close(
+                          FileGrowth(trusted_max_written_offset, 0)));
         }
         break;
       }
@@ -466,10 +454,8 @@ void NaClMessageScanner::ScanUntrustedMessage(
         if (increase <= 0)
           return;
         if (!it->second->Grow(increase)) {
-          new_msg_ptr->reset(
-              new PpapiHostMsg_ResourceCall(
-                  params,
-                  PpapiHostMsg_FileIO_SetLength(-1)));
+          *new_msg_ptr = std::make_unique<PpapiHostMsg_ResourceCall>(
+              params, PpapiHostMsg_FileIO_SetLength(-1));
         }
         break;
       }
@@ -500,11 +486,9 @@ void NaClMessageScanner::ScanUntrustedMessage(
           }
         }
         if (audit_failed) {
-          new_msg_ptr->reset(
-              new PpapiHostMsg_ResourceCall(
-                  params,
-                  PpapiHostMsg_FileSystem_ReserveQuota(
-                      amount, file_growths)));
+          *new_msg_ptr = std::make_unique<PpapiHostMsg_ResourceCall>(
+              params,
+              PpapiHostMsg_FileSystem_ReserveQuota(amount, file_growths));
         }
         break;
       }

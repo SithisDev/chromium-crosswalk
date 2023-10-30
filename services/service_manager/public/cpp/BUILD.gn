@@ -1,13 +1,13 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import("//mojo/public/tools/bindings/mojom.gni")
 
 component("cpp") {
   output_name = "service_manager_cpp"
 
   sources = [
-    "binder_map.h",
-    "binder_map_internal.h",
     "binder_registry.h",
     "connect.h",
     "connector.cc",
@@ -25,11 +25,13 @@ component("cpp") {
     "manifest_builder.h",
     "service.cc",
     "service.h",
-    "service_binding.cc",
-    "service_binding.h",
     "service_context_ref.h",
     "service_keepalive.cc",
     "service_keepalive.h",
+    "service_receiver.cc",
+    "service_receiver.h",
+    "standalone_connector_impl.cc",
+    "standalone_connector_impl.h",
   ]
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
@@ -44,9 +46,7 @@ component("cpp") {
     "//url",
   ]
 
-  deps = [
-    "//services/tracing/public/cpp:traced_process",
-  ]
+  deps = [ "//services/tracing/public/cpp:traced_process" ]
 
   defines = [
     "IS_SERVICE_MANAGER_CPP_IMPL",
@@ -76,9 +76,7 @@ component("cpp_types") {
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
-  deps = [
-    "//services/service_manager/public/mojom:constants",
-  ]
+  deps = [ "//services/service_manager/public/mojom:constants" ]
 
   defines = [
     "IS_SERVICE_MANAGER_CPP_TYPES_IMPL",
@@ -111,13 +109,21 @@ source_set("unittests") {
 
   sources = [
     "manifest_unittest.cc",
+    "standalone_connector_impl_unittest.cc",
   ]
 
   deps = [
     ":cpp",
+    ":test_mojom",
     "//base",
+    "//base/test:test_support",
     "//services/service_manager/public/mojom",
     "//testing/gmock",
     "//testing/gtest",
   ]
+}
+
+mojom("test_mojom") {
+  testonly = true
+  sources = [ "standalone_connector_impl_unittest.test-mojom" ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 
 #include "base/bind.h"
 #include "base/containers/unique_ptr_adapters.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_timestamp_helper.h"
@@ -45,23 +47,20 @@ constexpr double kMiddleAFreq = 440;
 constexpr double kMiddleCFreq = 261.626;
 
 // Audio buffer duration.
-constexpr base::TimeDelta kBufferDuration =
-    base::TimeDelta::FromMilliseconds(10);
+constexpr base::TimeDelta kBufferDuration = base::Milliseconds(10);
 
 // Local audio output delay.
-constexpr base::TimeDelta kDelayUntilOutput =
-    base::TimeDelta::FromMilliseconds(20);
+constexpr base::TimeDelta kDelayUntilOutput = base::Milliseconds(20);
 
 // The amount of audio signal to record each time PumpAudioAndTakeNewRecording()
 // is called.
-constexpr base::TimeDelta kTestRecordingDuration =
-    base::TimeDelta::FromMilliseconds(250);
+constexpr base::TimeDelta kTestRecordingDuration = base::Milliseconds(250);
 
 const media::AudioParameters& GetLoopbackStreamParams() {
   // 48 kHz, 2-channel audio, with 10 ms buffers.
   static const media::AudioParameters params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-      media::CHANNEL_LAYOUT_STEREO, 48000, 480);
+      media::ChannelLayoutConfig::Stereo(), 48000, 480);
   return params;
 }
 
@@ -82,7 +81,7 @@ class MockClientAndObserver : public media::mojom::AudioInputStreamClient,
   void CloseClientBinding() { client_receiver_.reset(); }
   void CloseObserverBinding() { observer_receiver_.reset(); }
 
-  MOCK_METHOD0(OnError, void());
+  MOCK_METHOD1(OnError, void(media::mojom::InputStreamErrorCode));
   MOCK_METHOD0(DidStartRecording, void());
   void OnMutedStateChanged(bool) override { NOTREACHED(); }
 
@@ -129,6 +128,9 @@ class LoopbackStreamTest : public testing::Test {
  public:
   LoopbackStreamTest() : group_id_(base::UnguessableToken::Create()) {}
 
+  LoopbackStreamTest(const LoopbackStreamTest&) = delete;
+  LoopbackStreamTest& operator=(const LoopbackStreamTest&) = delete;
+
   ~LoopbackStreamTest() override = default;
 
   void TearDown() override {
@@ -139,21 +141,21 @@ class LoopbackStreamTest : public testing::Test {
     }
     sources_.clear();
 
-    scoped_task_environment_.FastForwardUntilNoTasksRemain();
+    task_environment_.FastForwardUntilNoTasksRemain();
   }
 
   MockClientAndObserver* client() { return &client_; }
   LoopbackStream* stream() { return stream_.get(); }
   FakeSyncWriter* consumer() { return consumer_; }
 
-  void RunMojoTasks() { scoped_task_environment_.RunUntilIdle(); }
+  void RunMojoTasks() { task_environment_.RunUntilIdle(); }
 
   FakeLoopbackGroupMember* AddSource(int channels, int sample_rate) {
-    sources_.emplace_back(std::make_unique<FakeLoopbackGroupMember>(
-        media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                               media::GuessChannelLayout(channels), sample_rate,
-                               (sample_rate * kBufferDuration) /
-                                   base::TimeDelta::FromSeconds(1))));
+    sources_.emplace_back(
+        std::make_unique<FakeLoopbackGroupMember>(media::AudioParameters(
+            media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
+            media::ChannelLayoutConfig::Guess(channels), sample_rate,
+            (sample_rate * kBufferDuration).InSeconds())));
     coordinator_.RegisterMember(group_id_, sources_.back().get());
     return sources_.back().get();
   }
@@ -183,7 +185,7 @@ class LoopbackStreamTest : public testing::Test {
         base::BindOnce([](LoopbackStreamTest* self,
                           LoopbackStream* stream) { self->stream_ = nullptr; },
                        this),
-        scoped_task_environment_.GetMainThreadTaskRunner(),
+        task_environment_.GetMainThreadTaskRunner(),
         remote_input_stream_.BindNewPipeAndPassReceiver(), std::move(client),
         std::move(observer), GetLoopbackStreamParams(),
         // The following argument is the |shared_memory_count|, which does not
@@ -193,7 +195,7 @@ class LoopbackStreamTest : public testing::Test {
 
     // Override the clock used by the LoopbackStream so that everything is
     // single-threaded and synchronized with the driving code in these tests.
-    stream_->set_clock_for_testing(scoped_task_environment_.GetMockTickClock());
+    stream_->set_clock_for_testing(task_environment_.GetMockTickClock());
 
     // Redirect the output of the LoopbackStream to a FakeSyncWriter.
     // LoopbackStream takes ownership of the FakeSyncWriter.
@@ -234,14 +236,14 @@ class LoopbackStreamTest : public testing::Test {
       // Render audio meant for local output at some point in the near
       // future.
       const base::TimeTicks output_timestamp =
-          scoped_task_environment_.NowTicks() + kDelayUntilOutput;
+          task_environment_.NowTicks() + kDelayUntilOutput;
       for (const auto& source : sources_) {
         source->RenderMoreAudio(output_timestamp);
       }
 
       // Move the task runner forward, which will cause the FlowNetwork's
       // delayed tasks to run, which will generate output for the consumer.
-      scoped_task_environment_.FastForwardBy(kBufferDuration);
+      task_environment_.FastForwardBy(kBufferDuration);
     } while (consumer_->GetRecordedFrameCount() < min_frames_to_record);
   }
 
@@ -251,18 +253,16 @@ class LoopbackStreamTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   LoopbackCoordinator coordinator_;
   const base::UnguessableToken group_id_;
   std::vector<std::unique_ptr<FakeLoopbackGroupMember>> sources_;
   NiceMock<MockClientAndObserver> client_;
   std::unique_ptr<LoopbackStream> stream_;
-  FakeSyncWriter* consumer_ = nullptr;  // Owned by |stream_|.
+  raw_ptr<FakeSyncWriter> consumer_ = nullptr;  // Owned by |stream_|.
 
   mojo::Remote<media::mojom::AudioInputStream> remote_input_stream_;
-
-  DISALLOW_COPY_AND_ASSIGN(LoopbackStreamTest);
 };
 
 TEST_F(LoopbackStreamTest, ShutsDownStreamWhenInterfacePtrIsClosed) {
@@ -270,7 +270,7 @@ TEST_F(LoopbackStreamTest, ShutsDownStreamWhenInterfacePtrIsClosed) {
   EXPECT_CALL(*client(), DidStartRecording());
   StartLoopbackRecording();
   PumpAudioAndTakeNewRecording();
-  EXPECT_CALL(*client(), OnError());
+  EXPECT_CALL(*client(), OnError(media::mojom::InputStreamErrorCode::kUnknown));
   CloseInputStreamPtr();
   EXPECT_FALSE(stream());
   Mock::VerifyAndClearExpectations(client());
@@ -283,7 +283,7 @@ TEST_F(LoopbackStreamTest, ShutsDownStreamWhenClientBindingIsClosed) {
   PumpAudioAndTakeNewRecording();
   // Note: Expect no call to client::OnError() because it is the client binding
   // that is being closed and causing the error.
-  EXPECT_CALL(*client(), OnError()).Times(0);
+  EXPECT_CALL(*client(), OnError(_)).Times(0);
   client()->CloseClientBinding();
   RunMojoTasks();
   EXPECT_FALSE(stream());
@@ -295,7 +295,7 @@ TEST_F(LoopbackStreamTest, ShutsDownStreamWhenObserverBindingIsClosed) {
   EXPECT_CALL(*client(), DidStartRecording());
   StartLoopbackRecording();
   PumpAudioAndTakeNewRecording();
-  EXPECT_CALL(*client(), OnError());
+  EXPECT_CALL(*client(), OnError(media::mojom::InputStreamErrorCode::kUnknown));
   client()->CloseObserverBinding();
   RunMojoTasks();
   EXPECT_FALSE(stream());

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 
 #include "base/callback.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
-class DictionaryValue;
 class SingleThreadTaskRunner;
 }  // namespace base
 
@@ -66,12 +66,15 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   // is returned containing host_id and xmpp_login, with security-sensitive
   // fields filtered out. An empty dictionary is returned if the host is not
   // configured, and nullptr if the configuration is corrupt or cannot be read.
-  typedef base::Callback<void(std::unique_ptr<base::DictionaryValue> config)>
+  typedef base::OnceCallback<void(absl::optional<base::Value::Dict> config)>
       GetConfigCallback;
 
   // Callback used for asynchronous operations, e.g. when
   // starting/stopping the service.
-  typedef base::Callback<void (AsyncResult result)> CompletionCallback;
+  typedef base::OnceCallback<void(AsyncResult result)> CompletionCallback;
+
+  // Callback used to notify a Boolean result.
+  typedef base::OnceCallback<void(bool)> BoolCallback;
 
   struct UsageStatsConsent {
     // Indicates whether crash dump reporting is supported by the host.
@@ -86,7 +89,7 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   };
 
   // Callback type for GetUsageStatsConsent().
-  typedef base::Callback<void (const UsageStatsConsent&)>
+  typedef base::OnceCallback<void(const UsageStatsConsent&)>
       GetUsageStatsConsentCallback;
 
   // Interface representing the platform-spacific back-end. Most of its methods
@@ -107,27 +110,32 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
 
     // Queries current host configuration. Any values that might be security
     // sensitive have been filtered out.
-    virtual std::unique_ptr<base::DictionaryValue> GetConfig() = 0;
+    virtual absl::optional<base::Value::Dict> GetConfig() = 0;
+
+    // Checks to verify that the required OS permissions have been granted to
+    // the host process, querying the user if necessary. Notifies the callback
+    // when permission status is established, passing true iff all required
+    // permissions have been granted.
+    virtual void CheckPermission(bool it2me, BoolCallback callback) = 0;
 
     // Starts the daemon process. This may require that the daemon be
     // downloaded and installed. |done| is invoked on the calling thread when
     // the operation is completed.
-    virtual void SetConfigAndStart(
-        std::unique_ptr<base::DictionaryValue> config,
-        bool consent,
-        const CompletionCallback& done) = 0;
+    virtual void SetConfigAndStart(base::Value::Dict config,
+                                   bool consent,
+                                   CompletionCallback done) = 0;
 
     // Updates current host configuration with the values specified in
     // |config|. Any value in the existing configuration that isn't specified in
     // |config| is preserved. |config| must not contain host_id or xmpp_login
     // values, because implementations of this method cannot change them. |done|
     // is invoked on the calling thread when the operation is completed.
-    virtual void UpdateConfig(std::unique_ptr<base::DictionaryValue> config,
-                              const CompletionCallback& done) = 0;
+    virtual void UpdateConfig(base::Value::Dict config,
+                              CompletionCallback done) = 0;
 
     // Stops the daemon process. |done| is invoked on the calling thread when
     // the operation is completed.
-    virtual void Stop(const CompletionCallback& done) = 0;
+    virtual void Stop(CompletionCallback done) = 0;
 
     // Get the user's consent to crash reporting.
     virtual UsageStatsConsent GetUsageStatsConsent() = 0;
@@ -136,6 +144,9 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   static scoped_refptr<DaemonController> Create();
 
   explicit DaemonController(std::unique_ptr<Delegate> delegate);
+
+  DaemonController(const DaemonController&) = delete;
+  DaemonController& operator=(const DaemonController&) = delete;
 
   // Return the "installed/running" state of the daemon process.
   //
@@ -148,7 +159,13 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   // Queries current host configuration. The |done| is called
   // after the configuration is read, and any values that might be security
   // sensitive have been filtered out.
-  void GetConfig(const GetConfigCallback& done);
+  void GetConfig(GetConfigCallback done);
+
+  // Checks to see if the required OS permissions have been granted. This may
+  // show a dialog to the user requesting the permissions.
+  // Notifies the callback when permission status is established, passing true
+  // iff all required permissions have been granted.
+  void CheckPermission(bool it2me, BoolCallback callback);
 
   // Start the daemon process. This may require that the daemon be
   // downloaded and installed. |done| is called when the
@@ -158,17 +175,16 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   // these two steps are merged for simplicity. Consider splitting it
   // into SetConfig() and Start() once we have basic host setup flow
   // working.
-  void SetConfigAndStart(std::unique_ptr<base::DictionaryValue> config,
+  void SetConfigAndStart(base::Value::Dict config,
                          bool consent,
-                         const CompletionCallback& done);
+                         CompletionCallback done);
 
   // Updates current host configuration with the values specified in
   // |config|. Changes must take effect before the call completes.
   // Any value in the existing configuration that isn't specified in |config|
   // is preserved. |config| must not contain host_id or xmpp_login values,
   // because implementations of this method cannot change them.
-  void UpdateConfig(std::unique_ptr<base::DictionaryValue> config,
-                    const CompletionCallback& done);
+  void UpdateConfig(base::Value::Dict config, CompletionCallback done);
 
   // Stop the daemon process. It is permitted to call Stop while the daemon
   // process is being installed, in which case the installation should be
@@ -176,40 +192,37 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
   // daemon process is not started automatically upon successful installation.
   // As with Start, Stop may return before the operation is complete--poll
   // GetState until the state is STATE_STOPPED.
-  void Stop(const CompletionCallback& done);
+  void Stop(CompletionCallback done);
 
   // Get the user's consent to crash reporting.
-  void GetUsageStatsConsent(const GetUsageStatsConsentCallback& done);
+  void GetUsageStatsConsent(GetUsageStatsConsentCallback done);
 
  private:
   friend class base::RefCountedThreadSafe<DaemonController>;
   virtual ~DaemonController();
 
   // Blocking helper methods used to call the delegate.
-  void DoGetConfig(const GetConfigCallback& done);
-  void DoSetConfigAndStart(std::unique_ptr<base::DictionaryValue> config,
+  void DoGetConfig(GetConfigCallback done);
+  void DoSetConfigAndStart(base::Value::Dict config,
                            bool consent,
-                           const CompletionCallback& done);
-  void DoUpdateConfig(std::unique_ptr<base::DictionaryValue> config,
-                      const CompletionCallback& done);
-  void DoStop(const CompletionCallback& done);
-  void DoGetUsageStatsConsent(const GetUsageStatsConsentCallback& done);
+                           CompletionCallback done);
+  void DoUpdateConfig(base::Value::Dict config, CompletionCallback done);
+  void DoStop(CompletionCallback done);
+  void DoGetUsageStatsConsent(GetUsageStatsConsentCallback done);
 
   // "Trampoline" callbacks that schedule the next pending request and then
   // invoke the original caller-supplied callback.
-  void InvokeCompletionCallbackAndScheduleNext(
-      const CompletionCallback& done,
-      AsyncResult result);
+  void InvokeCompletionCallbackAndScheduleNext(CompletionCallback done,
+                                               AsyncResult result);
   void InvokeConfigCallbackAndScheduleNext(
-      const GetConfigCallback& done,
-      std::unique_ptr<base::DictionaryValue> config);
-  void InvokeConsentCallbackAndScheduleNext(
-      const GetUsageStatsConsentCallback& done,
-      const UsageStatsConsent& consent);
+      GetConfigCallback done,
+      absl::optional<base::Value::Dict> config);
+  void InvokeConsentCallbackAndScheduleNext(GetUsageStatsConsentCallback done,
+                                            const UsageStatsConsent& consent);
 
   // Queue management methods.
-  void ScheduleNext();
-  void ServiceOrQueueRequest(const base::Closure& request);
+  void OnServicingDone();
+  void ServiceOrQueueRequest(base::OnceClosure request);
   void ServiceNextRequest();
 
   // Task runner on which all public methods of this class should be called.
@@ -224,9 +237,8 @@ class DaemonController : public base::RefCountedThreadSafe<DaemonController> {
 
   std::unique_ptr<Delegate> delegate_;
 
-  base::queue<base::Closure> pending_requests_;
-
-  DISALLOW_COPY_AND_ASSIGN(DaemonController);
+  bool servicing_request_ = false;
+  base::queue<base::OnceClosure> pending_requests_;
 };
 
 }  // namespace remoting

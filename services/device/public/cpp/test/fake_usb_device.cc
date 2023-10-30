@@ -1,46 +1,54 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/public/cpp/test/fake_usb_device.h"
 
-#include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/ranges/algorithm.h"
 #include "services/device/public/cpp/test/mock_usb_mojo_device.h"
 #include "services/device/public/cpp/usb/usb_utils.h"
 
 namespace device {
 
 // static
-void FakeUsbDevice::Create(scoped_refptr<FakeUsbDeviceInfo> device,
-                           mojom::UsbDeviceRequest request,
-                           mojom::UsbDeviceClientPtr client) {
-  auto* device_object = new FakeUsbDevice(device, std::move(client));
-  device_object->binding_ = mojo::MakeStrongBinding(
-      base::WrapUnique(device_object), std::move(request));
+void FakeUsbDevice::Create(
+    scoped_refptr<FakeUsbDeviceInfo> device,
+    base::span<const uint8_t> blocked_interface_classes,
+    mojo::PendingReceiver<device::mojom::UsbDevice> receiver,
+    mojo::PendingRemote<mojom::UsbDeviceClient> client) {
+  auto* device_object =
+      new FakeUsbDevice(device, blocked_interface_classes, std::move(client));
+  device_object->receiver_ = mojo::MakeSelfOwnedReceiver(
+      base::WrapUnique(device_object), std::move(receiver));
 }
 
 FakeUsbDevice::~FakeUsbDevice() {
   CloseHandle();
-  observer_.RemoveAll();
+  observation_.Reset();
 }
 
-FakeUsbDevice::FakeUsbDevice(scoped_refptr<FakeUsbDeviceInfo> device,
-                             mojom::UsbDeviceClientPtr client)
-    : device_(device), observer_(this), client_(std::move(client)) {
+FakeUsbDevice::FakeUsbDevice(
+    scoped_refptr<FakeUsbDeviceInfo> device,
+    base::span<const uint8_t> blocked_interface_classes,
+    mojo::PendingRemote<mojom::UsbDeviceClient> client)
+    : device_(device),
+      blocked_interface_classes_(blocked_interface_classes.begin(),
+                                 blocked_interface_classes.end()),
+      client_(std::move(client)) {
   DCHECK(device_);
-  observer_.Add(device_.get());
+  observation_.Observe(device_.get());
 
   if (client_) {
-    client_.set_connection_error_handler(base::BindOnce(
+    client_.set_disconnect_handler(base::BindOnce(
         &FakeUsbDevice::OnClientConnectionError, base::Unretained(this)));
   }
 }
@@ -52,8 +60,7 @@ void FakeUsbDevice::CloseHandle() {
 
   MockUsbMojoDevice* mock_device = device_->mock_device();
   if (mock_device) {
-    mock_device->Close(base::DoNothing::Once());
-    return;
+    mock_device->Close(base::DoNothing());
   }
 
   if (client_)
@@ -64,34 +71,34 @@ void FakeUsbDevice::CloseHandle() {
 
 // Device implementation:
 void FakeUsbDevice::Open(OpenCallback callback) {
-  // Go on with mock device for testing.
-  MockUsbMojoDevice* mock_device = device_->mock_device();
-  if (mock_device) {
-    mock_device->Open(std::move(callback));
-    is_opened_ = true;
-    return;
-  }
-
   if (is_opened_) {
     std::move(callback).Run(mojom::UsbOpenDeviceError::ALREADY_OPEN);
     return;
   }
 
+  // Go on with mock device for testing.
+  MockUsbMojoDevice* mock_device = device_->mock_device();
+  if (mock_device) {
+    mock_device->Open(base::BindOnce(&FakeUsbDevice::FinishOpen,
+                                     base::Unretained(this),
+                                     std::move(callback)));
+    return;
+  }
+
+  FinishOpen(std::move(callback), mojom::UsbOpenDeviceError::OK);
+}
+
+void FakeUsbDevice::FinishOpen(OpenCallback callback,
+                               mojom::UsbOpenDeviceError error) {
+  DCHECK(!is_opened_);
   is_opened_ = true;
   if (client_)
     client_->OnDeviceOpened();
 
-  std::move(callback).Run(mojom::UsbOpenDeviceError::OK);
+  std::move(callback).Run(error);
 }
 
 void FakeUsbDevice::Close(CloseCallback callback) {
-  // Go on with mock device for testing.
-  MockUsbMojoDevice* mock_device = device_->mock_device();
-  if (mock_device) {
-    mock_device->Close(std::move(callback));
-    return;
-  }
-
   CloseHandle();
   std::move(callback).Run();
 }
@@ -105,7 +112,7 @@ void FakeUsbDevice::SetConfiguration(uint8_t value,
     return;
   }
 
-  std::move(callback).Run(true);
+  std::move(callback).Run(device_->SetActiveConfig(value));
 }
 
 void FakeUsbDevice::ClaimInterface(uint8_t interface_number,
@@ -117,9 +124,44 @@ void FakeUsbDevice::ClaimInterface(uint8_t interface_number,
     return;
   }
 
-  bool success = claimed_interfaces_.insert(interface_number).second;
+  const mojom::UsbDeviceInfo& device_info = device_->GetDeviceInfo();
+  auto config_it = base::ranges::find_if(
+      device_info.configurations,
+      [&device_info](const mojom::UsbConfigurationInfoPtr& config) {
+        return device_info.active_configuration == config->configuration_value;
+      });
+  if (config_it == device_info.configurations.end()) {
+    std::move(callback).Run(mojom::UsbClaimInterfaceResult::kFailure);
+    LOG(ERROR) << "No such configuration.";
+    return;
+  }
 
-  std::move(callback).Run(success);
+  auto interface_it = base::ranges::find_if(
+      (*config_it)->interfaces,
+      [interface_number](const mojom::UsbInterfaceInfoPtr& interface) {
+        return interface->interface_number == interface_number;
+      });
+  if (interface_it == (*config_it)->interfaces.end()) {
+    std::move(callback).Run(mojom::UsbClaimInterfaceResult::kFailure);
+    LOG(ERROR) << "No such interface in " << (*config_it)->interfaces.size()
+               << " interfaces.";
+    return;
+  }
+
+  for (const auto& alternate : (*interface_it)->alternates) {
+    if (base::Contains(blocked_interface_classes_, alternate->class_code)) {
+      std::move(callback).Run(mojom::UsbClaimInterfaceResult::kProtectedClass);
+      return;
+    }
+  }
+
+  bool success = claimed_interfaces_.insert(interface_number).second;
+  if (!success) {
+    LOG(ERROR) << "Interface already claimed.";
+  }
+
+  std::move(callback).Run(success ? mojom::UsbClaimInterfaceResult::kSuccess
+                                  : mojom::UsbClaimInterfaceResult::kFailure);
 }
 
 void FakeUsbDevice::ReleaseInterface(uint8_t interface_number,
@@ -160,11 +202,13 @@ void FakeUsbDevice::Reset(ResetCallback callback) {
   std::move(callback).Run(true);
 }
 
-void FakeUsbDevice::ClearHalt(uint8_t endpoint, ClearHaltCallback callback) {
+void FakeUsbDevice::ClearHalt(mojom::UsbTransferDirection direction,
+                              uint8_t endpoint_number,
+                              ClearHaltCallback callback) {
   // Go on with mock device for testing.
   MockUsbMojoDevice* mock_device = device_->mock_device();
   if (mock_device) {
-    mock_device->ClearHalt(endpoint, std::move(callback));
+    mock_device->ClearHalt(direction, endpoint_number, std::move(callback));
     return;
   }
   std::move(callback).Run(true);
@@ -186,7 +230,7 @@ void FakeUsbDevice::ControlTransferIn(mojom::UsbControlTransferParamsPtr params,
 
 void FakeUsbDevice::ControlTransferOut(
     mojom::UsbControlTransferParamsPtr params,
-    const std::vector<uint8_t>& data,
+    base::span<const uint8_t> data,
     uint32_t timeout,
     ControlTransferOutCallback callback) {
   // Go on with mock device for testing.
@@ -214,7 +258,7 @@ void FakeUsbDevice::GenericTransferIn(uint8_t endpoint_number,
 }
 
 void FakeUsbDevice::GenericTransferOut(uint8_t endpoint_number,
-                                       const std::vector<uint8_t>& data,
+                                       base::span<const uint8_t> data,
                                        uint32_t timeout,
                                        GenericTransferOutCallback callback) {
   // Go on with mock device for testing.
@@ -247,7 +291,7 @@ void FakeUsbDevice::IsochronousTransferIn(
 
 void FakeUsbDevice::IsochronousTransferOut(
     uint8_t endpoint_number,
-    const std::vector<uint8_t>& data,
+    base::span<const uint8_t> data,
     const std::vector<uint32_t>& packet_lengths,
     uint32_t timeout,
     IsochronousTransferOutCallback callback) {
@@ -265,13 +309,13 @@ void FakeUsbDevice::IsochronousTransferOut(
 
 void FakeUsbDevice::OnDeviceRemoved(scoped_refptr<FakeUsbDeviceInfo> device) {
   DCHECK_EQ(device_, device);
-  binding_->Close();
+  receiver_->Close();
 }
 
 void FakeUsbDevice::OnClientConnectionError() {
   // Close the binding with Blink when WebUsbService finds permission revoked
   // from setting UI.
-  binding_->Close();
+  receiver_->Close();
 }
 
 }  // namespace device

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,16 +45,16 @@ HANDLE CreateNamedPipeHelper(HANDLE target_process,
 namespace sandbox {
 
 bool NamedPipePolicy::GenerateRules(const wchar_t* name,
-                                    TargetPolicy::Semantics semantics,
+                                    Semantics semantics,
                                     LowLevelPolicy* policy) {
-  if (TargetPolicy::NAMEDPIPES_ALLOW_ANY != semantics) {
+  if (Semantics::kNamedPipesAllowAny != semantics) {
     return false;
   }
   PolicyRule pipe(ASK_BROKER);
   if (!pipe.AddStringMatch(IF, NameBased::NAME, name, CASE_INSENSITIVE)) {
     return false;
   }
-  if (!policy->AddRule(IPC_CREATENAMEDPIPEW_TAG, &pipe)) {
+  if (!policy->AddRule(IpcTag::CREATENAMEDPIPEW, &pipe)) {
     return false;
   }
   return true;
@@ -62,7 +62,7 @@ bool NamedPipePolicy::GenerateRules(const wchar_t* name,
 
 DWORD NamedPipePolicy::CreateNamedPipeAction(EvalResult eval_result,
                                              const ClientInfo& client_info,
-                                             const base::string16& name,
+                                             const std::wstring& name,
                                              DWORD open_mode,
                                              DWORD pipe_mode,
                                              DWORD max_instances,

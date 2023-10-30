@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/system/sys_info.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "remoting/base/name_value_map.h"
 
 namespace remoting {
@@ -158,19 +160,19 @@ ChromotingEvent& ChromotingEvent::operator=(ChromotingEvent&& other) {
 
 void ChromotingEvent::SetString(const std::string& key,
                                 const std::string& value) {
-  values_map_->SetString(key, value);
+  values_map_->SetStringKey(key, value);
 }
 
 void ChromotingEvent::SetInteger(const std::string& key, int value) {
-  values_map_->SetInteger(key, value);
+  values_map_->SetIntKey(key, value);
 }
 
 void ChromotingEvent::SetBoolean(const std::string& key, bool value) {
-  values_map_->SetBoolean(key, value);
+  values_map_->SetBoolKey(key, value);
 }
 
 void ChromotingEvent::SetDouble(const std::string& key, double value) {
-  values_map_->SetDouble(key, value);
+  values_map_->SetDoubleKey(key, value);
 }
 
 bool ChromotingEvent::IsDataValid() {
@@ -188,19 +190,17 @@ void ChromotingEvent::AddSystemInfo() {
   SetString(kCpuKey, base::SysInfo::OperatingSystemArchitecture());
   SetString(kOsVersionKey, base::SysInfo::OperatingSystemVersion());
   SetString(kWebAppVersionKey, STRINGIZE(VERSION));
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   Os os = Os::CHROMOTING_LINUX;
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
   Os os = Os::CHROMOTING_CHROMEOS;
-#elif defined(OS_IOS)
-  // This needs to precede the OS_MACOSX check since iOS will also define the
-  // OS_MACOSX macro.
+#elif BUILDFLAG(IS_IOS)
   Os os = Os::CHROMOTING_IOS;
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_MAC)
   Os os = Os::CHROMOTING_MAC;
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   Os os = Os::CHROMOTING_WINDOWS;
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   Os os = Os::CHROMOTING_ANDROID;
 #else
   Os os = Os::OTHER;
@@ -225,129 +225,129 @@ std::unique_ptr<base::DictionaryValue> ChromotingEvent::CopyDictionaryValue()
 // everything in a DictionaryValue that needs to be converted.
 apis::v1::ChromotingEvent ChromotingEvent::CreateProto() const {
   apis::v1::ChromotingEvent event_proto;
-  if (values_map_->HasKey(kAuthMethodKey)) {
+  if (values_map_->FindKey(kAuthMethodKey)) {
     event_proto.set_auth_method(
         static_cast<apis::v1::ChromotingEvent_AuthMethod>(
             values_map_->FindKey(kAuthMethodKey)->GetInt()));
   }
-  if (values_map_->HasKey(kCaptureLatencyKey)) {
+  if (values_map_->FindKey(kCaptureLatencyKey)) {
     event_proto.set_capture_latency(
         values_map_->FindKey(kCaptureLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kConnectionErrorKey)) {
+  if (values_map_->FindKey(kConnectionErrorKey)) {
     event_proto.set_connection_error(
         static_cast<apis::v1::ChromotingEvent_ConnectionError>(
             values_map_->FindKey(kConnectionErrorKey)->GetInt()));
   }
-  if (values_map_->HasKey(kConnectionTypeKey)) {
+  if (values_map_->FindKey(kConnectionTypeKey)) {
     event_proto.set_connection_type(
         static_cast<apis::v1::ChromotingEvent_ConnectionType>(
             values_map_->FindKey(kConnectionTypeKey)->GetInt()));
   }
-  if (values_map_->HasKey(kCpuKey)) {
+  if (values_map_->FindKey(kCpuKey)) {
     event_proto.set_cpu(values_map_->FindKey(kCpuKey)->GetString());
   }
-  if (values_map_->HasKey(kDecodeLatencyKey)) {
+  if (values_map_->FindKey(kDecodeLatencyKey)) {
     event_proto.set_decode_latency(
         values_map_->FindKey(kDecodeLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kEncodeLatencyKey)) {
+  if (values_map_->FindKey(kEncodeLatencyKey)) {
     event_proto.set_encode_latency(
         values_map_->FindKey(kEncodeLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kHostOsKey)) {
+  if (values_map_->FindKey(kHostOsKey)) {
     event_proto.set_host_os(static_cast<apis::v1::ChromotingEvent_Os>(
         values_map_->FindKey(kHostOsKey)->GetInt()));
   }
-  if (values_map_->HasKey(kHostOsVersionKey)) {
+  if (values_map_->FindKey(kHostOsVersionKey)) {
     event_proto.set_host_os_version(
         values_map_->FindKey(kHostOsVersionKey)->GetString());
   }
-  if (values_map_->HasKey(kHostVersionKey)) {
+  if (values_map_->FindKey(kHostVersionKey)) {
     event_proto.set_host_version(
         values_map_->FindKey(kHostVersionKey)->GetString());
   }
-  if (values_map_->HasKey(kMaxCaptureLatencyKey)) {
+  if (values_map_->FindKey(kMaxCaptureLatencyKey)) {
     event_proto.set_max_capture_latency(
         values_map_->FindKey(kMaxCaptureLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kMaxDecodeLatencyKey)) {
+  if (values_map_->FindKey(kMaxDecodeLatencyKey)) {
     event_proto.set_max_decode_latency(
         values_map_->FindKey(kMaxDecodeLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kMaxEncodeLatencyKey)) {
+  if (values_map_->FindKey(kMaxEncodeLatencyKey)) {
     event_proto.set_max_encode_latency(
         values_map_->FindKey(kMaxEncodeLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kMaxRenderLatencyKey)) {
+  if (values_map_->FindKey(kMaxRenderLatencyKey)) {
     event_proto.set_max_render_latency(
         values_map_->FindKey(kMaxRenderLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kMaxRoundtripLatencyKey)) {
+  if (values_map_->FindKey(kMaxRoundtripLatencyKey)) {
     event_proto.set_max_roundtrip_latency(
         values_map_->FindKey(kMaxRoundtripLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kModeKey)) {
+  if (values_map_->FindKey(kModeKey)) {
     event_proto.set_mode(static_cast<apis::v1::ChromotingEvent_Mode>(
         values_map_->FindKey(kModeKey)->GetInt()));
   }
-  if (values_map_->HasKey(kOsKey)) {
+  if (values_map_->FindKey(kOsKey)) {
     event_proto.set_os(static_cast<apis::v1::ChromotingEvent_Os>(
         values_map_->FindKey(kOsKey)->GetInt()));
   }
-  if (values_map_->HasKey(kOsVersionKey)) {
+  if (values_map_->FindKey(kOsVersionKey)) {
     event_proto.set_os_version(
         values_map_->FindKey(kOsVersionKey)->GetString());
   }
-  if (values_map_->HasKey(kPreviousSessionStateKey)) {
+  if (values_map_->FindKey(kPreviousSessionStateKey)) {
     event_proto.set_previous_session_state(
         static_cast<apis::v1::ChromotingEvent_SessionState>(
             values_map_->FindKey(kPreviousSessionStateKey)->GetInt()));
   }
-  if (values_map_->HasKey(kRenderLatencyKey)) {
+  if (values_map_->FindKey(kRenderLatencyKey)) {
     event_proto.set_render_latency(
         values_map_->FindKey(kRenderLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kRoleKey)) {
+  if (values_map_->FindKey(kRoleKey)) {
     event_proto.set_role(static_cast<apis::v1::ChromotingEvent_Role>(
         values_map_->FindKey(kRoleKey)->GetInt()));
   }
-  if (values_map_->HasKey(kRoundtripLatencyKey)) {
+  if (values_map_->FindKey(kRoundtripLatencyKey)) {
     event_proto.set_roundtrip_latency(
         values_map_->FindKey(kRoundtripLatencyKey)->GetDouble());
   }
-  if (values_map_->HasKey(kSessionDurationKey)) {
+  if (values_map_->FindKey(kSessionDurationKey)) {
     event_proto.set_session_duration(
         values_map_->FindKey(kSessionDurationKey)->GetDouble());
   }
-  if (values_map_->HasKey(kSessionEntryPointKey)) {
+  if (values_map_->FindKey(kSessionEntryPointKey)) {
     event_proto.set_session_entry_point(
         static_cast<apis::v1::ChromotingEvent_SessionEntryPoint>(
             values_map_->FindKey(kSessionEntryPointKey)->GetInt()));
   }
-  if (values_map_->HasKey(kSessionIdKey)) {
+  if (values_map_->FindKey(kSessionIdKey)) {
     event_proto.set_session_id(
         values_map_->FindKey(kSessionIdKey)->GetString());
   }
-  if (values_map_->HasKey(kSessionStateKey)) {
+  if (values_map_->FindKey(kSessionStateKey)) {
     event_proto.set_session_state(
         static_cast<apis::v1::ChromotingEvent_SessionState>(
             values_map_->FindKey(kSessionStateKey)->GetInt()));
   }
-  if (values_map_->HasKey(kSignalStrategyTypeKey)) {
+  if (values_map_->FindKey(kSignalStrategyTypeKey)) {
     event_proto.set_signal_strategy_type(
         static_cast<apis::v1::ChromotingEvent_SignalStrategyType>(
             values_map_->FindKey(kSignalStrategyTypeKey)->GetInt()));
   }
-  if (values_map_->HasKey(kTypeKey)) {
+  if (values_map_->FindKey(kTypeKey)) {
     event_proto.set_type(static_cast<apis::v1::ChromotingEvent_Type>(
         values_map_->FindKey(kTypeKey)->GetInt()));
   }
-  if (values_map_->HasKey(kVideoBandwidthKey)) {
+  if (values_map_->FindKey(kVideoBandwidthKey)) {
     event_proto.set_video_bandwidth(
         values_map_->FindKey(kVideoBandwidthKey)->GetDouble());
   }
-  if (values_map_->HasKey(kWebAppVersionKey)) {
+  if (values_map_->FindKey(kWebAppVersionKey)) {
     event_proto.set_webapp_version(
         values_map_->FindKey(kWebAppVersionKey)->GetString());
   }

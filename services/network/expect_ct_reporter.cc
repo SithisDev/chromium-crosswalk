@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,17 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/json/json_writer.h"
-#include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/time/time_to_iso8601.h"
 #include "base/values.h"
+#include "net/base/isolation_info.h"
 #include "net/base/load_flags.h"
 #include "net/cert/ct_serialization.h"
+#include "net/cert/x509_certificate.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/report_sender.h"
 #include "net/url_request/url_request_context.h"
@@ -50,16 +51,16 @@ bool HasHeaderValues(net::URLRequest* request,
   return false;
 }
 
-std::unique_ptr<base::ListValue> GetPEMEncodedChainAsList(
+base::Value::List GetPEMEncodedChainAsList(
     const net::X509Certificate* cert_chain) {
   if (!cert_chain)
-    return std::make_unique<base::ListValue>();
+    return base::Value::List();
 
-  std::unique_ptr<base::ListValue> result(new base::ListValue());
+  base::Value::List result;
   std::vector<std::string> pem_encoded_chain;
   cert_chain->GetPEMEncodedChain(&pem_encoded_chain);
-  for (const std::string& cert : pem_encoded_chain)
-    result->Append(std::make_unique<base::Value>(cert));
+  for (std::string& cert : pem_encoded_chain)
+    result.Append(std::move(cert));
 
   return result;
 }
@@ -80,10 +81,10 @@ std::string SCTOriginToString(
 }
 
 bool AddSCT(const net::SignedCertificateTimestampAndStatus& sct,
-            base::ListValue* list) {
-  std::unique_ptr<base::DictionaryValue> list_item(new base::DictionaryValue());
+            base::Value::List* list) {
+  base::Value::Dict list_item;
   // Chrome implements RFC6962, not 6962-bis, so the reports contain v1 SCTs.
-  list_item->SetInteger("version", 1);
+  list_item.Set("version", 1);
   std::string status;
   switch (sct.status) {
     case net::ct::SCT_STATUS_LOG_UNKNOWN:
@@ -99,15 +100,15 @@ bool AddSCT(const net::SignedCertificateTimestampAndStatus& sct,
     case net::ct::SCT_STATUS_NONE:
       NOTREACHED();
   }
-  list_item->SetString("status", status);
-  list_item->SetString("source", SCTOriginToString(sct.sct->origin));
+  list_item.Set("status", status);
+  list_item.Set("source", SCTOriginToString(sct.sct->origin));
   std::string serialized_sct;
   if (!net::ct::EncodeSignedCertificateTimestamp(sct.sct, &serialized_sct))
     return false;
   std::string encoded_serialized_sct;
   base::Base64Encode(serialized_sct, &encoded_serialized_sct);
-  list_item->SetString("serialized_sct", encoded_serialized_sct);
-  list->Append(std::move(list_item));
+  list_item.Set("serialized_sct", encoded_serialized_sct);
+  list->Append(base::Value(std::move(list_item)));
   return true;
 }
 
@@ -138,9 +139,10 @@ constexpr net::NetworkTrafficAnnotationTag kExpectCTReporterTrafficAnnotation =
 
 }  // namespace
 
-ExpectCTReporter::ExpectCTReporter(net::URLRequestContext* request_context,
-                                   const base::Closure& success_callback,
-                                   const base::Closure& failure_callback)
+ExpectCTReporter::ExpectCTReporter(
+    net::URLRequestContext* request_context,
+    const base::RepeatingClosure& success_callback,
+    const base::RepeatingClosure& failure_callback)
     : report_sender_(new net::ReportSender(request_context,
                                            kExpectCTReporterTrafficAnnotation)),
       request_context_(request_context),
@@ -156,32 +158,34 @@ void ExpectCTReporter::OnExpectCTFailed(
     const net::X509Certificate* validated_certificate_chain,
     const net::X509Certificate* served_certificate_chain,
     const net::SignedCertificateTimestampAndStatusList&
-        signed_certificate_timestamps) {
+        signed_certificate_timestamps,
+    const net::NetworkAnonymizationKey& network_anonymization_key) {
   if (report_uri.is_empty())
     return;
 
   if (!base::FeatureList::IsEnabled(features::kExpectCTReporting))
     return;
 
-  base::DictionaryValue outer_report;
-  base::DictionaryValue* report = outer_report.SetDictionary(
-      "expect-ct-report", std::make_unique<base::DictionaryValue>());
-  report->SetString("hostname", host_port_pair.host());
-  report->SetInteger("port", host_port_pair.port());
-  report->SetString("date-time", base::TimeToISO8601(base::Time::Now()));
-  report->SetString("effective-expiration-date",
-                    base::TimeToISO8601(expiration));
-  report->Set("served-certificate-chain",
-              GetPEMEncodedChainAsList(served_certificate_chain));
-  report->Set("validated-certificate-chain",
-              GetPEMEncodedChainAsList(validated_certificate_chain));
+  base::Value::Dict outer_report;
 
-  std::unique_ptr<base::ListValue> scts(new base::ListValue());
+  base::Value::Dict report;
+  report.Set("hostname", host_port_pair.host());
+  report.Set("port", host_port_pair.port());
+  report.Set("date-time", base::TimeToISO8601(base::Time::Now()));
+  report.Set("effective-expiration-date", base::TimeToISO8601(expiration));
+  report.Set("served-certificate-chain",
+             GetPEMEncodedChainAsList(served_certificate_chain));
+  report.Set("validated-certificate-chain",
+             GetPEMEncodedChainAsList(validated_certificate_chain));
+
+  base::Value::List scts;
   for (const auto& sct_and_status : signed_certificate_timestamps) {
-    if (!AddSCT(sct_and_status, scts.get()))
+    if (!AddSCT(sct_and_status, &scts))
       LOG(ERROR) << "Failed to add signed certificate timestamp to list";
   }
-  report->Set("scts", std::move(scts));
+  report.Set("scts", std::move(scts));
+
+  outer_report.Set("expect-ct-report", std::move(report));
 
   std::string serialized_report;
   if (!base::JSONWriter::Write(outer_report, &serialized_report)) {
@@ -189,9 +193,7 @@ void ExpectCTReporter::OnExpectCTFailed(
     return;
   }
 
-  UMA_HISTOGRAM_BOOLEAN("SSL.ExpectCTReportSendingAttempt", true);
-
-  SendPreflight(report_uri, serialized_report);
+  SendPreflight(report_uri, serialized_report, network_anonymization_key);
 }
 
 void ExpectCTReporter::OnResponseStarted(net::URLRequest* request,
@@ -201,40 +203,40 @@ void ExpectCTReporter::OnResponseStarted(net::URLRequest* request,
   PreflightInProgress* preflight = preflight_it->second.get();
 
   const int response_code =
-      request->status().is_success() ? request->GetResponseCode() : -1;
+      net_error == net::OK ? request->GetResponseCode() : -1;
 
   // Check that the preflight succeeded: it must have an HTTP OK status code,
   // with the following headers:
   // - Access-Control-Allow-Origin: * or null
-  // - Access-Control-Allow-Methods: POST
-  // - Access-Control-Allow-Headers: Content-Type
-
+  // - Access-Control-Allow-Headers: * or Content-Type
+  // Note that * is allowed here as the credentials mode is never 'include'.
+  // Access-Control-Allow-Methods is not checked, as the preflight is always
+  // for a POST method, which is safelisted.
   if (response_code == -1 || response_code < 200 || response_code > 299) {
-    OnReportFailure(preflight->report_uri, request->status().error(),
-                    response_code);
+    OnReportFailure(preflight->report_uri, net_error, response_code);
     inflight_preflights_.erase(request);
     // Do not use |preflight| after this point, since it has been erased above.
     return;
   }
 
   if (!HasHeaderValues(request, "Access-Control-Allow-Origin", {"*", "null"}) ||
-      !HasHeaderValues(request, "Access-Control-Allow-Methods", {"post"}) ||
       !HasHeaderValues(request, "Access-Control-Allow-Headers",
-                       {"content-type"})) {
-    OnReportFailure(preflight->report_uri, request->status().error(),
-                    response_code);
+                       {"*", "content-type"})) {
+    OnReportFailure(preflight->report_uri, net_error, response_code);
     inflight_preflights_.erase(request);
     // Do not use |preflight| after this point, since it has been erased above.
     return;
   }
 
-  report_sender_->Send(
-      preflight->report_uri, "application/expect-ct-report+json; charset=utf-8",
-      preflight->serialized_report, success_callback_,
-      // Since |this| owns the |report_sender_|, it's safe to
-      // use base::Unretained here: |report_sender_| will be
-      // destroyed before |this|.
-      base::Bind(&ExpectCTReporter::OnReportFailure, base::Unretained(this)));
+  report_sender_->Send(preflight->report_uri,
+                       "application/expect-ct-report+json; charset=utf-8",
+                       preflight->serialized_report,
+                       preflight->network_anonymization_key, success_callback_,
+                       // Since |this| owns the |report_sender_|, it's safe to
+                       // use base::Unretained here: |report_sender_| will be
+                       // destroyed before |this|.
+                       base::BindRepeating(&ExpectCTReporter::OnReportFailure,
+                                           base::Unretained(this)));
   inflight_preflights_.erase(request);
 }
 
@@ -246,38 +248,45 @@ void ExpectCTReporter::OnReadCompleted(net::URLRequest* request,
 ExpectCTReporter::PreflightInProgress::PreflightInProgress(
     std::unique_ptr<net::URLRequest> request,
     const std::string& serialized_report,
-    const GURL& report_uri)
+    const GURL& report_uri,
+    const net::NetworkAnonymizationKey& network_anonymization_key)
     : request(std::move(request)),
       serialized_report(serialized_report),
-      report_uri(report_uri) {}
+      report_uri(report_uri),
+      network_anonymization_key(network_anonymization_key) {}
 
 ExpectCTReporter::PreflightInProgress::~PreflightInProgress() {}
 
-void ExpectCTReporter::SendPreflight(const GURL& report_uri,
-                                     const std::string& serialized_report) {
+void ExpectCTReporter::SendPreflight(
+    const GURL& report_uri,
+    const std::string& serialized_report,
+    const net::NetworkAnonymizationKey& network_anonymization_key) {
   std::unique_ptr<net::URLRequest> url_request =
       request_context_->CreateRequest(report_uri, net::DEFAULT_PRIORITY, this,
                                       kExpectCTReporterTrafficAnnotation);
   url_request->SetLoadFlags(net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE);
   url_request->set_allow_credentials(false);
-  url_request->set_method("OPTIONS");
+  url_request->set_method(net::HttpRequestHeaders::kOptionsMethod);
+  url_request->set_isolation_info_from_network_anonymization_key(
+      network_anonymization_key);
 
   net::HttpRequestHeaders extra_headers;
   extra_headers.SetHeader("Origin", "null");
-  extra_headers.SetHeader("Access-Control-Request-Method", "POST");
+  extra_headers.SetHeader("Access-Control-Request-Method",
+                          net::HttpRequestHeaders::kPostMethod);
   extra_headers.SetHeader("Access-Control-Request-Headers", "content-type");
   url_request->SetExtraRequestHeaders(extra_headers);
 
   net::URLRequest* raw_request = url_request.get();
   inflight_preflights_[raw_request] = std::make_unique<PreflightInProgress>(
-      std::move(url_request), serialized_report, report_uri);
+      std::move(url_request), serialized_report, report_uri,
+      network_anonymization_key);
   raw_request->Start();
 }
 
 void ExpectCTReporter::OnReportFailure(const GURL& report_uri,
                                        int net_error,
                                        int http_response_code) {
-  base::UmaHistogramSparse("SSL.ExpectCTReportFailure2", -net_error);
   if (!failure_callback_.is_null())
     failure_callback_.Run();
 }

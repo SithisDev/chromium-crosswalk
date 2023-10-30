@@ -1,18 +1,18 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_STRUCT_TRAITS_H_
-#define SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_STRUCT_TRAITS_H_
+#ifndef SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_MOJOM_TRAITS_H_
+#define SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_MOJOM_TRAITS_H_
 
 #include "services/service_manager/public/cpp/interface_provider_spec.h"
-#include "services/service_manager/public/mojom/interface_provider_spec.mojom.h"
+#include "services/service_manager/public/mojom/interface_provider_spec.mojom-shared.h"
 
 namespace mojo {
 
 template <>
 struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
-    StructTraits<service_manager::mojom::InterfaceProviderSpec::DataView,
+    StructTraits<service_manager::mojom::InterfaceProviderSpecDataView,
                  service_manager::InterfaceProviderSpec> {
   static const std::map<service_manager::Capability,
                         service_manager::InterfaceSet>&
@@ -20,19 +20,18 @@ struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
     return spec.provides;
   }
   static const std::map<service_manager::Name, service_manager::CapabilitySet>&
-  requires(const service_manager::InterfaceProviderSpec& spec) {
-    return spec.requires;
+  needs(const service_manager::InterfaceProviderSpec& spec) {
+    return spec.needs;
   }
   static bool Read(service_manager::mojom::InterfaceProviderSpecDataView data,
                    service_manager::InterfaceProviderSpec* out) {
-    return data.ReadProvides(&out->provides) &&
-           data.ReadRequires(&out->requires);
+    return data.ReadProvides(&out->provides) && data.ReadNeeds(&out->needs);
   }
 };
 
 template <>
 struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
-    StructTraits<service_manager::mojom::InterfaceSet::DataView,
+    StructTraits<service_manager::mojom::InterfaceSetDataView,
                  service_manager::InterfaceSet> {
   static std::vector<std::string> interfaces(
       const service_manager::InterfaceSet& spec) {
@@ -57,7 +56,7 @@ struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
 
 template <>
 struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
-    StructTraits<service_manager::mojom::CapabilitySet::DataView,
+    StructTraits<service_manager::mojom::CapabilitySetDataView,
                  service_manager::CapabilitySet> {
   static std::vector<std::string> capabilities(
       const service_manager::CapabilitySet& spec) {
@@ -82,4 +81,4 @@ struct COMPONENT_EXPORT(SERVICE_MANAGER_MOJOM)
 
 }  // namespace mojo
 
-#endif  // SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_STRUCT_TRAITS_H_
+#endif  // SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_PROVIDER_SPEC_MOJOM_TRAITS_H_

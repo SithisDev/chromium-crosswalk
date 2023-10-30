@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/third_party_host_authenticator.h"
@@ -28,7 +27,6 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
  public:
   // Create a factory that dispenses shared secret authenticators.
   static std::unique_ptr<AuthenticatorFactory> CreateWithPin(
-      bool use_service_account,
       const std::string& host_owner,
       const std::string& local_cert,
       scoped_refptr<RsaKeyPair> key_pair,
@@ -38,7 +36,6 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
 
   // Create a factory that dispenses third party authenticators.
   static std::unique_ptr<AuthenticatorFactory> CreateWithThirdPartyAuth(
-      bool use_service_account,
       const std::string& host_owner,
       const std::string& local_cert,
       scoped_refptr<RsaKeyPair> key_pair,
@@ -46,6 +43,11 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
       scoped_refptr<TokenValidatorFactory> token_validator_factory);
 
   Me2MeHostAuthenticatorFactory();
+
+  Me2MeHostAuthenticatorFactory(const Me2MeHostAuthenticatorFactory&) = delete;
+  Me2MeHostAuthenticatorFactory& operator=(
+      const Me2MeHostAuthenticatorFactory&) = delete;
+
   ~Me2MeHostAuthenticatorFactory() override;
 
   // AuthenticatorFactory interface.
@@ -55,7 +57,6 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
 
  private:
   // Used for all host authenticators.
-  bool use_service_account_;
   std::string canonical_host_owner_email_;
   std::string local_cert_;
   scoped_refptr<RsaKeyPair> key_pair_;
@@ -69,8 +70,6 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
 
   // Used only for pairing host authenticators.
   scoped_refptr<PairingRegistry> pairing_registry_;
-
-  DISALLOW_COPY_AND_ASSIGN(Me2MeHostAuthenticatorFactory);
 };
 
 }  // namespace protocol

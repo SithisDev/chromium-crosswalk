@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,16 @@
 
 #include "base/component_export.h"
 #include "base/containers/flat_map.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/unguessable_token.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "services/media_session/public/cpp/media_metadata.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
 #include "services/media_session/public/mojom/media_controller.mojom.h"
 #include "services/media_session/public/mojom/media_session.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class UnguessableToken;
@@ -40,17 +39,25 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
   // mojom::MediaSessionObserver overrides.
   void MediaSessionInfoChanged(mojom::MediaSessionInfoPtr session) override;
   void MediaSessionMetadataChanged(
-      const base::Optional<MediaMetadata>& metadata) override;
+      const absl::optional<MediaMetadata>& metadata) override;
   void MediaSessionActionsChanged(
       const std::vector<mojom::MediaSessionAction>& actions) override;
   void MediaSessionImagesChanged(
       const base::flat_map<mojom::MediaSessionImageType,
                            std::vector<MediaImage>>& images) override;
   void MediaSessionPositionChanged(
-      const base::Optional<media_session::MediaPosition>& position) override;
+      const absl::optional<media_session::MediaPosition>& position) override;
 
   void WaitForState(mojom::MediaSessionInfo::SessionState wanted_state);
   void WaitForPlaybackState(mojom::MediaPlaybackState wanted_state);
+  void WaitForMicrophoneState(mojom::MicrophoneState wanted_state);
+  void WaitForCameraState(mojom::CameraState wanted_state);
+
+  // Blocks until the set of audio/video states for the players in the media
+  // session matches |wanted_states|. The order is not important.
+  void WaitForAudioVideoStates(
+      const std::vector<mojom::MediaAudioVideoState>& wanted_states);
+
   void WaitForControllable(bool is_controllable);
 
   void WaitForEmptyMetadata();
@@ -64,13 +71,22 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
                                    const std::vector<MediaImage>& images);
 
   void WaitForEmptyPosition();
-  void WaitForNonEmptyPosition();
+
+  // Blocks until notified about MediaPosition changing to one matching
+  // |position|.
+  void WaitForExpectedPosition(const MediaPosition& position);
+
+  // Blocks until notified about MediaPosition changing to one matching
+  // |position|, where media time is required to be equal to or greater than
+  // the media time of |position|. Returns the media time actually reported
+  // with MediaPosition.
+  base::TimeDelta WaitForExpectedPositionAtLeast(const MediaPosition& position);
 
   const mojom::MediaSessionInfoPtr& session_info() const {
     return session_info_;
   }
 
-  const base::Optional<base::Optional<MediaMetadata>>& session_metadata()
+  const absl::optional<absl::optional<MediaMetadata>>& session_metadata()
       const {
     return session_metadata_;
   }
@@ -79,7 +95,7 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
     return *session_actions_;
   }
 
-  const base::Optional<base::Optional<MediaPosition>>& session_position() {
+  const absl::optional<absl::optional<MediaPosition>>& session_position() {
     return session_position_;
   }
 
@@ -87,25 +103,30 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
   void StartWaiting();
 
   mojom::MediaSessionInfoPtr session_info_;
-  base::Optional<base::Optional<MediaMetadata>> session_metadata_;
-  base::Optional<std::set<mojom::MediaSessionAction>> session_actions_;
-  base::Optional<
+  absl::optional<absl::optional<MediaMetadata>> session_metadata_;
+  absl::optional<std::set<mojom::MediaSessionAction>> session_actions_;
+  absl::optional<
       base::flat_map<mojom::MediaSessionImageType, std::vector<MediaImage>>>
       session_images_;
-  base::Optional<base::Optional<MediaPosition>> session_position_;
+  absl::optional<absl::optional<MediaPosition>> session_position_;
   bool waiting_for_empty_position_ = false;
-  bool waiting_for_non_empty_position_ = false;
 
-  base::Optional<MediaMetadata> expected_metadata_;
-  base::Optional<std::set<mojom::MediaSessionAction>> expected_actions_;
-  base::Optional<bool> expected_controllable_;
-  base::Optional<
+  absl::optional<MediaMetadata> expected_metadata_;
+  absl::optional<std::set<mojom::MediaSessionAction>> expected_actions_;
+  absl::optional<bool> expected_controllable_;
+  absl::optional<
       std::pair<mojom::MediaSessionImageType, std::vector<MediaImage>>>
       expected_images_of_type_;
+  absl::optional<MediaPosition> expected_position_;
+  absl::optional<MediaPosition> minimum_expected_position_;
   bool waiting_for_empty_metadata_ = false;
 
-  base::Optional<mojom::MediaSessionInfo::SessionState> wanted_state_;
-  base::Optional<mojom::MediaPlaybackState> wanted_playback_state_;
+  absl::optional<mojom::MediaSessionInfo::SessionState> wanted_state_;
+  absl::optional<mojom::MediaPlaybackState> wanted_playback_state_;
+  absl::optional<mojom::MicrophoneState> wanted_microphone_state_;
+  absl::optional<mojom::CameraState> wanted_camera_state_;
+  absl::optional<std::vector<mojom::MediaAudioVideoState>>
+      wanted_audio_video_states_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
   mojo::Receiver<mojom::MediaSessionObserver> receiver_{this};
@@ -118,6 +139,9 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
  public:
   MockMediaSession();
   explicit MockMediaSession(bool force_duck);
+
+  MockMediaSession(const MockMediaSession&) = delete;
+  MockMediaSession& operator=(const MockMediaSession&) = delete;
 
   ~MockMediaSession() override;
 
@@ -141,6 +165,14 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
                            GetMediaImageBitmapCallback callback) override;
   void SeekTo(base::TimeDelta seek_time) override;
   void ScrubTo(base::TimeDelta scrub_to) override;
+  void EnterPictureInPicture() override;
+  void ExitPictureInPicture() override;
+  void SetAudioSinkId(const absl::optional<std::string>& id) override {}
+  void ToggleMicrophone() override {}
+  void ToggleCamera() override {}
+  void HangUp() override {}
+  void Raise() override {}
+  void SetMute(bool mute) override {}
 
   void SetIsControllable(bool value);
   void SetPreferStop(bool value) { prefer_stop_ = value; }
@@ -148,11 +180,12 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   void AbandonAudioFocusFromClient();
 
   base::UnguessableToken RequestAudioFocusFromService(
-      mojom::AudioFocusManagerPtr& service,
+      mojo::Remote<mojom::AudioFocusManager>& service,
       mojom::AudioFocusType audio_foucs_type);
 
-  base::UnguessableToken RequestGroupedAudioFocusFromService(
-      mojom::AudioFocusManagerPtr& service,
+  bool RequestGroupedAudioFocusFromService(
+      const base::UnguessableToken& request_id,
+      mojo::Remote<mojom::AudioFocusManager>& service,
       mojom::AudioFocusType audio_focus_type,
       const base::UnguessableToken& group_id);
 
@@ -163,8 +196,8 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   }
   void FlushForTesting();
 
-  void SimulateMetadataChanged(const base::Optional<MediaMetadata>& metadata);
-  void SimulatePositionChanged(const base::Optional<MediaPosition>& position);
+  void SimulateMetadataChanged(const absl::optional<MediaMetadata>& metadata);
+  void SimulatePositionChanged(const absl::optional<MediaPosition>& position);
 
   void ClearAllImages();
   void SetImagesOfType(mojom::MediaSessionImageType type,
@@ -192,7 +225,7 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
 
   void RequestAudioFocusFromClient(mojom::AudioFocusType audio_focus_type);
 
-  mojom::AudioFocusRequestClientPtr afr_client_;
+  mojo::Remote<mojom::AudioFocusRequestClient> afr_client_;
 
   base::UnguessableToken request_id_;
 
@@ -216,11 +249,9 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   base::flat_map<mojom::MediaSessionImageType, std::vector<MediaImage>> images_;
   GURL last_image_src_;
 
-  mojo::BindingSet<mojom::MediaSession> bindings_;
+  mojo::ReceiverSet<mojom::MediaSession> receivers_;
 
   mojo::RemoteSet<mojom::MediaSessionObserver> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockMediaSession);
 };
 
 }  // namespace test

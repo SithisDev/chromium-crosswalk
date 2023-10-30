@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,17 @@ public class BatteryMonitorFactory implements InterfaceFactory<BatteryMonitor> {
     // Monitors currently interested in the battery status notifications.
     private final HashSet<BatteryMonitorImpl> mSubscribedMonitors =
             new HashSet<BatteryMonitorImpl>();
+    // Tracks the latest battery status update for newly added observers.
+    private boolean mHasStatusUpdate;
+    private BatteryStatus mBatteryStatus;
 
     private final BatteryStatusCallback mCallback = new BatteryStatusCallback() {
         @Override
         public void onBatteryStatusChanged(BatteryStatus batteryStatus) {
             ThreadUtils.assertOnUiThread();
+
+            mHasStatusUpdate = true;
+            mBatteryStatus = batteryStatus;
 
             List<BatteryMonitorImpl> monitors = new ArrayList<>(mSubscribedMonitors);
             for (BatteryMonitorImpl monitor : monitors) {
@@ -41,6 +47,7 @@ public class BatteryMonitorFactory implements InterfaceFactory<BatteryMonitor> {
     };
 
     public BatteryMonitorFactory() {
+        mHasStatusUpdate = false;
         mManager = new BatteryStatusManager(mCallback);
     }
 
@@ -51,10 +58,12 @@ public class BatteryMonitorFactory implements InterfaceFactory<BatteryMonitor> {
         if (mSubscribedMonitors.isEmpty() && !mManager.start()) {
             Log.e(TAG, "BatteryStatusManager failed to start.");
         }
-        // TODO(ppi): record the "BatteryStatus.StartAndroid" histogram here once we have a Java API
-        //            for UMA - http://crbug.com/442300.
 
         BatteryMonitorImpl monitor = new BatteryMonitorImpl(this);
+        if (mHasStatusUpdate) {
+            monitor.didChange(mBatteryStatus);
+        }
+
         mSubscribedMonitors.add(monitor);
         return monitor;
     }
@@ -66,6 +75,7 @@ public class BatteryMonitorFactory implements InterfaceFactory<BatteryMonitor> {
         mSubscribedMonitors.remove(monitor);
         if (mSubscribedMonitors.isEmpty()) {
             mManager.stop();
+            mHasStatusUpdate = false;
         }
     }
 }

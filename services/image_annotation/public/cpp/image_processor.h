@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/task/sequenced_task_runner.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/image_annotation/public/mojom/image_annotation.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -27,14 +27,19 @@ class ImageProcessor : public mojom::ImageProcessor {
   //                         pixels; this will be required for iOS, where pixel
   //                         access entails a full image redownload.
   explicit ImageProcessor(base::RepeatingCallback<SkBitmap()> get_pixels);
+
+  ImageProcessor(const ImageProcessor&) = delete;
+  ImageProcessor& operator=(const ImageProcessor&) = delete;
+
   ~ImageProcessor() override;
 
   // Reencodes the image data for transmission to the service. Will be called by
   // the service if pixel data is needed.
   void GetJpgImageData(GetJpgImageDataCallback callback) override;
 
-  // Returns a new pointer to the Mojo interface for this image processor.
-  mojom::ImageProcessorPtr GetPtr();
+  // Returns a new pending remote to the Mojo interface for this image
+  // processor.
+  mojo::PendingRemote<mojom::ImageProcessor> GetPendingRemote();
 
  private:
   // TODO(crbug.com/916420): tune these values.
@@ -50,11 +55,9 @@ class ImageProcessor : public mojom::ImageProcessor {
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
 
-  mojo::BindingSet<mojom::ImageProcessor> bindings_;
+  mojo::ReceiverSet<mojom::ImageProcessor> receivers_;
 
   FRIEND_TEST_ALL_PREFIXES(ImageProcessorTest, ImageContent);
-
-  DISALLOW_COPY_AND_ASSIGN(ImageProcessor);
 };
 
 }  // namespace image_annotation

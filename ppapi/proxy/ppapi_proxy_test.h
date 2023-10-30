@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,9 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
 #include "ppapi/c/pp_instance.h"
@@ -128,6 +126,10 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
                              public PluginProxyDelegate {
    public:
     PluginDelegateMock() : ipc_task_runner_(NULL), shutdown_event_() {}
+
+    PluginDelegateMock(const PluginDelegateMock&) = delete;
+    PluginDelegateMock& operator=(const PluginDelegateMock&) = delete;
+
     ~PluginDelegateMock() override {}
 
     void Init(base::SingleThreadTaskRunner* ipc_task_runner,
@@ -147,9 +149,6 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
         base::PlatformFile handle,
         base::ProcessId remote_pid,
         bool should_close_source) override;
-    base::SharedMemoryHandle ShareSharedMemoryHandleWithRemote(
-        const base::SharedMemoryHandle& handle,
-        base::ProcessId remote_pid) override;
     base::UnsafeSharedMemoryRegion ShareUnsafeSharedMemoryRegionWithRemote(
         const base::UnsafeSharedMemoryRegion& region,
         base::ProcessId remote_pid) override;
@@ -165,7 +164,6 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     // PluginProxyDelegate implementation.
     IPC::Sender* GetBrowserSender() override;
     std::string GetUILanguage() override;
-    void PreCacheFontForFlash(const void* logfontw) override;
     void SetActiveURL(const std::string& url) override;
     PP_Resource CreateBrowserFont(
         Connection connection,
@@ -178,13 +176,11 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     base::WaitableEvent* shutdown_event_;  // Weak
     std::set<PP_Instance> instance_id_set_;
     IPC::Sender* browser_sender_;
-
-    DISALLOW_COPY_AND_ASSIGN(PluginDelegateMock);
   };
 
  private:
   void CreatePluginGlobals(
-      const scoped_refptr<base::TaskRunner>& ipc_task_runner);
+      const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner);
 
   GlobalsConfiguration globals_config_;
   std::unique_ptr<PluginGlobals> plugin_globals_;
@@ -202,7 +198,7 @@ class PluginProxyTest : public PluginProxyTestHarness, public testing::Test {
   virtual void SetUp();
   virtual void TearDown();
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 // This class provides support for multi-thread testing. A secondary thread is
@@ -281,6 +277,10 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
   class DelegateMock : public ProxyChannel::Delegate {
    public:
     DelegateMock() : ipc_task_runner_(NULL), shutdown_event_(NULL) {}
+
+    DelegateMock(const DelegateMock&) = delete;
+    DelegateMock& operator=(const DelegateMock&) = delete;
+
     ~DelegateMock() override {}
 
     void Init(base::SingleThreadTaskRunner* ipc_task_runner,
@@ -296,9 +296,6 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
         base::PlatformFile handle,
         base::ProcessId remote_pid,
         bool should_close_source) override;
-    base::SharedMemoryHandle ShareSharedMemoryHandleWithRemote(
-        const base::SharedMemoryHandle& handle,
-        base::ProcessId remote_pid) override;
     base::UnsafeSharedMemoryRegion ShareUnsafeSharedMemoryRegionWithRemote(
         const base::UnsafeSharedMemoryRegion& region,
         base::ProcessId remote_pid) override;
@@ -309,8 +306,6 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
    private:
     base::SingleThreadTaskRunner* ipc_task_runner_;  // Weak
     base::WaitableEvent* shutdown_event_;  // Weak
-
-    DISALLOW_COPY_AND_ASSIGN(DelegateMock);
   };
 
  private:
@@ -334,7 +329,7 @@ class HostProxyTest : public HostProxyTestHarness, public testing::Test {
   virtual void SetUp();
   virtual void TearDown();
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 // Use this base class to test both sides of a proxy.
@@ -361,7 +356,7 @@ class TwoWayTest : public testing::Test {
   // Post a task to the thread where the remote harness lives. This
   // is typically used to test the state of the var tracker on the plugin
   // thread. This runs the task synchronously for convenience.
-  void PostTaskOnRemoteHarness(const base::Closure& task);
+  void PostTaskOnRemoteHarness(base::OnceClosure task);
 
  private:
   TwoWayTestMode test_mode_;
@@ -372,7 +367,7 @@ class TwoWayTest : public testing::Test {
   // The plugin side of the proxy runs on its own thread.
   base::Thread plugin_thread_;
   // The message loop for the main (host) thread.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   // Aliases for the host and plugin harnesses; if we're testing a PPP
   // interface, remote_harness will point to plugin_, and local_harness

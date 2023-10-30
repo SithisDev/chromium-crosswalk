@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ class SecurityKeyMessageReader {
   // instance is destroyed and may be destroyed as a result of the callback
   // being invoked.
   virtual void Start(const SecurityKeyMessageCallback& message_callback,
-                     const base::Closure& error_callback) = 0;
+                     base::OnceClosure error_callback) = 0;
 };
 
 }  // namespace remoting

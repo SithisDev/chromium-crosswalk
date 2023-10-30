@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor.h"
@@ -22,9 +22,6 @@ void FakeMouseCursorMonitor::Init(
     webrtc::MouseCursorMonitor::Mode mode) {
   DCHECK(!callback_);
   DCHECK(callback);
-
-  // Only shapes supported right now.
-  CHECK(mode == SHAPE_ONLY);
 
   callback_ = callback;
 }

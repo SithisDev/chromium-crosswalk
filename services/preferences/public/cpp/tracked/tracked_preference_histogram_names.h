@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@ extern const char kTrackedPrefHistogramTrustedInitialized[];
 extern const char kTrackedPrefHistogramNullInitialized[];
 extern const char kTrackedPrefHistogramWantedReset[];
 extern const char kTrackedPrefHistogramReset[];
-extern const char kTrackedSplitPrefHistogramChanged[];
 extern const char kTrackedPrefRegistryValidationSuffix[];
 
 }  // namespace tracked

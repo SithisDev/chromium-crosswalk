@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,16 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
+#include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
+#include "base/time/time.h"
 #include "services/device/generic_sensor/platform_sensor_fusion_algorithm.h"
 #include "services/device/generic_sensor/platform_sensor_provider.h"
+#include "services/device/generic_sensor/platform_sensor_util.h"
 
 namespace device {
 
@@ -19,7 +25,7 @@ class PlatformSensorFusion::Factory : public base::RefCounted<Factory> {
   static void CreateSensorFusion(
       SensorReadingSharedBuffer* reading_buffer,
       std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm,
-      const PlatformSensorProviderBase::CreateSensorCallback& callback,
+      PlatformSensorProviderBase::CreateSensorCallback callback,
       PlatformSensorProvider* provider) {
     scoped_refptr<Factory> factory(new Factory(reading_buffer,
                                                std::move(fusion_algorithm),
@@ -32,7 +38,7 @@ class PlatformSensorFusion::Factory : public base::RefCounted<Factory> {
 
   Factory(SensorReadingSharedBuffer* reading_buffer,
           std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm,
-          const PlatformSensorProviderBase::CreateSensorCallback& callback,
+          PlatformSensorProviderBase::CreateSensorCallback callback,
           PlatformSensorProvider* provider)
       : fusion_algorithm_(std::move(fusion_algorithm)),
         result_callback_(std::move(callback)),
@@ -56,7 +62,7 @@ class PlatformSensorFusion::Factory : public base::RefCounted<Factory> {
         SensorCreated(std::move(sensor));
       } else {
         provider_->CreateSensor(type,
-                                base::Bind(&Factory::SensorCreated, this));
+                                base::BindOnce(&Factory::SensorCreated, this));
       }
     }
   }
@@ -85,8 +91,9 @@ class PlatformSensorFusion::Factory : public base::RefCounted<Factory> {
 
   std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm_;
   PlatformSensorProviderBase::CreateSensorCallback result_callback_;
-  SensorReadingSharedBuffer* reading_buffer_;  // NOTE: Owned by |provider_|.
-  PlatformSensorProvider* provider_;
+  raw_ptr<SensorReadingSharedBuffer>
+      reading_buffer_;  // NOTE: Owned by |provider_|.
+  raw_ptr<PlatformSensorProvider> provider_;
   PlatformSensorFusion::SourcesMap sources_map_;
 };
 
@@ -95,9 +102,9 @@ void PlatformSensorFusion::Create(
     SensorReadingSharedBuffer* reading_buffer,
     PlatformSensorProvider* provider,
     std::unique_ptr<PlatformSensorFusionAlgorithm> fusion_algorithm,
-    const PlatformSensorProviderBase::CreateSensorCallback& callback) {
+    PlatformSensorProviderBase::CreateSensorCallback callback) {
   Factory::CreateSensorFusion(reading_buffer, std::move(fusion_algorithm),
-                              callback, provider);
+                              std::move(callback), provider);
 }
 
 PlatformSensorFusion::PlatformSensorFusion(
@@ -114,11 +121,10 @@ PlatformSensorFusion::PlatformSensorFusion(
 
   fusion_algorithm_->set_fusion_sensor(this);
 
-  if (std::any_of(source_sensors_.begin(), source_sensors_.end(),
-                  [](const SourcesMapEntry& pair) {
-                    return pair.second->GetReportingMode() ==
-                           mojom::ReportingMode::ON_CHANGE;
-                  })) {
+  if (base::ranges::any_of(source_sensors_, [](const auto& pair) {
+        return pair.second->GetReportingMode() ==
+               mojom::ReportingMode::ON_CHANGE;
+      })) {
     reporting_mode_ = mojom::ReportingMode::ON_CHANGE;
   }
 }
@@ -195,13 +201,7 @@ void PlatformSensorFusion::OnSensorReadingChanged(mojom::SensorType type) {
   if (!fusion_algorithm_->GetFusedData(type, &reading))
     return;
 
-  if (GetReportingMode() == mojom::ReportingMode::ON_CHANGE &&
-      !fusion_algorithm_->IsReadingSignificantlyDifferent(reading_, reading)) {
-    return;
-  }
-
-  reading_ = reading;
-  UpdateSharedBufferAndNotifyClients(reading_);
+  UpdateSharedBufferAndNotifyClients(reading);
 }
 
 void PlatformSensorFusion::OnSensorError() {
@@ -220,8 +220,21 @@ bool PlatformSensorFusion::GetSourceReading(mojom::SensorType type,
                                             SensorReading* result) {
   auto it = source_sensors_.find(type);
   if (it != source_sensors_.end())
-    return it->second->GetLatestReading(result);
+    return it->second->GetLatestRawReading(result);
   NOTREACHED();
+  return false;
+}
+
+bool PlatformSensorFusion::IsSignificantlyDifferent(
+    const SensorReading& reading1,
+    const SensorReading& reading2,
+    mojom::SensorType) {
+  for (size_t i = 0; i < SensorReadingRaw::kValuesCount; ++i) {
+    if (std::fabs(reading1.raw.values[i] - reading2.raw.values[i]) >=
+        fusion_algorithm_->threshold()) {
+      return true;
+    }
+  }
   return false;
 }
 

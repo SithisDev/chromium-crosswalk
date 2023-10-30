@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,17 @@
 #define SERVICES_NETWORK_PROXY_CONFIG_SERVICE_MOJO_H_
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
-#include "base/optional.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 #include "net/proxy_resolution/proxy_config_with_annotation.h"
 #include "services/network/public/mojom/proxy_config.mojom.h"
 #include "services/network/public/mojom/proxy_config_with_annotation.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 class ProxyConfigWithAnnotation;
@@ -27,17 +29,22 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ProxyConfigServiceMojo
     : public net::ProxyConfigService,
       public mojom::ProxyConfigClient {
  public:
-  // |proxy_config_client_request| is the Mojo pipe over which new
+  // |proxy_config_client_receiver| is the Mojo pipe over which new
   // configurations are received. |initial_proxy_config| is the initial proxy
-  // configuration. If nullptr, waits for the initial configuration over
-  // |proxy_config_client_request|. Either |proxy_config_client_request| or
-  // |initial_proxy_config| must be non-null. If |proxy_config_client_request|
-  // and |proxy_poller_client| are non-null, calls into |proxy_poller_client|
-  // whenever OnLazyPoll() is invoked.
+  // configuration. If mojo::NullReceiver(), waits for the initial configuration
+  // over |proxy_config_client_receiver|. Either |proxy_config_client_receiver|
+  // or |initial_proxy_config| must be non-null. If
+  // |proxy_config_client_receiver| and |proxy_poller_client| are non-null,
+  // calls into |proxy_poller_client| whenever OnLazyPoll() is invoked.
   explicit ProxyConfigServiceMojo(
-      mojom::ProxyConfigClientRequest proxy_config_client_request,
-      base::Optional<net::ProxyConfigWithAnnotation> initial_proxy_config,
-      mojom::ProxyConfigPollerClientPtrInfo proxy_poller_client);
+      mojo::PendingReceiver<mojom::ProxyConfigClient>
+          proxy_config_client_receiver,
+      absl::optional<net::ProxyConfigWithAnnotation> initial_proxy_config,
+      mojo::PendingRemote<mojom::ProxyConfigPollerClient> proxy_poller_client);
+
+  ProxyConfigServiceMojo(const ProxyConfigServiceMojo&) = delete;
+  ProxyConfigServiceMojo& operator=(const ProxyConfigServiceMojo&) = delete;
+
   ~ProxyConfigServiceMojo() override;
 
   // net::ProxyConfigService implementation:
@@ -53,16 +60,14 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ProxyConfigServiceMojo
       const net::ProxyConfigWithAnnotation& proxy_config) override;
   void FlushProxyConfig(FlushProxyConfigCallback callback) override;
 
-  mojom::ProxyConfigPollerClientPtr proxy_poller_client_;
+  mojo::Remote<mojom::ProxyConfigPollerClient> proxy_poller_client_;
 
   net::ProxyConfigWithAnnotation config_;
   bool config_pending_ = true;
 
-  mojo::Binding<mojom::ProxyConfigClient> binding_;
+  mojo::Receiver<mojom::ProxyConfigClient> receiver_{this};
 
   base::ObserverList<Observer>::Unchecked observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyConfigServiceMojo);
 };
 
 }  // namespace network

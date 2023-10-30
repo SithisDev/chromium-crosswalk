@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,13 @@
 #define SERVICES_RESOURCE_COORDINATOR_PUBLIC_CPP_MEMORY_INSTRUMENTATION_MEMORY_INSTRUMENTATION_MOJOM_TRAITS_H_
 
 #include "base/component_export.h"
+#include "base/notreached.h"
 #include "base/process/process_handle.h"
+#include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_request_args.h"
-#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
+#include "base/trace_event/process_memory_dump.h"
+#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom-shared.h"
 
 namespace mojo {
 
@@ -35,6 +38,16 @@ struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM)
 
 template <>
 struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM)
+    EnumTraits<memory_instrumentation::mojom::Determinism,
+               base::trace_event::MemoryDumpDeterminism> {
+  static memory_instrumentation::mojom::Determinism ToMojom(
+      base::trace_event::MemoryDumpDeterminism determinism);
+  static bool FromMojom(memory_instrumentation::mojom::Determinism input,
+                        base::trace_event::MemoryDumpDeterminism* out);
+};
+
+template <>
+struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM)
     StructTraits<memory_instrumentation::mojom::RequestArgsDataView,
                  base::trace_event::MemoryDumpRequestArgs> {
   static uint64_t dump_guid(
@@ -48,6 +61,10 @@ struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM)
   static base::trace_event::MemoryDumpLevelOfDetail level_of_detail(
       const base::trace_event::MemoryDumpRequestArgs& args) {
     return args.level_of_detail;
+  }
+  static base::trace_event::MemoryDumpDeterminism determinism(
+      const base::trace_event::MemoryDumpRequestArgs& args) {
+    return args.determinism;
   }
   static bool Read(memory_instrumentation::mojom::RequestArgsDataView input,
                    base::trace_event::MemoryDumpRequestArgs* out);
@@ -86,19 +103,19 @@ template <>
 struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM) UnionTraits<
     memory_instrumentation::mojom::RawAllocatorDumpEntryValueDataView,
     base::trace_event::MemoryAllocatorDump::Entry> {
-  static memory_instrumentation::mojom::RawAllocatorDumpEntryValue::Tag GetTag(
-      const base::trace_event::MemoryAllocatorDump::Entry& args) {
+  static memory_instrumentation::mojom::RawAllocatorDumpEntryValueDataView::Tag
+  GetTag(const base::trace_event::MemoryAllocatorDump::Entry& args) {
     switch (args.entry_type) {
       case base::trace_event::MemoryAllocatorDump::Entry::EntryType::kUint64:
-        return memory_instrumentation::mojom::RawAllocatorDumpEntryValue::Tag::
-            VALUE_UINT64;
+        return memory_instrumentation::mojom::
+            RawAllocatorDumpEntryValueDataView::Tag::kValueUint64;
       case base::trace_event::MemoryAllocatorDump::Entry::EntryType::kString:
-        return memory_instrumentation::mojom::RawAllocatorDumpEntryValue::Tag::
-            VALUE_STRING;
+        return memory_instrumentation::mojom::
+            RawAllocatorDumpEntryValueDataView::Tag::kValueString;
     }
     NOTREACHED();
-    return memory_instrumentation::mojom::RawAllocatorDumpEntryValue::Tag::
-        VALUE_UINT64;
+    return memory_instrumentation::mojom::RawAllocatorDumpEntryValueDataView::
+        Tag::kValueUint64;
   }
 
   static uint64_t value_uint64(
@@ -190,6 +207,10 @@ struct COMPONENT_EXPORT(RESOURCE_COORDINATOR_PUBLIC_MOJOM)
   static base::trace_event::MemoryDumpLevelOfDetail level_of_detail(
       const std::unique_ptr<base::trace_event::ProcessMemoryDump>& pmd) {
     return pmd->dump_args().level_of_detail;
+  }
+  static base::trace_event::MemoryDumpDeterminism determinism(
+      const std::unique_ptr<base::trace_event::ProcessMemoryDump>& pmd) {
+    return pmd->dump_args().determinism;
   }
 
   static void SetToNull(

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
@@ -27,13 +27,14 @@ const int kMessageLoopWaitMsecs = 150;
 
 class CertificateWatcherTest : public testing::Test {
  public:
-  CertificateWatcherTest() : task_runner_(message_loop_.task_runner()) {
+  CertificateWatcherTest()
+      : task_runner_(task_environment_.GetMainThreadTaskRunner()) {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
-    watcher_.reset(new CertificateWatcher(
-        base::Bind(&CertificateWatcherTest::OnRestart,
-        base::Unretained(this)),
-        task_runner_));
-    watcher_->SetDelayForTests(base::TimeDelta::FromSeconds(0));
+    watcher_ = std::make_unique<CertificateWatcher>(
+        base::BindRepeating(&CertificateWatcherTest::OnRestart,
+                            base::Unretained(this)),
+        task_runner_);
+    watcher_->SetDelayForTests(base::Seconds(0));
     watcher_->SetWatchPathForTests(temp_dir_.GetPath());
   }
 
@@ -55,14 +56,11 @@ class CertificateWatcherTest : public testing::Test {
   // Will quit the loop after kMessageLoopWaitMsecs.
   void RunAndWait() {
     base::RunLoop loop;
-    task_runner_->PostDelayedTask(FROM_HERE,loop.QuitClosure(),
-                                  loop_wait_);
+    task_runner_->PostDelayedTask(FROM_HERE, loop.QuitClosure(), loop_wait_);
     loop.Run();
   }
 
-  void Start() {
-    watcher_->Start();
-  }
+  void Start() { watcher_->Start(); }
 
   void Connect() {
     task_runner_->PostTask(
@@ -87,8 +85,7 @@ class CertificateWatcherTest : public testing::Test {
     base::FilePath path = temp_dir_.GetPath().AppendASCII(filename);
 
     if (base::PathExists(path)) {
-      EXPECT_TRUE(base::AppendToFile(path, testWriteString.c_str(),
-                                     testWriteString.length()));
+      EXPECT_TRUE(base::AppendToFile(path, testWriteString));
     } else {
       EXPECT_EQ(static_cast<int>(testWriteString.length()),
                 base::WriteFile(path, testWriteString.c_str(),
@@ -96,14 +93,14 @@ class CertificateWatcherTest : public testing::Test {
     }
   }
 
-  base::MessageLoopForIO message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<CertificateWatcher> watcher_;
   int restart_count_ = 0;
-  base::TimeDelta loop_wait_ =
-      base::TimeDelta::FromMilliseconds(kMessageLoopWaitMsecs);
-  base::Closure quit_loop_closure_;
+  base::TimeDelta loop_wait_ = base::Milliseconds(kMessageLoopWaitMsecs);
+  base::RepeatingClosure quit_loop_closure_;
 
  private:
   void OnRestart() {
@@ -168,4 +165,4 @@ TEST_F(CertificateWatcherTest, TouchOtherFile) {
   EXPECT_EQ(0, restart_count_);
 }
 
-} // namespace remoting
+}  // namespace remoting

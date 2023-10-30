@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "remoting/ios/mdc/MDCActionImageView.h"
 
-#import "ios/third_party/material_components_ios/src/components/AnimationTiming/src/MaterialAnimationTiming.h"
+#import <MaterialComponents/MaterialAnimationTiming.h>
 
 static const CGFloat kIconRotationRadians = 0.375f * 2 * M_PI;
 static const CGFloat kIconTransitionAnimationDuration = 0.3f;

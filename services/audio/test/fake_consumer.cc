@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/files/file.h"
-#include "base/logging.h"
 #include "base/numerics/math_constants.h"
-#include "base/task/thread_pool/thread_pool.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/test/task_environment.h"
 #include "media/audio/audio_debug_file_writer.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
@@ -122,15 +122,15 @@ double FakeConsumer::ComputeAmplitudeAt(int channel,
 void FakeConsumer::SaveToFile(const base::FilePath& path) const {
   // Not all tests set-up a full task environment. However, AudioDebugFileWriter
   // requires one. Provide a temporary one here, if necessary.
-  std::unique_ptr<base::test::ScopedTaskEnvironment> task_environment;
+  std::unique_ptr<base::test::TaskEnvironment> task_environment;
   if (!base::ThreadPoolInstance::Get()) {
-    task_environment = std::make_unique<base::test::ScopedTaskEnvironment>();
+    task_environment = std::make_unique<base::test::TaskEnvironment>();
   }
 
   const media::AudioParameters params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-      media::GuessChannelLayout(recorded_channel_data_.size()), sample_rate_,
-      recorded_channel_data_[0].size());
+      media::ChannelLayoutConfig::Guess(recorded_channel_data_.size()),
+      sample_rate_, recorded_channel_data_[0].size());
   media::AudioDebugFileWriter writer(params);
   base::File file(path, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_READ |
                             base::File::FLAG_WRITE);

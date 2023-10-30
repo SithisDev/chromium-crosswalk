@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,8 @@ class LocationProvider {
  public:
   virtual ~LocationProvider() {}
 
-  typedef base::Callback<void(const LocationProvider*,
-                              const mojom::Geoposition&)>
+  typedef base::RepeatingCallback<void(const LocationProvider*,
+                                       const mojom::Geoposition&)>
       LocationProviderUpdateCallback;
 
   // This callback will be used to notify when a new Geoposition becomes

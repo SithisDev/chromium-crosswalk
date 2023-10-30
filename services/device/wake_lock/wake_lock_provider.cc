@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/device/wake_lock/wake_lock.h"
 
 namespace device {
@@ -18,7 +19,10 @@ namespace device {
 // would be 3.
 struct WakeLockProvider::WakeLockDataPerType {
   WakeLockDataPerType() = default;
-  WakeLockDataPerType(WakeLockDataPerType&&) = default;
+
+  WakeLockDataPerType(const WakeLockDataPerType&) = delete;
+  WakeLockDataPerType& operator=(const WakeLockDataPerType&) = delete;
+
   ~WakeLockDataPerType() = default;
 
   // Currently activated wake locks of this wake lock type.
@@ -29,9 +33,7 @@ struct WakeLockProvider::WakeLockDataPerType {
   std::map<WakeLock*, std::unique_ptr<WakeLock>> wake_locks;
 
   // Observers for this wake lock type.
-  mojo::InterfacePtrSet<mojom::WakeLockObserver> observers;
-
-  DISALLOW_COPY_AND_ASSIGN(WakeLockDataPerType);
+  mojo::RemoteSet<mojom::WakeLockObserver> observers;
 };
 
 WakeLockProvider::WakeLockProvider(
@@ -50,27 +52,28 @@ WakeLockProvider::WakeLockProvider(
 
 WakeLockProvider::~WakeLockProvider() = default;
 
-void WakeLockProvider::AddBinding(mojom::WakeLockProviderRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void WakeLockProvider::AddBinding(
+    mojo::PendingReceiver<mojom::WakeLockProvider> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void WakeLockProvider::GetWakeLockContextForID(
     int context_id,
-    mojom::WakeLockContextRequest request) {
+    mojo::PendingReceiver<mojom::WakeLockContext> receiver) {
   DCHECK_GE(context_id, 0);
-  mojo::MakeStrongBinding(
+  mojo::MakeSelfOwnedReceiver(
       std::make_unique<WakeLockContext>(context_id, file_task_runner_,
                                         native_view_getter_),
-      std::move(request));
+      std::move(receiver));
 }
 
 void WakeLockProvider::GetWakeLockWithoutContext(
     mojom::WakeLockType type,
     mojom::WakeLockReason reason,
     const std::string& description,
-    mojom::WakeLockRequest request) {
+    mojo::PendingReceiver<mojom::WakeLock> receiver) {
   std::unique_ptr<WakeLock> wake_lock =
-      std::make_unique<WakeLock>(std::move(request), type, reason, description,
+      std::make_unique<WakeLock>(std::move(receiver), type, reason, description,
                                  WakeLockContext::WakeLockInvalidContextId,
                                  native_view_getter_, file_task_runner_, this);
   GetWakeLockDataPerType(type).wake_locks[wake_lock.get()] =
@@ -79,13 +82,14 @@ void WakeLockProvider::GetWakeLockWithoutContext(
 
 void WakeLockProvider::NotifyOnWakeLockDeactivation(
     mojom::WakeLockType type,
-    mojom::WakeLockObserverPtr observer) {
+    mojo::PendingRemote<mojom::WakeLockObserver> pending_observer) {
+  mojo::Remote<mojom::WakeLockObserver> observer(std::move(pending_observer));
   // If |type| is not held then notify the observer immediately. Add it to the
   // observer list for future deactivation notifications.
   if (GetWakeLockDataPerType(type).count == 0) {
     observer->OnWakeLockDeactivated(type);
   }
-  GetWakeLockDataPerType(type).observers.AddPtr(std::move(observer));
+  GetWakeLockDataPerType(type).observers.Add(std::move(observer));
 }
 
 void WakeLockProvider::GetActiveWakeLocksForTests(
@@ -112,10 +116,8 @@ void WakeLockProvider::OnWakeLockDeactivated(mojom::WakeLockType type) {
   // Notify observers of the last cancelation i.e. deactivation of wake lock
   // type |type|.
   if (new_count == 0) {
-    GetWakeLockDataPerType(type).observers.ForAllPtrs(
-        [type](mojom::WakeLockObserver* wake_lock_observer) {
-          wake_lock_observer->OnWakeLockDeactivated(type);
-        });
+    for (auto& observer : GetWakeLockDataPerType(type).observers)
+      observer->OnWakeLockDeactivated(type);
   }
 }
 

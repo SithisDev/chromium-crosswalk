@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 
 #include "base/component_export.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/address_family.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/ip_endpoint.h"
@@ -71,7 +73,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) UDPSocket : public mojom::UDPSocket {
                          net::CompletionOnceCallback callback) = 0;
   };
 
-  UDPSocket(mojom::UDPSocketReceiverPtr receiver, net::NetLog* net_log);
+  UDPSocket(mojo::PendingRemote<mojom::UDPSocketListener> listener,
+            net::NetLog* net_log);
+
+  UDPSocket(const UDPSocket&) = delete;
+  UDPSocket& operator=(const UDPSocket&) = delete;
+
   ~UDPSocket() override;
 
   // UDPSocket implementation.
@@ -138,7 +145,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) UDPSocket : public mojom::UDPSocket {
   void OnRecvFromCompleted(uint32_t buffer_size, int net_result);
   void OnSendToCompleted(int net_result);
 
-  net::NetLog* net_log_;
+  raw_ptr<net::NetLog> net_log_;
 
   // Whether a Bind() has been successfully executed.
   bool is_bound_;
@@ -147,7 +154,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) UDPSocket : public mojom::UDPSocket {
   bool is_connected_;
 
   // The interface which gets data from fulfilled receive requests.
-  mojom::UDPSocketReceiverPtr receiver_;
+  mojo::Remote<mojom::UDPSocketListener> listener_;
 
   std::unique_ptr<SocketWrapper> wrapped_socket_;
 
@@ -168,8 +175,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) UDPSocket : public mojom::UDPSocket {
   // The queue owns the PendingSendRequest instances.
   base::circular_deque<std::unique_ptr<PendingSendRequest>>
       pending_send_requests_;
-
-  DISALLOW_COPY_AND_ASSIGN(UDPSocket);
 };
 
 }  // namespace network

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/guid.h"
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/memory/raw_ptr.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/mojom/connector.mojom.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
@@ -30,6 +32,9 @@ class ProxiedServiceConnector : public mojom::Connector {
         factory_(factory),
         proxies_(proxies),
         test_instance_group_(test_instance_group) {}
+
+  ProxiedServiceConnector(const ProxiedServiceConnector&) = delete;
+  ProxiedServiceConnector& operator=(const ProxiedServiceConnector&) = delete;
 
   ~ProxiedServiceConnector() override = default;
 
@@ -51,7 +56,7 @@ class ProxiedServiceConnector : public mojom::Connector {
     auto* proxy = GetServiceProxy(service_filter.service_name());
     if (!proxy && factory_->ignore_unknown_service_requests()) {
       std::move(callback).Run(mojom::ConnectResult::ACCESS_DENIED,
-                              base::nullopt);
+                              absl::nullopt);
       return;
     }
 
@@ -63,7 +68,7 @@ class ProxiedServiceConnector : public mojom::Connector {
                                 base::Token{}, fake_guid_),
                        CapabilitySet()),
         interface_name, std::move(interface_pipe), base::DoNothing());
-    std::move(callback).Run(mojom::ConnectResult::SUCCEEDED, base::nullopt);
+    std::move(callback).Run(mojom::ConnectResult::SUCCEEDED, absl::nullopt);
   }
 
   void WarmService(const ServiceFilter& filter,
@@ -84,24 +89,15 @@ class ProxiedServiceConnector : public mojom::Connector {
     NOTREACHED();
   }
 
-  void Clone(mojom::ConnectorRequest request) override {
-    bindings_.AddBinding(this, std::move(request));
-  }
-
-  void FilterInterfaces(const std::string& spec,
-                        const Identity& source,
-                        mojom::InterfaceProviderRequest source_request,
-                        mojom::InterfaceProviderPtr target) override {
-    NOTREACHED();
+  void Clone(mojo::PendingReceiver<mojom::Connector> receiver) override {
+    receivers_.Add(this, std::move(receiver));
   }
 
   const base::Token fake_guid_;
-  TestConnectorFactory* const factory_;
-  TestConnectorFactory::NameToServiceProxyMap* const proxies_;
+  const raw_ptr<TestConnectorFactory> factory_;
+  const raw_ptr<TestConnectorFactory::NameToServiceProxyMap> proxies_;
   const base::Token test_instance_group_;
-  mojo::BindingSet<mojom::Connector> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxiedServiceConnector);
+  mojo::ReceiverSet<mojom::Connector> receivers_;
 };
 
 }  // namespace
@@ -121,39 +117,41 @@ Connector* TestConnectorFactory::GetDefaultConnector() {
 }
 
 std::unique_ptr<Connector> TestConnectorFactory::CreateConnector() {
-  mojom::ConnectorPtr proxy;
-  impl_->Clone(mojo::MakeRequest(&proxy));
+  mojo::PendingRemote<mojom::Connector> proxy;
+  impl_->Clone(proxy.InitWithNewPipeAndPassReceiver());
   return std::make_unique<Connector>(std::move(proxy));
 }
 
-mojom::ServiceRequest TestConnectorFactory::RegisterInstance(
+mojo::PendingReceiver<mojom::Service> TestConnectorFactory::RegisterInstance(
     const std::string& service_name) {
-  mojom::ServicePtr proxy;
-  mojom::ServiceRequest request = mojo::MakeRequest(&proxy);
-  proxy->OnStart(Identity(service_name, test_instance_group_, base::Token{},
-                          base::Token::CreateRandom()),
-                 base::BindOnce(&TestConnectorFactory::OnStartResponseHandler,
-                                base::Unretained(this), service_name));
-  service_proxies_[service_name] = std::move(proxy);
-  return request;
+  mojo::Remote<mojom::Service> proxy_remote;
+  mojo::PendingReceiver<mojom::Service> receiver =
+      proxy_remote.BindNewPipeAndPassReceiver();
+  proxy_remote->OnStart(
+      Identity(service_name, test_instance_group_, base::Token{},
+               base::Token::CreateRandom()),
+      base::BindOnce(&TestConnectorFactory::OnStartResponseHandler,
+                     base::Unretained(this), service_name));
+  service_proxies_[service_name] = std::move(proxy_remote);
+  return receiver;
 }
 
 void TestConnectorFactory::OnStartResponseHandler(
     const std::string& service_name,
-    mojom::ConnectorRequest connector_request,
-    mojom::ServiceControlAssociatedRequest control_request) {
-  impl_->Clone(std::move(connector_request));
-  service_control_bindings_.AddBinding(this, std::move(control_request),
-                                       service_name);
+    mojo::PendingReceiver<mojom::Connector> connector_receiver,
+    mojo::PendingAssociatedReceiver<mojom::ServiceControl> control_receiver) {
+  impl_->Clone(std::move(connector_receiver));
+  service_control_receivers_.Add(this, std::move(control_receiver),
+                                 service_name);
 }
 
 void TestConnectorFactory::RequestQuit() {
   if (ignore_quit_requests_)
     return;
 
-  service_proxies_.erase(service_control_bindings_.dispatch_context());
-  service_control_bindings_.RemoveBinding(
-      service_control_bindings_.dispatch_binding());
+  service_proxies_.erase(service_control_receivers_.current_context());
+  service_control_receivers_.Remove(
+      service_control_receivers_.current_receiver());
 }
 
 }  // namespace service_manager

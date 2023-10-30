@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,6 @@ int wmain(int argc, wchar_t **argv) {
 
   base::TestSuite test_suite(argc, argv);
   return base::LaunchUnitTests(
-      argc,
-      argv,
-      false,
-      base::Bind(&base::TestSuite::Run, base::Unretained(&test_suite)));
+      argc, argv, false,
+      base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
 }

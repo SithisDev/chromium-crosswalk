@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "services/device/usb/usb_device_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -61,11 +62,15 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
   }
   MOCK_METHOD1(ResetDeviceInternal, void(ResultCallback& callback));
 
-  void ClearHalt(uint8_t endpoint, ResultCallback callback) override {
-    ClearHaltInternal(endpoint, callback);
+  void ClearHalt(mojom::UsbTransferDirection direction,
+                 uint8_t endpoint_number,
+                 ResultCallback callback) override {
+    ClearHaltInternal(direction, endpoint_number, callback);
   }
-  MOCK_METHOD2(ClearHaltInternal,
-               void(uint8_t endpoint, ResultCallback& callback));
+  MOCK_METHOD3(ClearHaltInternal,
+               void(mojom::UsbTransferDirection direction,
+                    uint8_t endpoint_number,
+                    ResultCallback& callback));
 
   void ControlTransfer(mojom::UsbTransferDirection direction,
                        mojom::UsbControlTransferType request_type,
@@ -138,7 +143,7 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
   ~MockUsbDeviceHandle() override;
 
  private:
-  UsbDevice* device_;
+  raw_ptr<UsbDevice> device_;
 };
 
 }  // namespace device

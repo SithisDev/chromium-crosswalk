@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ class ChromiumUrlRequest : public UrlRequest {
   void AddHeader(const std::string& value) override;
   void SetPostData(const std::string& content_type,
                    const std::string& data) override;
-  void Start(const OnResultCallback& on_result_callback) override;
+  void Start(OnResultCallback on_result_callback) override;
 
  private:
   void OnURLLoadComplete(std::unique_ptr<std::string> response_body);

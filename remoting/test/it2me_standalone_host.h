@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "remoting/host/host_mock_objects.h"
 #include "remoting/host/it2me_desktop_environment.h"
@@ -43,7 +43,7 @@ class It2MeStandaloneHost {
  private:
   void Connect();
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   std::unique_ptr<ChromotingHostContext> context_;
   scoped_refptr<AutoThreadTaskRunner> main_task_runner_;

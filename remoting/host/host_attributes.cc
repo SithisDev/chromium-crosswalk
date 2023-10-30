@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,13 @@
 #include <vector>
 
 #include "base/atomicops.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check_op.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #include "media/base/win/mf_initializer.h"
 #include "media/gpu/windows/media_foundation_video_encode_accelerator_win.h"
@@ -44,7 +43,7 @@ inline constexpr bool IsDebug() {
 }
 
 inline constexpr bool IsChromeBranded() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return true;
 #elif BUILDFLAG(CHROMIUM_BRANDING)
   return false;
@@ -69,7 +68,7 @@ inline constexpr bool IsNonOfficialBuild() {
   return !IsOfficialBuild();
 }
 
-// By using base::size() macro in base/macros.h, it's illegal to have empty
+// By using std::size() macro in base/macros.h, it's illegal to have empty
 // arrays.
 //
 // error: no matching function for call to 'ArraySizeHelper'
@@ -93,17 +92,13 @@ static_assert(std::is_pod<Attribute>::value, "Attribute should be POD.");
 
 std::string GetHostAttributes() {
   std::vector<std::string> result;
-  // By using ranged for-loop, MSVC throws error C3316:
-  // 'const remoting::StaticAttribute [0]':
-  // an array of unknown size cannot be used in a range-based for statement.
-  for (size_t i = 0; i < base::size(kAttributes); i++) {
-    const auto& attribute = kAttributes[i];
+  for (const auto& attribute : kAttributes) {
     DCHECK_EQ(std::string(attribute.name).find(kSeparator), std::string::npos);
     if (attribute.get_value_func()) {
       result.push_back(attribute.name);
     }
   }
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   {
     GetD3DCapabilities(&result);
 
@@ -119,12 +114,14 @@ std::string GetHostAttributes() {
     }
   }
 
+  // TODO(crbug.com/1184041): Remove this and/or the entire HostAttributes class
+  // so we can remove //remoting/host:common from //media/gpu's visibility list.
   if (media::MediaFoundationVideoEncodeAccelerator
       ::PreSandboxInitialization() &&
       media::InitializeMediaFoundation()) {
     result.push_back("HWEncoder");
   }
-#elif defined(OS_LINUX)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   result.push_back("HWEncoder");
 #endif
 

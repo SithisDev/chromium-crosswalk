@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,20 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/containers/circular_deque.h"
-#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
 #include "base/sys_byteorder.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/datagram_server_socket.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -47,7 +52,7 @@ class ScopedFakeClock : public rtc::ClockInterface {
   void SetTimeNanos(uint64_t time_nanos) { time_nanos_ = time_nanos; }
 
  private:
-  ClockInterface* prev_clock_;
+  raw_ptr<ClockInterface> prev_clock_;
   uint64_t time_nanos_ = 0;
 };
 
@@ -185,15 +190,15 @@ class FakeDatagramServerSocket : public net::DatagramServerSocket {
 
  private:
   net::IPEndPoint address_;
-  base::circular_deque<UDPPacket>* sent_packets_;
+  raw_ptr<base::circular_deque<UDPPacket>> sent_packets_;
   base::circular_deque<UDPPacket> incoming_packets_;
   net::NetLogWithSource net_log_;
 
   scoped_refptr<net::IOBuffer> recv_buffer_;
-  net::IPEndPoint* recv_address_;
+  raw_ptr<net::IPEndPoint> recv_address_;
   int recv_size_;
   net::CompletionOnceCallback recv_callback_;
-  std::vector<uint16_t>* used_ports_;
+  raw_ptr<std::vector<uint16_t>> used_ports_;
 };
 
 std::unique_ptr<net::DatagramServerSocket> CreateFakeDatagramServerSocket(
@@ -210,19 +215,19 @@ namespace network {
 class P2PSocketUdpTest : public testing::Test {
  protected:
   void SetUp() override {
-    mojom::P2PSocketClientPtr socket_client;
-    auto socket_client_request = mojo::MakeRequest(&socket_client);
-    mojom::P2PSocketPtr socket;
-    auto socket_request = mojo::MakeRequest(&socket);
+    mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+    mojo::PendingRemote<mojom::P2PSocket> socket;
+    auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
     fake_client_ = std::make_unique<FakeSocketClient>(
-        std::move(socket), std::move(socket_client_request));
+        std::move(socket), socket_client.InitWithNewPipeAndPassReceiver());
 
     EXPECT_CALL(*fake_client_.get(), SocketCreated(_, _)).Times(1);
 
     socket_impl_ = std::make_unique<P2PSocketUdp>(
-        &socket_delegate_, std::move(socket_client), std::move(socket_request),
-        &throttler_, /*net_log=*/nullptr,
+        &socket_delegate_, std::move(socket_client), std::move(socket_receiver),
+        &throttler_,
+        /*net_log=*/nullptr,
         base::BindRepeating(&CreateFakeDatagramServerSocket, &sent_packets_,
                             nullptr));
 
@@ -230,7 +235,8 @@ class P2PSocketUdpTest : public testing::Test {
     socket_impl_->Init(
         local_address_, 0, 0,
         P2PHostAndIPEndPoint(std::string(),
-                             ParseAddress(kTestIpAddress1, kTestPort1)));
+                             ParseAddress(kTestIpAddress1, kTestPort1)),
+        net::NetworkAnonymizationKey());
     socket_ = GetSocketFromHost(socket_impl_.get());
 
     dest1_ = ParseAddress(kTestIpAddress1, kTestPort1);
@@ -242,11 +248,11 @@ class P2PSocketUdpTest : public testing::Test {
     return static_cast<FakeDatagramServerSocket*>(socket_host->socket_.get());
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   P2PMessageThrottler throttler_;
   ScopedFakeClock fake_clock_;
   base::circular_deque<FakeDatagramServerSocket::UDPPacket> sent_packets_;
-  FakeDatagramServerSocket* socket_;  // Owned by |socket_impl_|.
+  raw_ptr<FakeDatagramServerSocket> socket_;  // Owned by |socket_impl_|.
   FakeP2PSocketDelegate socket_delegate_;
   std::unique_ptr<P2PSocketUdp> socket_impl_;
   std::unique_ptr<FakeSocketClient> fake_client_;
@@ -557,39 +563,41 @@ TEST_F(P2PSocketUdpTest, PortRangeImplicitPort) {
                           &used_ports);
   P2PMessageThrottler throttler;
 
-  mojom::P2PSocketClientPtr socket_client;
-  auto socket_client_request = mojo::MakeRequest(&socket_client);
-  mojom::P2PSocketPtr socket;
-  auto socket_request = mojo::MakeRequest(&socket);
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  auto socket_client_receiver = socket_client.InitWithNewPipeAndPassReceiver();
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
   FakeSocketClient fake_client2(std::move(socket),
-                                std::move(socket_client_request));
+                                std::move(socket_client_receiver));
   EXPECT_CALL(fake_client2, SocketCreated(_, _)).Times(max_port - min_port + 1);
 
   for (unsigned port = min_port; port <= max_port; ++port) {
     std::unique_ptr<P2PSocketUdp> socket_impl(new P2PSocketUdp(
-        &socket_delegate_, std::move(socket_client), std::move(socket_request),
+        &socket_delegate_, std::move(socket_client), std::move(socket_receiver),
         &throttler, /*net_log=*/nullptr, fake_socket_factory));
     net::IPEndPoint local_address = ParseAddress(kTestLocalIpAddress, 0);
     socket_impl->Init(
         local_address, min_port, max_port,
         P2PHostAndIPEndPoint(std::string(),
-                             ParseAddress(kTestIpAddress1, kTestPort1)));
+                             ParseAddress(kTestIpAddress1, kTestPort1)),
+        net::NetworkAnonymizationKey());
 
-    FakeDatagramServerSocket* socket = GetSocketFromHost(socket_impl.get());
+    FakeDatagramServerSocket* datagram_socket =
+        GetSocketFromHost(socket_impl.get());
     net::IPEndPoint bound_address;
-    socket->GetLocalAddress(&bound_address);
+    datagram_socket->GetLocalAddress(&bound_address);
     EXPECT_EQ(port, bound_address.port());
 
     base::RunLoop().RunUntilIdle();
 
     socket_client = socket_impl->ReleaseClientForTesting();
-    socket_request = socket_impl->ReleaseBindingForTesting();
+    socket_receiver = socket_impl->ReleaseReceiverForTesting();
   }
 
   std::unique_ptr<P2PSocketUdp> socket_impl(
       new P2PSocketUdp(&socket_delegate_, std::move(socket_client),
-                       std::move(socket_request), &throttler,
+                       std::move(socket_receiver), &throttler,
                        /*net_log=*/nullptr, std::move(fake_socket_factory)));
   net::IPEndPoint local_address = ParseAddress(kTestLocalIpAddress, 0);
 
@@ -598,7 +606,8 @@ TEST_F(P2PSocketUdpTest, PortRangeImplicitPort) {
   socket_impl_ptr->Init(
       local_address, min_port, max_port,
       P2PHostAndIPEndPoint(std::string(),
-                           ParseAddress(kTestIpAddress1, kTestPort1)));
+                           ParseAddress(kTestIpAddress1, kTestPort1)),
+      net::NetworkAnonymizationKey());
 
   base::RunLoop().RunUntilIdle();
 
@@ -618,25 +627,25 @@ TEST_F(P2PSocketUdpTest, PortRangeExplictValidPort) {
                           &used_ports);
   P2PMessageThrottler throttler;
 
-  mojom::P2PSocketClientPtr socket_client;
-  auto socket_client_request = mojo::MakeRequest(&socket_client);
-  mojom::P2PSocketPtr socket;
-  auto socket_request = mojo::MakeRequest(&socket);
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
   FakeSocketClient fake_client2(std::move(socket),
-                                std::move(socket_client_request));
+                                socket_client.InitWithNewPipeAndPassReceiver());
 
   EXPECT_CALL(fake_client2, SocketCreated(_, _)).Times(1);
 
   std::unique_ptr<P2PSocketUdp> socket_host(
       new P2PSocketUdp(&socket_delegate_, std::move(socket_client),
-                       std::move(socket_request), &throttler,
+                       std::move(socket_receiver), &throttler,
                        /*net_log=*/nullptr, std::move(fake_socket_factory)));
   net::IPEndPoint local_address = ParseAddress(kTestLocalIpAddress, valid_port);
   socket_host->Init(
       local_address, min_port, max_port,
       P2PHostAndIPEndPoint(std::string(),
-                           ParseAddress(kTestIpAddress1, kTestPort1)));
+                           ParseAddress(kTestIpAddress1, kTestPort1)),
+      net::NetworkAnonymizationKey());
 
   FakeDatagramServerSocket* fake_socket = GetSocketFromHost(socket_host.get());
   net::IPEndPoint bound_address;
@@ -659,16 +668,15 @@ TEST_F(P2PSocketUdpTest, PortRangeExplictInvalidPort) {
                           &used_ports);
   P2PMessageThrottler throttler;
 
-  mojom::P2PSocketClientPtr socket_client;
-  auto socket_client_request = mojo::MakeRequest(&socket_client);
-  mojom::P2PSocketPtr socket_ptr;
-  auto socket_request = mojo::MakeRequest(&socket_ptr);
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
-  FakeSocketClient fake_client2(std::move(socket_ptr),
-                                std::move(socket_client_request));
+  FakeSocketClient fake_client2(std::move(socket),
+                                socket_client.InitWithNewPipeAndPassReceiver());
 
   auto socket_impl = std::make_unique<P2PSocketUdp>(
-      &socket_delegate_, std::move(socket_client), std::move(socket_request),
+      &socket_delegate_, std::move(socket_client), std::move(socket_receiver),
       &throttler, /*net_log=*/nullptr, std::move(fake_socket_factory));
   net::IPEndPoint local_address =
       ParseAddress(kTestLocalIpAddress, invalid_port);
@@ -678,7 +686,8 @@ TEST_F(P2PSocketUdpTest, PortRangeExplictInvalidPort) {
   socket_impl_ptr->Init(
       local_address, min_port, max_port,
       P2PHostAndIPEndPoint(std::string(),
-                           ParseAddress(kTestIpAddress1, kTestPort1)));
+                           ParseAddress(kTestIpAddress1, kTestPort1)),
+      net::NetworkAnonymizationKey());
 
   base::RunLoop().RunUntilIdle();
 

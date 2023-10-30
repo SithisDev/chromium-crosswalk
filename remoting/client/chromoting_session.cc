@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -14,12 +15,12 @@
 #include "base/callback_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task_runner_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/timer/timer.h"
-#include "jingle/glue/thread_wrapper.h"
+#include "components/webrtc/thread_wrapper.h"
 #include "net/socket/client_socket_factory.h"
-#include "remoting/base/chromium_url_request.h"
 #include "remoting/base/chromoting_event.h"
 #include "remoting/base/service_urls.h"
 #include "remoting/client/audio/audio_player.h"
@@ -33,6 +34,7 @@
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/network_settings.h"
 #include "remoting/protocol/performance_tracker.h"
+#include "remoting/protocol/token_validator.h"
 #include "remoting/protocol/transport_context.h"
 #include "remoting/protocol/video_renderer.h"
 #include "remoting/signaling/ftl_client_uuid_device_id_provider.h"
@@ -52,12 +54,11 @@ const int kDefaultDPI = 96;
 const int kMinDimension = 640;
 
 // Interval at which to log performance statistics, if enabled.
-constexpr base::TimeDelta kPerfStatsInterval = base::TimeDelta::FromMinutes(1);
+constexpr base::TimeDelta kPerfStatsInterval = base::Minutes(1);
 
 // Delay to destroy the signal strategy, so that the session-terminate event can
 // still be sent out.
-constexpr base::TimeDelta kDestroySignalingDelay =
-    base::TimeDelta::FromSeconds(2);
+constexpr base::TimeDelta kDestroySignalingDelay = base::Seconds(2);
 
 bool IsClientResolutionValid(int dips_width, int dips_height) {
   // This prevents sending resolution on a portrait mode small phone screen
@@ -95,11 +96,16 @@ struct SessionContext {
 }  // namespace
 
 class ChromotingSession::Core : public ClientUserInterface,
-                                public protocol::ClipboardStub {
+                                public protocol::ClipboardStub,
+                                public protocol::KeyboardLayoutStub {
  public:
   Core(ChromotingClientRuntime* runtime,
        std::unique_ptr<ClientTelemetryLogger> logger,
        std::unique_ptr<SessionContext> session_context);
+
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
+
   ~Core() override;
 
   void RequestPairing(const std::string& device_name);
@@ -134,9 +140,13 @@ class ChromotingSession::Core : public ClientUserInterface,
                       const webrtc::DesktopVector& dpi) override;
   protocol::ClipboardStub* GetClipboardStub() override;
   protocol::CursorShapeStub* GetCursorShapeStub() override;
+  protocol::KeyboardLayoutStub* GetKeyboardLayoutStub() override;
 
-  // CursorShapeStub implementation.
+  // ClipboardStub implementation.
   void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
+
+  // KeyboardLayoutStub implementation.
+  void SetKeyboardLayout(const protocol::KeyboardLayout& layout) override;
 
   base::WeakPtr<Core> GetWeakPtr();
 
@@ -164,7 +174,7 @@ class ChromotingSession::Core : public ClientUserInterface,
   void HandleOnThirdPartyTokenFetched(
       const protocol::ThirdPartyTokenFetchedCallback& callback,
       const std::string& token,
-      const std::string& shared_secret);
+      const protocol::TokenValidator::ValidationResult& validation_result);
 
   scoped_refptr<AutoThreadTaskRunner> ui_task_runner() {
     return runtime_->ui_task_runner();
@@ -176,7 +186,7 @@ class ChromotingSession::Core : public ClientUserInterface,
 
   // |runtime_| and |logger_| are stored separately from |session_context_| so
   // that they won't be destroyed after the core is invalidated.
-  ChromotingClientRuntime* const runtime_;
+  const raw_ptr<ChromotingClientRuntime> runtime_;
   std::unique_ptr<ClientTelemetryLogger> logger_;
 
   std::unique_ptr<SessionContext> session_context_;
@@ -203,8 +213,7 @@ class ChromotingSession::Core : public ClientUserInterface,
   // |weak_ptr_| in GetWeakPtr() so that its copies are still invalidated once
   // InvalidateWeakPtrs() is called.
   base::WeakPtr<Core> weak_ptr_;
-  base::WeakPtrFactory<Core> weak_factory_;
-  DISALLOW_COPY_AND_ASSIGN(Core);
+  base::WeakPtrFactory<Core> weak_factory_{this};
 };
 
 ChromotingSession::Core::Core(ChromotingClientRuntime* runtime,
@@ -212,8 +221,7 @@ ChromotingSession::Core::Core(ChromotingClientRuntime* runtime,
                               std::unique_ptr<SessionContext> session_context)
     : runtime_(runtime),
       logger_(std::move(logger)),
-      session_context_(std::move(session_context)),
-      weak_factory_(this) {
+      session_context_(std::move(session_context)) {
   DCHECK(ui_task_runner()->BelongsToCurrentThread());
   DCHECK(runtime_);
   DCHECK(logger_);
@@ -446,8 +454,17 @@ protocol::CursorShapeStub* ChromotingSession::Core::GetCursorShapeStub() {
   return session_context_->cursor_shape_stub.get();
 }
 
+protocol::KeyboardLayoutStub* ChromotingSession::Core::GetKeyboardLayoutStub() {
+  return this;
+}
+
 void ChromotingSession::Core::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
+  NOTIMPLEMENTED();
+}
+
+void ChromotingSession::Core::SetKeyboardLayout(
+    const protocol::KeyboardLayout& layout) {
   NOTIMPLEMENTED();
 }
 
@@ -486,12 +503,21 @@ void ChromotingSession::Core::Invalidate() {
 void ChromotingSession::Core::ConnectOnNetworkThread() {
   DCHECK(network_task_runner()->BelongsToCurrentThread());
 
-  jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
+  if (session_context_->info.host_ftl_id.empty()) {
+    // Simulate a CONNECTING state to make sure it doesn't skew telemetry.
+    OnConnectionState(protocol::ConnectionToHost::State::CONNECTING,
+                      protocol::OK);
+    OnConnectionState(protocol::ConnectionToHost::State::FAILED,
+                      protocol::INCOMPATIBLE_PROTOCOL);
+    return;
+  }
 
-  client_context_.reset(new ClientContext(network_task_runner()));
+  webrtc::ThreadWrapper::EnsureForCurrentMessageLoop();
+
+  client_context_ = std::make_unique<ClientContext>(network_task_runner());
   client_context_->Start();
 
-  perf_tracker_.reset(new protocol::PerformanceTracker());
+  perf_tracker_ = std::make_unique<protocol::PerformanceTracker>();
 
   session_context_->video_renderer->Initialize(*client_context_,
                                                perf_tracker_.get());
@@ -502,12 +528,12 @@ void ChromotingSession::Core::ConnectOnNetworkThread() {
 
   // TODO(yuweih): Ideally we should make ChromotingClient and all its
   // sub-components (e.g. ConnectionToHost) take raw pointer instead of WeakPtr.
-  client_.reset(new ChromotingClient(
+  client_ = std::make_unique<ChromotingClient>(
       client_context_.get(), this, session_context_->video_renderer.get(),
-      session_context_->audio_player_weak_factory->GetWeakPtr()));
+      session_context_->audio_player_weak_factory->GetWeakPtr());
 
   signaling_ = std::make_unique<FtlSignalStrategy>(
-      runtime_->CreateOAuthTokenGetter(),
+      runtime_->CreateOAuthTokenGetter(), runtime_->url_loader_factory(),
       std::make_unique<FtlClientUuidDeviceIdProvider>());
   logger_->SetSignalStrategyType(ChromotingEvent::SignalStrategyType::FTL);
 
@@ -516,22 +542,13 @@ void ChromotingSession::Core::ConnectOnNetworkThread() {
   scoped_refptr<protocol::TransportContext> transport_context =
       new protocol::TransportContext(
           std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
-          std::make_unique<ChromiumUrlRequestFactory>(
-              runtime_->url_loader_factory()),
+          webrtc::ThreadWrapper::current()->SocketServer(),
+          runtime_->url_loader_factory(),
+          /* oauth_token_getter= */ nullptr,
           protocol::NetworkSettings(
               protocol::NetworkSettings::NAT_TRAVERSAL_FULL),
           protocol::TransportRole::CLIENT);
 
-#if defined(ENABLE_WEBRTC_REMOTING_CLIENT)
-  if (session_context_->info.flags.find("useWebrtc") != std::string::npos) {
-    VLOG(0) << "Attempting to connect using WebRTC.";
-    std::unique_ptr<protocol::CandidateSessionConfig> protocol_config =
-        protocol::CandidateSessionConfig::CreateEmpty();
-    protocol_config->set_webrtc_supported(true);
-    protocol_config->set_ice_supported(false);
-    client_->set_protocol_config(std::move(protocol_config));
-  }
-#endif  // defined(ENABLE_WEBRTC_REMOTING_CLIENT)
   if (session_context_->info.pairing_id.length() &&
       session_context_->info.pairing_secret.length()) {
     logger_->SetAuthMethod(ChromotingEvent::AuthMethod::PINLESS);
@@ -547,11 +564,9 @@ void ChromotingSession::Core::ConnectOnNetworkThread() {
   client_auth_config.fetch_secret_callback =
       base::BindRepeating(&Core::FetchSecret, GetWeakPtr());
 
-  std::string signaling_id = session_context_->info.host_ftl_id.empty()
-                                 ? session_context_->info.host_jid
-                                 : session_context_->info.host_ftl_id;
   client_->Start(signaling_.get(), client_auth_config, transport_context,
-                 signaling_id, session_context_->info.capabilities);
+                 session_context_->info.host_ftl_id,
+                 session_context_->info.capabilities);
 }
 
 void ChromotingSession::Core::LogPerfStats() {
@@ -606,13 +621,14 @@ void ChromotingSession::Core::FetchThirdPartyToken(
       [](scoped_refptr<AutoThreadTaskRunner> network_task_runner,
          base::WeakPtr<ChromotingSession::Core> core,
          const protocol::ThirdPartyTokenFetchedCallback& callback,
-         const std::string& token, const std::string& shared_secret) {
+         const std::string& token,
+         const protocol::TokenValidator::ValidationResult& validation_result) {
         DCHECK(!network_task_runner->BelongsToCurrentThread());
         network_task_runner->PostTask(
             FROM_HERE,
             base::BindOnce(
                 &ChromotingSession::Core::HandleOnThirdPartyTokenFetched, core,
-                callback, token, shared_secret));
+                callback, token, validation_result));
       },
       network_task_runner(), GetWeakPtr(), token_fetched_callback);
 
@@ -626,12 +642,12 @@ void ChromotingSession::Core::FetchThirdPartyToken(
 void ChromotingSession::Core::HandleOnThirdPartyTokenFetched(
     const protocol::ThirdPartyTokenFetchedCallback& callback,
     const std::string& token,
-    const std::string& shared_secret) {
+    const protocol::TokenValidator::ValidationResult& validation_result) {
   DCHECK(network_task_runner()->BelongsToCurrentThread());
 
   logger_->SetAuthMethod(ChromotingEvent::AuthMethod::THIRD_PARTY);
 
-  callback.Run(token, shared_secret);
+  callback.Run(token, validation_result);
 }
 
 // ChromotingSession implementation.

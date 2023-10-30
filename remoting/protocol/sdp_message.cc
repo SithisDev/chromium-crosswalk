@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 SdpMessage::SdpMessage(const std::string& sdp) {
   sdp_lines_ = base::SplitString(
@@ -124,5 +123,4 @@ std::vector<std::pair<int, std::string>> SdpMessage::FindCodec(
   return results;
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

@@ -1,17 +1,15 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_PROTOCOL_PAIRING_AUTHENTICATOR_BASE_H_
 #define REMOTING_PROTOCOL_PAIRING_AUTHENTICATOR_BASE_H_
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/protocol/authenticator.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // The pairing authenticator builds on top of V2Authenticator to add
 // support for PIN-less authentication via device pairing:
@@ -40,6 +38,10 @@ namespace protocol {
 class PairingAuthenticatorBase : public Authenticator {
  public:
   PairingAuthenticatorBase();
+
+  PairingAuthenticatorBase(const PairingAuthenticatorBase&) = delete;
+  PairingAuthenticatorBase& operator=(const PairingAuthenticatorBase&) = delete;
+
   ~PairingAuthenticatorBase() override;
 
   // Authenticator interface.
@@ -47,7 +49,7 @@ class PairingAuthenticatorBase : public Authenticator {
   bool started() const override;
   RejectionReason rejection_reason() const override;
   void ProcessMessage(const jingle_xmpp::XmlElement* message,
-                      const base::Closure& resume_callback) override;
+                      base::OnceClosure resume_callback) override;
   std::unique_ptr<jingle_xmpp::XmlElement> GetNextMessage() override;
   const std::string& GetAuthKey() const override;
   std::unique_ptr<ChannelAuthenticator> CreateChannelAuthenticator()
@@ -58,7 +60,7 @@ class PairingAuthenticatorBase : public Authenticator {
   // for the PIN first if necessary.
   virtual void CreateSpakeAuthenticatorWithPin(
       State initial_state,
-      const base::Closure& resume_callback) = 0;
+      base::OnceClosure resume_callback) = 0;
 
   // A non-fatal error message that derived classes should set in order to
   // cause the peer to be notified that pairing has failed and that it should
@@ -78,14 +80,11 @@ class PairingAuthenticatorBase : public Authenticator {
   // Helper methods for ProcessMessage() and GetNextMessage().
   void MaybeAddErrorMessage(jingle_xmpp::XmlElement* message);
   bool HasErrorMessage(const jingle_xmpp::XmlElement* message) const;
-  void CheckForFailedSpakeExchange(const base::Closure& resume_callback);
+  void CheckForFailedSpakeExchange(base::OnceClosure resume_callback);
 
-  base::WeakPtrFactory<PairingAuthenticatorBase> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PairingAuthenticatorBase);
+  base::WeakPtrFactory<PairingAuthenticatorBase> weak_factory_{this};
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
-#endif  // REMOTING_PROTOCOL_PAIRING_AUTHENTICATOR_H_
+#endif  // REMOTING_PROTOCOL_PAIRING_AUTHENTICATOR_BASE_H_

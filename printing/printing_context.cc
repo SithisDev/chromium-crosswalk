@@ -1,153 +1,208 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "printing/printing_context.h"
 
-#include "base/logging.h"
+#include <utility>
+
+#include "base/check.h"
+#include "base/notreached.h"
+#include "build/build_config.h"
+#include "printing/buildflags/buildflags.h"
+#include "printing/mojom/print.mojom.h"
 #include "printing/page_setup.h"
-#include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings_conversion.h"
+#include "printing/printing_context_factory_for_test.h"
 #include "printing/units.h"
+
+#if BUILDFLAG(ENABLE_OOP_PRINTING)
+#include "printing/printing_features.h"
+#endif
 
 namespace printing {
 
 namespace {
-const float kCloudPrintMarginInch = 0.25;
-}
+
+PrintingContextFactoryForTest* g_printing_context_factory_for_test = nullptr;
+
+}  // namespace
 
 PrintingContext::PrintingContext(Delegate* delegate)
-    : delegate_(delegate), in_print_job_(false), abort_printing_(false) {
+    : settings_(std::make_unique<PrintSettings>()),
+      delegate_(delegate),
+      in_print_job_(false),
+      abort_printing_(false) {
   DCHECK(delegate_);
 }
 
 PrintingContext::~PrintingContext() = default;
 
-void PrintingContext::set_margin_type(MarginType type) {
-  DCHECK(type != CUSTOM_MARGINS);
-  settings_.set_margin_type(type);
+// static
+std::unique_ptr<PrintingContext> PrintingContext::Create(
+    Delegate* delegate,
+    bool skip_system_calls) {
+  return g_printing_context_factory_for_test
+             ? g_printing_context_factory_for_test->CreatePrintingContext(
+                   delegate, skip_system_calls)
+             : PrintingContext::CreateImpl(delegate, skip_system_calls);
+}
+
+// static
+void PrintingContext::SetPrintingContextFactoryForTest(
+    PrintingContextFactoryForTest* factory) {
+  g_printing_context_factory_for_test = factory;
+}
+
+void PrintingContext::set_margin_type(mojom::MarginType type) {
+  DCHECK(type != mojom::MarginType::kCustomMargins);
+  settings_->set_margin_type(type);
 }
 
 void PrintingContext::set_is_modifiable(bool is_modifiable) {
-  settings_.set_is_modifiable(is_modifiable);
-#if defined(OS_WIN)
-  settings_.set_print_text_with_gdi(is_modifiable);
-#endif
+  settings_->set_is_modifiable(is_modifiable);
+}
+
+const PrintSettings& PrintingContext::settings() const {
+  DCHECK(!in_print_job_);
+  return *settings_;
 }
 
 void PrintingContext::ResetSettings() {
   ReleaseContext();
 
-  settings_.Clear();
+  settings_->Clear();
 
   in_print_job_ = false;
   abort_printing_ = false;
 }
 
-PrintingContext::Result PrintingContext::OnError() {
-  Result result = abort_printing_ ? CANCEL : FAILED;
+std::unique_ptr<PrintSettings> PrintingContext::TakeAndResetSettings() {
+  std::unique_ptr<PrintSettings> result = std::move(settings_);
+  settings_ = std::make_unique<PrintSettings>();
+  return result;
+}
+
+mojom::ResultCode PrintingContext::OnError() {
+  mojom::ResultCode result = abort_printing_ ? mojom::ResultCode::kCanceled
+                                             : mojom::ResultCode::kFailed;
   ResetSettings();
   return result;
 }
 
-PrintingContext::Result PrintingContext::UsePdfSettings() {
-  base::Value pdf_settings(base::Value::Type::DICTIONARY);
-  pdf_settings.SetKey(kSettingHeaderFooterEnabled, base::Value(false));
-  pdf_settings.SetKey(kSettingShouldPrintBackgrounds, base::Value(false));
-  pdf_settings.SetKey(kSettingShouldPrintSelectionOnly, base::Value(false));
-  pdf_settings.SetKey(kSettingMarginsType, base::Value(printing::NO_MARGINS));
-  pdf_settings.SetKey(kSettingCollate, base::Value(true));
-  pdf_settings.SetKey(kSettingCopies, base::Value(1));
-  pdf_settings.SetKey(kSettingColor, base::Value(printing::COLOR));
-  pdf_settings.SetKey(kSettingDpiHorizontal, base::Value(kPointsPerInch));
-  pdf_settings.SetKey(kSettingDpiVertical, base::Value(kPointsPerInch));
-  pdf_settings.SetKey(kSettingDuplexMode, base::Value(printing::SIMPLEX));
-  pdf_settings.SetKey(kSettingLandscape, base::Value(false));
-  pdf_settings.SetKey(kSettingDeviceName, base::Value(""));
-  pdf_settings.SetKey(kSettingPrintToPDF, base::Value(true));
-  pdf_settings.SetKey(kSettingCloudPrintDialog, base::Value(false));
-  pdf_settings.SetKey(kSettingPrintWithPrivet, base::Value(false));
-  pdf_settings.SetKey(kSettingPrintWithExtension, base::Value(false));
-  pdf_settings.SetKey(kSettingScaleFactor, base::Value(100));
-  pdf_settings.SetKey(kSettingRasterizePdf, base::Value(false));
-  pdf_settings.SetKey(kSettingPagesPerSheet, base::Value(1));
-  return UpdatePrintSettings(std::move(pdf_settings));
+void PrintingContext::SetDefaultPrintableAreaForVirtualPrinters() {
+  gfx::Size paper_size(GetPdfPaperSizeDeviceUnits());
+  if (!settings_->requested_media().size_microns.IsEmpty()) {
+    float device_microns_per_device_unit = static_cast<float>(kMicronsPerInch) /
+                                           settings_->device_units_per_inch();
+    paper_size = gfx::Size(settings_->requested_media().size_microns.width() /
+                               device_microns_per_device_unit,
+                           settings_->requested_media().size_microns.height() /
+                               device_microns_per_device_unit);
+  }
+  gfx::Rect paper_rect(0, 0, paper_size.width(), paper_size.height());
+  settings_->SetPrinterPrintableArea(paper_size, paper_rect,
+                                     /*landscape_needs_flip=*/true);
 }
 
-PrintingContext::Result PrintingContext::UpdatePrintSettings(
-    base::Value job_settings) {
+void PrintingContext::UsePdfSettings() {
+  base::Value::Dict pdf_settings;
+  pdf_settings.Set(kSettingHeaderFooterEnabled, false);
+  pdf_settings.Set(kSettingShouldPrintBackgrounds, false);
+  pdf_settings.Set(kSettingShouldPrintSelectionOnly, false);
+  pdf_settings.Set(kSettingMarginsType,
+                   static_cast<int>(mojom::MarginType::kNoMargins));
+  pdf_settings.Set(kSettingCollate, true);
+  pdf_settings.Set(kSettingCopies, 1);
+  pdf_settings.Set(kSettingColor, static_cast<int>(mojom::ColorModel::kColor));
+  // DPI value should match GetPdfCapabilities().
+  pdf_settings.Set(kSettingDpiHorizontal, kDefaultPdfDpi);
+  pdf_settings.Set(kSettingDpiVertical, kDefaultPdfDpi);
+  pdf_settings.Set(kSettingDuplexMode,
+                   static_cast<int>(printing::mojom::DuplexMode::kSimplex));
+  pdf_settings.Set(kSettingLandscape, false);
+  pdf_settings.Set(kSettingDeviceName, "");
+  pdf_settings.Set(kSettingPrinterType,
+                   static_cast<int>(mojom::PrinterType::kPdf));
+  pdf_settings.Set(kSettingScaleFactor, 100);
+  pdf_settings.Set(kSettingRasterizePdf, false);
+  pdf_settings.Set(kSettingPagesPerSheet, 1);
+  mojom::ResultCode result = UpdatePrintSettings(std::move(pdf_settings));
+  // TODO(thestig): Downgrade these to DCHECKs after shipping these CHECKs to
+  // production without any failures.
+  CHECK_EQ(result, mojom::ResultCode::kSuccess);
+  // UsePdfSettings() should never fail and the returned DPI should always be a
+  // well-known value that is safe to use as a divisor.
+#if BUILDFLAG(IS_MAC)
+  CHECK_EQ(settings_->device_units_per_inch(), kPointsPerInch);
+#else
+  CHECK_EQ(settings_->device_units_per_inch(), kDefaultPdfDpi);
+#endif
+}
+
+mojom::ResultCode PrintingContext::UpdatePrintSettings(
+    base::Value::Dict job_settings) {
   ResetSettings();
+  {
+    std::unique_ptr<PrintSettings> settings =
+        PrintSettingsFromJobSettings(job_settings);
+    if (!settings) {
+      NOTREACHED();
+      return OnError();
+    }
+    settings_ = std::move(settings);
+  }
 
-  if (!PrintSettingsFromJobSettings(job_settings, &settings_)) {
+  mojom::PrinterType printer_type = static_cast<mojom::PrinterType>(
+      job_settings.FindInt(kSettingPrinterType).value());
+  if (printer_type == mojom::PrinterType::kPrivetDeprecated ||
+      printer_type == mojom::PrinterType::kCloudDeprecated) {
     NOTREACHED();
     return OnError();
   }
 
-  base::Optional<bool> print_to_pdf_opt =
-      job_settings.FindBoolKey(kSettingPrintToPDF);
-  base::Optional<bool> is_cloud_dialog_opt =
-      job_settings.FindBoolKey(kSettingCloudPrintDialog);
-  base::Optional<bool> print_with_privet_opt =
-      job_settings.FindBoolKey(kSettingPrintWithPrivet);
-  base::Optional<bool> print_with_extension_opt =
-      job_settings.FindBoolKey(kSettingPrintWithExtension);
-
-  if (!print_to_pdf_opt || !is_cloud_dialog_opt || !print_with_privet_opt ||
-      !print_with_extension_opt) {
-    NOTREACHED();
-    return OnError();
-  }
-
-  bool print_to_pdf = print_to_pdf_opt.value();
-  bool is_cloud_dialog = is_cloud_dialog_opt.value();
-  bool print_with_privet = print_with_privet_opt.value();
-  bool print_with_extension = print_with_extension_opt.value();
-
-  bool print_to_cloud = job_settings.FindKey(kSettingCloudPrintId) != nullptr;
   bool open_in_external_preview =
-      job_settings.FindKey(kSettingOpenPDFInPreview) != nullptr;
+      job_settings.contains(kSettingOpenPDFInPreview);
 
   if (!open_in_external_preview &&
-      (print_to_pdf || print_to_cloud || is_cloud_dialog || print_with_privet ||
-       print_with_extension)) {
-    settings_.set_dpi(kDefaultPdfDpi);
-    gfx::Size paper_size(GetPdfPaperSizeDeviceUnits());
-    if (!settings_.requested_media().size_microns.IsEmpty()) {
-      float device_microns_per_device_unit =
-          static_cast<float>(kMicronsPerInch) /
-          settings_.device_units_per_inch();
-      paper_size = gfx::Size(settings_.requested_media().size_microns.width() /
-                                 device_microns_per_device_unit,
-                             settings_.requested_media().size_microns.height() /
-                                 device_microns_per_device_unit);
-    }
-    gfx::Rect paper_rect(0, 0, paper_size.width(), paper_size.height());
-    if (print_to_cloud || print_with_privet) {
-      paper_rect.Inset(
-          kCloudPrintMarginInch * settings_.device_units_per_inch(),
-          kCloudPrintMarginInch * settings_.device_units_per_inch());
-    }
-    settings_.SetPrinterPrintableArea(paper_size, paper_rect, true);
-    return OK;
+      (printer_type == mojom::PrinterType::kPdf ||
+       printer_type == mojom::PrinterType::kExtension)) {
+    if (settings_->page_setup_device_units().printable_area().IsEmpty())
+      SetDefaultPrintableAreaForVirtualPrinters();
+    return mojom::ResultCode::kSuccess;
   }
 
-  return UpdatePrinterSettings(
-      open_in_external_preview,
-      job_settings.FindBoolKey(kSettingShowSystemDialog).value_or(false),
-      job_settings.FindIntKey(kSettingPreviewPageCount).value_or(0));
+  // The `open_in_external_preview` case does not care about the printable area.
+  // Local printers set their printable area within UpdatePrinterSettings().
+  DCHECK(open_in_external_preview ||
+         printer_type == mojom::PrinterType::kLocal);
+
+  PrinterSettings printer_settings {
+#if BUILDFLAG(IS_MAC)
+    .external_preview = open_in_external_preview,
+#endif
+    .show_system_dialog =
+        job_settings.FindBool(kSettingShowSystemDialog).value_or(false),
+#if BUILDFLAG(IS_WIN)
+    .page_count = job_settings.FindInt(kSettingPreviewPageCount).value_or(0)
+#endif
+  };
+  return UpdatePrinterSettings(printer_settings);
 }
 
-#if defined(OS_CHROMEOS)
-PrintingContext::Result PrintingContext::UpdatePrintSettingsFromPOD(
+#if BUILDFLAG(IS_CHROMEOS)
+mojom::ResultCode PrintingContext::UpdatePrintSettingsFromPOD(
     std::unique_ptr<PrintSettings> job_settings) {
   ResetSettings();
-  settings_ = *job_settings;
+  settings_ = std::move(job_settings);
 
-  return UpdatePrinterSettings(false /* external_preview */,
-                               false /* show_system_dialog */,
-                               0 /* page_count is only used on Android */);
+  return UpdatePrinterSettings({.show_system_dialog = false});
 }
 #endif
+
+void PrintingContext::ApplyPrintSettings(const PrintSettings& settings) {
+  *settings_ = settings;
+}
 
 }  // namespace printing

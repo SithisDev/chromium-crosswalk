@@ -1,7 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/device/fingerprint/fingerprint.h"
 #include "services/device/public/mojom/fingerprint.mojom.h"
 
@@ -20,7 +21,8 @@ class FingerprintDefault : public Fingerprint {
 }  // namespace
 
 // static
-void Fingerprint::Create(device::mojom::FingerprintRequest request) {
+void Fingerprint::Create(
+    mojo::PendingReceiver<device::mojom::Fingerprint> receiver) {
   // Do nothing.
 }
 

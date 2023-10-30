@@ -1,20 +1,23 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.device.geolocation;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 
 import java.util.List;
 
@@ -26,7 +29,7 @@ import java.util.List;
  * [1] https://developer.android.com/reference/android/location/package-summary.html
  */
 public class LocationProviderAndroid implements LocationListener, LocationProvider {
-    private static final String TAG = "cr_LocationProvider";
+    private static final String TAG = "LocationProvider";
 
     private LocationManager mLocationManager;
     private boolean mIsRunning;
@@ -99,7 +102,13 @@ public class LocationProviderAndroid implements LocationListener, LocationProvid
         // bounce notifications to the Geolocation thread as they arrive in the mainLooper.
         try {
             Criteria criteria = new Criteria();
-            if (enableHighAccuracy) criteria.setAccuracy(Criteria.ACCURACY_FINE);
+            Context context = ContextUtils.getApplicationContext();
+            if (enableHighAccuracy
+                    && context.checkCallingOrSelfPermission(
+                               Manifest.permission.ACCESS_FINE_LOCATION)
+                            == PackageManager.PERMISSION_GRANTED) {
+                criteria.setAccuracy(Criteria.ACCURACY_FINE);
+            }
             mLocationManager.requestLocationUpdates(
                     0, 0, criteria, this, ThreadUtils.getUiThreadLooper());
         } catch (SecurityException e) {

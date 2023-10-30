@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/unguessable_token.h"
 #include "services/audio/loopback_coordinator.h"
 #include "services/audio/loopback_group_member.h"
@@ -84,7 +84,7 @@ TEST(LocalMuterTest, MutesJoiningMembers) {
 }
 
 TEST(LocalMuter, UnmutesWhenLastBindingIsLost) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment;
   LoopbackCoordinator coordinator;
   const UnguessableToken group_id = UnguessableToken::Create();
 
@@ -93,16 +93,16 @@ TEST(LocalMuter, UnmutesWhenLastBindingIsLost) {
   // stack as the mojo connection error handler, just as would take place in the
   // live build.
   auto muter = std::make_unique<LocalMuter>(&coordinator, group_id);
-  base::MockCallback<base::OnceClosure> callback;
+  base::MockCallback<base::RepeatingClosure> callback;
   EXPECT_CALL(callback, Run()).WillOnce(InvokeWithoutArgs([&muter]() {
     muter.reset();
   }));
   muter->SetAllBindingsLostCallback(callback.Get());
 
   // Create two bindings to the muter.
-  mojo::AssociatedRemote<mojom::LocalMuter> remote_muter1;
+  mojo::AssociatedRemote<media::mojom::LocalMuter> remote_muter1;
   muter->AddReceiver(remote_muter1.BindNewEndpointAndPassReceiver());
-  mojo::AssociatedRemote<mojom::LocalMuter> remote_muter2;
+  mojo::AssociatedRemote<media::mojom::LocalMuter> remote_muter2;
   muter->AddReceiver(remote_muter2.BindNewEndpointAndPassReceiver());
 
   // A member joins the group and should be muted.

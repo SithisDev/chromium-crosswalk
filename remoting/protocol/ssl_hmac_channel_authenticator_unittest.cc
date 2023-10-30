@@ -1,18 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/protocol/ssl_hmac_channel_authenticator.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer/timer.h"
 #include "crypto/rsa_private_key.h"
@@ -32,8 +32,7 @@ using testing::_;
 using testing::NotNull;
 using testing::SaveArg;
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 
@@ -57,6 +56,12 @@ ACTION_P(QuitThreadOnCounter, counter) {
 class SslHmacChannelAuthenticatorTest : public testing::Test {
  public:
   SslHmacChannelAuthenticatorTest() = default;
+
+  SslHmacChannelAuthenticatorTest(const SslHmacChannelAuthenticatorTest&) =
+      delete;
+  SslHmacChannelAuthenticatorTest& operator=(
+      const SslHmacChannelAuthenticatorTest&) = delete;
+
   ~SslHmacChannelAuthenticatorTest() override = default;
 
  protected:
@@ -76,19 +81,20 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
   }
 
   void RunChannelAuth(int expected_client_error, int expected_host_error) {
-    client_fake_socket_.reset(new FakeStreamSocket());
-    host_fake_socket_.reset(new FakeStreamSocket());
+    client_fake_socket_ = std::make_unique<FakeStreamSocket>();
+    host_fake_socket_ = std::make_unique<FakeStreamSocket>();
     client_fake_socket_->PairWith(host_fake_socket_.get());
 
     client_auth_->SecureAndAuthenticate(
         std::move(client_fake_socket_),
-        base::Bind(&SslHmacChannelAuthenticatorTest::OnClientConnected,
-                   base::Unretained(this)));
+        base::BindOnce(&SslHmacChannelAuthenticatorTest::OnClientConnected,
+                       base::Unretained(this)));
 
     host_auth_->SecureAndAuthenticate(
         std::move(host_fake_socket_),
-        base::Bind(&SslHmacChannelAuthenticatorTest::OnHostConnected,
-                   base::Unretained(this), std::string("ref argument value")));
+        base::BindOnce(&SslHmacChannelAuthenticatorTest::OnHostConnected,
+                       base::Unretained(this),
+                       std::string("ref argument value")));
 
     // Expect two callbacks to be called - the client callback and the host
     // callback.
@@ -136,7 +142,7 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
     client_socket_ = std::move(socket);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   scoped_refptr<RsaKeyPair> key_pair_;
   std::string host_cert_;
@@ -148,8 +154,6 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
   MockChannelDoneCallback host_callback_;
   std::unique_ptr<P2PStreamSocket> client_socket_;
   std::unique_ptr<P2PStreamSocket> host_socket_;
-
-  DISALLOW_COPY_AND_ASSIGN(SslHmacChannelAuthenticatorTest);
 };
 
 // Verify that a channel can be connected using a valid shared secret.
@@ -208,5 +212,4 @@ TEST_F(SslHmacChannelAuthenticatorTest, InvalidCertificate) {
   ASSERT_TRUE(host_socket_.get() == nullptr);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 namespace jni_generator {
 struct JniJavaCallContextUnchecked;
 }
-struct unw_context_t;
 
 namespace tracing {
 
@@ -33,9 +32,6 @@ namespace tracing {
 class COMPONENT_EXPORT(TRACING_CPP) StackUnwinderAndroid {
  public:
   using JniMarker = jni_generator::JniJavaCallContextUnchecked;
-
-  // Whether to use libunwind for android framework frames.
-  static const bool kUseLibunwind;
 
   StackUnwinderAndroid();
   ~StackUnwinderAndroid();
@@ -52,7 +48,7 @@ class COMPONENT_EXPORT(TRACING_CPP) StackUnwinderAndroid {
   // Same as above function, but pauses the thread with the given |tid| and then
   // unwinds. |tid| should not be current thread's.
   size_t TraceStack(base::PlatformThreadId tid,
-                    base::StackSampler::StackBuffer* stack_buffer,
+                    base::StackBuffer* stack_buffer,
                     const void** out_trace,
                     size_t max_depth) const;
 
@@ -69,18 +65,16 @@ class COMPONENT_EXPORT(TRACING_CPP) StackUnwinderAndroid {
   // Sends a SIGURG signal to the thread with id |tid| and copies the stack
   // segment of the thread, along with register context. Returns true on
   // success.
-  bool SuspendThreadAndRecordStack(
-      base::PlatformThreadId tid,
-      base::StackSampler::StackBuffer* stack_buffer,
-      uintptr_t* sp,
-      size_t* stack_size,
-      unw_context_t* context,
-      ucontext_t* signal_context) const;
+  bool SuspendThreadAndRecordStack(base::PlatformThreadId tid,
+                                   base::StackBuffer* stack_buffer,
+                                   uintptr_t* sp,
+                                   size_t* stack_size,
+                                   ucontext_t* signal_context) const;
 
   // Replaces any pointers to the old stack to point to the new stack segment.
   // Returns the jni markers found on stack while scanning stack for pointers.
   std::vector<const JniMarker*> RewritePointersAndGetMarkers(
-      base::StackSampler::StackBuffer* stack_buffer,
+      base::StackBuffer* stack_buffer,
       uintptr_t sp,
       size_t stack_size) const;
 

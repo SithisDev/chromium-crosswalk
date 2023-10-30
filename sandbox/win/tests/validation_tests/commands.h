@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_TESTS_VALIDATION_TESTS_COMMANDS_H__
-#define SANDBOX_TESTS_VALIDATION_TESTS_COMMANDS_H__
+#ifndef SANDBOX_WIN_TESTS_VALIDATION_TESTS_COMMANDS_H_
+#define SANDBOX_WIN_TESTS_VALIDATION_TESTS_COMMANDS_H_
 
 #include <windows.h>
 
-#include "base/strings/string16.h"
+#include <string>
 
 namespace sandbox {
 
@@ -21,13 +21,13 @@ int TestOpenProcess(DWORD process_id, DWORD access_mask);
 int TestOpenThread(DWORD thread_id);
 
 // Tries to open path for read access. Returns a SboxTestResult.
-int TestOpenReadFile(const base::string16& path);
+int TestOpenReadFile(const std::wstring& path);
 
 // Tries to open path for write access. Returns a SboxTestResult.
-int TestOpenWriteFile(const base::string16& path);
+int TestOpenWriteFile(const std::wstring& path);
 
 // Tries to open a registry key.
-int TestOpenKey(HKEY base_key, base::string16 subkey);
+int TestOpenKey(HKEY base_key, std::wstring subkey);
 
 // Tries to open the workstation's input desktop as long as the
 // current desktop is not the interactive one. Returns a SboxTestResult.
@@ -45,4 +45,4 @@ int TestEnumAlternateWinsta();
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_TESTS_VALIDATION_TESTS_COMMANDS_H__
+#endif  // SANDBOX_WIN_TESTS_VALIDATION_TESTS_COMMANDS_H_

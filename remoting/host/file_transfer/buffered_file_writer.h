@@ -1,9 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_HOST_FILE_TRANSFER_BUFFERED_FILE_WRITER_H_
 #define REMOTING_HOST_FILE_TRANSFER_BUFFERED_FILE_WRITER_H_
+
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback_forward.h"
@@ -43,7 +47,7 @@ class BufferedFileWriter {
   void Start(const base::FilePath& filename);
 
   // Enqueue the provided chunk to be written to the file.
-  void Write(std::string data);
+  void Write(std::vector<std::uint8_t> data);
 
   // Close the file. If any chunks are currently queued, they will be written
   // before the file is closed.
@@ -87,7 +91,7 @@ class BufferedFileWriter {
 
   // Chunks that have been provided to Write but have not yet been passed to the
   // Writer instance.
-  base::queue<std::string> chunks_;
+  base::queue<std::vector<std::uint8_t>> chunks_;
 };
 
 }  // namespace remoting

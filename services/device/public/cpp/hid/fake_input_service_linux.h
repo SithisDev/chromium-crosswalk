@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 #include <map>
 #include <string>
 
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "services/device/public/mojom/input_service.mojom.h"
 
 namespace device {
@@ -19,25 +21,27 @@ class FakeInputServiceLinux : public mojom::InputDeviceManager {
   using DeviceMap = std::map<std::string, mojom::InputDeviceInfoPtr>;
 
   FakeInputServiceLinux();
+
+  FakeInputServiceLinux(const FakeInputServiceLinux&) = delete;
+  FakeInputServiceLinux& operator=(const FakeInputServiceLinux&) = delete;
+
   ~FakeInputServiceLinux() override;
 
   // mojom::InputDeviceManager implementation:
   void GetDevicesAndSetClient(
-      mojom::InputDeviceManagerClientAssociatedPtrInfo client,
+      mojo::PendingAssociatedRemote<mojom::InputDeviceManagerClient> client,
       GetDevicesCallback callback) override;
   void GetDevices(GetDevicesCallback callback) override;
 
-  void Bind(mojom::InputDeviceManagerRequest request);
+  void Bind(mojo::PendingReceiver<mojom::InputDeviceManager> receiver);
   void AddDevice(mojom::InputDeviceInfoPtr info);
   void RemoveDevice(const std::string& id);
 
   DeviceMap devices_;
 
  private:
-  mojo::BindingSet<mojom::InputDeviceManager> bindings_;
-  mojo::AssociatedInterfacePtrSet<mojom::InputDeviceManagerClient> clients_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeInputServiceLinux);
+  mojo::ReceiverSet<mojom::InputDeviceManager> receivers_;
+  mojo::AssociatedRemoteSet<mojom::InputDeviceManagerClient> clients_;
 };
 
 }  // namespace device

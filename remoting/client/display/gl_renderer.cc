@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "remoting/client/display/drawable.h"
 #include "remoting/client/display/gl_canvas.h"
@@ -27,8 +27,7 @@ bool CompareDrawableZOrder(base::WeakPtr<Drawable> a,
 
 }  // namespace
 
-GlRenderer::GlRenderer() :
-    weak_factory_(this) {
+GlRenderer::GlRenderer() {
   weak_ptr_ = weak_factory_.GetWeakPtr();
   thread_checker_.DetachFromThread();
 }
@@ -79,7 +78,7 @@ void GlRenderer::OnCursorVisibilityChanged(bool visible) {
 }
 
 void GlRenderer::OnFrameReceived(std::unique_ptr<webrtc::DesktopFrame> frame,
-                                 const base::Closure& done) {
+                                 base::OnceClosure done) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(frame->size().width() > 0 && frame->size().height() > 0);
   if (canvas_width_ != frame->size().width() ||
@@ -92,7 +91,7 @@ void GlRenderer::OnFrameReceived(std::unique_ptr<webrtc::DesktopFrame> frame,
   }
 
   desktop_.SetVideoFrame(*frame);
-  pending_done_callbacks_.push(done);
+  pending_done_callbacks_.push(std::move(done));
   RequestRender();
 }
 
@@ -177,7 +176,7 @@ void GlRenderer::OnRender() {
   delegate_->OnFrameRendered();
 
   while (!pending_done_callbacks_.empty()) {
-    pending_done_callbacks_.front().Run();
+    std::move(pending_done_callbacks_.front()).Run();
     pending_done_callbacks_.pop();
   }
 }

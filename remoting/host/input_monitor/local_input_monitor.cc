@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/input_monitor/local_hotkey_input_monitor.h"
 #include "remoting/host/input_monitor/local_keyboard_input_monitor.h"
@@ -24,13 +24,17 @@ class LocalInputMonitorImpl : public LocalInputMonitor {
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+
+  LocalInputMonitorImpl(const LocalInputMonitorImpl&) = delete;
+  LocalInputMonitorImpl& operator=(const LocalInputMonitorImpl&) = delete;
+
   ~LocalInputMonitorImpl() override;
 
   // LocalInputMonitor implementation.
   void StartMonitoringForClientSession(
       base::WeakPtr<ClientSessionControl> client_session_control) override;
   void StartMonitoring(PointerMoveCallback on_pointer_input,
-                       base::RepeatingClosure on_keyboard_input,
+                       KeyPressedCallback on_keyboard_input,
                        base::RepeatingClosure on_error) override;
 
  private:
@@ -46,8 +50,6 @@ class LocalInputMonitorImpl : public LocalInputMonitor {
 
   // Indicates whether the instance is actively monitoring local input.
   bool monitoring_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(LocalInputMonitorImpl);
 };
 
 LocalInputMonitorImpl::LocalInputMonitorImpl(
@@ -90,12 +92,19 @@ void LocalInputMonitorImpl::StartMonitoringForClientSession(
       base::BindOnce(&ClientSessionControl::DisconnectSession,
                      client_session_control, protocol::OK));
 
+  keyboard_input_monitor_ = LocalKeyboardInputMonitor::Create(
+      caller_task_runner_, input_task_runner_, ui_task_runner_,
+      base::BindRepeating(&ClientSessionControl::OnLocalKeyPressed,
+                          client_session_control),
+      base::BindOnce(&ClientSessionControl::DisconnectSession,
+                     client_session_control, protocol::OK));
+
   OnMonitoringStarted();
 }
 
 void LocalInputMonitorImpl::StartMonitoring(
     PointerMoveCallback on_pointer_input,
-    base::RepeatingClosure on_keyboard_input,
+    KeyPressedCallback on_keyboard_input,
     base::RepeatingClosure on_error) {
   DCHECK(!monitoring_);
   DCHECK(on_error);

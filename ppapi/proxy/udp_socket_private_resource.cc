@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/udp_socket_private_resource.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "ppapi/c/ppb_udp_socket.h"
 #include "ppapi/shared_impl/tracked_callback.h"
 
@@ -43,7 +43,7 @@ int32_t UDPSocketPrivateResource::SetSocketFeature(
   }
   int32_t result = SetOptionImpl(public_name, value,
                                  true,  // Check bind() state.
-                                 NULL);
+                                 nullptr);
   return result == PP_OK_COMPLETIONPENDING ? PP_OK : result;
 }
 
@@ -61,7 +61,7 @@ int32_t UDPSocketPrivateResource::RecvFrom(
     char* buffer,
     int32_t num_bytes,
     scoped_refptr<TrackedCallback> callback) {
-  return RecvFromImpl(buffer, num_bytes, NULL, callback);
+  return RecvFromImpl(buffer, num_bytes, nullptr, callback);
 }
 
 PP_Bool UDPSocketPrivateResource::GetRecvFromAddress(

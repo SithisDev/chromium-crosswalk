@@ -1,16 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/base/oauth_token_getter_proxy.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -21,13 +20,16 @@ namespace remoting {
 namespace {
 
 OAuthTokenGetter::TokenCallback GetDoNothingTokenCallback() {
-  return base::DoNothing::Repeatedly<OAuthTokenGetter::Status,
-                                     const std::string&, const std::string&>();
+  return base::DoNothing();
 }
 
 class FakeOAuthTokenGetter : public OAuthTokenGetter {
  public:
   FakeOAuthTokenGetter();
+
+  FakeOAuthTokenGetter(const FakeOAuthTokenGetter&) = delete;
+  FakeOAuthTokenGetter& operator=(const FakeOAuthTokenGetter&) = delete;
+
   ~FakeOAuthTokenGetter() override;
 
   void ResolveCallback(Status status,
@@ -48,11 +50,10 @@ class FakeOAuthTokenGetter : public OAuthTokenGetter {
 
   THREAD_CHECKER(thread_checker_);
 
-  base::WeakPtrFactory<FakeOAuthTokenGetter> weak_factory_;
-  DISALLOW_COPY_AND_ASSIGN(FakeOAuthTokenGetter);
+  base::WeakPtrFactory<FakeOAuthTokenGetter> weak_factory_{this};
 };
 
-FakeOAuthTokenGetter::FakeOAuthTokenGetter() : weak_factory_(this) {
+FakeOAuthTokenGetter::FakeOAuthTokenGetter() {
   DETACH_FROM_THREAD(thread_checker_);
 }
 
@@ -95,6 +96,11 @@ base::WeakPtr<FakeOAuthTokenGetter> FakeOAuthTokenGetter::GetWeakPtr() {
 class OAuthTokenGetterProxyTest : public testing::Test {
  public:
   OAuthTokenGetterProxyTest() = default;
+
+  OAuthTokenGetterProxyTest(const OAuthTokenGetterProxyTest&) = delete;
+  OAuthTokenGetterProxyTest& operator=(const OAuthTokenGetterProxyTest&) =
+      delete;
+
   ~OAuthTokenGetterProxyTest() override = default;
 
   // testing::Test overrides.
@@ -135,9 +141,7 @@ class OAuthTokenGetterProxyTest : public testing::Test {
 
   std::unique_ptr<TokenCallbackResult> expected_callback_result_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(OAuthTokenGetterProxyTest);
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 void OAuthTokenGetterProxyTest::SetUp() {

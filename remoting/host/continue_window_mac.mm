@@ -1,18 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "remoting/host/continue_window.h"
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "remoting/base/string_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -20,12 +19,12 @@
 // Handles the ContinueWindow.
 @interface ContinueWindowMacController : NSObject {
  @private
-  base::scoped_nsobject<NSMutableArray> shades_;
-  base::scoped_nsobject<NSAlert> continue_alert_;
-  remoting::ContinueWindow* continue_window_;
+  base::scoped_nsobject<NSMutableArray> _shades;
+  base::scoped_nsobject<NSAlert> _continue_alert;
+  raw_ptr<remoting::ContinueWindow> _continue_window;
 }
 
-- (id)initWithWindow:(remoting::ContinueWindow*)continue_window;
+- (instancetype)initWithWindow:(remoting::ContinueWindow*)continue_window;
 - (void)show;
 - (void)hide;
 - (void)onCancel:(id)sender;
@@ -39,6 +38,10 @@ namespace remoting {
 class ContinueWindowMac : public ContinueWindow {
  public:
   ContinueWindowMac();
+
+  ContinueWindowMac(const ContinueWindowMac&) = delete;
+  ContinueWindowMac& operator=(const ContinueWindowMac&) = delete;
+
   ~ContinueWindowMac() override;
 
  protected:
@@ -48,8 +51,6 @@ class ContinueWindowMac : public ContinueWindow {
 
  private:
   base::scoped_nsobject<ContinueWindowMacController> controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContinueWindowMac);
 };
 
 ContinueWindowMac::ContinueWindowMac() {
@@ -57,22 +58,28 @@ ContinueWindowMac::ContinueWindowMac() {
 
 ContinueWindowMac::~ContinueWindowMac() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (controller_) {
+    HideUi();
+  }
 }
 
 void ContinueWindowMac::ShowUi() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  base::mac::ScopedNSAutoreleasePool pool;
-  controller_.reset(
-      [[ContinueWindowMacController alloc] initWithWindow:this]);
-  [controller_ show];
+  @autoreleasepool {
+    controller_.reset(
+        [[ContinueWindowMacController alloc] initWithWindow:this]);
+    [controller_ show];
+  }
 }
 
 void ContinueWindowMac::HideUi() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  base::mac::ScopedNSAutoreleasePool pool;
-  [controller_ hide];
+  @autoreleasepool {
+    [controller_ hide];
+    controller_.reset();
+  }
 }
 
 // static
@@ -84,9 +91,9 @@ std::unique_ptr<HostWindow> HostWindow::CreateContinueWindow() {
 
 @implementation ContinueWindowMacController
 
-- (id)initWithWindow:(remoting::ContinueWindow*)continue_window {
+- (instancetype)initWithWindow:(remoting::ContinueWindow*)continue_window {
   if ((self = [super init])) {
-    continue_window_ = continue_window;
+    _continue_window = continue_window;
   }
   return self;
 }
@@ -94,14 +101,14 @@ std::unique_ptr<HostWindow> HostWindow::CreateContinueWindow() {
 - (void)show {
   // Generate window shade
   NSArray* screens = [NSScreen screens];
-  shades_.reset([[NSMutableArray alloc] initWithCapacity:[screens count]]);
+  _shades.reset([[NSMutableArray alloc] initWithCapacity:[screens count]]);
   for (NSScreen *screen in screens) {
     NSWindow* shade =
-      [[[NSWindow alloc] initWithContentRect:[screen frame]
-                                   styleMask:NSBorderlessWindowMask
-                                     backing:NSBackingStoreBuffered
-                                       defer:NO
-                                      screen:screen] autorelease];
+        [[[NSWindow alloc] initWithContentRect:[screen frame]
+                                     styleMask:NSWindowStyleMaskBorderless
+                                       backing:NSBackingStoreBuffered
+                                         defer:NO
+                                        screen:screen] autorelease];
     [shade setReleasedWhenClosed:NO];
     [shade setAlphaValue:0.8];
     [shade setOpaque:NO];
@@ -111,21 +118,21 @@ std::unique_ptr<HostWindow> HostWindow::CreateContinueWindow() {
     // of control (like they can quit Chromium).
     [shade setLevel:NSModalPanelWindowLevel - 1];
     [shade orderFront:nil];
-    [shades_ addObject:shade];
+    [_shades addObject:shade];
   }
 
   // Create alert.
-  continue_alert_.reset([[NSAlert alloc] init]);
-  [continue_alert_ setMessageText:l10n_util::GetNSString(IDS_CONTINUE_PROMPT)];
+  _continue_alert.reset([[NSAlert alloc] init]);
+  [_continue_alert setMessageText:l10n_util::GetNSString(IDS_CONTINUE_PROMPT)];
 
   NSButton* continue_button =
-      [continue_alert_ addButtonWithTitle:l10n_util::GetNSString(
+      [_continue_alert addButtonWithTitle:l10n_util::GetNSString(
           IDS_CONTINUE_BUTTON)];
   [continue_button setAction:@selector(onContinue:)];
   [continue_button setTarget:self];
 
   NSButton* cancel_button =
-      [continue_alert_ addButtonWithTitle:l10n_util::GetNSString(
+      [_continue_alert addButtonWithTitle:l10n_util::GetNSString(
           IDS_STOP_SHARING_BUTTON)];
   [cancel_button setAction:@selector(onCancel:)];
   [cancel_button setTarget:self];
@@ -134,35 +141,38 @@ std::unique_ptr<HostWindow> HostWindow::CreateContinueWindow() {
   NSString *imagePath = [bundle pathForResource:@"chromoting128" ofType:@"png"];
   base::scoped_nsobject<NSImage> image(
       [[NSImage alloc] initByReferencingFile:imagePath]);
-  [continue_alert_ setIcon:image];
-  [continue_alert_ layout];
+  [_continue_alert setIcon:image];
+  [_continue_alert layout];
 
   // Force alert to be at the proper level and location.
-  NSWindow* continue_window = [continue_alert_ window];
+  NSWindow* continue_window = [_continue_alert window];
   [continue_window center];
   [continue_window setLevel:NSModalPanelWindowLevel];
   [continue_window orderWindow:NSWindowAbove
-                    relativeTo:[[shades_ lastObject] windowNumber]];
+                    relativeTo:[[_shades lastObject] windowNumber]];
   [continue_window makeKeyWindow];
 }
 
 - (void)hide {
   // Remove window shade.
-  for (NSWindow* window in shades_.get()) {
+  for (NSWindow* window in _shades.get()) {
     [window close];
   }
-  shades_.reset();
-  continue_alert_.reset();
+  _shades.reset();
+  if (_continue_alert) {
+    [[_continue_alert window] close];
+    _continue_alert.reset();
+  }
 }
 
 - (void)onCancel:(id)sender {
   [self hide];
-  continue_window_->DisconnectSession();
+  _continue_window->DisconnectSession();
 }
 
 - (void)onContinue:(id)sender {
   [self hide];
-  continue_window_->ContinueSession();
+  _continue_window->ContinueSession();
 }
 
 @end

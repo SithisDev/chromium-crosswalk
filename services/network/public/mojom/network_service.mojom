@@ -1,208 +1,52 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 module network.mojom;
 
+import "mojo/public/mojom/base/byte_string.mojom";
 import "mojo/public/mojom/base/file.mojom";
 import "mojo/public/mojom/base/file_path.mojom";
 import "mojo/public/mojom/base/memory_pressure_level.mojom";
 import "mojo/public/mojom/base/read_only_buffer.mojom";
+import "mojo/public/mojom/base/read_only_file.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "mojo/public/mojom/base/unguessable_token.mojom";
 import "mojo/public/mojom/base/values.mojom";
-import "services/network/public/mojom/cookie_manager.mojom";
+import "sandbox/policy/mojom/context.mojom";
+import "sandbox/policy/mojom/sandbox.mojom";
+import "services/network/public/mojom/first_party_sets.mojom";
 import "services/network/public/mojom/host_resolver.mojom";
 import "services/network/public/mojom/http_raw_headers.mojom";
+import "services/network/public/mojom/key_pinning.mojom";
+import "services/network/public/mojom/mutable_network_traffic_annotation_tag.mojom";
 import "services/network/public/mojom/net_log.mojom";
 import "services/network/public/mojom/network_change_manager.mojom";
 import "services/network/public/mojom/network_context.mojom";
+import "services/network/public/mojom/ip_address_space.mojom";
 import "services/network/public/mojom/network_interface.mojom";
 import "services/network/public/mojom/network_param.mojom";
 import "services/network/public/mojom/network_quality_estimator_manager.mojom";
-import "services/network/public/mojom/url_loader.mojom";
-import "services/network/public/mojom/url_loader_factory.mojom";
+import "services/network/public/mojom/network_service_test.mojom";
+import "services/network/public/mojom/schemeful_site.mojom";
+import "services/network/public/mojom/trust_tokens.mojom";
+import "services/network/public/mojom/parsed_headers.mojom";
+import "services/network/public/mojom/url_loader_network_service_observer.mojom";
+import "services/network/public/mojom/url_request.mojom";
+import "services/network/public/mojom/url_response_head.mojom";
+import "services/network/public/mojom/client_security_state.mojom";
 import "url/mojom/origin.mojom";
 import "url/mojom/url.mojom";
 
 [EnableIf=is_android]
 import "mojo/public/mojom/base/application_state.mojom";
 
-// The content/browser implementation of this SSLPrivateKey interface wraps the
-// scoped_refptr<net::SSLPrivateKey> that is received from
-// SSLClientAuthDelegate::ContinueWithCertificate(), and this mojo interface is
-// sent from content/browser to services/network so that services/network can
-// have its own net::SSLPrivateKey implementation that internally uses this mojo
-// interface.
-// The |algorithm| and |input| parameters correspond to the |algorithm| and
-// |input| parameters in net::SSLPrivateKey::Sign().
-// The |net_error| and |signature| parameters correspond to the parameters in
-// net::SSLPrivateKey::SignCallback.
-interface SSLPrivateKey {
-  Sign(uint16 algorithm,
-       array<uint8> input) => (int32 net_error, array<uint8> signature);
-};
-
-// The |credentials| output parameter is given to URLRequest::SetAuth()
-// through this mojo interface. It is not set when URLRequest::CancelAuth()
-// needs to be called.
-interface AuthChallengeResponder {
-   OnAuthCredentials(AuthCredentials? credentials);
-};
-
-// This interface enables the UI to send client certificate selections back to
-// the network service.
-//
-// Defining an interface for this purpose, rather than using a union in the
-// response of OnCertificateRequested, enables the NetworkServiceClient to learn
-// of the URLLoader destruction via the connection error handler.
-interface ClientCertificateResponder {
-  // Use the selected certificate and continue the URLRequest.
-  //
-  // - |provider_name| corresponds to the return value of
-  //   net::SSLPrivateKey::GetProviderName().
-  // - |algorithm_preferences| corresponds to the return value of
-  //   net::SSLPrivateKey::GetAlgorithmPreferences().
-  ContinueWithCertificate(network.mojom.X509Certificate x509_certificate,
-                          string provider_name,
-                          array<uint16> algorithm_preferences,
-                          SSLPrivateKey ssl_private_key);
-
-  // Affirmatively select no certificate (this is cached and can affect future
-  // URLRequests). Does not cancel the URLRequest.
-  //
-  // The connection is continued with no client cert.
-  // net::URLRequest::ContinueWithCertificate(nullptr, nullptr) needs to be
-  // called.
-  ContinueWithoutCertificate();
-
-  // Cancel the URLRequest. The request is aborted.
-  // net::URLRequest::CancelWithError() needs to be called.
-  CancelRequest();
-};
-
-struct LoadInfo {
-  uint32 process_id;
-  uint32 routing_id;
-  string host;
-  uint32 load_state;  // net::LoadState enum
-  mojo_base.mojom.String16 state_param;
-  uint64 upload_position;
-  uint64 upload_size;
-};
-
-// Network service interface to the browser.
-interface NetworkServiceClient {
-  // Called when we receive an authentication failure.
-  // The |auth_challenge_responder| will respond to auth challenge with
-  // credentials. |head| can provide response headers for the response
-  // which has elicited this auth request, if applicable.
-  //
-  // |window_id| or else |process_id| and |routing_id| indicates
-  // the frame making the request, see
-  // network::ResourceRequest::fetch_window_id.
-  OnAuthRequired(mojo_base.mojom.UnguessableToken? window_id,
-                 uint32 process_id,
-                 uint32 routing_id,
-                 uint32 request_id,
-                 url.mojom.Url url,
-                 bool first_auth_attempt,
-                 AuthChallengeInfo auth_info,
-                 URLResponseHead? head,
-                 AuthChallengeResponder auth_challenge_responder);
-
-  // Called when an SSL certificate requested message is received for client
-  // authentication.
-  //
-  // Rather than using one response for multiple purposes, the caller expects
-  // exactly one response (or disconnect) to be sent back via |cert_responder|.
-  //
-  // |window_id| or else |process_id| and |routing_id| indicates the frame
-  // making the request, see network::ResourceRequest::fetch_window_id.
-  OnCertificateRequested(mojo_base.mojom.UnguessableToken? window_id,
-                         uint32 process_id,
-                         uint32 routing_id,
-                         uint32 request_id,
-                         network.mojom.SSLCertRequestInfo cert_info,
-                         ClientCertificateResponder cert_responder);
-
-  // Called when an SSL certificate is encountered.
-  // The callback argument is a net::ERROR value. If it's net::OK, then the
-  // request is resumed. Otherwise it's cancelled with the given error.
-  OnSSLCertificateError(uint32 process_id,
-                        uint32 routing_id,
-                        url.mojom.Url url,
-                        int32 net_error,
-                        SSLInfo ssl_info,
-                        bool fatal) => (int32 net_error);
-
-  // Notification that a trust anchor was used for the given user.
-  // |username_hash| was the parameter passed in NetworkContextParams.
-  [EnableIf=is_chromeos]
-  OnTrustAnchorUsed(string username_hash);
-
-  // Called when file uploading was requested.
-  // If the process that requested the uploads has permission to read all of
-  // the files referenced by |file_paths|, the callback arguments will be
-  // net::OK, along with an array of open file handles. The array will contain
-  // exactly one handle for each path in |file_paths|, in the same order.
-  // If any files referenced by |file_paths| cannot be read, a net::ERROR will
-  // be returned, and |files| will be an empty list. If the |async| parameter
-  // is true, the files will be opened with FLAG_ASYNC.
-  OnFileUploadRequested(uint32 process_id,
-                        bool async,
-                        array<mojo_base.mojom.FilePath> file_paths) =>
-                        (int32 net_error, array<mojo_base.mojom.File> files);
-
-  // Called periodically to update the client about progress of the current
-  // loads. To avoid flooding the client, it has to ack the update before it can
-  // receive the next update.
-  OnLoadingStateUpdate(array<LoadInfo> infos) => ();
-
-  // Called on every request completion to update the network traffic annotation
-  // ID, and the total bytes received and sent.
-  // |network_traffic_annotation_id_hash| represents the hash of unique tag that
-  // identifies the annotation of the request.
-  OnDataUseUpdate(int32 network_traffic_annotation_id_hash, int64 recv_bytes,
-                  int64 sent_bytes);
-
-  // Called to generate an auth token for SPNEGO authentication on Android.
-  [EnableIf=is_android]
-  OnGenerateHttpNegotiateAuthToken(string server_auth_token, bool can_delegate,
-                                   string auth_negotiate_android_account_type,
-                                   string spn) =>
-                                   (int32 result, string auth_token);
-
-  // Called to send raw header information and information about excluded
-  // cookies. Only called when |devtool_request_id| is available to the
-  // URLLoader.
-  OnRawRequest(
-    int32 process_id,
-    int32 routing_id,
-    string devtool_request_id,
-    array<CookieWithStatus> cookies_with_status,
-    array<HttpRawHeaderPair> headers);
-
-  // Called to send information about the cookies blocked from storage from a
-  // received response. Only called when |devtool_request_id| is available to
-  // the URLLoader.
-  OnRawResponse(
-    int32 process_id,
-    int32 routing_id,
-    string devtool_request_id,
-    array<CookieAndLineWithStatus> cookies_with_status,
-    array<HttpRawHeaderPair> headers,
-    string? raw_response_headers);
-};
+[EnableIf=is_ct_supported]
+import "services/network/public/mojom/ct_log_info.mojom";
 
 // Values for configuring HTTP authentication that can only be set once.
 struct HttpAuthStaticParams {
-  // List of supported auth schemes. Unrecognized schemes are ignored.
-  // The default value of this field (an empty list) does not match default
-  // behavior of NetworkService when no HttpAuthStaticParams is specified.
-  array<string> supported_schemes;
-
   // File name the GSSAPI library to load. Only supported on platforms where an
   // external GSSAPI library is necessary for Kerberos/SPNEGO support. See the
   // |use_external_gssapi| variable definition in //net/BUILD.gn for details on
@@ -212,17 +56,26 @@ struct HttpAuthStaticParams {
 
 // Values for configurating HTTP authentication that can be changed as needed.
 struct HttpAuthDynamicParams {
-  // Comma / semi-colon delimited whitelist of server origins which the network
+  // List of allowed auth schemes. Unrecognized schemes are ignored.
+  array<string>? allowed_schemes;
+
+  // List of origins patterns that are allowed the use of all the HTTP auth
+  // schemes recognized and supported by the browser regardless of
+  // `allowed_schemes`. The accepted format is documented at
+  // http://www.chromium.org/administrators/url-blocklist-filter-format.
+  array<string> patterns_allowed_to_use_all_schemes;
+
+  // Comma / semi-colon delimited allowlist of server origins which the network
   // service may send the default credentials for NTLM or Negotiate
   // authentication.
-  string server_whitelist;
+  string server_allowlist;
 
-  // Comma / semi-colon delimited whitelist of server origins for which Kerberos
+  // Comma / semi-colon delimited allowlist of server origins for which Kerberos
   // delegation is allowed for NTLM or Negotiate authentication.
-  string delegate_whitelist;
+  string delegate_allowlist;
 
   // True if OK-AS-DELEGATE flag from KDC should be used to allow delegation for
-  // Negotiate authentication along with delegate_whitelist;
+  // Negotiate authentication along with delegate_allowlist;
   bool delegate_by_kdc_policy = false;
 
   // True if canonical hostnames should be resolved when using Negotiate.
@@ -230,10 +83,10 @@ struct HttpAuthDynamicParams {
 
   // True if Negotiate SPNs (service principal names) should include ports
   // when the port isn't a standard port (80 or 443).
-  bool enable_negotiate_port = true;
+  bool enable_negotiate_port = false;
 
   // Whether NTLM V2 is enabled on POSIX platforms. No effect elsewhere.
-  bool ntlm_v2_enabled = false;
+  bool ntlm_v2_enabled = true;
 
   // The AccountManager AccountManagerget.AccountsByTypeAndFeatures on Android
   // when using Negotiate authentication.
@@ -242,22 +95,10 @@ struct HttpAuthDynamicParams {
   // Indicates whether the GSSAPI library should be loaded. Only supported on
   // Chrome OS.
   bool allow_gssapi_library_load = true;
-};
 
-// Values for configuring OSCrypt.
-[EnableIf=needs_crypt_config]
-struct CryptConfig {
-  // Force OSCrypt to use a specific linux password store.
-  string store;
-
-  // The product name to use for permission prompts.
-  string product_name;
-
-  // Controls whether preference on using or ignoring backends is used.
-  bool should_use_preference;
-
-  // Preferences are stored in a separate file in the user data directory.
-  mojo_base.mojom.FilePath user_data_path;
+  // True if Basic authentication challenges should be allowed for non-secure
+  // HTTP responses.
+  bool basic_over_http_enabled = true;
 };
 
 // Represents the value of a single environment variable.
@@ -274,28 +115,55 @@ struct NetworkServiceParams {
   // A set of environment variables that should be set in the network
   // service when starting up.
   array<EnvironmentVariable> environment;
+
+  // An URLLoaderFactory can provide its own URLLoaderNetworkServiceObserver
+  // but if it does not, this default will be used.
+  pending_remote<URLLoaderNetworkServiceObserver> default_observer;
+
+  // A boolean provided by the Browser Process in order to plumb into the
+  // First-Party Sets attribute during NetworkService::Initialize().
+  bool first_party_sets_enabled;
 };
 
-// Information about how logging should be configured.
-// Corresponds to logging::LoggingSettings.
-[EnableIf=is_chromeos]
-struct LoggingSettings {
-  uint32 logging_dest;
-  mojo_base.mojom.FilePath log_file;
+// Configuration settings for SCT Auditing.
+[EnableIf=is_ct_supported]
+struct SCTAuditingConfiguration {
+  // The sampling rate for SCT auditing reports.
+  double sampling_rate;
+
+  // How long Chrome will wait before assuming a new SCT has been ingested by
+  // the log.
+  mojo_base.mojom.TimeDelta log_expected_ingestion_delay;
+
+  // The maximum random delay that may be added to
+  // |log_expected_ingestion_delay|.
+  mojo_base.mojom.TimeDelta log_max_ingestion_random_delay;
+
+  // The URL where reports should be sent.
+  url.mojom.Url report_uri;
+
+  // An annotated URL template for hashdance lookup queries. $1 should be in
+  // place of the "length" parameter, and $2 in place of the "prefix" parameter.
+  url.mojom.Url hashdance_lookup_uri;
+
+  // Traffic annotation for the report request.
+  MutableNetworkTrafficAnnotationTag traffic_annotation;
+
+  // Traffic annotation for the hashdance lookup query.
+  MutableNetworkTrafficAnnotationTag hashdance_traffic_annotation;
 };
 
-// Browser interface to the network service.
+// Implemented by the network service. The browser process sends messages to
+// the network service over this interface.
+//
+// This is a trusted interface that only the browser process should have access
+// to. It must not be sent to any untrusted process like a renderer process.
+// The network sandbox may be disabled (to kNoSandbox) by policy, and may not
+// be available on all platforms.
+[ServiceSandbox=sandbox.mojom.Sandbox.kNetwork]
 interface NetworkService {
-  // Sets client used by all |NetworkContext|s creating by |NetworkService|.
-  // Pending requests may hang if the |client| pipe is closed before they
-  // complete.
-  SetClient(NetworkServiceClient client, NetworkServiceParams params);
-
-  // Reinitializes the Network Service's logging with the given settings. This
-  // is needed on Chrome OS, which switches to a log file in the user's home
-  // directory once they log in.
-  [EnableIf=is_chromeos]
-  ReinitializeLogging(LoggingSettings settings);
+  // Sets the parameters and initializes the service.
+  SetParams(NetworkServiceParams params);
 
   // Starts observing the NetLog event stream and writing entries to |file|.
   // |constants| is a legend used for decoding constant values in the log; it
@@ -307,15 +175,21 @@ interface NetworkService {
               NetLogCaptureMode capture_mode,
               mojo_base.mojom.DictionaryValue constants);
 
+  // Attaches an external source of NetLog events. Control events will be sent
+  // to the |proxy_source| pipe indicating when netlogging is active, the
+  // NetLog events should be sent to the |proxy_sink| pipe, and must use a
+  // non-conflicting source id space.
+  AttachNetLogProxy(pending_remote<NetLogProxySource> proxy_source,
+                    pending_receiver<NetLogProxySink> proxy_sink);
+
   // Starts logging SSL key material to the |file|. This must be called before
   // any SSL connections are made. (See |SSLClientSocket::SetSSLKeyLogger()|
   // for more details).
-  // TODO(crbug.com/841001) This should pass a File which has already been
-  // opened to be sandbox friendly.
-  SetSSLKeyLogFile(mojo_base.mojom.FilePath file);
+  SetSSLKeyLogFile(mojo_base.mojom.File file);
 
   // Creates a new network context with the given parameters.
-  CreateNetworkContext(NetworkContext& context,
+  [AllowedContext=sandbox.mojom.Context.kBrowser]
+  CreateNetworkContext(pending_receiver<NetworkContext> context,
                        NetworkContextParams params);
 
   // Configures whether the built-in stub host resolver is used in preference
@@ -324,11 +198,14 @@ interface NetworkService {
   // https://tools.ietf.org/html/rfc1034#section-5.3.1 for definition of a stub
   // resolver.
   //
-  // |dns_over_https_servers| is an optional list of DNS over HTTPS servers.
-  // When populated, all DNS lookups will try to use DNS over HTTPS in the order
-  // the servers are provided in and will only fall back to using system
-  // settings if DNS over HTTPS fails. It is illegal to have a populated
-  // |dns_over_https_servers| when |stub_resolver_enabled| is false.
+  // `dns_over_https_config` provides zero or more DNS over HTTPS servers.
+  // DnsTransactions will by default follow the behavior of `secure_dns_mode`.
+  // In SECURE mode, only DoH lookups will be performed. In AUTOMATIC mode,
+  // DoH lookups to available servers will be performed first, and insecure
+  // lookups will be used as a fallback. In OFF mode, only insecure lookups will
+  // be performed. When insecure lookups are performed, they will be sent by
+  // the async resolver first if `insecure_dns_client_enabled` is true and
+  // then by the system resolver as a fallback.
   //
   // DNS over HTTPS will use the primary NetworkContext, so can only be enabled
   // after the primary network context has been created. Other than that
@@ -336,9 +213,14 @@ interface NetworkService {
   // configuration, though calling it will fail any DNS lookups that have
   // already been started.
   //
-  // Both the stub resolver and DNS over HTTPS are disabled by default.
-  ConfigureStubHostResolver(bool stub_resolver_enabled,
-                            array<DnsOverHttpsServer>? dns_over_https_servers);
+  // `additional_dns_types_enabled` controls whether additional DNS query types,
+  // e.g. HTTPS (DNS type 65) will be allowed besides the traditional A and AAAA
+  // queries when a request is being made via insecure DNS. Has no effect on
+  // Secure DNS which always allows additional types.
+  ConfigureStubHostResolver(bool insecure_dns_client_enabled,
+                            SecureDnsMode secure_dns_mode,
+                            DnsOverHttpsConfig dns_over_https_config,
+                            bool additional_dns_types_enabled);
 
   // Disables QUIC for the NetworkService. Affects all existing NetworkContexts,
   // and all new ones that are created. Once called, QUIC cannot be re-enabled.
@@ -366,7 +248,7 @@ interface NetworkService {
   // Granting a permission increases risks in case the child process becomes
   // compromised, so this should be done only in specific cases
   // (e.g. DevTools attached).
-  SetRawHeadersAccess(uint32 process_id, array<url.mojom.Origin> origins);
+  SetRawHeadersAccess(int32 process_id, array<url.mojom.Origin> origins);
 
   // Sets the maximum number of connections for a proxy server.
   //   * Negative values will set the default proxy connection limit (32)
@@ -376,17 +258,15 @@ interface NetworkService {
 
   // Gets the NetworkChangeManager.
   GetNetworkChangeManager(
-      NetworkChangeManager& network_change_manager);
+      pending_receiver<NetworkChangeManager> network_change_manager);
 
   // Gets the NetworkQualityEstimatorManager.
   GetNetworkQualityEstimatorManager(
-      NetworkQualityEstimatorManager& network_quality_estimator_manager);
+      pending_receiver<NetworkQualityEstimatorManager> receiver);
 
   // Gets the DnsConfigChangeManager.
-  GetDnsConfigChangeManager(DnsConfigChangeManager& dns_config_change_manager);
-
-  // Gets the accumulated network usage since the start/restart of the service.
-  GetTotalNetworkUsages() => (array<NetworkUsage> total_network_usages);
+  GetDnsConfigChangeManager(
+      pending_receiver<DnsConfigChangeManager> receiver);
 
   // Gets list of network interfaces.
   // The |policy| parameter is a flag that specifies whether to include/exclude
@@ -398,38 +278,13 @@ interface NetworkService {
   // CRLSets (where older is determined by the sequence number). All Network
   // Contexts created by the Network Service, including those created after
   // this call, will use the same CRLSet.
-  UpdateCRLSet(mojo_base.mojom.ReadOnlyBuffer crl_set);
+  UpdateCRLSet(mojo_base.mojom.ReadOnlyBuffer crl_set) => ();
 
   // Notification that the certificate database has been modified.
   OnCertDBChanged();
 
-  // Sets up OSCrypt for the network service process. Must be called before
-  // encrypted cookies can be read or set.
-  [EnableIf=needs_crypt_config]
-  SetCryptConfig(CryptConfig crypt_config);
-
   // Send the encryption key to the network service to use for AES encryption.
-  [EnableIf=is_mac]
-  SetEncryptionKey(string encryption_key);
-
-  // Notifies CORB (Cross-Origin Read Blocking) that |process_id| is proxying
-  // requests on behalf of a universal-access plugin and therefore CORB should
-  // stop blocking requests marked as ResourceType::kPluginResource.
-  //
-  // TODO(lukasza, laforge): https://crbug.com/702995: Remove the ...ForPlugin
-  // methods once Flash support is removed from Chromium (probably around 2020
-  // - see https://www.chromium.org/flash-roadmap).
-  AddCorbExceptionForPlugin(uint32 process_id);
-
-  // Reverts AddCorbExceptionForPlugin.
-  RemoveCorbExceptionForPlugin(uint32 process_id);
-
-  // Registers additional MIME types that can be protected by CORB (without any
-  // confirmation sniffing).
-  //
-  // TODO(lukasza): https://crbug.com/944162: Remove the method below once
-  // kMimeHandlerViewInCrossProcessFrame feature ships.
-  AddExtraMimeTypesForCorb(array<string> mime_types);
+  SetEncryptionKey(mojo_base.mojom.ByteString encryption_key);
 
   // Called when the system is low on memory.
   OnMemoryPressure(mojo_base.mojom.MemoryPressureLevel memory_pressure_level);
@@ -447,9 +302,76 @@ interface NetworkService {
   // |environment| array.
   SetEnvironment(array<EnvironmentVariable> environment);
 
+  // Sets Trust Tokens key commitment state. |raw_commitments| is the
+  // JSON-encoded string representation of a collection of issuers' key
+  // commitments according to the format specified, for now, in the Trust
+  // Tokens design doc:
+  // https://docs.google.com/document/d/1TNnya6B8pyomDK2F1R9CL3dY10OAmqWlnCxsWyOBDVQ/edit#heading=h.z52drgpfgulz.
+  SetTrustTokenKeyCommitments(string raw_commitments) => ();
+
+  // Clears the SCT auditing cache.
+  [EnableIf=is_ct_supported]
+  ClearSCTAuditingCache();
+
+  // Configures SCT auditing.
+  [EnableIf=is_ct_supported]
+  ConfigureSCTAuditing(SCTAuditingConfiguration configuration);
+
+  // Updates the log list used for CT verification. `update_time` should
+  // contain the timestamp that the log list was considered fresh/current, in
+  // order to ensure that CT is not enforced if the log list is too out of
+  // date.
+  [EnableIf=is_ct_supported]
+  UpdateCtLogList(array<CTLogInfo> log_list,
+                  mojo_base.mojom.Time update_time) => ();
+
+  // Updates the list of popular SCTs queried during CT hashdance auditing.
+  [EnableIf=is_ct_supported]
+  UpdateCtKnownPopularSCTs(array<array<uint8>> sct_hashes) => ();
+
+  // Disables or enables CT Enforcement.
+  [EnableIf=is_ct_supported]
+  SetCtEnforcementEnabled(bool enabled) => ();
+
+  // Updates the key pinnning pin list. `update_time` should contain the
+  // timestamp that the pins list was considered fresh/current, in order to
+  // ensure that key pinning is not enforced if the list is too out of date.
+  UpdateKeyPinsList(PinList pin_list, mojo_base.mojom.Time update_time);
+
   // Calls base::debug::DumpWithoutCrashing for the network process.
   // TODO(http://crbug.com/934317): Remove this once done debugging renderer
   // hangs.
   [EnableIf=is_android]
   DumpWithoutCrashing(mojo_base.mojom.Time dump_request_time);
+
+  // Binds the test service's testing interface. Available only in some test
+  // environments.
+  BindTestInterface(pending_receiver<NetworkServiceTest> receiver);
+
+  // Sets the First-Party Sets data. First-Party Sets are a collection of set
+  // declarations defined in the document:
+  // https://github.com/privacycg/first-party-sets. Each set is indicated by the
+  // primary site, and member sites. |sets| contains the mapping of site ->
+  // entry, where keys are sites in the sets, and values are entries containing
+  // site metadata (such as the primary site in the set). Primary sites are
+  // included as keys of the map.
+  //
+  // Only the first call can have any effect, subsequent invocations are
+  // ignored.
+  SetFirstPartySets(PublicFirstPartySets sets);
+
+  // Sets the list of ports which will be permitted even if they normally would
+  // be restricted.
+  SetExplicitlyAllowedPorts(array<uint16> ports);
+
+  // Parses response headers and returns a structured version to the caller.
+  // This call originates from the browser process. Used for navigations when
+  // the URLLoader didn't provide ParsedHeader in the first place. This happens
+  // when the raw headers represent untrustworthy input and the URLLoader used
+  // lives in a non-sandboxed process. It can also happen from some exotic
+  // URLLoader where parsing hasn't been implemented.
+  // In particular, this is used for request served from WebBundle,
+  // Extensions, etc.
+  ParseHeaders(url.mojom.Url url, HttpResponseHeaders headers)
+      => (ParsedHeaders parsed_headers);
 };

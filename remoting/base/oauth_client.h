@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,8 @@ class OAuthClient {
   // Called when GetCredentialsFromAuthCode is completed, with the |user_email|
   // and |refresh_token| that correspond to the given |auth_code|, or with empty
   // strings on error.
-  typedef base::Callback<void(const std::string& user_email,
-                              const std::string& refresh_token)>
+  typedef base::OnceCallback<void(const std::string& user_email,
+                                  const std::string& refresh_token)>
       CompletionCallback;
 
   virtual ~OAuthClient() {}

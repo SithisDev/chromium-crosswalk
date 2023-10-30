@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringize_macros.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/base/test_rsa_key_pair.h"
@@ -21,16 +21,17 @@
 #include "remoting/signaling/iq_sender.h"
 #include "remoting/signaling/mock_signal_strategy.h"
 #include "remoting/signaling/signaling_address.h"
+#include "remoting/signaling/xmpp_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
-#include "third_party/libjingle_xmpp/xmpp/constants.h"
 
 using jingle_xmpp::QName;
 using jingle_xmpp::XmlElement;
 
 using testing::_;
 using testing::DeleteArg;
+using testing::DoAll;
 using testing::Invoke;
 using testing::NotNull;
 using testing::Return;
@@ -73,8 +74,8 @@ class XmppRegisterSupportHostRequestTest : public testing::Test {
         .WillRepeatedly(RemoveListener(&signal_strategy_listeners_));
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   MockSignalStrategy signal_strategy_;
   base::ObserverList<SignalStrategy::Listener, true> signal_strategy_listeners_;
   scoped_refptr<RsaKeyPair> key_pair_;
@@ -91,10 +92,10 @@ TEST_F(XmppRegisterSupportHostRequestTest, Timeout) {
   request->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
 
   // Generate response and verify that callback is called.
-  EXPECT_CALL(callback_, Run("", base::TimeDelta::FromSeconds(0),
-                             ErrorCode::SIGNALING_TIMEOUT));
+  EXPECT_CALL(callback_,
+              Run("", base::Seconds(0), ErrorCode::SIGNALING_TIMEOUT));
 
-  scoped_task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(15));
+  task_environment_.FastForwardBy(base::Seconds(15));
 }
 
 TEST_F(XmppRegisterSupportHostRequestTest, Send) {
@@ -110,7 +111,7 @@ TEST_F(XmppRegisterSupportHostRequestTest, Send) {
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
   request->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Verify format of the query.
   std::unique_ptr<XmlElement> stanza(sent_iq);
@@ -156,10 +157,9 @@ TEST_F(XmppRegisterSupportHostRequestTest, Send) {
   EXPECT_EQ(expected_signature, signature->BodyText());
 
   // Generate response and verify that callback is called.
-  EXPECT_CALL(callback_, Run(kSupportId, base::TimeDelta::FromSeconds(300),
-                             ErrorCode::OK));
+  EXPECT_CALL(callback_, Run(kSupportId, base::Seconds(300), ErrorCode::OK));
 
-  std::unique_ptr<XmlElement> response(new XmlElement(jingle_xmpp::QN_IQ));
+  std::unique_ptr<XmlElement> response(new XmlElement(kQNameIq));
   response->AddAttr(QName(std::string(), "from"), kTestBotJid);
   response->AddAttr(QName(std::string(), "type"), "result");
   response->AddAttr(QName(std::string(), "id"), kStanzaId);
@@ -185,7 +185,7 @@ TEST_F(XmppRegisterSupportHostRequestTest, Send) {
   }
   EXPECT_EQ(1, consumed);
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 }  // namespace remoting

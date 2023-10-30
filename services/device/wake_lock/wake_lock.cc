@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "services/device/wake_lock/wake_lock_context.h"
 
 namespace device {
 
-WakeLock::WakeLock(mojom::WakeLockRequest request,
+WakeLock::WakeLock(mojo::PendingReceiver<mojom::WakeLock> receiver,
                    mojom::WakeLockType type,
                    mojom::WakeLockReason reason,
                    const std::string& description,
@@ -23,7 +25,7 @@ WakeLock::WakeLock(mojom::WakeLockRequest request,
       type_(type),
       reason_(reason),
       description_(std::make_unique<std::string>(description)),
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       context_id_(context_id),
       native_view_getter_(native_view_getter),
 #endif
@@ -31,47 +33,46 @@ WakeLock::WakeLock(mojom::WakeLockRequest request,
       file_task_runner_(std::move(file_task_runner)),
       observer_(observer) {
   DCHECK(observer_);
-  AddClient(std::move(request));
-  binding_set_.set_connection_error_handler(
-      base::Bind(&WakeLock::OnConnectionError, base::Unretained(this)));
+  AddClient(std::move(receiver));
+  receiver_set_.set_disconnect_handler(base::BindRepeating(
+      &WakeLock::OnConnectionError, base::Unretained(this)));
 }
 
 WakeLock::~WakeLock() {}
 
-void WakeLock::AddClient(mojom::WakeLockRequest request) {
+void WakeLock::AddClient(mojo::PendingReceiver<mojom::WakeLock> receiver) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
-  binding_set_.AddBinding(this, std::move(request),
-                          std::make_unique<bool>(false));
+  receiver_set_.Add(this, std::move(receiver), std::make_unique<bool>(false));
 }
 
 void WakeLock::RequestWakeLock() {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
-  DCHECK(binding_set_.dispatch_context());
+  DCHECK(receiver_set_.current_context());
   DCHECK_GE(num_lock_requests_, 0);
 
   // Uses the Context to get the outstanding status of current binding.
   // Two consecutive requests from the same client should be coalesced
   // as one request.
-  if (*binding_set_.dispatch_context()) {
+  if (*receiver_set_.current_context()) {
     return;
   }
 
-  *binding_set_.dispatch_context() = true;
+  *receiver_set_.current_context() = true;
   num_lock_requests_++;
   UpdateWakeLock();
 }
 
 void WakeLock::CancelWakeLock() {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
-  DCHECK(binding_set_.dispatch_context());
+  DCHECK(receiver_set_.current_context());
 
   // TODO(crbug.com/935063): Calling CancelWakeLock befoe RequestWakeLock
   // shouldn't be allowed.
-  if (!(*binding_set_.dispatch_context()))
+  if (!(*receiver_set_.current_context()))
     return;
 
   DCHECK_GT(num_lock_requests_, 0);
-  *binding_set_.dispatch_context() = false;
+  *receiver_set_.current_context() = false;
   num_lock_requests_--;
   UpdateWakeLock();
 }
@@ -80,12 +81,11 @@ void WakeLock::ChangeType(mojom::WakeLockType type,
                           ChangeTypeCallback callback) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   LOG(ERROR) << "WakeLock::ChangeType() has no effect on Android.";
   std::move(callback).Run(false);
-  return;
-#endif
-  if (binding_set_.size() > 1) {
+#else
+  if (receiver_set_.size() > 1) {
     LOG(ERROR) << "WakeLock::ChangeType() is not allowed when the current wake "
                   "lock is shared by more than one clients.";
     std::move(callback).Run(false);
@@ -101,6 +101,7 @@ void WakeLock::ChangeType(mojom::WakeLockType type,
   }
 
   std::move(callback).Run(true);
+#endif
 }
 
 void WakeLock::HasWakeLockForTests(HasWakeLockForTestsCallback callback) {
@@ -129,7 +130,7 @@ void WakeLock::CreateWakeLock() {
   if (type_ != mojom::WakeLockType::kPreventDisplaySleep)
     return;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (context_id_ == WakeLockContext::WakeLockInvalidContextId) {
     LOG(ERROR) << "Client must pass a valid context_id when requests wake lock "
                   "on Android.";
@@ -161,12 +162,12 @@ void WakeLock::SwapWakeLock() {
 void WakeLock::OnConnectionError() {
   // If this client has an outstanding wake lock request, decrease the
   // num_lock_requests and call UpdateWakeLock().
-  if (*binding_set_.dispatch_context() && num_lock_requests_ > 0) {
+  if (*receiver_set_.current_context() && num_lock_requests_ > 0) {
     num_lock_requests_--;
     UpdateWakeLock();
   }
 
-  if (binding_set_.empty()) {
+  if (receiver_set_.empty()) {
     // May delete |this|.
     observer_->OnConnectionError(type_, this);
   }

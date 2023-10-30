@@ -1,10 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/codec/scoped_vpx_codec.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check_op.h"
 #include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
 
 namespace remoting {

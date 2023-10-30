@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,18 @@
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "services/device/binder_overrides.h"
 #include "services/device/bluetooth/bluetooth_system_factory.h"
+#include "services/device/compute_pressure/pressure_manager_impl.h"
+#include "services/device/device_posture/device_posture_platform_provider.h"
+#include "services/device/device_posture/device_posture_provider_impl.h"
 #include "services/device/fingerprint/fingerprint.h"
 #include "services/device/generic_sensor/platform_sensor_provider.h"
 #include "services/device/generic_sensor/sensor_provider_impl.h"
@@ -29,7 +35,7 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
 #include "services/device/device_service_jni_headers/InterfaceRegistrar_jni.h"
 #include "services/device/screen_orientation/screen_orientation_listener_android.h"
@@ -40,99 +46,127 @@
 #include "services/device/vibration/vibration_manager_impl.h"
 #endif
 
-#if defined(OS_LINUX) && defined(USE_UDEV)
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(USE_UDEV)
 #include "services/device/hid/input_service_linux.h"
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_service.h"
+#endif
+
+namespace {
+
+#if !BUILDFLAG(IS_ANDROID)
+constexpr bool IsLaCrOS() {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  return true;
+#else
+  return false;
+#endif
+}
+#endif
+
+#if !BUILDFLAG(IS_ANDROID)
+void BindLaCrOSHidManager(
+    mojo::PendingReceiver<device::mojom::HidManager> receiver) {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // LaCrOS does not have direct access to the permission_broker service over
+  // D-Bus. Use the HidManager interface from ash-chrome instead.
+  auto* lacros_service = chromeos::LacrosService::Get();
+  DCHECK(lacros_service);
+  // If the Hid manager is not available, then the pending receiver is deleted.
+  if (lacros_service->IsAvailable<device::mojom::HidManager>()) {
+    lacros_service->GetRemote<device::mojom::HidManager>()->AddReceiver(
+        std::move(receiver));
+  }
+#endif
+}
+#endif
+
+}  // namespace
+
 namespace device {
 
-#if defined(OS_ANDROID)
+DeviceServiceParams::DeviceServiceParams() = default;
+
+DeviceServiceParams::~DeviceServiceParams() = default;
+
 std::unique_ptr<DeviceService> CreateDeviceService(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    network::NetworkConnectionTracker* network_connection_tracker,
-    const std::string& geolocation_api_key,
-    bool use_gms_core_location_provider,
-    const WakeLockContextCallback& wake_lock_context_callback,
-    const CustomLocationProviderCallback& custom_location_provider_callback,
-    const base::android::JavaRef<jobject>& java_nfc_delegate,
-    service_manager::mojom::ServiceRequest request) {
+    std::unique_ptr<DeviceServiceParams> params,
+    mojo::PendingReceiver<mojom::DeviceService> receiver) {
   GeolocationProviderImpl::SetGeolocationConfiguration(
-      url_loader_factory, geolocation_api_key,
-      custom_location_provider_callback, use_gms_core_location_provider);
-  return std::make_unique<DeviceService>(
-      std::move(file_task_runner), std::move(io_task_runner),
-      std::move(url_loader_factory), network_connection_tracker,
-      geolocation_api_key, wake_lock_context_callback, java_nfc_delegate,
-      std::move(request));
+      params->url_loader_factory, params->geolocation_api_key,
+      params->custom_location_provider_callback, params->geolocation_manager,
+      params->use_gms_core_location_provider);
+  return std::make_unique<DeviceService>(std::move(params),
+                                         std::move(receiver));
 }
-#else
-std::unique_ptr<DeviceService> CreateDeviceService(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    network::NetworkConnectionTracker* network_connection_tracker,
-    const std::string& geolocation_api_key,
-    const CustomLocationProviderCallback& custom_location_provider_callback,
-    service_manager::mojom::ServiceRequest request) {
-  GeolocationProviderImpl::SetGeolocationConfiguration(
-      url_loader_factory, geolocation_api_key,
-      custom_location_provider_callback);
-  return std::make_unique<DeviceService>(
-      std::move(file_task_runner), std::move(io_task_runner),
-      std::move(url_loader_factory), network_connection_tracker,
-      geolocation_api_key, std::move(request));
-}
+
+DeviceService::DeviceService(
+    std::unique_ptr<DeviceServiceParams> params,
+    mojo::PendingReceiver<mojom::DeviceService> receiver)
+    : file_task_runner_(std::move(params->file_task_runner)),
+      io_task_runner_(std::move(params->io_task_runner)),
+      url_loader_factory_(std::move(params->url_loader_factory)),
+      network_connection_tracker_(params->network_connection_tracker),
+      geolocation_api_key_(params->geolocation_api_key),
+      wake_lock_context_callback_(params->wake_lock_context_callback),
+      wake_lock_provider_(file_task_runner_,
+                          params->wake_lock_context_callback) {
+  receivers_.Add(this, std::move(receiver));
+
+#if BUILDFLAG(IS_ANDROID)
+  java_nfc_delegate_.Reset(params->java_nfc_delegate);
 #endif
 
-#if defined(OS_ANDROID)
-DeviceService::DeviceService(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    network::NetworkConnectionTracker* network_connection_tracker,
-    const std::string& geolocation_api_key,
-    const WakeLockContextCallback& wake_lock_context_callback,
-    const base::android::JavaRef<jobject>& java_nfc_delegate,
-    service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)),
-      file_task_runner_(std::move(file_task_runner)),
-      io_task_runner_(std::move(io_task_runner)),
-      url_loader_factory_(std::move(url_loader_factory)),
-      network_connection_tracker_(network_connection_tracker),
-      geolocation_api_key_(geolocation_api_key),
-      wake_lock_context_callback_(wake_lock_context_callback),
-      wake_lock_provider_(file_task_runner_, wake_lock_context_callback_),
-      java_interface_provider_initialized_(false) {
-  java_nfc_delegate_.Reset(java_nfc_delegate);
-}
+#if defined(IS_SERIAL_ENABLED_PLATFORM)
+  serial_port_manager_ = std::make_unique<SerialPortManagerImpl>(
+      io_task_runner_, base::ThreadTaskRunnerHandle::Get());
+#if BUILDFLAG(IS_MAC)
+  // On macOS the SerialDeviceEnumerator needs to run on the UI thread so that
+  // it has access to a CFRunLoop where it can register a notification source.
+  serial_port_manager_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 #else
-DeviceService::DeviceService(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    network::NetworkConnectionTracker* network_connection_tracker,
-    const std::string& geolocation_api_key,
-    service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)),
-      file_task_runner_(std::move(file_task_runner)),
-      io_task_runner_(std::move(io_task_runner)),
-      url_loader_factory_(std::move(url_loader_factory)),
-      network_connection_tracker_(network_connection_tracker),
-      geolocation_api_key_(geolocation_api_key),
-      wake_lock_provider_(file_task_runner_, wake_lock_context_callback_) {}
+  // On other platforms it must be allowed to do blocking IO.
+  serial_port_manager_task_runner_ =
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 #endif
+#endif  // defined(IS_SERIAL_ENABLED_PLATFORM)
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Ensure that the battery backend is initialized now; otherwise it may end up
+  // getting initialized on access during destruction, when it's no longer safe
+  // to initialize.
+  device::BatteryStatusService::GetInstance();
+#endif  // !BUILDFLAG(IS_ANDROID)
+}
 
 DeviceService::~DeviceService() {
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+  // NOTE: We don't call this on Chrome OS due to https://crbug.com/856771, as
+  // Shutdown() implicitly depends on DBusThreadManager, which may already be
+  // destroyed by the time DeviceService is destroyed. Fortunately on Chrome OS
+  // it's not really important that this runs anyway.
   device::BatteryStatusService::GetInstance()->Shutdown();
 #endif
-#if (defined(OS_LINUX) && defined(USE_UDEV)) || defined(OS_WIN) || \
-    defined(OS_MACOSX)
-  serial_port_manager_task_runner_->DeleteSoon(FROM_HERE,
-                                               std::move(serial_port_manager_));
-#endif
+#if defined(IS_SERIAL_ENABLED_PLATFORM)
+  auto* serial_port_manager = serial_port_manager_.release();
+  if (!serial_port_manager_task_runner_->DeleteSoon(FROM_HERE,
+                                                    serial_port_manager)) {
+    // The ThreadPool can be shutdown by the time ~DeviceService is triggered.
+    // Synchronously delete |serial_port_manager| in that event (which is
+    // naturally sequenced after the last task on
+    // |serial_port_manager_task_runner_| per ThreadPool shutdown semantics).
+    // See crbug.com/1263149#c20 for details.
+    delete serial_port_manager;
+  }
+#endif  // defined(IS_SERIAL_ENABLED_PLATFORM)
+}
+
+void DeviceService::AddReceiver(
+    mojo::PendingReceiver<mojom::DeviceService> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void DeviceService::SetPlatformSensorProviderForTesting(
@@ -141,186 +175,162 @@ void DeviceService::SetPlatformSensorProviderForTesting(
   sensor_provider_ = std::make_unique<SensorProviderImpl>(std::move(provider));
 }
 
-void DeviceService::OnStart() {
-  registry_.AddInterface<mojom::Fingerprint>(base::Bind(
-      &DeviceService::BindFingerprintRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::GeolocationConfig>(base::BindRepeating(
-      &DeviceService::BindGeolocationConfigRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::GeolocationContext>(base::Bind(
-      &DeviceService::BindGeolocationContextRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::GeolocationControl>(base::Bind(
-      &DeviceService::BindGeolocationControlRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::PowerMonitor>(base::Bind(
-      &DeviceService::BindPowerMonitorRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::PublicIpAddressGeolocationProvider>(
-      base::Bind(&DeviceService::BindPublicIpAddressGeolocationProviderRequest,
-                 base::Unretained(this)));
-  registry_.AddInterface<mojom::ScreenOrientationListener>(
-      base::Bind(&DeviceService::BindScreenOrientationListenerRequest,
-                 base::Unretained(this)));
-  registry_.AddInterface<mojom::SensorProvider>(base::Bind(
-      &DeviceService::BindSensorProviderRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::TimeZoneMonitor>(base::Bind(
-      &DeviceService::BindTimeZoneMonitorRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::WakeLockProvider>(base::Bind(
-      &DeviceService::BindWakeLockProviderRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::UsbDeviceManager>(base::Bind(
-      &DeviceService::BindUsbDeviceManagerRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::UsbDeviceManagerTest>(base::Bind(
-      &DeviceService::BindUsbDeviceManagerTestRequest, base::Unretained(this)));
+// static
+void DeviceService::OverrideGeolocationContextBinderForTesting(
+    GeolocationContextBinder binder) {
+  internal::GetGeolocationContextBinderOverride() = std::move(binder);
+}
 
-#if defined(OS_ANDROID)
-  registry_.AddInterface(GetJavaInterfaceProvider()
-                             ->CreateInterfaceFactory<mojom::BatteryMonitor>());
-  registry_.AddInterface(
-      GetJavaInterfaceProvider()->CreateInterfaceFactory<mojom::NFCProvider>());
-  registry_.AddInterface(
-      GetJavaInterfaceProvider()
-          ->CreateInterfaceFactory<mojom::VibrationManager>());
+// static
+void DeviceService::OverridePressureManagerBinderForTesting(
+    PressureManagerBinder binder) {
+  internal::GetPressureManagerBinderOverride() = std::move(binder);
+}
+
+void DeviceService::BindBatteryMonitor(
+    mojo::PendingReceiver<mojom::BatteryMonitor> receiver) {
+#if BUILDFLAG(IS_ANDROID)
+  GetJavaInterfaceProvider()->GetInterface(std::move(receiver));
 #else
-  registry_.AddInterface<mojom::BatteryMonitor>(base::Bind(
-      &DeviceService::BindBatteryMonitorRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::HidManager>(base::Bind(
-      &DeviceService::BindHidManagerRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::NFCProvider>(base::Bind(
-      &DeviceService::BindNFCProviderRequest, base::Unretained(this)));
-  registry_.AddInterface<mojom::VibrationManager>(base::Bind(
-      &DeviceService::BindVibrationManagerRequest, base::Unretained(this)));
-#endif
-
-#if (defined(OS_LINUX) && defined(USE_UDEV)) || defined(OS_WIN) || \
-    defined(OS_MACOSX)
-  // SerialPortManagerImpl must live on a thread that is allowed to do
-  // blocking IO.
-  serial_port_manager_ = std::make_unique<SerialPortManagerImpl>(
-      io_task_runner_, base::ThreadTaskRunnerHandle::Get());
-  serial_port_manager_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
-  registry_.AddInterface<mojom::SerialPortManager>(
-      base::BindRepeating(&SerialPortManagerImpl::Bind,
-                          base::Unretained(serial_port_manager_.get())),
-      serial_port_manager_task_runner_);
-#endif
-
-#if defined(OS_CHROMEOS)
-  registry_.AddInterface<mojom::BluetoothSystemFactory>(
-      base::BindRepeating(&DeviceService::BindBluetoothSystemFactoryRequest,
-                          base::Unretained(this)));
-  registry_.AddInterface<mojom::MtpManager>(base::BindRepeating(
-      &DeviceService::BindMtpManagerRequest, base::Unretained(this)));
-#endif
-
-#if defined(OS_LINUX) && defined(USE_UDEV)
-  registry_.AddInterface<mojom::InputDeviceManager>(base::Bind(
-      &DeviceService::BindInputDeviceManagerRequest, base::Unretained(this)));
+  BatteryMonitorImpl::Create(std::move(receiver));
 #endif
 }
 
-void DeviceService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(interface_name, std::move(interface_pipe));
+void DeviceService::BindPressureManager(
+    mojo::PendingReceiver<mojom::PressureManager> receiver) {
+  const auto& binder_override = internal::GetPressureManagerBinderOverride();
+  if (binder_override) {
+    binder_override.Run(std::move(receiver));
+    return;
+  }
+
+  if (!pressure_manager_)
+    pressure_manager_ = PressureManagerImpl::Create();
+  pressure_manager_->Bind(std::move(receiver));
 }
 
-#if !defined(OS_ANDROID)
-void DeviceService::BindBatteryMonitorRequest(
-    mojom::BatteryMonitorRequest request) {
-  BatteryMonitorImpl::Create(std::move(request));
+#if BUILDFLAG(IS_ANDROID)
+// static
+void DeviceService::OverrideNFCProviderBinderForTesting(
+    NFCProviderBinder binder) {
+  internal::GetNFCProviderBinderOverride() = std::move(binder);
 }
 
-void DeviceService::BindHidManagerRequest(mojom::HidManagerRequest request) {
-  if (!hid_manager_)
-    hid_manager_ = std::make_unique<HidManagerImpl>();
-  hid_manager_->AddBinding(std::move(request));
-}
-
-void DeviceService::BindNFCProviderRequest(mojom::NFCProviderRequest request) {
-  LOG(ERROR) << "NFC is only supported on Android";
-  NOTREACHED();
-}
-
-void DeviceService::BindVibrationManagerRequest(
-    mojom::VibrationManagerRequest request) {
-  VibrationManagerImpl::Create(std::move(request));
+void DeviceService::BindNFCProvider(
+    mojo::PendingReceiver<mojom::NFCProvider> receiver) {
+  const auto& binder_override = internal::GetNFCProviderBinderOverride();
+  if (binder_override)
+    binder_override.Run(std::move(receiver));
+  else
+    GetJavaInterfaceProvider()->GetInterface(std::move(receiver));
 }
 #endif
 
-#if defined(OS_CHROMEOS)
-void DeviceService::BindBluetoothSystemFactoryRequest(
-    mojom::BluetoothSystemFactoryRequest request) {
-  BluetoothSystemFactory::CreateFactory(std::move(request));
+void DeviceService::BindVibrationManager(
+    mojo::PendingReceiver<mojom::VibrationManager> receiver) {
+#if BUILDFLAG(IS_ANDROID)
+  GetJavaInterfaceProvider()->GetInterface(std::move(receiver));
+#else
+  VibrationManagerImpl::Create(std::move(receiver));
+#endif
 }
 
-void DeviceService::BindMtpManagerRequest(mojom::MtpManagerRequest request) {
+#if !BUILDFLAG(IS_ANDROID)
+void DeviceService::BindHidManager(
+    mojo::PendingReceiver<mojom::HidManager> receiver) {
+  if (IsLaCrOS() && !HidManagerImpl::IsHidServiceTesting()) {
+    BindLaCrOSHidManager(std::move(receiver));
+  } else {
+    if (!hid_manager_)
+      hid_manager_ = std::make_unique<HidManagerImpl>();
+    hid_manager_->AddReceiver(std::move(receiver));
+  }
+}
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void DeviceService::BindBluetoothSystemFactory(
+    mojo::PendingReceiver<mojom::BluetoothSystemFactory> receiver) {
+  BluetoothSystemFactory::CreateFactory(std::move(receiver));
+}
+
+void DeviceService::BindMtpManager(
+    mojo::PendingReceiver<mojom::MtpManager> receiver) {
   if (!mtp_device_manager_)
     mtp_device_manager_ = MtpDeviceManager::Initialize();
-  mtp_device_manager_->AddBinding(std::move(request));
+  mtp_device_manager_->AddReceiver(std::move(receiver));
 }
 #endif
 
-#if defined(OS_LINUX) && defined(USE_UDEV)
-void DeviceService::BindInputDeviceManagerRequest(
-    mojom::InputDeviceManagerRequest request) {
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(USE_UDEV)
+void DeviceService::BindInputDeviceManager(
+    mojo::PendingReceiver<mojom::InputDeviceManager> receiver) {
   file_task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(&InputServiceLinux::BindRequest, std::move(request)));
+      base::BindOnce(&InputServiceLinux::BindReceiver, std::move(receiver)));
 }
 #endif
 
-void DeviceService::BindFingerprintRequest(mojom::FingerprintRequest request) {
-  Fingerprint::Create(std::move(request));
+void DeviceService::BindFingerprint(
+    mojo::PendingReceiver<mojom::Fingerprint> receiver) {
+  Fingerprint::Create(std::move(receiver));
 }
 
-void DeviceService::BindGeolocationConfigRequest(
-    mojom::GeolocationConfigRequest request) {
-  GeolocationConfig::Create(std::move(request));
+void DeviceService::BindGeolocationConfig(
+    mojo::PendingReceiver<mojom::GeolocationConfig> receiver) {
+  GeolocationConfig::Create(std::move(receiver));
 }
 
-void DeviceService::BindGeolocationContextRequest(
-    mojom::GeolocationContextRequest request) {
-  GeolocationContext::Create(std::move(request));
+void DeviceService::BindGeolocationContext(
+    mojo::PendingReceiver<mojom::GeolocationContext> receiver) {
+  const auto& binder_override = internal::GetGeolocationContextBinderOverride();
+  if (binder_override) {
+    binder_override.Run(std::move(receiver));
+    return;
+  }
+
+  GeolocationContext::Create(std::move(receiver));
 }
 
-void DeviceService::BindGeolocationControlRequest(
-    mojom::GeolocationControlRequest request) {
-  GeolocationProviderImpl::GetInstance()->BindGeolocationControlRequest(
-      std::move(request));
+void DeviceService::BindGeolocationControl(
+    mojo::PendingReceiver<mojom::GeolocationControl> receiver) {
+  GeolocationProviderImpl::GetInstance()->BindGeolocationControlReceiver(
+      std::move(receiver));
 }
 
-void DeviceService::BindPowerMonitorRequest(
-    mojom::PowerMonitorRequest request) {
+void DeviceService::BindPowerMonitor(
+    mojo::PendingReceiver<mojom::PowerMonitor> receiver) {
   if (!power_monitor_message_broadcaster_) {
     power_monitor_message_broadcaster_ =
         std::make_unique<PowerMonitorMessageBroadcaster>();
   }
-  power_monitor_message_broadcaster_->Bind(std::move(request));
+  power_monitor_message_broadcaster_->Bind(std::move(receiver));
 }
 
-void DeviceService::BindPublicIpAddressGeolocationProviderRequest(
-    mojom::PublicIpAddressGeolocationProviderRequest request) {
+void DeviceService::BindPublicIpAddressGeolocationProvider(
+    mojo::PendingReceiver<mojom::PublicIpAddressGeolocationProvider> receiver) {
   if (!public_ip_address_geolocation_provider_) {
     public_ip_address_geolocation_provider_ =
         std::make_unique<PublicIpAddressGeolocationProvider>(
             url_loader_factory_, network_connection_tracker_,
             geolocation_api_key_);
   }
-  public_ip_address_geolocation_provider_->Bind(std::move(request));
+  public_ip_address_geolocation_provider_->Bind(std::move(receiver));
 }
 
-void DeviceService::BindScreenOrientationListenerRequest(
-    mojom::ScreenOrientationListenerRequest request) {
-#if defined(OS_ANDROID)
+void DeviceService::BindScreenOrientationListener(
+    mojo::PendingReceiver<mojom::ScreenOrientationListener> receiver) {
+#if BUILDFLAG(IS_ANDROID)
   if (io_task_runner_) {
     io_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&ScreenOrientationListenerAndroid::Create,
-                                  std::move(request)));
+                                  std::move(receiver)));
   }
 #endif
 }
 
-void DeviceService::BindSensorProviderRequest(
-    mojom::SensorProviderRequest request) {
+void DeviceService::BindSensorProvider(
+    mojo::PendingReceiver<mojom::SensorProvider> receiver) {
   if (!sensor_provider_) {
     auto platform_provider = PlatformSensorProvider::Create();
     if (!platform_provider)
@@ -328,31 +338,67 @@ void DeviceService::BindSensorProviderRequest(
     sensor_provider_ =
         std::make_unique<SensorProviderImpl>(std::move(platform_provider));
   }
-  sensor_provider_->Bind(std::move(request));
+  sensor_provider_->Bind(std::move(receiver));
 }
 
-void DeviceService::BindTimeZoneMonitorRequest(
-    mojom::TimeZoneMonitorRequest request) {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+void DeviceService::BindDevicePostureProvider(
+    mojo::PendingReceiver<mojom::DevicePostureProvider> receiver) {
+  if (!device_posture_provider_) {
+    auto posture_platform_provider_ = DevicePosturePlatformProvider::Create();
+    if (!posture_platform_provider_)
+      return;
+    device_posture_provider_ = std::make_unique<DevicePostureProviderImpl>(
+        std::move(posture_platform_provider_));
+  }
+  device_posture_provider_->Bind(std::move(receiver));
+}
+#endif
+
+void DeviceService::BindSerialPortManager(
+    mojo::PendingReceiver<mojom::SerialPortManager> receiver) {
+#if defined(IS_SERIAL_ENABLED_PLATFORM)
+  // TODO(crbug.com/1109621): SerialPortManagerImpl depends on the
+  // permission_broker service on Chromium OS. We will need to redirect
+  // connections for LaCrOS here.
+  DCHECK(serial_port_manager_task_runner_);
+  serial_port_manager_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&SerialPortManagerImpl::Bind,
+                                base::Unretained(serial_port_manager_.get()),
+                                std::move(receiver)));
+#else   // defined(IS_SERIAL_ENABLED_PLATFORM)
+  NOTREACHED() << "Serial devices not supported on this platform.";
+#endif  // defined(IS_SERIAL_ENABLED_PLATFORM)
+}
+
+void DeviceService::BindTimeZoneMonitor(
+    mojo::PendingReceiver<mojom::TimeZoneMonitor> receiver) {
   if (!time_zone_monitor_)
     time_zone_monitor_ = TimeZoneMonitor::Create(file_task_runner_);
-  time_zone_monitor_->Bind(std::move(request));
+  time_zone_monitor_->Bind(std::move(receiver));
 }
 
-void DeviceService::BindWakeLockProviderRequest(
-    mojom::WakeLockProviderRequest request) {
-  wake_lock_provider_.AddBinding(std::move(request));
+void DeviceService::BindWakeLockProvider(
+    mojo::PendingReceiver<mojom::WakeLockProvider> receiver) {
+  wake_lock_provider_.AddBinding(std::move(receiver));
 }
 
-void DeviceService::BindUsbDeviceManagerRequest(
-    mojom::UsbDeviceManagerRequest request) {
+void DeviceService::BindUsbDeviceManager(
+    mojo::PendingReceiver<mojom::UsbDeviceManager> receiver) {
+  // TODO(crbug.com/1109621): usb::DeviceManagerImpl depends on the
+  // permission_broker service on Chromium OS. We will need to redirect
+  // connections for LaCrOS here.
   if (!usb_device_manager_)
     usb_device_manager_ = std::make_unique<usb::DeviceManagerImpl>();
 
-  usb_device_manager_->AddBinding(std::move(request));
+  usb_device_manager_->AddReceiver(std::move(receiver));
 }
 
-void DeviceService::BindUsbDeviceManagerTestRequest(
-    mojom::UsbDeviceManagerTestRequest request) {
+void DeviceService::BindUsbDeviceManagerTest(
+    mojo::PendingReceiver<mojom::UsbDeviceManagerTest> receiver) {
+  // TODO(crbug.com/1109621): usb::DeviceManagerImpl depends on the
+  // permission_broker service on Chromium OS. We will need to redirect
+  // connections for LaCrOS here.
   if (!usb_device_manager_)
     usb_device_manager_ = std::make_unique<usb::DeviceManagerImpl>();
 
@@ -361,16 +407,17 @@ void DeviceService::BindUsbDeviceManagerTestRequest(
         usb_device_manager_->GetUsbService());
   }
 
-  usb_device_manager_test_->BindRequest(std::move(request));
+  usb_device_manager_test_->BindReceiver(std::move(receiver));
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 service_manager::InterfaceProvider* DeviceService::GetJavaInterfaceProvider() {
   if (!java_interface_provider_initialized_) {
-    service_manager::mojom::InterfaceProviderPtr provider;
+    mojo::PendingRemote<service_manager::mojom::InterfaceProvider> provider;
     JNIEnv* env = base::android::AttachCurrentThread();
     Java_InterfaceRegistrar_createInterfaceRegistryForContext(
-        env, mojo::MakeRequest(&provider).PassMessagePipe().release().value(),
+        env,
+        provider.InitWithNewPipeAndPassReceiver().PassPipe().release().value(),
         java_nfc_delegate_);
     java_interface_provider_.Bind(std::move(provider));
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/notreached.h"
 #include "services/device/usb/usb_device.h"
 
 namespace device {
@@ -57,7 +57,9 @@ void FakeUsbDeviceHandle::ResetDevice(ResultCallback callback) {
   NOTIMPLEMENTED();
 }
 
-void FakeUsbDeviceHandle::ClearHalt(uint8_t endpoint, ResultCallback callback) {
+void FakeUsbDeviceHandle::ClearHalt(mojom::UsbTransferDirection direction,
+                                    uint8_t endpoint_number,
+                                    ResultCallback callback) {
   NOTIMPLEMENTED();
 }
 

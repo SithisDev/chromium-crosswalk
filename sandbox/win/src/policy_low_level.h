@@ -1,23 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_POLICY_LOW_LEVEL_H__
-#define SANDBOX_SRC_POLICY_LOW_LEVEL_H__
+#ifndef SANDBOX_WIN_SRC_POLICY_LOW_LEVEL_H_
+#define SANDBOX_WIN_SRC_POLICY_LOW_LEVEL_H_
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include <list>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
+#include "base/memory/raw_ptr.h"
 #include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/policy_engine_opcodes.h"
 #include "sandbox/win/src/policy_engine_params.h"
 
 // Low level policy classes.
-// Built on top of the PolicyOpcode and OpcodeFatory, the low level policy
+// Built on top of the PolicyOpcode and OpcodeFactory, the low level policy
 // provides a way to define rules on strings and numbers but it is unaware
 // of Windows specific details or how the Interceptions must be set up.
 // To use these classes you construct one or more rules and add them to the
@@ -41,10 +42,6 @@
 // to the target process where it can be evaluated.
 
 namespace sandbox {
-
-// TODO(cpu): Move this constant to crosscall_client.h.
-const size_t kMaxServiceCount = 64;
-static_assert(IPC_LAST_TAG <= kMaxServiceCount, "kMaxServiceCount is too low");
 
 // Defines the memory layout of the policy. This memory is filled by
 // LowLevelPolicy object.
@@ -82,9 +79,14 @@ class PolicyRule;
 // Provides the means to collect rules into a policy store (memory)
 class LowLevelPolicy {
  public:
+  LowLevelPolicy() = delete;
+
   // policy_store: must contain allocated memory and the internal
   // size fields set to correct values.
   explicit LowLevelPolicy(PolicyGlobal* policy_store);
+
+  LowLevelPolicy(const LowLevelPolicy&) = delete;
+  LowLevelPolicy& operator=(const LowLevelPolicy&) = delete;
 
   // Destroys all the policy rules.
   ~LowLevelPolicy();
@@ -93,7 +95,7 @@ class LowLevelPolicy {
   // service: The id of the service that this rule is associated with,
   // for example the 'Open Thread' service or the "Create File" service.
   // returns false on error.
-  bool AddRule(int service, PolicyRule* rule);
+  bool AddRule(IpcTag service, PolicyRule* rule);
 
   // Generates all the rules added with AddRule() into the memory area
   // passed on the constructor. Returns false on error.
@@ -102,11 +104,10 @@ class LowLevelPolicy {
  private:
   struct RuleNode {
     const PolicyRule* rule;
-    int service;
+    IpcTag service;
   };
   std::list<RuleNode> rules_;
-  PolicyGlobal* policy_store_;
-  DISALLOW_IMPLICIT_CONSTRUCTORS(LowLevelPolicy);
+  raw_ptr<PolicyGlobal> policy_store_;
 };
 
 // There are 'if' rules and 'if not' comparisons
@@ -171,7 +172,7 @@ class PolicyRule {
                        int state,
                        bool last_call,
                        int* skip_count,
-                       base::string16* fragment);
+                       std::wstring* fragment);
 
   // Loop over all generated opcodes and copy them to increasing memory
   // addresses from opcode_start and copy the extra data (strings usually) into
@@ -181,12 +182,12 @@ class PolicyRule {
                   size_t opcode_size,
                   char* data_start,
                   size_t* data_size) const;
-  PolicyBuffer* buffer_;
-  OpcodeFactory* opcode_factory_;
+  raw_ptr<PolicyBuffer> buffer_;
+  raw_ptr<OpcodeFactory> opcode_factory_;
   EvalResult action_;
   bool done_;
 };
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_POLICY_LOW_LEVEL_H__
+#endif  // SANDBOX_WIN_SRC_POLICY_LOW_LEVEL_H_

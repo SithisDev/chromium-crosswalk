@@ -1,15 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/shared_impl/tracked_callback.h"
 
+#include <memory>
+
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/notreached.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
@@ -33,7 +36,7 @@ bool IsMainThread() {
 int32_t RunCompletionTask(TrackedCallback::CompletionTask completion_task,
                           int32_t result) {
   ProxyLock::AssertAcquired();
-  int32_t task_result = completion_task.Run(result);
+  int32_t task_result = std::move(completion_task).Run(result);
   if (result != PP_ERROR_ABORTED)
     result = task_result;
   return result;
@@ -73,8 +76,8 @@ TrackedCallback::TrackedCallback(Resource* resource,
     if (is_blocking()) {
       // This is a blocking completion callback, so we will need a condition
       // variable for blocking & signalling the calling thread.
-      operation_completed_condvar_.reset(
-          new base::ConditionVariable(proxy_lock));
+      operation_completed_condvar_ =
+          std::make_unique<base::ConditionVariable>(&lock_);
     } else {
       // It's a non-blocking callback, so we should have a MessageLoopResource
       // to dispatch to. Note that we don't error check here, though. Later,
@@ -132,8 +135,8 @@ void TrackedCallback::Run(int32_t result) {
     // the completion callback.
     MarkAsCompletedWithLock();
 
-    if (!completion_task_.is_null())
-      result = RunCompletionTask(completion_task_, result);
+    if (completion_task_)
+      result = RunCompletionTask(std::move(completion_task_), result);
 
     {
       base::AutoUnlock release(lock_);
@@ -148,11 +151,10 @@ void TrackedCallback::PostRun(int32_t result) {
   PostRunWithLock(result);
 }
 
-void TrackedCallback::set_completion_task(
-    const CompletionTask& completion_task) {
+void TrackedCallback::set_completion_task(CompletionTask completion_task) {
   base::AutoLock acquire(lock_);
   DCHECK(completion_task_.is_null());
-  completion_task_ = completion_task;
+  completion_task_ = std::move(completion_task);
 }
 
 // static
@@ -191,22 +193,25 @@ int32_t TrackedCallback::BlockUntilComplete() {
   // Protect us from being deleted to ensure operation_completed_condvar_ is
   // available to wait on when we drop our lock.
   scoped_refptr<TrackedCallback> thiz(this);
+
+  // Unlock proxy lock temporarily; We don't want to block whole proxy while
+  // we're waiting for the callback
+  ProxyLock::Release();
+
   while (!completed_) {
-    // Unlock our lock temporarily; any thread that tries to signal us will need
-    // the lock.
-    lock_.Release();
     operation_completed_condvar_->Wait();
-    // Note that the condvar releases the ProxyLock during Wait and re-acquires
-    // the ProxyLock when it's signaled. We reacquire lock_ immediately after,
-    // preserving lock order.
-    ProxyLock::AssertAcquired();
-    lock_.Acquire();
   }
 
-  if (!completion_task_.is_null()) {
-    result_for_blocked_callback_ =
-        RunCompletionTask(completion_task_, result_for_blocked_callback_);
-    completion_task_.Reset();
+  // Now we need to get ProxyLock back, but because it's used in outer code to
+  // maintain lock order we need to release our lock first
+  {
+    base::AutoUnlock unlock(lock_);
+    ProxyLock::Acquire();
+  }
+
+  if (completion_task_) {
+    result_for_blocked_callback_ = RunCompletionTask(
+        std::move(completion_task_), result_for_blocked_callback_);
   }
   return result_for_blocked_callback_;
 }
@@ -227,13 +232,13 @@ void TrackedCallback::MarkAsCompletedWithLock() {
   // We may not have a valid resource, in which case we're not in the tracker.
   if (resource_id_)
     tracker_->Remove(thiz);
-  tracker_ = NULL;
+  tracker_.reset();
 
   // Relax the cross-thread access restriction to non-thread-safe RefCount.
   // |lock_| protects the access to Resource instances.
   base::ScopedAllowCrossThreadRefCountAccess
       allow_cross_thread_ref_count_access;
-  target_loop_ = NULL;
+  target_loop_.reset();
 }
 
 void TrackedCallback::PostRunWithLock(int32_t result) {
@@ -253,17 +258,17 @@ void TrackedCallback::PostRunWithLock(int32_t result) {
     // directly.
     SignalBlockingCallback(result);
   } else {
-    base::Closure callback_closure(
-        RunWhileLocked(base::Bind(&TrackedCallback::Run, this, result)));
+    base::OnceClosure callback_closure(
+        RunWhileLocked(base::BindOnce(&TrackedCallback::Run, this, result)));
     if (target_loop_) {
-      target_loop_->PostClosure(FROM_HERE, callback_closure, 0);
+      target_loop_->PostClosure(FROM_HERE, std::move(callback_closure), 0);
     } else {
       // We must be running in-process and on the main thread (the Enter
       // classes protect against having a null target_loop_ otherwise).
       DCHECK(IsMainThread());
       DCHECK(PpapiGlobals::Get()->IsHostGlobals());
-      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                    callback_closure);
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, std::move(callback_closure));
     }
   }
   is_scheduled_ = true;

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,12 @@
 
 typedef NSString* RemotingFlag NS_STRING_ENUM;
 extern RemotingFlag const RemotingFlagUseWebRTC;
+extern RemotingFlag const RemotingFlagLastSeenNotificationMessageId;
+extern RemotingFlag const RemotingFlagNotificationUiState;
+extern RemotingFlag const RemotingFlagNotificationShownTimes;
 
 // |RemotingPreferences| is the centralized place to ask for information about
-// defaults and prefrences.
+// defaults and preferences.
 @interface RemotingPreferences : NSObject
 
 - (HostSettings*)settingsForHost:(NSString*)hostId;

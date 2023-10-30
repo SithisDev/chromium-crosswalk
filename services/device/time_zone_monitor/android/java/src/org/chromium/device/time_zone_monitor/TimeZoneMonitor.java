@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,14 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * Android implementation details for device::TimeZoneMonitorAndroid.
  */
 @JNINamespace("device")
 class TimeZoneMonitor {
-    private static final String TAG = "cr_TimeZoneMonitor";
+    private static final String TAG = "TimeZoneMonitor";
 
     private final IntentFilter mFilter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
     private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
@@ -30,7 +31,7 @@ class TimeZoneMonitor {
                 return;
             }
 
-            nativeTimeZoneChangedFromJava(mNativePtr);
+            TimeZoneMonitorJni.get().timeZoneChangedFromJava(mNativePtr, TimeZoneMonitor.this);
         }
     };
 
@@ -42,7 +43,8 @@ class TimeZoneMonitor {
      */
     private TimeZoneMonitor(long nativePtr) {
         mNativePtr = nativePtr;
-        ContextUtils.getApplicationContext().registerReceiver(mBroadcastReceiver, mFilter);
+        ContextUtils.registerNonExportedBroadcastReceiver(
+                ContextUtils.getApplicationContext(), mBroadcastReceiver, mFilter);
     }
 
     @CalledByNative
@@ -59,9 +61,12 @@ class TimeZoneMonitor {
         mNativePtr = 0;
     }
 
-    /**
-     * Native JNI call to device::TimeZoneMonitorAndroid::TimeZoneChanged.
-     * See device/time_zone_monitor/time_zone_monitor_android.cc.
-     */
-    private native void nativeTimeZoneChangedFromJava(long nativeTimeZoneMonitorAndroid);
+    @NativeMethods
+    interface Natives {
+        /**
+         * Native JNI call to device::TimeZoneMonitorAndroid::TimeZoneChanged. See
+         * device/time_zone_monitor/time_zone_monitor_android.cc.
+         */
+        void timeZoneChangedFromJava(long nativeTimeZoneMonitorAndroid, TimeZoneMonitor caller);
+    }
 }

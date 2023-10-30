@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include <string>
 
 #include "mojo/public/cpp/bindings/struct_traits.h"
-#include "services/tracing/public/mojom/perfetto_service.mojom.h"
+#include "services/tracing/public/mojom/perfetto_service.mojom-shared.h"
 #include "third_party/perfetto/include/perfetto/tracing/core/chrome_config.h"
 #include "third_party/perfetto/include/perfetto/tracing/core/data_source_config.h"
 
@@ -39,6 +39,10 @@ class StructTraits<tracing::mojom::DataSourceConfigDataView,
   static const std::string& legacy_config(
       const perfetto::DataSourceConfig& src) {
     return src.legacy_config();
+  }
+  static const std::string& track_event_config_raw(
+      const perfetto::DataSourceConfig& src) {
+    return src.track_event_config_raw();
   }
 
   static bool Read(tracing::mojom::DataSourceConfigDataView data,

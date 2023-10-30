@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromoting.jni;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.chromium.chromoting.R;
 
@@ -73,7 +73,7 @@ public interface ConnectionListener {
             case Error.SIGNALING_ERROR:
                 return R.string.error_p2p_failure;
             case Error.SIGNALING_TIMEOUT:
-                return R.string.error_p2p_failure;
+                return R.string.error_host_is_offline;
             case Error.HOST_OVERLOAD:
                 return R.string.error_host_overload;
             case Error.MAX_SESSION_LENGTH:

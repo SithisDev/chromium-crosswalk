@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,79 +6,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/data_decoder/public/mojom/xml_parser.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace data_decoder {
-
-namespace {
-
-// Class that does the actual parsing. Deletes itself when parsing is done.
-class SafeXmlParser {
- public:
-  SafeXmlParser(service_manager::Connector* connector,
-                const std::string& unsafe_xml,
-                XmlParserCallback callback,
-                const base::Token& batch_id);
-  ~SafeXmlParser();
-
- private:
-  void ReportResults(base::Optional<base::Value> parsed_json,
-                     const base::Optional<std::string>& error);
-
-  XmlParserCallback callback_;
-  mojom::XmlParserPtr xml_parser_ptr_;
-  SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(SafeXmlParser);
-};
-
-SafeXmlParser::SafeXmlParser(service_manager::Connector* connector,
-                             const std::string& unsafe_xml,
-                             XmlParserCallback callback,
-                             const base::Token& batch_id)
-    : callback_(std::move(callback)) {
-  DCHECK(callback_);  // Parsing without a callback is useless.
-
-  // If no batch ID has been provided, use a random instance ID to guarantee the
-  // connection is to a new service running in its own process.
-  connector->BindInterface(
-      service_manager::ServiceFilter::ByNameWithId(
-          mojom::kServiceName,
-          batch_id.is_zero() ? base::Token::CreateRandom() : batch_id),
-      &xml_parser_ptr_);
-
-  // Unretained(this) is safe as the xml_parser_ptr_ is owned by this class.
-  xml_parser_ptr_.set_connection_error_handler(base::BindOnce(
-      &SafeXmlParser::ReportResults, base::Unretained(this),
-      /*parsed_xml=*/base::nullopt,
-      base::make_optional(
-          std::string("Connection error with the XML parser process."))));
-  xml_parser_ptr_->Parse(
-      unsafe_xml,
-      base::BindOnce(&SafeXmlParser::ReportResults, base::Unretained(this)));
-}
-
-SafeXmlParser::~SafeXmlParser() = default;
-
-void SafeXmlParser::ReportResults(base::Optional<base::Value> parsed_xml,
-                                  const base::Optional<std::string>& error) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  std::unique_ptr<base::Value> parsed_xml_ptr =
-      parsed_xml ? base::Value::ToUniquePtrValue(std::move(parsed_xml.value()))
-                 : nullptr;
-  std::move(callback_).Run(std::move(parsed_xml_ptr), error);
-
-  // This should be the last interaction with this instance, safely delete.
-  delete this;
-}
-
-}  // namespace
 
 const base::Value* GetXmlElementChildren(const base::Value& element) {
   if (!element.is_dict())
@@ -90,13 +23,6 @@ const base::Value* GetXmlElementChildren(const base::Value& element) {
 std::string GetXmlQualifiedName(const std::string& name_space,
                                 const std::string& name) {
   return name_space.empty() ? name : name_space + ":" + name;
-}
-
-void ParseXml(service_manager::Connector* connector,
-              const std::string& unsafe_xml,
-              XmlParserCallback callback,
-              const base::Token& batch_id) {
-  new SafeXmlParser(connector, unsafe_xml, std::move(callback), batch_id);
 }
 
 bool IsXmlElementNamed(const base::Value& element, const std::string& name) {
@@ -134,7 +60,7 @@ bool GetXmlElementText(const base::Value& element, std::string* text) {
     return false;
 
   const base::Value* text_node = nullptr;
-  for (const base::Value& value : children->GetList()) {
+  for (const base::Value& value : children->GetListDeprecated()) {
     if (IsXmlElementOfType(value, mojom::XmlParser::kTextNodeType) ||
         IsXmlElementOfType(value, mojom::XmlParser::kCDataNodeType)) {
       text_node = &value;
@@ -162,7 +88,7 @@ bool GetXmlElementNamespacePrefix(const base::Value& element,
 
   // The namespaces dictionary is prefix -> URI, so we have to do a reverse
   // lookup.
-  for (const auto& item : namespaces->DictItems()) {
+  for (auto item : namespaces->DictItems()) {
     if (item.second.GetString() == namespace_uri) {
       *prefix = item.first;
       return true;
@@ -177,7 +103,7 @@ int GetXmlElementChildrenCount(const base::Value& element,
   if (!children)
     return 0;
   int child_count = 0;
-  for (const base::Value& value : children->GetList()) {
+  for (const base::Value& value : children->GetListDeprecated()) {
     DCHECK(value.is_dict());
     std::string tag_name;
     bool success = GetXmlElementTagName(value, &tag_name);
@@ -192,7 +118,7 @@ const base::Value* GetXmlElementChildWithType(const base::Value& element,
   const base::Value* children = GetXmlElementChildren(element);
   if (!children)
     return nullptr;
-  for (const base::Value& value : children->GetList()) {
+  for (const base::Value& value : children->GetListDeprecated()) {
     DCHECK(value.is_dict());
     if (IsXmlElementOfType(value, type)) {
       return &value;
@@ -206,7 +132,7 @@ const base::Value* GetXmlElementChildWithTag(const base::Value& element,
   const base::Value* children = GetXmlElementChildren(element);
   if (!children)
     return nullptr;
-  for (const base::Value& value : children->GetList()) {
+  for (const base::Value& value : children->GetListDeprecated()) {
     DCHECK(value.is_dict());
     if (IsXmlElementNamed(value, tag))
       return &value;
@@ -222,7 +148,7 @@ bool GetAllXmlElementChildrenWithTag(
   if (!children)
     return false;
   bool found = false;
-  for (const base::Value& child : children->GetList()) {
+  for (const base::Value& child : children->GetListDeprecated()) {
     DCHECK(child.is_dict());
     if (IsXmlElementNamed(child, tag)) {
       found = true;

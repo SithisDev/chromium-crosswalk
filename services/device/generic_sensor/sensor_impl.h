@@ -1,11 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_DEVICE_GENERIC_SENSOR_SENSOR_IMPL_H_
 #define SERVICES_DEVICE_GENERIC_SENSOR_SENSOR_IMPL_H_
 
-#include "base/macros.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/generic_sensor/platform_sensor.h"
 #include "services/device/public/mojom/sensor.mojom.h"
 
@@ -16,9 +17,13 @@ namespace device {
 class SensorImpl final : public mojom::Sensor, public PlatformSensor::Client {
  public:
   explicit SensorImpl(scoped_refptr<PlatformSensor> sensor);
+
+  SensorImpl(const SensorImpl&) = delete;
+  SensorImpl& operator=(const SensorImpl&) = delete;
+
   ~SensorImpl() override;
 
-  mojom::SensorClientRequest GetClient();
+  mojo::PendingReceiver<mojom::SensorClient> GetClient();
 
  private:
   // Sensor implementation.
@@ -32,18 +37,16 @@ class SensorImpl final : public mojom::Sensor, public PlatformSensor::Client {
   void Resume() override;
   void ConfigureReadingChangeNotifications(bool enabled) override;
 
-  // device::Sensor::Client implementation.
+  // device::PlatformSensor::Client implementation.
   void OnSensorReadingChanged(mojom::SensorType type) override;
   void OnSensorError() override;
   bool IsSuspended() override;
 
  private:
   scoped_refptr<PlatformSensor> sensor_;
-  mojom::SensorClientPtr client_;
+  mojo::Remote<mojom::SensorClient> client_;
   bool reading_notification_enabled_;
   bool suspended_;
-
-  DISALLOW_COPY_AND_ASSIGN(SensorImpl);
 };
 
 }  // namespace device

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "remoting/protocol/authenticator.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
@@ -40,6 +40,9 @@ class Spake2Authenticator : public Authenticator {
       const std::string& shared_secret,
       State initial_state);
 
+  Spake2Authenticator(const Spake2Authenticator&) = delete;
+  Spake2Authenticator& operator=(const Spake2Authenticator&) = delete;
+
   ~Spake2Authenticator() override;
 
   // Authenticator interface.
@@ -47,7 +50,7 @@ class Spake2Authenticator : public Authenticator {
   bool started() const override;
   RejectionReason rejection_reason() const override;
   void ProcessMessage(const jingle_xmpp::XmlElement* message,
-                      const base::Closure& resume_callback) override;
+                      base::OnceClosure resume_callback) override;
   std::unique_ptr<jingle_xmpp::XmlElement> GetNextMessage() override;
   const std::string& GetAuthKey() const override;
   std::unique_ptr<ChannelAuthenticator> CreateChannelAuthenticator()
@@ -81,17 +84,15 @@ class Spake2Authenticator : public Authenticator {
   std::string remote_cert_;
 
   // Used for both host and client authenticators.
-  SPAKE2_CTX* spake2_context_;
+  raw_ptr<SPAKE2_CTX> spake2_context_;
   State state_;
   bool started_ = false;
-  RejectionReason rejection_reason_ = INVALID_CREDENTIALS;
+  RejectionReason rejection_reason_ = RejectionReason::INVALID_CREDENTIALS;
   std::string local_spake_message_;
   bool spake_message_sent_ = false;
   std::string outgoing_verification_hash_;
   std::string auth_key_;
   std::string expected_verification_hash_;
-
-  DISALLOW_COPY_AND_ASSIGN(Spake2Authenticator);
 };
 
 }  // namespace protocol

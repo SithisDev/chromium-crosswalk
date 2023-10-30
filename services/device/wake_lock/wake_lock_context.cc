@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <string>
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/device/wake_lock/wake_lock.h"
 
 namespace device {
@@ -24,12 +25,13 @@ WakeLockContext::WakeLockContext(
 
 WakeLockContext::~WakeLockContext() {}
 
-void WakeLockContext::GetWakeLock(mojom::WakeLockType type,
-                                  mojom::WakeLockReason reason,
-                                  const std::string& description,
-                                  mojom::WakeLockRequest request) {
+void WakeLockContext::GetWakeLock(
+    mojom::WakeLockType type,
+    mojom::WakeLockReason reason,
+    const std::string& description,
+    mojo::PendingReceiver<mojom::WakeLock> receiver) {
   wake_locks_.push_back(std::make_unique<WakeLock>(
-      std::move(request), type, reason, description, context_id_,
+      std::move(receiver), type, reason, description, context_id_,
       native_view_getter_, file_task_runner_, this));
 }
 

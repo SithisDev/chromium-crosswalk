@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/video_capture/testing_controls_impl.h"
 
+#include "base/check.h"
+
 namespace video_capture {
 
-TestingControlsImpl::TestingControlsImpl(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref)
-    : service_ref_(std::move(service_ref)) {}
+TestingControlsImpl::TestingControlsImpl() = default;
 
 TestingControlsImpl::~TestingControlsImpl() = default;
 

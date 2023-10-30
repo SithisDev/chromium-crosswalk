@@ -1,17 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/file_transfer/local_file_operations.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/containers/queue.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/test/scoped_path_override.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "remoting/host/file_transfer/fake_file_chooser.h"
+#include "remoting/host/file_transfer/test_byte_vector_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
@@ -47,34 +48,38 @@ class LocalFileOperationsTest : public testing::Test {
       base::FilePath::FromUTF8Unsafe("test-file (1).txt");
   const base::FilePath kTestFilenameTertiary =
       base::FilePath::FromUTF8Unsafe("test-file (2).txt");
-  const std::string kTestDataOne = "this is the first test string";
-  const std::string kTestDataTwo = "this is the second test string";
-  const std::string kTestDataThree = "this is the third test string";
+  const std::vector<std::uint8_t> kTestDataOne =
+      ByteArrayFrom("this is the first test string");
+  const std::vector<std::uint8_t> kTestDataTwo =
+      ByteArrayFrom("this is the second test string");
+  const std::vector<std::uint8_t> kTestDataThree =
+      ByteArrayFrom("this is the third test string");
+  const std::vector<std::uint8_t> kTestDataSmallTail = ByteArrayFrom("string4");
 
   base::FilePath TestDir();
   void WriteFile(const base::FilePath& filename,
-                 base::queue<std::string> chunks,
+                 base::queue<std::vector<uint8_t>> chunks,
                  bool close);
-  void OnOperationComplete(base::queue<std::string> remaining_chunks,
+  void OnOperationComplete(base::queue<std::vector<uint8_t>> remaining_chunks,
                            bool close,
                            FileOperations::Writer::Result result);
   void OnCloseComplete(FileOperations::Writer::Result result);
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  // Points DIR_USER_DESKTOP at a scoped temporary directory.
   base::ScopedPathOverride scoped_path_override_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<FileOperations> file_operations_;
   std::unique_ptr<FileOperations::Writer> file_writer_;
   bool operation_completed_ = false;
 };
 
 LocalFileOperationsTest::LocalFileOperationsTest()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-          base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED),
-      // Points DIR_USER_DESKTOP at a scoped temporary directory.
-      scoped_path_override_(base::DIR_USER_DESKTOP),
+    : scoped_path_override_(base::DIR_USER_DESKTOP),
+      task_environment_(
+          base::test::TaskEnvironment::MainThreadType::DEFAULT,
+          base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED),
       file_operations_(std::make_unique<LocalFileOperations>(
-          scoped_task_environment_.GetMainThreadTaskRunner())) {}
+          task_environment_.GetMainThreadTaskRunner())) {}
 
 void LocalFileOperationsTest::SetUp() {}
 
@@ -86,9 +91,10 @@ base::FilePath LocalFileOperationsTest::TestDir() {
   return result;
 }
 
-void LocalFileOperationsTest::WriteFile(const base::FilePath& filename,
-                                        base::queue<std::string> chunks,
-                                        bool close) {
+void LocalFileOperationsTest::WriteFile(
+    const base::FilePath& filename,
+    base::queue<std::vector<std::uint8_t>> chunks,
+    bool close) {
   operation_completed_ = false;
   file_writer_ = file_operations_->CreateWriter();
   file_writer_->Open(
@@ -98,12 +104,12 @@ void LocalFileOperationsTest::WriteFile(const base::FilePath& filename,
 }
 
 void LocalFileOperationsTest::OnOperationComplete(
-    base::queue<std::string> remaining_chunks,
+    base::queue<std::vector<std::uint8_t>> remaining_chunks,
     bool close,
     FileOperations::Writer::Result result) {
   ASSERT_TRUE(result);
   if (!remaining_chunks.empty()) {
-    std::string next_chunk = std::move(remaining_chunks.front());
+    std::vector<std::uint8_t> next_chunk = std::move(remaining_chunks.front());
     remaining_chunks.pop();
     file_writer_->WriteChunk(
         std::move(next_chunk),
@@ -126,76 +132,99 @@ void LocalFileOperationsTest::OnCloseComplete(
 
 // Verifies that a file consisting of three chunks can be written successfully.
 TEST_F(LocalFileOperationsTest, WritesThreeChunks) {
-  WriteFile(
-      kTestFilename,
-      base::queue<std::string>({kTestDataOne, kTestDataTwo, kTestDataThree}),
-      true /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>(
+                {kTestDataOne, kTestDataTwo, kTestDataThree}),
+            true /* close */);
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(operation_completed_);
 
   std::string actual_file_data;
   ASSERT_TRUE(base::ReadFileToString(TestDir().Append(kTestFilename),
                                      &actual_file_data));
-  ASSERT_EQ(kTestDataOne + kTestDataTwo + kTestDataThree, actual_file_data);
+  ASSERT_EQ(ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree),
+            ByteArrayFrom(actual_file_data));
+}
+
+// Verifies that a file with a small last chunk can be written successfully.
+TEST_F(LocalFileOperationsTest, WritesSmallTail) {
+  WriteFile(
+      kTestFilename,
+      base::queue<std::vector<std::uint8_t>>(
+          {kTestDataOne, kTestDataTwo, kTestDataThree, kTestDataSmallTail}),
+      true /* close */);
+  task_environment_.RunUntilIdle();
+  ASSERT_TRUE(operation_completed_);
+
+  std::string actual_file_data;
+  ASSERT_TRUE(base::ReadFileToString(TestDir().Append(kTestFilename),
+                                     &actual_file_data));
+  ASSERT_EQ(ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree,
+                          kTestDataSmallTail),
+            ByteArrayFrom(actual_file_data));
 }
 
 // Verifies that LocalFileOperations will write to a file named "file (1).txt"
 // if "file.txt" already exists, and "file (2).txt" after that.
 TEST_F(LocalFileOperationsTest, RenamesFileIfExists) {
-  WriteFile(kTestFilename, base::queue<std::string>({kTestDataOne}),
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>({kTestDataOne}),
             true /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(operation_completed_);
 
-  WriteFile(kTestFilename, base::queue<std::string>({kTestDataTwo}),
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>({kTestDataTwo}),
             true /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(operation_completed_);
 
-  WriteFile(kTestFilename, base::queue<std::string>({kTestDataThree}),
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>({kTestDataThree}),
             true /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(operation_completed_);
 
   std::string actual_file_data_one;
   EXPECT_TRUE(base::ReadFileToString(TestDir().Append(kTestFilename),
                                      &actual_file_data_one));
-  EXPECT_EQ(kTestDataOne, actual_file_data_one);
+  EXPECT_EQ(kTestDataOne, ByteArrayFrom(actual_file_data_one));
   std::string actual_file_data_two;
   EXPECT_TRUE(base::ReadFileToString(TestDir().Append(kTestFilenameSecondary),
                                      &actual_file_data_two));
-  EXPECT_EQ(kTestDataTwo, actual_file_data_two);
+  EXPECT_EQ(kTestDataTwo, ByteArrayFrom(actual_file_data_two));
   std::string actual_file_data_three;
   EXPECT_TRUE(base::ReadFileToString(TestDir().Append(kTestFilenameTertiary),
                                      &actual_file_data_three));
-  EXPECT_EQ(kTestDataThree, actual_file_data_three);
+  EXPECT_EQ(kTestDataThree, ByteArrayFrom(actual_file_data_three));
 }
 
 // Verifies that dropping early deletes the temporary file.
 TEST_F(LocalFileOperationsTest, DroppingDeletesTemp) {
-  WriteFile(
-      kTestFilename,
-      base::queue<std::string>({kTestDataOne, kTestDataTwo, kTestDataThree}),
-      false /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>(
+                {kTestDataOne, kTestDataTwo, kTestDataThree}),
+            false /* close */);
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(operation_completed_);
 
   file_writer_.reset();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_TRUE(base::IsDirectoryEmpty(TestDir()));
 }
 
 // Verifies that dropping works while an operation is pending.
 TEST_F(LocalFileOperationsTest, CancelsWhileOperationPending) {
-  WriteFile(kTestFilename, base::queue<std::string>({kTestDataOne}),
+  WriteFile(kTestFilename,
+            base::queue<std::vector<std::uint8_t>>({kTestDataOne}),
             false /* close */);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(operation_completed_);
 
   file_writer_->WriteChunk(kTestDataTwo, base::DoNothing());
   file_writer_.reset();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_TRUE(base::IsDirectoryEmpty(TestDir()));
 }
@@ -203,21 +232,24 @@ TEST_F(LocalFileOperationsTest, CancelsWhileOperationPending) {
 // Verifies that a file can be successfully opened for reading.
 TEST_F(LocalFileOperationsTest, OpensReader) {
   base::FilePath path = TestDir().Append(kTestFilename);
-  std::string contents = kTestDataOne + kTestDataTwo + kTestDataThree;
-  ASSERT_EQ(static_cast<int>(contents.size()),
-            base::WriteFile(path, contents.data(), contents.size()));
+  std::vector<std::uint8_t> contents =
+      ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree);
+  ASSERT_EQ(
+      static_cast<int>(contents.size()),
+      base::WriteFile(path, reinterpret_cast<const char*>(contents.data()),
+                      contents.size()));
 
   std::unique_ptr<FileOperations::Reader> reader =
       file_operations_->CreateReader();
 
   FakeFileChooser::SetResult(path);
-  base::Optional<FileOperations::Reader::OpenResult> open_result;
+  absl::optional<FileOperations::Reader::OpenResult> open_result;
   ASSERT_EQ(FileOperations::kCreated, reader->state());
   reader->Open(BindLambda([&](FileOperations::Reader::OpenResult result) {
     open_result = std::move(result);
   }));
   ASSERT_EQ(FileOperations::kBusy, reader->state());
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(FileOperations::kReady, reader->state());
   ASSERT_TRUE(open_result);
   ASSERT_TRUE(*open_result);
@@ -228,30 +260,33 @@ TEST_F(LocalFileOperationsTest, OpensReader) {
 // Verifies that a file can be successfully read in three chunks.
 TEST_F(LocalFileOperationsTest, ReadsThreeChunks) {
   base::FilePath path = TestDir().Append(kTestFilename);
-  std::string contents = kTestDataOne + kTestDataTwo + kTestDataThree;
-  ASSERT_EQ(static_cast<int>(contents.size()),
-            base::WriteFile(path, contents.data(), contents.size()));
+  std::vector<std::uint8_t> contents =
+      ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree);
+  ASSERT_EQ(
+      static_cast<int>(contents.size()),
+      base::WriteFile(path, reinterpret_cast<const char*>(contents.data()),
+                      contents.size()));
 
   std::unique_ptr<FileOperations::Reader> reader =
       file_operations_->CreateReader();
 
   FakeFileChooser::SetResult(path);
-  base::Optional<FileOperations::Reader::OpenResult> open_result;
+  absl::optional<FileOperations::Reader::OpenResult> open_result;
   reader->Open(BindLambda([&](FileOperations::Reader::OpenResult result) {
     open_result = std::move(result);
   }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(open_result && *open_result);
 
   for (const auto& chunk : {kTestDataOne, kTestDataTwo, kTestDataThree}) {
-    base::Optional<FileOperations::Reader::ReadResult> read_result;
+    absl::optional<FileOperations::Reader::ReadResult> read_result;
     reader->ReadChunk(
         chunk.size(),
         BindLambda([&](FileOperations::Reader::ReadResult result) {
           read_result = std::move(result);
         }));
     ASSERT_EQ(FileOperations::kBusy, reader->state());
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     ASSERT_EQ(FileOperations::kReady, reader->state());
     ASSERT_TRUE(read_result);
     ASSERT_TRUE(*read_result);
@@ -262,28 +297,31 @@ TEST_F(LocalFileOperationsTest, ReadsThreeChunks) {
 // Verifies proper EOF handling.
 TEST_F(LocalFileOperationsTest, ReaderHandlesEof) {
   base::FilePath path = TestDir().Append(kTestFilename);
-  std::string contents = kTestDataOne + kTestDataTwo + kTestDataThree;
-  ASSERT_EQ(static_cast<int>(contents.size()),
-            base::WriteFile(path, contents.data(), contents.size()));
+  std::vector<std::uint8_t> contents =
+      ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree);
+  ASSERT_EQ(
+      static_cast<int>(contents.size()),
+      base::WriteFile(path, reinterpret_cast<const char*>(contents.data()),
+                      contents.size()));
 
   std::unique_ptr<FileOperations::Reader> reader =
       file_operations_->CreateReader();
 
   FakeFileChooser::SetResult(path);
-  base::Optional<FileOperations::Reader::OpenResult> open_result;
+  absl::optional<FileOperations::Reader::OpenResult> open_result;
   reader->Open(BindLambda([&](FileOperations::Reader::OpenResult result) {
     open_result = std::move(result);
   }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(open_result && *open_result);
 
-  base::Optional<FileOperations::Reader::ReadResult> read_result;
+  absl::optional<FileOperations::Reader::ReadResult> read_result;
   reader->ReadChunk(
       contents.size() + 5,  // Attempt to read more than is in file.
       BindLambda([&](FileOperations::Reader::ReadResult result) {
         read_result = std::move(result);
       }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_EQ(FileOperations::kReady, reader->state());
   ASSERT_TRUE(read_result && *read_result);
   EXPECT_EQ(contents, **read_result);
@@ -293,7 +331,7 @@ TEST_F(LocalFileOperationsTest, ReaderHandlesEof) {
                     BindLambda([&](FileOperations::Reader::ReadResult result) {
                       read_result = std::move(result);
                     }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(FileOperations::kComplete, reader->state());
   ASSERT_TRUE(read_result && *read_result);
   EXPECT_EQ(std::size_t{0}, (*read_result)->size());
@@ -306,11 +344,11 @@ TEST_F(LocalFileOperationsTest, ReaderCancels) {
 
   FakeFileChooser::SetResult(protocol::MakeFileTransferError(
       FROM_HERE, protocol::FileTransfer_Error_Type_CANCELED));
-  base::Optional<FileOperations::Reader::OpenResult> open_result;
+  absl::optional<FileOperations::Reader::OpenResult> open_result;
   reader->Open(BindLambda([&](FileOperations::Reader::OpenResult result) {
     open_result = std::move(result);
   }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(FileOperations::kFailed, reader->state());
   ASSERT_TRUE(open_result);
   ASSERT_FALSE(*open_result);
@@ -325,11 +363,11 @@ TEST_F(LocalFileOperationsTest, FileNotFound) {
 
   // Currently non-existent file.
   FakeFileChooser::SetResult(TestDir().Append(kTestFilename));
-  base::Optional<FileOperations::Reader::OpenResult> open_result;
+  absl::optional<FileOperations::Reader::OpenResult> open_result;
   reader->Open(BindLambda([&](FileOperations::Reader::OpenResult result) {
     open_result = std::move(result);
   }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(FileOperations::kFailed, reader->state());
   ASSERT_TRUE(open_result);
   ASSERT_FALSE(*open_result);

@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,7 @@ import("//build/config/android/rules.gni")
 _jni_sources = [
   "java/src/org/chromium/services/media_session/MediaImage.java",
   "java/src/org/chromium/services/media_session/MediaMetadata.java",
+  "java/src/org/chromium/services/media_session/MediaPosition.java",
 ]
 
 generate_jni("media_session_jni_headers") {
@@ -16,8 +17,10 @@ generate_jni("media_session_jni_headers") {
 if (current_toolchain == default_toolchain) {
   android_library("media_session_java") {
     deps = [
-      "//base:base_java",
+      "//base:jni_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
+      "//url:gurl_java",
     ]
-    java_files = _jni_sources
+    sources = _jni_sources
   }
 }

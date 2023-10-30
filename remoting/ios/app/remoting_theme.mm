@@ -1,22 +1,48 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#import "remoting/ios/app/remoting_theme.h"
+
+#import <MaterialComponents/MDCAlertColorThemer.h>
+#import <MaterialComponents/MDCColorScheme.h>
+
+#include "remoting/base/string_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-#import "remoting/ios/app/remoting_theme.h"
-
-#import "ios/third_party/material_components_ios/src/components/Dialogs/src/ColorThemer/MDCAlertColorThemer.h"
-#import "ios/third_party/material_components_ios/src/components/Themes/src/MDCColorScheme.h"
-
-#include "remoting/base/string_resources.h"
-#include "ui/base/l10n/l10n_util.h"
-
 @implementation RemotingTheme
 
 #pragma mark - Colors
+
++ (UIColor*)dialogBackgroundColor {
+  return UIColor.whiteColor;
+}
+
++ (UIColor*)dialogTextColor {
+  return UIColor.blackColor;
+}
+
++ (UIColor*)dialogPrimaryButtonTextColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithRed:0.29 green:0.58 blue:0.96 alpha:1.0];
+  });
+  return color;
+}
+
++ (UIColor*)dialogSecondaryButtonTextColor {
+  static UIColor* color;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    color = [UIColor colorWithWhite:0.25f alpha:1.f];
+  });
+  return color;
+}
 
 + (UIColor*)firstLaunchViewBackgroundColor {
   return UIColor.whiteColor;
@@ -312,7 +338,8 @@
   static UIImage* icon;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    icon = [UIImage imageNamed:@"ic_help"];
+    icon = [[UIImage imageNamed:@"ic_help"]
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   });
   return icon;
 }
@@ -321,7 +348,8 @@
   static UIImage* icon;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    icon = [UIImage imageNamed:@"ic_feedback"];
+    icon = [[UIImage imageNamed:@"ic_feedback"]
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   });
   return icon;
 }

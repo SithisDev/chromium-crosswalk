@@ -1,18 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
+#include <memory>
 #include <tuple>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/observer_list.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/message_filter.h"
@@ -93,10 +95,10 @@ void TearDownRemoteHarness(ProxyTestHarnessBase* harness,
   harness_torn_down->Signal();
 }
 
-void RunTaskOnRemoteHarness(const base::Closure& task,
+void RunTaskOnRemoteHarness(base::OnceClosure task,
                             base::WaitableEvent* task_complete) {
- task.Run();
- task_complete->Signal();
+  std::move(task).Run();
+  task_complete->Signal();
 }
 
 }  // namespace
@@ -170,10 +172,8 @@ void PluginProxyTestHarness::SetUpHarness() {
 
   resource_tracker().DidCreateInstance(pp_instance());
 
-  plugin_dispatcher_.reset(new PluginDispatcher(
-      &MockGetInterface,
-      PpapiPermissions(),
-      false));
+  plugin_dispatcher_ = std::make_unique<PluginDispatcher>(
+      &MockGetInterface, PpapiPermissions(), false);
   plugin_dispatcher_->InitWithTestSink(&sink());
   // The plugin proxy delegate is needed for
   // |PluginProxyDelegate::GetBrowserSender| which is used
@@ -198,10 +198,8 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
   resource_tracker().DidCreateInstance(pp_instance());
   plugin_delegate_mock_.Init(ipc_task_runner, shutdown_event);
 
-  plugin_dispatcher_.reset(new PluginDispatcher(
-      &MockGetInterface,
-      PpapiPermissions(),
-      false));
+  plugin_dispatcher_ = std::make_unique<PluginDispatcher>(
+      &MockGetInterface, PpapiPermissions(), false);
   plugin_dispatcher_->InitPluginWithChannel(&plugin_delegate_mock_,
                                             base::kNullProcessId,
                                             channel_handle,
@@ -225,13 +223,13 @@ void PluginProxyTestHarness::TearDownHarness() {
 }
 
 void PluginProxyTestHarness::CreatePluginGlobals(
-    const scoped_refptr<base::TaskRunner>& ipc_task_runner) {
+    const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner) {
   if (globals_config_ == PER_THREAD_GLOBALS) {
-    plugin_globals_.reset(new PluginGlobals(PpapiGlobals::PerThreadForTest(),
-                                            ipc_task_runner));
+    plugin_globals_ = std::make_unique<PluginGlobals>(
+        PpapiGlobals::PerThreadForTest(), ipc_task_runner);
     PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   } else {
-    plugin_globals_.reset(new PluginGlobals(ipc_task_runner));
+    plugin_globals_ = std::make_unique<PluginGlobals>(ipc_task_runner);
   }
 }
 
@@ -252,13 +250,6 @@ PluginProxyTestHarness::PluginDelegateMock::ShareHandleWithRemote(
     bool should_close_source) {
   return IPC::GetPlatformFileForTransit(handle,
                                         should_close_source);
-}
-
-base::SharedMemoryHandle
-PluginProxyTestHarness::PluginDelegateMock::ShareSharedMemoryHandleWithRemote(
-    const base::SharedMemoryHandle& handle,
-    base::ProcessId /* remote_pid */) {
-  return base::SharedMemory::DuplicateHandle(handle);
 }
 
 base::UnsafeSharedMemoryRegion PluginProxyTestHarness::PluginDelegateMock::
@@ -294,10 +285,6 @@ IPC::Sender* PluginProxyTestHarness::PluginDelegateMock::GetBrowserSender() {
 
 std::string PluginProxyTestHarness::PluginDelegateMock::GetUILanguage() {
   return std::string("en-US");
-}
-
-void PluginProxyTestHarness::PluginDelegateMock::PreCacheFontForFlash(
-    const void* logfontw) {
 }
 
 void PluginProxyTestHarness::PluginDelegateMock::SetActiveURL(
@@ -340,10 +327,10 @@ void PluginProxyMultiThreadTest::RunTest() {
   main_thread_task_runner_ = PpapiGlobals::Get()->GetMainThreadMessageLoop();
   ASSERT_EQ(main_thread_task_runner_.get(),
             base::ThreadTaskRunnerHandle::Get().get());
-  nested_main_thread_message_loop_.reset(new base::RunLoop());
+  nested_main_thread_message_loop_ = std::make_unique<base::RunLoop>();
 
-  secondary_thread_.reset(new base::DelegateSimpleThread(
-      this, "PluginProxyMultiThreadTest"));
+  secondary_thread_ = std::make_unique<base::DelegateSimpleThread>(
+      this, "PluginProxyMultiThreadTest");
 
   {
     ProxyAutoLock auto_lock;
@@ -370,12 +357,12 @@ void PluginProxyMultiThreadTest::RunTest() {
 
     // The destruction requires a valid PpapiGlobals instance, so we should
     // explicitly release it.
-    secondary_thread_message_loop_ = NULL;
+    secondary_thread_message_loop_.reset();
   }
 
   secondary_thread_.reset(NULL);
   nested_main_thread_message_loop_.reset(NULL);
-  main_thread_task_runner_ = NULL;
+  main_thread_task_runner_.reset();
 }
 
 void PluginProxyMultiThreadTest::CheckOnThread(ThreadType thread_type) {
@@ -442,10 +429,8 @@ void HostProxyTestHarness::SetUpHarness() {
   // These must be first since the dispatcher set-up uses them.
   CreateHostGlobals();
 
-  host_dispatcher_.reset(new HostDispatcher(
-      pp_module(),
-      &MockGetInterface,
-      PpapiPermissions::AllPermissions()));
+  host_dispatcher_ = std::make_unique<HostDispatcher>(
+      pp_module(), &MockGetInterface, PpapiPermissions::AllPermissions());
   host_dispatcher_->InitWithTestSink(&sink());
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -460,10 +445,8 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
 
   delegate_mock_.Init(ipc_task_runner, shutdown_event);
 
-  host_dispatcher_.reset(new HostDispatcher(
-      pp_module(),
-      &MockGetInterface,
-      PpapiPermissions::AllPermissions()));
+  host_dispatcher_ = std::make_unique<HostDispatcher>(
+      pp_module(), &MockGetInterface, PpapiPermissions::AllPermissions());
   ppapi::Preferences preferences;
   host_dispatcher_->InitHostWithChannel(&delegate_mock_, base::kNullProcessId,
                                         channel_handle, is_client, preferences,
@@ -478,12 +461,13 @@ void HostProxyTestHarness::TearDownHarness() {
 }
 
 void HostProxyTestHarness::CreateHostGlobals() {
-  disable_locking_.reset(new ProxyLock::LockingDisablerForTest);
+  disable_locking_ = std::make_unique<ProxyLock::LockingDisablerForTest>();
   if (globals_config_ == PER_THREAD_GLOBALS) {
-    host_globals_.reset(new TestGlobals(PpapiGlobals::PerThreadForTest()));
+    host_globals_ =
+        std::make_unique<TestGlobals>(PpapiGlobals::PerThreadForTest());
     PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   } else {
-    host_globals_.reset(new TestGlobals());
+    host_globals_ = std::make_unique<TestGlobals>();
   }
 }
 
@@ -503,13 +487,6 @@ HostProxyTestHarness::DelegateMock::ShareHandleWithRemote(
     bool should_close_source) {
   return IPC::GetPlatformFileForTransit(handle,
                                         should_close_source);
-}
-
-base::SharedMemoryHandle
-HostProxyTestHarness::DelegateMock::ShareSharedMemoryHandleWithRemote(
-    const base::SharedMemoryHandle& handle,
-    base::ProcessId /*remote_pid*/) {
-  return base::SharedMemory::DuplicateHandle(handle);
 }
 
 base::UnsafeSharedMemoryRegion
@@ -571,8 +548,8 @@ TwoWayTest::~TwoWayTest() {
 
 void TwoWayTest::SetUp() {
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
-  io_thread_.StartWithOptions(options);
+  options.message_pump_type = base::MessagePumpType::IO;
+  io_thread_.StartWithOptions(std::move(options));
   plugin_thread_.Start();
 
   mojo::MessagePipe pipe;
@@ -604,15 +581,15 @@ void TwoWayTest::TearDown() {
   io_thread_.Stop();
 }
 
-void TwoWayTest::PostTaskOnRemoteHarness(const base::Closure& task) {
+void TwoWayTest::PostTaskOnRemoteHarness(base::OnceClosure task) {
   base::WaitableEvent task_complete(
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
   plugin_thread_.task_runner()->PostTask(
-      FROM_HERE, base::BindOnce(&RunTaskOnRemoteHarness, task, &task_complete));
+      FROM_HERE,
+      base::BindOnce(&RunTaskOnRemoteHarness, std::move(task), &task_complete));
   task_complete.Wait();
 }
-
 
 }  // namespace proxy
 }  // namespace ppapi

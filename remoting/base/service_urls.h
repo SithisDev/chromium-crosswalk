@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 
 namespace remoting {
@@ -20,21 +19,8 @@ class ServiceUrls {
  public:
   static ServiceUrls* GetInstance();
 
-  // Remoting directory REST API URLs.
-  const std::string& directory_base_url() const { return directory_base_url_; }
-  const std::string& directory_hosts_url() const {
-    return directory_hosts_url_;
-  }
-  const std::string& gcd_base_url() const { return gcd_base_url_; }
-
-  // Remoting directory bot JID (for registering hosts, logging, heartbeats).
-  const std::string& directory_bot_jid() const { return directory_bot_jid_; }
-
-  // JID for communicating with GCD.
-  const std::string& gcd_jid() const { return gcd_jid_; }
-
-  // ICE config URL.
-  const std::string& ice_config_url() const { return ice_config_url_; }
+  ServiceUrls(const ServiceUrls&) = delete;
+  ServiceUrls& operator=(const ServiceUrls&) = delete;
 
   const std::string& ftl_server_endpoint() const {
     return ftl_server_endpoint_;
@@ -44,13 +30,6 @@ class ServiceUrls {
     return remoting_server_endpoint_;
   }
 
-#if !defined(NDEBUG)
-  // Override the directory bot JID for testing.
-  void set_directory_bot_jid(const std::string& bot_jid) {
-    directory_bot_jid_ = bot_jid;
-  }
-#endif
-
  private:
   friend struct base::DefaultSingletonTraits<ServiceUrls>;
 
@@ -59,14 +38,9 @@ class ServiceUrls {
 
   std::string directory_base_url_;
   std::string directory_hosts_url_;
-  std::string gcd_base_url_;
-  std::string directory_bot_jid_;
-  std::string gcd_jid_;
   std::string ice_config_url_;
   std::string ftl_server_endpoint_;
   std::string remoting_server_endpoint_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceUrls);
 };
 
 }  // namespace remoting

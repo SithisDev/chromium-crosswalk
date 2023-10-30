@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,9 @@ public interface Printable {
 
     /** Get the title of the generated PDF document. */
     String getTitle();
+
+    /** Get the error message from the Printable. */
+    String getErrorMessage();
 
     /** Check if the current Printable can print. */
     boolean canPrint();

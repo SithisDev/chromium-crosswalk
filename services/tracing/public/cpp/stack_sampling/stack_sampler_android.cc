@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,10 @@ namespace {
 constexpr size_t kMaxFrameDepth = 48;
 }  // namespace
 
-StackSamplerAndroid::StackSamplerAndroid(base::PlatformThreadId tid,
-                                         base::ModuleCache* module_cache)
-    : tid_(tid), module_cache_(module_cache) {}
+StackSamplerAndroid::StackSamplerAndroid(
+    base::SamplingProfilerThreadToken thread_token,
+    base::ModuleCache* module_cache)
+    : thread_token_(thread_token), module_cache_(module_cache) {}
 
 StackSamplerAndroid::~StackSamplerAndroid() = default;
 
@@ -25,8 +26,9 @@ void StackSamplerAndroid::AddAuxUnwinder(
     std::unique_ptr<base::Unwinder> unwinder) {}
 
 void StackSamplerAndroid::RecordStackFrames(
-    StackBuffer* stack_buffer,
-    base::ProfileBuilder* profile_builder) {
+    base::StackBuffer* stack_buffer,
+    base::ProfileBuilder* profile_builder,
+    base::PlatformThreadId thread_id) {
   if (!unwinder_.is_initialized()) {
     // May block on disk access. This function is executed on the profiler
     // thread, so this will only block profiling execution.
@@ -35,14 +37,15 @@ void StackSamplerAndroid::RecordStackFrames(
     unwinder_.Initialize();
   }
   const void* pcs[kMaxFrameDepth];
-  size_t depth = unwinder_.TraceStack(tid_, stack_buffer, pcs, kMaxFrameDepth);
+  size_t depth =
+      unwinder_.TraceStack(thread_token_.id, stack_buffer, pcs, kMaxFrameDepth);
   std::vector<base::Frame> frames;
   frames.reserve(depth);
   for (size_t i = 0; i < depth; ++i) {
     uintptr_t address = reinterpret_cast<uintptr_t>(pcs[i]);
     frames.emplace_back(address, module_cache_->GetModuleForAddress(address));
   }
-  profile_builder->OnSampleCompleted(std::move(frames));
+  profile_builder->OnSampleCompleted(std::move(frames), TRACE_TIME_TICKS_NOW());
 }
 
 }  // namespace tracing

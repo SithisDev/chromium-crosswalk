@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,10 @@
 #include <string>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
 #include "base/test/multiprocess_test.h"
@@ -117,7 +117,8 @@ MULTIPROCESS_TEST_MAIN(ChrootMe) {
 }
 
 // Temporarily disabled on ASAN due to crbug.com/451603.
-TEST_F(NamespaceSandboxTest, DISABLE_ON_ASAN(ChrootAndDropCapabilities)) {
+// Disabled on MSAN due to crbug.com/1180105
+TEST_F(NamespaceSandboxTest, DISABLE_ON_SANITIZERS(ChrootAndDropCapabilities)) {
   TestProc("ChrootMe");
 }
 

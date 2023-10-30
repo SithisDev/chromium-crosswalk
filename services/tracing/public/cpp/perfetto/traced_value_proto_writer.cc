@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "services/tracing/public/cpp/perfetto/traced_value_proto_writer.h"
@@ -8,10 +8,11 @@
 
 #include "base/hash/hash.h"
 #include "base/json/string_escape.h"
+#include "base/strings/string_piece.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
-#include "base/values.h"
 #include "third_party/perfetto/include/perfetto/protozero/message_handle.h"
+#include "third_party/perfetto/include/perfetto/protozero/root_message.h"
 #include "third_party/perfetto/include/perfetto/protozero/scattered_heap_buffer.h"
 #include "third_party/perfetto/include/perfetto/protozero/scattered_stream_writer.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/debug_annotation.pbzero.h"
@@ -53,6 +54,7 @@ class ProtoWriter final : public TracedValue::Writer {
         stream_(&buffer_) {
     proto_.Reset(&stream_);
     buffer_.set_writer(&stream_);
+    stream_.Reset(buffer_.GetNewBuffer());
     node_stack_.emplace(ProtoValueHandle(&proto_));
     proto_.set_nested_type(ProtoValue::DICT);
   }
@@ -124,7 +126,7 @@ class ProtoWriter final : public TracedValue::Writer {
   }
 
   void SetValueWithCopiedName(base::StringPiece name, Writer* value) override {
-    SetValue(name.as_string().c_str(), value);
+    SetValue(std::string(name).c_str(), value);
   }
 
   void BeginArray() override {
@@ -221,11 +223,6 @@ class ProtoWriter final : public TracedValue::Writer {
                   buffer_.GetTotalSize());
   }
 
-  std::unique_ptr<base::Value> ToBaseValue() const override {
-    base::Value root(base::Value::Type::DICTIONARY);
-    return base::Value::ToUniquePtrValue(std::move(root));
-  }
-
  private:
   ProtoValue* AddDictEntry(const char* name) {
     DCHECK(!node_stack_.empty() && !node_stack_.top()->is_finalized());
@@ -246,7 +243,7 @@ class ProtoWriter final : public TracedValue::Writer {
 
   std::stack<ProtoValueHandle> node_stack_;
 
-  ProtoValue proto_;
+  protozero::RootMessage<ProtoValue> proto_;
   protozero::ScatteredHeapBuffer buffer_;
   protozero::ScatteredStreamWriter stream_;
 };
@@ -258,11 +255,7 @@ std::unique_ptr<TracedValue::Writer> CreateNestedValueProtoWriter(
 
 }  // namespace
 
-void RegisterTracedValueProtoWriter(bool enable) {
-  if (!enable) {
-    TracedValue::SetWriterFactoryCallback(nullptr);
-    return;
-  }
+void RegisterTracedValueProtoWriter() {
   TracedValue::SetWriterFactoryCallback(&CreateNestedValueProtoWriter);
 }
 

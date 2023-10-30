@@ -1,15 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/security_key/security_key_message_handler.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/logging.h"
 #include "remoting/host/security_key/security_key_ipc_client.h"
 #include "remoting/host/security_key/security_key_ipc_constants.h"
 #include "remoting/host/security_key/security_key_message_reader_impl.h"
@@ -27,7 +29,7 @@ void SecurityKeyMessageHandler::Start(
     base::File message_read_stream,
     base::File message_write_stream,
     std::unique_ptr<SecurityKeyIpcClient> ipc_client,
-    const base::Closure& error_callback) {
+    base::OnceClosure error_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(message_read_stream.IsValid());
   DCHECK(message_write_stream.IsValid());
@@ -36,22 +38,23 @@ void SecurityKeyMessageHandler::Start(
   DCHECK(error_callback_.is_null());
 
   if (!reader_) {
-    reader_.reset(
-        new SecurityKeyMessageReaderImpl(std::move(message_read_stream)));
+    reader_ = std::make_unique<SecurityKeyMessageReaderImpl>(
+        std::move(message_read_stream));
   }
 
   if (!writer_) {
-    writer_.reset(
-        new SecurityKeyMessageWriterImpl(std::move(message_write_stream)));
+    writer_ = std::make_unique<SecurityKeyMessageWriterImpl>(
+        std::move(message_write_stream));
   }
 
   ipc_client_ = std::move(ipc_client);
-  error_callback_ = error_callback;
+  error_callback_ = std::move(error_callback);
 
   reader_->Start(
-      base::Bind(&SecurityKeyMessageHandler::ProcessSecurityKeyMessage,
-                 base::Unretained(this)),
-      base::Bind(&SecurityKeyMessageHandler::OnError, base::Unretained(this)));
+      base::BindRepeating(&SecurityKeyMessageHandler::ProcessSecurityKeyMessage,
+                          base::Unretained(this)),
+      base::BindOnce(&SecurityKeyMessageHandler::OnError,
+                     base::Unretained(this)));
 }
 
 void SecurityKeyMessageHandler::SetSecurityKeyMessageReaderForTest(
@@ -76,32 +79,23 @@ void SecurityKeyMessageHandler::ProcessSecurityKeyMessage(
   } else if (message_type == SecurityKeyMessageType::REQUEST) {
     HandleSecurityKeyRequest(message->payload());
   } else {
+    // uint8_t is handled as char, so we use uint16_t to show number here.
     LOG(ERROR) << "Unknown message type: "
-               << static_cast<uint8_t>(message_type);
+               << static_cast<uint16_t>(message_type);
     SendMessage(SecurityKeyMessageType::UNKNOWN_COMMAND);
   }
 }
 
-void SecurityKeyMessageHandler::HandleIpcConnectionChange(
-    bool connection_established) {
+void SecurityKeyMessageHandler::HandleIpcConnectionChange() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (connection_established) {
-    SendMessageWithPayload(SecurityKeyMessageType::CONNECT_RESPONSE,
-                           std::string(1, kConnectResponseActiveSession));
-  } else {
-    SendMessageWithPayload(SecurityKeyMessageType::CONNECT_RESPONSE,
-                           std::string(1, kConnectResponseNoSession));
-    // We expect the server to close the IPC channel in this scenario.
-    expect_ipc_channel_close_ = true;
-  }
+  SendMessageWithPayload(SecurityKeyMessageType::CONNECT_RESPONSE,
+                         std::string(1, kConnectResponseActiveSession));
 }
 
 void SecurityKeyMessageHandler::HandleIpcConnectionError() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!expect_ipc_channel_close_) {
-    SendMessageWithPayload(SecurityKeyMessageType::CONNECT_ERROR,
-                           "Unknown error occurred during connection.");
-  }
+  SendMessageWithPayload(SecurityKeyMessageType::CONNECT_ERROR,
+                         "Unknown error occurred during connection.");
 }
 
 void SecurityKeyMessageHandler::HandleSecurityKeyResponse(
@@ -134,10 +128,10 @@ void SecurityKeyMessageHandler::HandleConnectRequest(
   if (ipc_client_->CheckForSecurityKeyIpcServerChannel()) {
     // If we find an IPC server, then attempt to establish a connection.
     ipc_client_->EstablishIpcConnection(
-        base::Bind(&SecurityKeyMessageHandler::HandleIpcConnectionChange,
-                   base::Unretained(this)),
-        base::Bind(&SecurityKeyMessageHandler::HandleIpcConnectionError,
-                   base::Unretained(this)));
+        base::BindOnce(&SecurityKeyMessageHandler::HandleIpcConnectionChange,
+                       base::Unretained(this)),
+        base::BindOnce(&SecurityKeyMessageHandler::HandleIpcConnectionError,
+                       base::Unretained(this)));
   } else {
     SendMessageWithPayload(SecurityKeyMessageType::CONNECT_RESPONSE,
                            std::string(1, kConnectResponseNoSession));
@@ -155,8 +149,9 @@ void SecurityKeyMessageHandler::HandleSecurityKeyRequest(
 
   if (!ipc_client_->SendSecurityKeyRequest(
           message_payload,
-          base::Bind(&SecurityKeyMessageHandler::HandleSecurityKeyResponse,
-                     base::Unretained(this)))) {
+          base::BindRepeating(
+              &SecurityKeyMessageHandler::HandleSecurityKeyResponse,
+              base::Unretained(this)))) {
     SendMessageWithPayload(SecurityKeyMessageType::REQUEST_ERROR,
                            "Failed to send request data.");
   }

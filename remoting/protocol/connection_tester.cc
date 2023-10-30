@@ -1,8 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/protocol/connection_tester.h"
+#include "base/memory/raw_ptr.h"
 
 #include "base/bind.h"
 #include "net/base/io_buffer.h"
@@ -15,8 +16,7 @@
 #include "remoting/protocol/p2p_stream_socket.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 StreamConnectionTester::StreamConnectionTester(P2PStreamSocket* client_socket,
                                                P2PStreamSocket* host_socket,
@@ -73,10 +73,11 @@ void StreamConnectionTester::DoWrite() {
 
     int bytes_to_write = std::min(output_buffer_->BytesRemaining(),
                                   message_size_);
-    result = client_socket_->Write(
-        output_buffer_.get(), bytes_to_write,
-        base::Bind(&StreamConnectionTester::OnWritten, base::Unretained(this)),
-        TRAFFIC_ANNOTATION_FOR_TESTS);
+    result =
+        client_socket_->Write(output_buffer_.get(), bytes_to_write,
+                              base::BindOnce(&StreamConnectionTester::OnWritten,
+                                             base::Unretained(this)),
+                              TRAFFIC_ANNOTATION_FOR_TESTS);
     HandleWriteResult(result);
   }
 }
@@ -100,10 +101,9 @@ void StreamConnectionTester::DoRead() {
   int result = 1;
   while (result > 0) {
     input_buffer_->SetCapacity(input_buffer_->offset() + message_size_);
-    result = host_socket_->Read(
-        input_buffer_.get(),
-        message_size_,
-        base::Bind(&StreamConnectionTester::OnRead, base::Unretained(this)));
+    result = host_socket_->Read(input_buffer_.get(), message_size_,
+                                base::BindOnce(&StreamConnectionTester::OnRead,
+                                               base::Unretained(this)));
     HandleReadResult(result);
   };
 }
@@ -149,7 +149,7 @@ class MessagePipeConnectionTester::MessageSender
       for (int p = 0; p < message_size_; ++p) {
         message->mutable_data()[0] = static_cast<char>(i + p);
       }
-      pipe_->Send(message.get(), base::Closure());
+      pipe_->Send(message.get(), {});
       sent_messages_.push_back(std::move(message));
     }
   }
@@ -159,7 +159,7 @@ class MessagePipeConnectionTester::MessageSender
   void OnMessagePipeClosed() override { NOTREACHED(); }
 
  private:
-  MessagePipe* pipe_;
+  raw_ptr<MessagePipe> pipe_;
   int message_size_;
   int message_count_;
 
@@ -204,5 +204,4 @@ void MessagePipeConnectionTester::OnMessagePipeClosed() {
   FAIL();
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

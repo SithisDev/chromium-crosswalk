@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,6 @@ import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
-import android.support.annotation.IntDef;
-import android.support.v7.app.ActionBar.OnMenuVisibilityListener;
-import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
 import android.util.DisplayMetrics;
 import android.view.DisplayCutout;
 import android.view.KeyEvent;
@@ -30,6 +26,11 @@ import android.view.WindowManager.LayoutParams;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.view.inputmethod.InputMethodManager;
+
+import androidx.annotation.IntDef;
+import androidx.appcompat.app.ActionBar.OnMenuVisibilityListener;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 
 import org.chromium.chromoting.help.HelpContext;
 import org.chromium.chromoting.help.HelpSingleton;
@@ -454,7 +455,7 @@ public class Desktop
         };
     }
 
-    // Posts a deplayed task to hide the ActionBar.  If an existing task has already been
+    // Posts a delayed task to hide the ActionBar.  If an existing task has already been
     // scheduled, then the previous task is removed and the new one scheduled, effectively
     // resetting the timer.
     private void startActionBarAutoHideTimer() {

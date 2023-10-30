@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,13 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/memory/shared_memory.h"
-#include "base/single_thread_task_runner.h"
+#include "base/check_op.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "gpu/ipc/common/gpu_memory_buffer_impl.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/gfx/buffer_format_util.h"
 
 namespace viz {
@@ -32,17 +30,17 @@ void NotifyDestructionOnCorrectThread(
 }  // namespace
 
 ClientGpuMemoryBufferManager::ClientGpuMemoryBufferManager(
-    mojom::GpuMemoryBufferFactoryPtr gpu)
+    mojo::PendingRemote<mojom::GpuMemoryBufferFactory> gpu)
     : thread_("GpuMemoryThread"),
       gpu_memory_buffer_support_(
           std::make_unique<gpu::GpuMemoryBufferSupport>()),
-      weak_ptr_factory_(this) {
+      pool_(base::MakeRefCounted<base::UnsafeSharedMemoryPool>()) {
   CHECK(thread_.Start());
   // The thread is owned by this object. Which means the task will not run if
   // the object has been destroyed. So Unretained() is safe.
   thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&ClientGpuMemoryBufferManager::InitThread,
-                                base::Unretained(this), gpu.PassInterface()));
+                                base::Unretained(this), std::move(gpu)));
 }
 
 ClientGpuMemoryBufferManager::~ClientGpuMemoryBufferManager() {
@@ -53,9 +51,9 @@ ClientGpuMemoryBufferManager::~ClientGpuMemoryBufferManager() {
 }
 
 void ClientGpuMemoryBufferManager::InitThread(
-    mojom::GpuMemoryBufferFactoryPtrInfo gpu_info) {
-  gpu_.Bind(std::move(gpu_info));
-  gpu_.set_connection_error_handler(
+    mojo::PendingRemote<mojom::GpuMemoryBufferFactory> gpu_remote) {
+  gpu_.Bind(std::move(gpu_remote));
+  gpu_.set_disconnect_handler(
       base::BindOnce(&ClientGpuMemoryBufferManager::DisconnectGpuOnThread,
                      base::Unretained(this)));
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
@@ -133,7 +131,8 @@ ClientGpuMemoryBufferManager::CreateGpuMemoryBuffer(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    gpu::SurfaceHandle surface_handle) {
+    gpu::SurfaceHandle surface_handle,
+    base::WaitableEvent* shutdown_event) {
   // Note: this can be called from multiple threads at the same time. Some of
   // those threads may not have a TaskRunner set.
   DCHECK_EQ(gpu::kNullSurfaceHandle, surface_handle);
@@ -158,7 +157,8 @@ ClientGpuMemoryBufferManager::CreateGpuMemoryBuffer(
       gpu_memory_buffer_support_->CreateGpuMemoryBufferImplFromHandle(
           std::move(gmb_handle), size, format, usage,
           base::BindOnce(&NotifyDestructionOnCorrectThread,
-                         thread_.task_runner(), std::move(callback)));
+                         thread_.task_runner(), std::move(callback)),
+          this, pool_);
   if (!buffer) {
     DeletedGpuMemoryBuffer(gmb_handle_id, gpu::SyncToken());
     return nullptr;
@@ -171,6 +171,40 @@ void ClientGpuMemoryBufferManager::SetDestructionSyncToken(
     const gpu::SyncToken& sync_token) {
   static_cast<gpu::GpuMemoryBufferImpl*>(buffer)->set_destruction_sync_token(
       sync_token);
+}
+
+void ClientGpuMemoryBufferManager::CopyGpuMemoryBufferAsync(
+    gfx::GpuMemoryBufferHandle buffer_handle,
+    base::UnsafeSharedMemoryRegion memory_region,
+    base::OnceCallback<void(bool)> callback) {
+  if (!thread_.task_runner()->BelongsToCurrentThread()) {
+    thread_.task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ClientGpuMemoryBufferManager::CopyGpuMemoryBufferAsync,
+                       base::Unretained(this), std::move(buffer_handle),
+                       std::move(memory_region), std::move(callback)));
+    return;
+  }
+
+  gpu_->CopyGpuMemoryBuffer(std::move(buffer_handle), std::move(memory_region),
+                            std::move(callback));
+}
+
+bool ClientGpuMemoryBufferManager::CopyGpuMemoryBufferSync(
+    gfx::GpuMemoryBufferHandle buffer_handle,
+    base::UnsafeSharedMemoryRegion memory_region) {
+  base::WaitableEvent event;
+  bool mapping_result = false;
+  CopyGpuMemoryBufferAsync(
+      std::move(buffer_handle), std::move(memory_region),
+      base::BindOnce(
+          [](base::WaitableEvent* event, bool* result_ptr, bool result) {
+            *result_ptr = result;
+            event->Signal();
+          },
+          &event, &mapping_result));
+  event.Wait();
+  return mapping_result;
 }
 
 }  // namespace viz

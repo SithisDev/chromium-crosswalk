@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ppapi/proxy/ppapi_messages.h"
 
 namespace ppapi {
@@ -70,11 +70,15 @@ void MediaStreamTrackResourceBase::OnPluginMsgInitBuffers(
     int32_t number_of_buffers,
     int32_t buffer_size,
     bool readonly) {
-  base::SharedMemoryHandle shm_handle;
-  params.TakeSharedMemoryHandleAtIndex(0, &shm_handle);
-  buffer_manager_.SetBuffers(number_of_buffers, buffer_size,
-                             std::unique_ptr<base::SharedMemory>(
-                                 new base::SharedMemory(shm_handle, readonly)),
+  // |readonly| specifies only that the region can be mapped readonly, it does
+  // not specify that the passed region is readonly (and, in fact, it is
+  // not). In the current shared memory API the mapping of a region always
+  // matches the permissions on the handle, so the |readonly| parameter is
+  // ignored.
+  // TODO(crbug.com/793446): could the region be shared readonly from the host?
+  base::UnsafeSharedMemoryRegion region;
+  params.TakeUnsafeSharedMemoryRegionAtIndex(0, &region);
+  buffer_manager_.SetBuffers(number_of_buffers, buffer_size, std::move(region),
                              false);
 }
 

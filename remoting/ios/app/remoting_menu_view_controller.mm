@@ -1,26 +1,26 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if !defined(__has_feature) || !__has_feature(objc_arc)
-#error "This file requires ARC support."
-#endif
-
 #import "remoting/ios/app/remoting_menu_view_controller.h"
 
-#import "ios/third_party/material_components_ios/src/components/AppBar/src/MaterialAppBar.h"
-#import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
+#import <MaterialComponents/MaterialAppBar.h>
+#import <MaterialComponents/MaterialButtons.h>
+
+#include "base/strings/escape.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
+#include "google_apis/google_api_keys.h"
+#include "remoting/base/string_resources.h"
 #import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/side_menu_items.h"
 #import "remoting/ios/facade/remoting_authentication.h"
 #import "remoting/ios/facade/remoting_service.h"
-
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
-#include "google_apis/google_api_keys.h"
-#include "net/base/escape.h"
-#include "remoting/base/string_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // TODO(nicholss): This should be generated from a remoting/base class:
 
@@ -31,9 +31,11 @@ static UIColor* kBackgroundColor =
 
 namespace {
 
+// To use these scopes in a debug build, your development account will need to
+// be allowlisted.
 const char kChromotingAuthScopeValues[] =
-    "https://www.googleapis.com/auth/chromoting "
-    "https://www.googleapis.com/auth/googletalk "
+    "https://www.googleapis.com/auth/chromoting.directory "
+    "https://www.googleapis.com/auth/tachyon "
     "https://www.googleapis.com/auth/userinfo.email";
 
 std::string GetAuthorizationCodeUri() {
@@ -42,14 +44,13 @@ std::string GetAuthorizationCodeUri() {
   return base::StringPrintf(
       "https://accounts.google.com/o/oauth2/auth"
       "?scope=%s"
-      "&redirect_uri=https://chromoting-oauth.talkgadget.google.com/"
-      "talkgadget/oauth/chrome-remote-desktop/dev"
+      "&redirect_uri=https://remotedesktop.google.com/_/oauthredirect"
       "&response_type=code"
       "&client_id=%s"
       "&access_type=offline"
       "&approval_prompt=force",
-      net::EscapeUrlEncodedData(kChromotingAuthScopeValues, use_plus).c_str(),
-      net::EscapeUrlEncodedData(
+      base::EscapeUrlEncodedData(kChromotingAuthScopeValues, use_plus).c_str(),
+      base::EscapeUrlEncodedData(
           google_apis::GetOAuth2ClientID(google_apis::CLIENT_REMOTING),
           use_plus)
           .c_str());
@@ -191,7 +192,7 @@ std::string GetAuthorizationCodeUri() {
                              layout:
                                  (UICollectionViewLayout*)collectionViewLayout
     referenceSizeForHeaderInSection:(NSInteger)section {
-  // Only show the title if it's the account manangement section.
+  // Only show the title if it's the account management section.
   if (section != 0) {
     return CGSizeZero;
   }

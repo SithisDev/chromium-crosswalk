@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,16 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "media/audio/audio_debug_recording_manager.h"
-#include "services/audio/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace audio {
 
 namespace {
 
-#if defined(OS_WIN)
-#define NumberToStringType base::NumberToString16
+#if BUILDFLAG(IS_WIN)
+#define NumberToStringType base::NumberToWString
 #else
 #define NumberToStringType base::NumberToString
 #endif
@@ -36,6 +35,22 @@ const base::FilePath::CharType* StreamTypeToStringType(
   return FILE_PATH_LITERAL("output");
 }
 
+// Asynchronously creates a file and passes it to |reply_callback|.
+void CreateFile(base::FilePath file_path,
+                base::OnceCallback<void(base::File)> reply_callback) {
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(
+          [](const base::FilePath& file_name) {
+            return base::File(file_name, base::File::FLAG_CREATE_ALWAYS |
+                                             base::File::FLAG_WRITE);
+          },
+          file_path),
+      std::move(reply_callback));
+}
+
 }  // namespace
 
 DebugRecordingSession::DebugRecordingFileProvider::DebugRecordingFileProvider(
@@ -50,34 +65,29 @@ void DebugRecordingSession::DebugRecordingFileProvider::CreateWavFile(
     media::AudioDebugRecordingStreamType stream_type,
     uint32_t id,
     CreateWavFileCallback reply_callback) {
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(
-          [](const base::FilePath& file_name) {
-            return base::File(file_name, base::File::FLAG_CREATE_ALWAYS |
-                                             base::File::FLAG_WRITE);
-          },
-          file_name_base_.AddExtension(StreamTypeToStringType(stream_type))
-              .AddExtension(NumberToStringType(id))
-              .AddExtension(FILE_PATH_LITERAL("wav"))),
-      std::move(reply_callback));
+  CreateFile(file_name_base_.AddExtension(StreamTypeToStringType(stream_type))
+                 .AddExtension(NumberToStringType(id))
+                 .AddExtension(FILE_PATH_LITERAL("wav")),
+             std::move(reply_callback));
+}
+
+void DebugRecordingSession::DebugRecordingFileProvider::CreateAecdumpFile(
+    uint32_t id,
+    CreateAecdumpFileCallback reply_callback) {
+  CreateFile(file_name_base_.AddExtension(NumberToStringType(id))
+                 .AddExtension(FILE_PATH_LITERAL("aecdump")),
+             std::move(reply_callback));
 }
 
 DebugRecordingSession::DebugRecordingSession(
     const base::FilePath& file_name_base,
-    std::unique_ptr<service_manager::Connector> connector) {
-  DCHECK(connector);
+    mojo::PendingRemote<mojom::DebugRecording> debug_recording) {
+  debug_recording_.Bind(std::move(debug_recording));
 
   mojo::PendingRemote<mojom::DebugRecordingFileProvider> remote_file_provider;
   file_provider_ = std::make_unique<DebugRecordingFileProvider>(
       remote_file_provider.InitWithNewPipeAndPassReceiver(), file_name_base);
-
-  connector->Connect(audio::mojom::kServiceName,
-                     debug_recording_.BindNewPipeAndPassReceiver());
-  if (debug_recording_.is_bound())
-    debug_recording_->Enable(std::move(remote_file_provider));
+  debug_recording_->Enable(std::move(remote_file_provider));
 }
 
 DebugRecordingSession::~DebugRecordingSession() {}

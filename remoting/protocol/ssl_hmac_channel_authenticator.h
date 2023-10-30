@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "remoting/protocol/channel_authenticator.h"
@@ -17,7 +16,6 @@
 namespace net {
 class CertVerifier;
 class CTPolicyEnforcer;
-class CTVerifier;
 class DrainableIOBuffer;
 class GrowableIOBuffer;
 class SSLClientContext;
@@ -60,11 +58,15 @@ class SslHmacChannelAuthenticator : public ChannelAuthenticator {
       scoped_refptr<RsaKeyPair> key_pair,
       const std::string& auth_key);
 
+  SslHmacChannelAuthenticator(const SslHmacChannelAuthenticator&) = delete;
+  SslHmacChannelAuthenticator& operator=(const SslHmacChannelAuthenticator&) =
+      delete;
+
   ~SslHmacChannelAuthenticator() override;
 
   // ChannelAuthenticator interface.
   void SecureAndAuthenticate(std::unique_ptr<P2PStreamSocket> socket,
-                             const DoneCallback& done_callback) override;
+                             DoneCallback done_callback) override;
 
  private:
   class P2PStreamSocketAdapter;
@@ -84,7 +86,6 @@ class SslHmacChannelAuthenticator : public ChannelAuthenticator {
     // Used in the CLIENT mode only.
     std::unique_ptr<net::TransportSecurityState> transport_security_state;
     std::unique_ptr<net::CertVerifier> cert_verifier;
-    std::unique_ptr<net::CTVerifier> ct_verifier;
     std::unique_ptr<net::CTPolicyEnforcer> ct_policy_enforcer;
     std::unique_ptr<net::SSLClientContext> client_context;
   };
@@ -125,8 +126,6 @@ class SslHmacChannelAuthenticator : public ChannelAuthenticator {
   scoped_refptr<net::GrowableIOBuffer> auth_read_buf_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(SslHmacChannelAuthenticator);
 };
 
 }  // namespace protocol

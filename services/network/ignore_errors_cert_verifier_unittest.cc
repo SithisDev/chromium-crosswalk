@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/base64.h"
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -22,6 +23,7 @@
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
 #include "services/network/public/cpp/network_switches.h"
+#include "services/network/public/cpp/spki_hash_set.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -45,7 +47,7 @@ namespace network {
 
 static const char kTestUserDataDirSwitch[] = "test-user-data-dir";
 
-static std::vector<std::string> MakeWhitelist() {
+static std::vector<std::string> MakeAllowlist() {
   base::FilePath certs_dir = net::GetTestCertsDirectory();
   net::CertificateList certs = net::CreateCertificateListFromFile(
       certs_dir, "x509_verify_results.chain.pem", X509Certificate::FORMAT_AUTO);
@@ -68,23 +70,21 @@ class IgnoreErrorsCertVerifierTest : public ::testing::Test {
  public:
   IgnoreErrorsCertVerifierTest()
       : mock_verifier_(new MockCertVerifier()),
-        verifier_(base::WrapUnique(mock_verifier_),
-                  IgnoreErrorsCertVerifier::SPKIHashSet()) {}
+        verifier_(base::WrapUnique(mock_verifier_.get()), SPKIHashSet()) {}
   ~IgnoreErrorsCertVerifierTest() override {}
 
  protected:
   void SetUp() override {
-    verifier_.set_whitelist(
-        IgnoreErrorsCertVerifier::MakeWhitelist(MakeWhitelist()));
+    verifier_.SetAllowlistForTesting(CreateSPKIHashSet(MakeAllowlist()));
   }
 
   // The wrapped CertVerifier. Defaults to returning ERR_CERT_INVALID. Owned by
   // |verifier_|.
-  MockCertVerifier* mock_verifier_;
+  raw_ptr<MockCertVerifier> mock_verifier_;
   IgnoreErrorsCertVerifier verifier_;
 };
 
-static void GetNonWhitelistedTestCert(scoped_refptr<X509Certificate>* out) {
+static void GetNonAllowlistedTestCert(scoped_refptr<X509Certificate>* out) {
   base::FilePath certs_dir = net::GetTestCertsDirectory();
   scoped_refptr<X509Certificate> test_cert(
       net::ImportCertFromFile(certs_dir, "ok_cert.pem"));
@@ -99,7 +99,7 @@ static CertVerifier::RequestParams MakeRequestParams(
                                      /*sct_list=*/std::string());
 }
 
-static void GetWhitelistedTestCert(scoped_refptr<X509Certificate>* out) {
+static void GetAllowlistedTestCert(scoped_refptr<X509Certificate>* out) {
   base::FilePath certs_dir = net::GetTestCertsDirectory();
   *out = net::CreateCertificateChainFromFile(
       certs_dir, "x509_verify_results.chain.pem", X509Certificate::FORMAT_AUTO);
@@ -111,7 +111,7 @@ TEST_F(IgnoreErrorsCertVerifierTest, TestNoMatchCertOk) {
   mock_verifier_->set_default_result(OK);
 
   scoped_refptr<X509Certificate> test_cert;
-  ASSERT_NO_FATAL_FAILURE(GetNonWhitelistedTestCert(&test_cert));
+  ASSERT_NO_FATAL_FAILURE(GetNonAllowlistedTestCert(&test_cert));
   CertVerifyResult verify_result;
   TestCompletionCallback callback;
   std::unique_ptr<CertVerifier::Request> request;
@@ -124,7 +124,7 @@ TEST_F(IgnoreErrorsCertVerifierTest, TestNoMatchCertOk) {
 
 TEST_F(IgnoreErrorsCertVerifierTest, TestNoMatchCertError) {
   scoped_refptr<X509Certificate> test_cert;
-  ASSERT_NO_FATAL_FAILURE(GetNonWhitelistedTestCert(&test_cert));
+  ASSERT_NO_FATAL_FAILURE(GetNonAllowlistedTestCert(&test_cert));
   CertVerifyResult verify_result;
   TestCompletionCallback callback;
   std::unique_ptr<CertVerifier::Request> request;
@@ -137,7 +137,7 @@ TEST_F(IgnoreErrorsCertVerifierTest, TestNoMatchCertError) {
 
 TEST_F(IgnoreErrorsCertVerifierTest, TestMatch) {
   scoped_refptr<X509Certificate> test_cert;
-  ASSERT_NO_FATAL_FAILURE(GetWhitelistedTestCert(&test_cert));
+  ASSERT_NO_FATAL_FAILURE(GetAllowlistedTestCert(&test_cert));
   CertVerifyResult verify_result;
   TestCompletionCallback callback;
   std::unique_ptr<CertVerifier::Request> request;
@@ -157,7 +157,7 @@ class IgnoreCertificateErrorsSPKIListFlagTest
       command_line.AppendSwitchASCII(kTestUserDataDirSwitch, "/foo/bar/baz");
     }
     command_line.AppendSwitchASCII(switches::kIgnoreCertificateErrorsSPKIList,
-                                   base::JoinString(MakeWhitelist(), ","));
+                                   base::JoinString(MakeAllowlist(), ","));
 
     auto mock_verifier = std::make_unique<MockCertVerifier>();
     mock_verifier->set_default_result(ERR_CERT_INVALID);
@@ -174,7 +174,7 @@ class IgnoreCertificateErrorsSPKIListFlagTest
 // are present, certificate verification is bypassed.
 TEST_P(IgnoreCertificateErrorsSPKIListFlagTest, TestUserDataDirSwitchRequired) {
   scoped_refptr<X509Certificate> test_cert;
-  ASSERT_NO_FATAL_FAILURE(GetWhitelistedTestCert(&test_cert));
+  ASSERT_NO_FATAL_FAILURE(GetAllowlistedTestCert(&test_cert));
   CertVerifyResult verify_result;
   TestCompletionCallback callback;
   std::unique_ptr<CertVerifier::Request> request;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,13 @@ TestServiceManager::TestServiceManager(const std::vector<Manifest>& manifests)
 
 TestServiceManager::~TestServiceManager() = default;
 
-mojom::ServiceRequest TestServiceManager::RegisterTestInstance(
+mojo::PendingReceiver<mojom::Service> TestServiceManager::RegisterTestInstance(
     const std::string& service_name) {
   return RegisterInstance(Identity{service_name, base::Token::CreateRandom(),
                                    base::Token{}, base::Token::CreateRandom()});
 }
 
-mojom::ServiceRequest TestServiceManager::RegisterInstance(
+mojo::PendingReceiver<mojom::Service> TestServiceManager::RegisterInstance(
     const Identity& identity) {
   mojo::PendingRemote<mojom::Service> service;
   auto receiver = service.InitWithNewPipeAndPassReceiver();

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 
 #include "base/callback_forward.h"
 #include "base/cancelable_callback.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
 #include "services/device/geolocation/geolocation_provider_impl.h"
 #include "services/device/geolocation/network_location_provider.h"
@@ -26,7 +26,13 @@ namespace network {
 class SharedURLLoaderFactory;
 }
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
 namespace device {
+
+class GeolocationManager;
 
 // This class is responsible for handling updates from multiple underlying
 // providers and resolving them to a single 'best' location fix at any given
@@ -42,9 +48,13 @@ class LocationArbitrator : public LocationProvider {
   // LocationArbitrator uses the default system location provider.
   LocationArbitrator(
       const CustomLocationProviderCallback& custom_location_provider_getter,
-      const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      GeolocationManager* geolocation_manager,
+      const scoped_refptr<base::SingleThreadTaskRunner>& main_task_runner,
+      const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
       const std::string& api_key,
       std::unique_ptr<PositionCache> position_cache);
+  LocationArbitrator(const LocationArbitrator&) = delete;
+  LocationArbitrator& operator=(const LocationArbitrator&) = delete;
   ~LocationArbitrator() override;
 
   static GURL DefaultNetworkProviderURL();
@@ -73,8 +83,7 @@ class LocationArbitrator : public LocationProvider {
   // Provider will either be added to |providers_| or
   // deleted on error (e.g. it fails to start).
   void RegisterProvider(std::unique_ptr<LocationProvider> provider);
-  void RegisterSystemProvider();
-  void RegisterNetworkProvider();
+  void RegisterProviders();
 
   // Tells all registered providers to start.
   // If |providers_| is empty, immediately provides
@@ -94,6 +103,8 @@ class LocationArbitrator : public LocationProvider {
                            bool from_same_provider) const;
 
   const CustomLocationProviderCallback custom_location_provider_getter_;
+  const raw_ptr<GeolocationManager> geolocation_manager_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   const std::string api_key_;
 
@@ -102,7 +113,7 @@ class LocationArbitrator : public LocationProvider {
   std::vector<std::unique_ptr<LocationProvider>> providers_;
   bool enable_high_accuracy_;
   // The provider which supplied the current |position_|
-  const LocationProvider* position_provider_;
+  raw_ptr<const LocationProvider> position_provider_;
   bool is_permission_granted_;
   // The current best estimate of our position.
   mojom::Geoposition position_;
@@ -111,13 +122,13 @@ class LocationArbitrator : public LocationProvider {
 
   // Tracks whether providers should be running.
   bool is_running_;
-
-  DISALLOW_COPY_AND_ASSIGN(LocationArbitrator);
 };
 
 // Factory functions for the various types of location provider to abstract
 // over the platform-dependent implementations.
-std::unique_ptr<LocationProvider> NewSystemLocationProvider();
+std::unique_ptr<LocationProvider> NewSystemLocationProvider(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    GeolocationManager* geolocation_manager = nullptr);
 
 }  // namespace device
 

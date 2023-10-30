@@ -1,17 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/host_event_logger.h"
 
-// Included here, since the #define for LOG_USER in syslog.h conflicts with the
-// constants in base/logging.h, and this source file should use the version in
-// syslog.h.
+// Included order is important, since the #define for LOG_USER in syslog.h
+// conflicts with the constants in base/logging.h, and this source file should
+// use the version in syslog.h.
+// clang-format off
+#include "base/logging.h"
 #include <syslog.h>
+// clang-format on
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/stringprintf.h"
@@ -29,26 +31,27 @@ class HostEventLoggerPosix : public HostEventLogger, public HostStatusObserver {
   HostEventLoggerPosix(scoped_refptr<HostStatusMonitor> monitor,
                        const std::string& application_name);
 
+  HostEventLoggerPosix(const HostEventLoggerPosix&) = delete;
+  HostEventLoggerPosix& operator=(const HostEventLoggerPosix&) = delete;
+
   ~HostEventLoggerPosix() override;
 
   // HostStatusObserver implementation.  These methods will be called from the
   // network thread.
-  void OnClientAuthenticated(const std::string& jid) override;
-  void OnClientDisconnected(const std::string& jid) override;
-  void OnAccessDenied(const std::string& jid) override;
-  void OnClientRouteChange(const std::string& jid,
+  void OnClientAuthenticated(const std::string& signaling_id) override;
+  void OnClientDisconnected(const std::string& signaling_id) override;
+  void OnClientAccessDenied(const std::string& signaling_id) override;
+  void OnClientRouteChange(const std::string& signaling_id,
                            const std::string& channel_name,
                            const protocol::TransportRoute& route) override;
-  void OnStart(const std::string& xmpp_login) override;
-  void OnShutdown() override;
+  void OnHostStarted(const std::string& user_email) override;
+  void OnHostShutdown() override;
 
  private:
   void Log(const std::string& message);
 
   scoped_refptr<HostStatusMonitor> monitor_;
   std::string application_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(HostEventLoggerPosix);
 };
 
 } //namespace
@@ -66,36 +69,45 @@ HostEventLoggerPosix::~HostEventLoggerPosix() {
   closelog();
 }
 
-void HostEventLoggerPosix::OnClientAuthenticated(const std::string& jid) {
-  Log("Client connected: " + jid);
+void HostEventLoggerPosix::OnClientAuthenticated(
+    const std::string& signaling_id) {
+  Log("Client connected: " + signaling_id);
 }
 
-void HostEventLoggerPosix::OnClientDisconnected(const std::string& jid) {
-  Log("Client disconnected: " + jid);
+void HostEventLoggerPosix::OnClientDisconnected(
+    const std::string& signaling_id) {
+  Log("Client disconnected: " + signaling_id);
 }
 
-void HostEventLoggerPosix::OnAccessDenied(const std::string& jid) {
-  Log("Access denied for client: " + jid);
+void HostEventLoggerPosix::OnClientAccessDenied(
+    const std::string& signaling_id) {
+  Log("Access denied for client: " + signaling_id);
 }
 
 void HostEventLoggerPosix::OnClientRouteChange(
-    const std::string& jid,
+    const std::string& signaling_id,
     const std::string& channel_name,
     const protocol::TransportRoute& route) {
   Log(base::StringPrintf(
       "Channel IP for client: %s ip='%s' host_ip='%s' channel='%s' "
       "connection='%s'",
-      jid.c_str(), route.remote_address.ToString().c_str(),
-      route.local_address.ToString().c_str(), channel_name.c_str(),
+      signaling_id.c_str(),
+      route.remote_address.address().IsValid()
+          ? route.remote_address.ToString().c_str()
+          : "unknown",
+      route.local_address.address().IsValid()
+          ? route.local_address.ToString().c_str()
+          : "unknown",
+      channel_name.c_str(),
       protocol::TransportRoute::GetTypeString(route.type).c_str()));
 }
 
-void HostEventLoggerPosix::OnShutdown() {
+void HostEventLoggerPosix::OnHostShutdown() {
   // TODO(rmsousa): Fix host shutdown to actually call this, and add a log line.
 }
 
-void HostEventLoggerPosix::OnStart(const std::string& xmpp_login) {
-  Log("Host started for user: " + xmpp_login);
+void HostEventLoggerPosix::OnHostStarted(const std::string& user_email) {
+  Log("Host started for user: " + user_email);
 }
 
 void HostEventLoggerPosix::Log(const std::string& message) {

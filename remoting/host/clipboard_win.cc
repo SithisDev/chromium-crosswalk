@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 
 #include <windows.h>
 
+#include <memory>
+#include <string>
+
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/win/message_window.h"
@@ -44,8 +46,7 @@ class ScopedClipboard {
 
   bool Init(HWND owner) {
     const int kMaxAttemptsToOpenClipboard = 5;
-    const base::TimeDelta kSleepTimeBetweenAttempts =
-        base::TimeDelta::FromMilliseconds(5);
+    const base::TimeDelta kSleepTimeBetweenAttempts = base::Milliseconds(5);
 
     if (opened_) {
       NOTREACHED();
@@ -97,9 +98,6 @@ class ScopedClipboard {
   bool opened_;
 };
 
-typedef BOOL (WINAPI AddClipboardFormatListenerFn)(HWND);
-typedef BOOL (WINAPI RemoveClipboardFormatListenerFn)(HWND);
-
 }  // namespace
 
 namespace remoting {
@@ -107,6 +105,10 @@ namespace remoting {
 class ClipboardWin : public Clipboard {
  public:
   ClipboardWin();
+
+  ClipboardWin(const ClipboardWin&) = delete;
+  ClipboardWin& operator=(const ClipboardWin&) = delete;
+
   ~ClipboardWin() override;
 
   void Start(
@@ -124,63 +126,33 @@ class ClipboardWin : public Clipboard {
                      LRESULT* result);
 
   std::unique_ptr<protocol::ClipboardStub> client_clipboard_;
-  AddClipboardFormatListenerFn* add_clipboard_format_listener_;
-  RemoveClipboardFormatListenerFn* remove_clipboard_format_listener_;
-
   // Used to subscribe to WM_CLIPBOARDUPDATE messages.
   std::unique_ptr<base::win::MessageWindow> window_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClipboardWin);
 };
 
-ClipboardWin::ClipboardWin()
-    : add_clipboard_format_listener_(nullptr),
-      remove_clipboard_format_listener_(nullptr) {
-}
+ClipboardWin::ClipboardWin() {}
 
 ClipboardWin::~ClipboardWin() {
-  if (window_ && remove_clipboard_format_listener_)
-    (*remove_clipboard_format_listener_)(window_->hwnd());
+  if (window_)
+    ::RemoveClipboardFormatListener(window_->hwnd());
 }
 
 void ClipboardWin::Start(
     std::unique_ptr<protocol::ClipboardStub> client_clipboard) {
-  DCHECK(!add_clipboard_format_listener_);
-  DCHECK(!remove_clipboard_format_listener_);
   DCHECK(!window_);
 
   client_clipboard_.swap(client_clipboard);
 
-  // user32.dll is statically linked.
-  HMODULE user32 = GetModuleHandle(L"user32.dll");
-  CHECK(user32);
-
-  add_clipboard_format_listener_ =
-      reinterpret_cast<AddClipboardFormatListenerFn*>(
-          GetProcAddress(user32, "AddClipboardFormatListener"));
-  if (add_clipboard_format_listener_) {
-    remove_clipboard_format_listener_ =
-        reinterpret_cast<RemoveClipboardFormatListenerFn*>(
-            GetProcAddress(user32, "RemoveClipboardFormatListener"));
-    // If AddClipboardFormatListener() present, RemoveClipboardFormatListener()
-    // should be available too.
-    CHECK(remove_clipboard_format_listener_);
-  } else {
-    LOG(WARNING) << "AddClipboardFormatListener() is not available.";
-  }
-
-  window_.reset(new base::win::MessageWindow());
-  if (!window_->Create(base::Bind(&ClipboardWin::HandleMessage,
-                                  base::Unretained(this)))) {
+  window_ = std::make_unique<base::win::MessageWindow>();
+  if (!window_->Create(base::BindRepeating(&ClipboardWin::HandleMessage,
+                                           base::Unretained(this)))) {
     LOG(ERROR) << "Couldn't create clipboard window.";
     window_.reset();
     return;
   }
 
-  if (add_clipboard_format_listener_) {
-    if (!(*add_clipboard_format_listener_)(window_->hwnd())) {
-      LOG(WARNING) << "AddClipboardFormatListener() failed: " << GetLastError();
-    }
+  if (!::AddClipboardFormatListener(window_->hwnd())) {
+    LOG(WARNING) << "AddClipboardFormatListener() failed: " << GetLastError();
   }
 }
 
@@ -192,12 +164,12 @@ void ClipboardWin::InjectClipboardEvent(
   // Currently we only handle UTF-8 text.
   if (event.mime_type().compare(kMimeTypeTextUtf8) != 0)
     return;
-  if (!StringIsUtf8(event.data().c_str(), event.data().length())) {
+  if (!base::IsStringUTF8AllowingNoncharacters(event.data())) {
     LOG(ERROR) << "ClipboardEvent: data is not UTF-8 encoded.";
     return;
   }
 
-  base::string16 text = base::UTF8ToUTF16(ReplaceLfByCrLf(event.data()));
+  std::u16string text = base::UTF8ToUTF16(ReplaceLfByCrLf(event.data()));
 
   ScopedClipboard clipboard;
   if (!clipboard.Init(window_->hwnd())) {
@@ -227,7 +199,7 @@ void ClipboardWin::OnClipboardUpdate() {
   DCHECK(window_);
 
   if (::IsClipboardFormatAvailable(CF_UNICODETEXT)) {
-    base::string16 text;
+    std::wstring text;
     // Add a scope, so that we keep the clipboard open for as short a time as
     // possible.
     {
@@ -254,7 +226,7 @@ void ClipboardWin::OnClipboardUpdate() {
 
     protocol::ClipboardEvent event;
     event.set_mime_type(kMimeTypeTextUtf8);
-    event.set_data(ReplaceCrLfByLf(base::UTF16ToUTF8(text)));
+    event.set_data(ReplaceCrLfByLf(base::WideToUTF8(text)));
 
     if (client_clipboard_.get()) {
       client_clipboard_->InjectClipboardEvent(event);

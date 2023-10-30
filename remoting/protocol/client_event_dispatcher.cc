@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,7 @@
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/message_pipe.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 ClientEventDispatcher::ClientEventDispatcher()
     : ChannelDispatcherBase(kEventChannelName) {}
@@ -25,7 +24,7 @@ void ClientEventDispatcher::InjectKeyEvent(const KeyEvent& event) {
   EventMessage message;
   message.set_timestamp(base::TimeTicks::Now().ToInternalValue());
   message.mutable_key_event()->CopyFrom(event);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void ClientEventDispatcher::InjectTextEvent(const TextEvent& event) {
@@ -33,21 +32,21 @@ void ClientEventDispatcher::InjectTextEvent(const TextEvent& event) {
   EventMessage message;
   message.set_timestamp(base::TimeTicks::Now().ToInternalValue());
   message.mutable_text_event()->CopyFrom(event);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void ClientEventDispatcher::InjectMouseEvent(const MouseEvent& event) {
   EventMessage message;
   message.set_timestamp(base::TimeTicks::Now().ToInternalValue());
   message.mutable_mouse_event()->CopyFrom(event);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void ClientEventDispatcher::InjectTouchEvent(const TouchEvent& event) {
   EventMessage message;
   message.set_timestamp(base::TimeTicks::Now().ToInternalValue());
   message.mutable_touch_event()->CopyFrom(event);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void ClientEventDispatcher::OnIncomingMessage(
@@ -55,5 +54,4 @@ void ClientEventDispatcher::OnIncomingMessage(
   LOG(ERROR) << "Received unexpected message on the event channel.";
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

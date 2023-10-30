@@ -1,13 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.printing;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
-import android.os.Build;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintJob;
@@ -16,16 +14,14 @@ import android.print.PrintManager;
 import android.text.TextUtils;
 
 import org.chromium.base.Log;
-import org.chromium.base.annotations.RemovableInRelease;
 
 import java.util.List;
 
 /**
  * An implementation of {@link PrintManagerDelegate} using the Android framework print manager.
  */
-@TargetApi(Build.VERSION_CODES.KITKAT)
 public class PrintManagerDelegateImpl implements PrintManagerDelegate {
-    private static final String TAG = "cr.printing";
+    private static final String TAG = "printing";
     private final PrintManager mPrintManager;
 
     public PrintManagerDelegateImpl(Activity activity) {
@@ -39,8 +35,9 @@ public class PrintManagerDelegateImpl implements PrintManagerDelegate {
         mPrintManager.print(printJobName, documentAdapter, attributes);
     }
 
-    @RemovableInRelease
     private void dumpJobStatesForDebug() {
+        if (!Log.isLoggable(TAG, Log.VERBOSE)) return;
+
         List<PrintJob> printJobs = mPrintManager.getPrintJobs();
         String[] states = new String[printJobs.size()];
 

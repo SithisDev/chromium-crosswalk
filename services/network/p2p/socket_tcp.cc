@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,10 @@
 #include "base/sys_byteorder.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "jingle/glue/fake_ssl_client_socket.h"
+#include "components/webrtc/fake_ssl_client_socket.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
@@ -59,8 +60,8 @@ P2PSocketTcp::SendBuffer::~SendBuffer() = default;
 
 P2PSocketTcpBase::P2PSocketTcpBase(
     Delegate* delegate,
-    mojom::P2PSocketClientPtr client,
-    mojom::P2PSocketRequest socket,
+    mojo::PendingRemote<mojom::P2PSocketClient> client,
+    mojo::PendingReceiver<mojom::P2PSocket> socket,
     P2PSocketType type,
     ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory)
     : P2PSocket(delegate, std::move(client), std::move(socket), P2PSocket::TCP),
@@ -78,10 +79,12 @@ void P2PSocketTcpBase::InitAccepted(const net::IPEndPoint& remote_address,
   DoRead();
 }
 
-void P2PSocketTcpBase::Init(const net::IPEndPoint& local_address,
-                            uint16_t min_port,
-                            uint16_t max_port,
-                            const P2PHostAndIPEndPoint& remote_address) {
+void P2PSocketTcpBase::Init(
+    const net::IPEndPoint& local_address,
+    uint16_t min_port,
+    uint16_t max_port,
+    const P2PHostAndIPEndPoint& remote_address,
+    const net::NetworkAnonymizationKey& network_anonymization_key) {
   DCHECK(!socket_);
 
   remote_address_ = remote_address;
@@ -106,11 +109,10 @@ void P2PSocketTcpBase::Init(const net::IPEndPoint& local_address,
 
   socket_ = proxy_resolving_socket_factory_->CreateSocket(
       GURL("https://" + dest_host_port_pair.ToString()),
-      IsTlsClientSocket(type_));
+      network_anonymization_key, IsTlsClientSocket(type_));
 
   if (IsPseudoTlsClientSocket(type_)) {
-    socket_ =
-        std::make_unique<jingle_glue::FakeSSLClientSocket>(std::move(socket_));
+    socket_ = std::make_unique<webrtc::FakeSSLClientSocket>(std::move(socket_));
   }
 
   int status = socket_->Connect(
@@ -236,9 +238,16 @@ bool P2PSocketTcpBase::OnPacket(std::vector<int8_t> data) {
     }
   }
 
+  if (data.size() == 0) {
+    // https://tools.ietf.org/html/rfc4571#section-2 allows null packets which
+    // are ignored.
+    LOG(WARNING) << "Ignoring empty RTP-over-TCP frame.";
+    return true;
+  }
+
   client_->DataReceived(
       remote_address_.ip_address, data,
-      base::TimeTicks() + base::TimeDelta::FromNanoseconds(rtc::TimeNanos()));
+      base::TimeTicks() + base::Nanoseconds(rtc::TimeNanos()));
 
   delegate_->DumpPacket(
       base::make_span(reinterpret_cast<const uint8_t*>(&data[0]), data.size()),
@@ -395,8 +404,8 @@ void P2PSocketTcpBase::SetOption(P2PSocketOption option, int32_t value) {
 
 P2PSocketTcp::P2PSocketTcp(
     Delegate* delegate,
-    mojom::P2PSocketClientPtr client,
-    mojom::P2PSocketRequest socket,
+    mojo::PendingRemote<mojom::P2PSocketClient> client,
+    mojo::PendingReceiver<mojom::P2PSocket> socket,
     P2PSocketType type,
     ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory)
     : P2PSocketTcpBase(delegate,
@@ -453,8 +462,8 @@ void P2PSocketTcp::DoSend(
 // P2PSocketStunTcp
 P2PSocketStunTcp::P2PSocketStunTcp(
     Delegate* delegate,
-    mojom::P2PSocketClientPtr client,
-    mojom::P2PSocketRequest socket,
+    mojo::PendingRemote<mojom::P2PSocketClient> client,
+    mojo::PendingReceiver<mojom::P2PSocket> socket,
     P2PSocketType type,
     ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory)
     : P2PSocketTcpBase(delegate,

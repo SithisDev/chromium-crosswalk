@@ -1,19 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_SANDBOX_UTILS_H_
-#define SANDBOX_SRC_SANDBOX_UTILS_H_
+#ifndef SANDBOX_WIN_SRC_SANDBOX_UTILS_H_
+#define SANDBOX_WIN_SRC_SANDBOX_UTILS_H_
 
 #include <windows.h>
 #include <string>
 
-#include "base/strings/string16.h"
 #include "sandbox/win/src/nt_internals.h"
 
 namespace sandbox {
 
-void InitObjectAttribs(const base::string16& name,
+void InitObjectAttribs(const std::wstring& name,
                        ULONG attributes,
                        HANDLE root,
                        OBJECT_ATTRIBUTES* obj_attr,
@@ -22,4 +21,4 @@ void InitObjectAttribs(const base::string16& name,
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_SANDBOX_UTILS_H_
+#endif  // SANDBOX_WIN_SRC_SANDBOX_UTILS_H_

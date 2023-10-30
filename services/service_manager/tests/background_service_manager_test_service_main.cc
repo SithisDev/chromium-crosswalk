@@ -1,14 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/task/single_thread_task_executor.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
+#include "services/service_manager/public/cpp/service_receiver.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
 #include "services/service_manager/tests/background.test-mojom.h"
 
@@ -18,11 +18,14 @@ namespace service_manager {
 // parent background service manager.
 class TestClient : public Service, public mojom::TestService {
  public:
-  TestClient(mojom::ServiceRequest request)
-      : service_binding_(this, std::move(request)) {
+  explicit TestClient(mojo::PendingReceiver<mojom::Service> receiver)
+      : service_receiver_(this, std::move(receiver)) {
     registry_.AddInterface(base::BindRepeating(
-        &TestClient::BindTestServiceRequest, base::Unretained(this)));
+        &TestClient::BindTestServiceReceiver, base::Unretained(this)));
   }
+
+  TestClient(const TestClient&) = delete;
+  TestClient& operator=(const TestClient&) = delete;
 
   ~TestClient() override = default;
 
@@ -37,22 +40,22 @@ class TestClient : public Service, public mojom::TestService {
   // mojom::TestService
   void Test(TestCallback callback) override { std::move(callback).Run(); }
 
-  void BindTestServiceRequest(mojom::TestServiceRequest request) {
-    bindings_.AddBinding(this, std::move(request));
+  void BindTestServiceReceiver(
+      mojo::PendingReceiver<mojom::TestService> receiver) {
+    receivers_.Add(this, std::move(receiver));
   }
 
-  void Quit() override { service_binding_.RequestClose(); }
+  void Quit() override { service_receiver_.RequestClose(); }
 
-  ServiceBinding service_binding_;
+  ServiceReceiver service_receiver_;
   BinderRegistry registry_;
-  mojo::BindingSet<mojom::TestService> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestClient);
+  mojo::ReceiverSet<mojom::TestService> receivers_;
 };
 
 }  // namespace service_manager
 
-void ServiceMain(service_manager::mojom::ServiceRequest request) {
+void ServiceMain(
+    mojo::PendingReceiver<service_manager::mojom::Service> receiver) {
   base::SingleThreadTaskExecutor main_task_executor;
-  service_manager::TestClient(std::move(request)).RunUntilTermination();
+  service_manager::TestClient(std::move(receiver)).RunUntilTermination();
 }

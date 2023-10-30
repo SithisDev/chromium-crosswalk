@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/numerics/safe_conversions.h"
 #include "ppapi/c/pp_array_output.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -53,8 +53,8 @@ std::vector<PP_VideoProfileDescription_0_1> PP_VideoProfileDescriptionTo_0_1(
 
 VideoEncoderResource::ShmBuffer::ShmBuffer(
     uint32_t id,
-    std::unique_ptr<base::SharedMemory> shm)
-    : id(id), shm(std::move(shm)) {}
+    base::WritableSharedMemoryMapping mapping)
+    : id(id), mapping(std::move(mapping)) {}
 
 VideoEncoderResource::ShmBuffer::~ShmBuffer() {
 }
@@ -103,8 +103,9 @@ int32_t VideoEncoderResource::GetSupportedProfiles(
   get_supported_profiles_callback_ = callback;
   Call<PpapiPluginMsg_VideoEncoder_GetSupportedProfilesReply>(
       RENDERER, PpapiHostMsg_VideoEncoder_GetSupportedProfiles(),
-      base::Bind(&VideoEncoderResource::OnPluginMsgGetSupportedProfilesReply,
-                 this, output, false));
+      base::BindOnce(
+          &VideoEncoderResource::OnPluginMsgGetSupportedProfilesReply, this,
+          output, false));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -117,8 +118,9 @@ int32_t VideoEncoderResource::GetSupportedProfiles0_1(
   get_supported_profiles_callback_ = callback;
   Call<PpapiPluginMsg_VideoEncoder_GetSupportedProfilesReply>(
       RENDERER, PpapiHostMsg_VideoEncoder_GetSupportedProfiles(),
-      base::Bind(&VideoEncoderResource::OnPluginMsgGetSupportedProfilesReply,
-                 this, output, true));
+      base::BindOnce(
+          &VideoEncoderResource::OnPluginMsgGetSupportedProfilesReply, this,
+          output, true));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -149,10 +151,11 @@ int32_t VideoEncoderResource::Initialize(
 
   initialize_callback_ = callback;
   Call<PpapiPluginMsg_VideoEncoder_InitializeReply>(
-      RENDERER, PpapiHostMsg_VideoEncoder_Initialize(
-                    input_format, *input_visible_size, output_profile,
-                    initial_bitrate, acceleration),
-      base::Bind(&VideoEncoderResource::OnPluginMsgInitializeReply, this));
+      RENDERER,
+      PpapiHostMsg_VideoEncoder_Initialize(input_format, *input_visible_size,
+                                           output_profile, initial_bitrate,
+                                           acceleration),
+      base::BindOnce(&VideoEncoderResource::OnPluginMsgInitializeReply, this));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -172,8 +175,8 @@ int32_t VideoEncoderResource::GetVideoFrame(
   if (buffer_manager_.number_of_buffers() == 0) {
     Call<PpapiPluginMsg_VideoEncoder_GetVideoFramesReply>(
         RENDERER, PpapiHostMsg_VideoEncoder_GetVideoFrames(),
-        base::Bind(&VideoEncoderResource::OnPluginMsgGetVideoFramesReply,
-                   this));
+        base::BindOnce(&VideoEncoderResource::OnPluginMsgGetVideoFramesReply,
+                       this));
   } else {
     TryWriteVideoFrame();
   }
@@ -201,8 +204,8 @@ int32_t VideoEncoderResource::Encode(
       RENDERER,
       PpapiHostMsg_VideoEncoder_Encode(frame_resource->GetBufferIndex(),
                                        PP_ToBool(force_keyframe)),
-      base::Bind(&VideoEncoderResource::OnPluginMsgEncodeReply, this,
-                 video_frame));
+      base::BindOnce(&VideoEncoderResource::OnPluginMsgEncodeReply, this,
+                     video_frame));
 
   // Invalidate the frame to prevent the plugin from modifying it.
   it->second->Invalidate();
@@ -338,12 +341,11 @@ void VideoEncoderResource::OnPluginMsgGetVideoFramesReply(
     return;
   }
 
-  base::SharedMemoryHandle buffer_handle;
-  params.TakeSharedMemoryHandleAtIndex(0, &buffer_handle);
+  base::UnsafeSharedMemoryRegion buffer_region;
+  params.TakeUnsafeSharedMemoryRegionAtIndex(0, &buffer_region);
 
-  if (!buffer_manager_.SetBuffers(
-          frame_count, frame_length,
-          std::make_unique<base::SharedMemory>(buffer_handle, false), true)) {
+  if (!buffer_manager_.SetBuffers(frame_count, frame_length,
+                                  std::move(buffer_region), true)) {
     NotifyError(PP_ERROR_FAILED);
     return;
   }
@@ -381,21 +383,23 @@ void VideoEncoderResource::OnPluginMsgEncodeReply(
 void VideoEncoderResource::OnPluginMsgBitstreamBuffers(
     const ResourceMessageReplyParams& params,
     uint32_t buffer_length) {
-  std::vector<base::SharedMemoryHandle> shm_handles;
-  params.TakeAllSharedMemoryHandles(&shm_handles);
-  if (shm_handles.size() == 0) {
+  std::vector<base::UnsafeSharedMemoryRegion> shm_regions;
+  for (size_t i = 0; i < params.handles().size(); ++i) {
+    base::UnsafeSharedMemoryRegion region;
+    params.TakeUnsafeSharedMemoryRegionAtIndex(i, &region);
+    shm_regions.push_back(std::move(region));
+  }
+  if (shm_regions.size() == 0) {
     NotifyError(PP_ERROR_FAILED);
     return;
   }
 
-  for (uint32_t i = 0; i < shm_handles.size(); ++i) {
-    std::unique_ptr<base::SharedMemory> shm(
-        new base::SharedMemory(shm_handles[i], true));
-    CHECK(shm->Map(buffer_length));
-
-    auto buffer = std::make_unique<ShmBuffer>(i, std::move(shm));
+  for (size_t i = 0; i < shm_regions.size(); ++i) {
+    base::WritableSharedMemoryMapping mapping = shm_regions[i].Map();
+    CHECK(mapping.IsValid());
+    auto buffer = std::make_unique<ShmBuffer>(i, std::move(mapping));
     bitstream_buffer_map_.insert(
-        std::make_pair(buffer->shm->memory(), buffer->id));
+        std::make_pair(buffer->mapping.memory(), buffer->id));
     shm_buffers_.push_back(std::move(buffer));
   }
 }
@@ -458,7 +462,8 @@ void VideoEncoderResource::WriteBitstreamBuffer(const BitstreamBuffer& buffer) {
   DCHECK_LT(buffer.id, shm_buffers_.size());
 
   get_bitstream_buffer_data_->size = buffer.size;
-  get_bitstream_buffer_data_->buffer = shm_buffers_[buffer.id]->shm->memory();
+  get_bitstream_buffer_data_->buffer =
+      shm_buffers_[buffer.id]->mapping.memory();
   get_bitstream_buffer_data_->key_frame = PP_FromBool(buffer.key_frame);
   get_bitstream_buffer_data_ = nullptr;
   SafeRunCallback(&get_bitstream_buffer_callback_, PP_OK);

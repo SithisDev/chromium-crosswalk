@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,12 @@
 #include "base/bind.h"
 #include "base/containers/queue.h"
 #include "base/memory/ptr_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "remoting/base/compound_buffer.h"
 #include "remoting/host/file_transfer/fake_file_operations.h"
+#include "remoting/host/file_transfer/test_byte_vector_utils.h"
 #include "remoting/protocol/fake_message_pipe.h"
 #include "remoting/protocol/fake_message_pipe_wrapper.h"
 #include "remoting/protocol/file_transfer_helpers.h"
@@ -42,9 +43,9 @@ std::unique_ptr<remoting::CompoundBuffer> MessageToBuffer(
 }
 
 std::unique_ptr<remoting::CompoundBuffer> DataToBuffer(
-    const std::string& data) {
+    const std::vector<std::uint8_t>& data) {
   remoting::protocol::FileTransfer message;
-  message.mutable_data()->set_data(data);
+  message.mutable_data()->set_data(std::string(data.begin(), data.end()));
   return MessageToBuffer(message);
 }
 
@@ -79,11 +80,14 @@ class FileTransferMessageHandlerTest : public testing::Test {
   void TearDown() override;
 
  protected:
-  const std::string kTestDataOne = "this is the first test string";
-  const std::string kTestDataTwo = "this is the second test string";
-  const std::string kTestDataThree = "this is the third test string";
+  const std::vector<std::uint8_t> kTestDataOne =
+      ByteArrayFrom("this is the first test string");
+  const std::vector<std::uint8_t> kTestDataTwo =
+      ByteArrayFrom("this is the second test string");
+  const std::vector<std::uint8_t> kTestDataThree =
+      ByteArrayFrom("this is the third test string");
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<protocol::FakeMessagePipe> fake_pipe_;
   protocol::FileTransfer fake_metadata_;
   protocol::FileTransfer fake_end_;
@@ -92,9 +96,9 @@ class FileTransferMessageHandlerTest : public testing::Test {
 };
 
 FileTransferMessageHandlerTest::FileTransferMessageHandlerTest()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-          base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
+    : task_environment_(
+          base::test::TaskEnvironment::MainThreadType::DEFAULT,
+          base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
 FileTransferMessageHandlerTest::~FileTransferMessageHandlerTest() = default;
 
 void FileTransferMessageHandlerTest::SetUp() {
@@ -129,14 +133,14 @@ TEST_F(FileTransferMessageHandlerTest, WritesThreeChunks) {
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
   fake_pipe_->Receive(DataToBuffer(kTestDataThree));
   fake_pipe_->Receive(MessageToBuffer(fake_end_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(false, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo,
-                                              kTestDataThree};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {
+      kTestDataOne, kTestDataTwo, kTestDataThree};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 
   const base::queue<std::string>& actual_sent_messages =
@@ -163,11 +167,11 @@ TEST_F(FileTransferMessageHandlerTest, HandlesWriteError) {
   fake_pipe_->Receive(MessageToBuffer(fake_metadata_));
   fake_pipe_->Receive(DataToBuffer(kTestDataOne));
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   test_io.io_error = fake_error;
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
   fake_pipe_->Receive(MessageToBuffer(fake_end_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -198,15 +202,16 @@ TEST_F(FileTransferMessageHandlerTest, HandlesErrorMessage) {
   fake_pipe_->Receive(MessageToBuffer(fake_metadata_));
   fake_pipe_->Receive(DataToBuffer(kTestDataOne));
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   fake_pipe_->Receive(MessageToBuffer(fake_error_message));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(true, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {kTestDataOne,
+                                                            kTestDataTwo};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 
   const base::queue<std::string>& actual_sent_messages =
@@ -230,13 +235,14 @@ TEST_F(FileTransferMessageHandlerTest, HandlesPrematureClose) {
   fake_pipe_->Receive(MessageToBuffer(fake_metadata_));
   fake_pipe_->Receive(DataToBuffer(kTestDataOne));
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(true, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {kTestDataOne,
+                                                            kTestDataTwo};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 }
 
@@ -254,7 +260,7 @@ TEST_F(FileTransferMessageHandlerTest, ErrorsOnMissingMetadata) {
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
   fake_pipe_->Receive(DataToBuffer(kTestDataThree));
   fake_pipe_->Receive(MessageToBuffer(fake_end_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -284,13 +290,13 @@ TEST_F(FileTransferMessageHandlerTest, ErrorsOnNewMetadata) {
   fake_pipe_->Receive(DataToBuffer(kTestDataTwo));
   fake_pipe_->Receive(DataToBuffer(kTestDataThree));
   fake_pipe_->Receive(MessageToBuffer(fake_end_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   fake_pipe_->Receive(MessageToBuffer(fake_metadata_));
 
   fake_pipe_->ClosePipe();
 
   const base::queue<std::string>& sent_messages = fake_pipe_->sent_messages();
-  // First is the sucess message, second should be a protocol error.
+  // First is the success message, second should be a protocol error.
   ASSERT_EQ(2ul, sent_messages.size());
   protocol::FileTransfer response;
   response.ParseFromString(sent_messages.back());
@@ -315,7 +321,7 @@ TEST_F(FileTransferMessageHandlerTest, ErrorsOnDataAfterClose) {
   fake_pipe_->Receive(DataToBuffer(kTestDataThree));
   fake_pipe_->Receive(MessageToBuffer(fake_end_));
   fake_pipe_->Receive(DataToBuffer(kTestDataOne));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -342,8 +348,8 @@ TEST_F(FileTransferMessageHandlerTest, ReadsFile) {
   auto file_operations = std::make_unique<FakeFileOperations>(&test_io);
 
   test_io.input_file = FakeFileOperations::InputFile(
-      base::FilePath::FromUTF8Unsafe(kTestFilename),
-      kTestDataOne + kTestDataTwo + kTestDataThree, base::nullopt);
+      base::FilePath::FromASCII(kTestFilename),
+      ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree), absl::nullopt);
 
   // This will delete itself when fake_pipe_->ClosePipe() is called.
   new FileTransferMessageHandler(kTestDatachannelName, fake_pipe_->Wrap(),
@@ -351,9 +357,9 @@ TEST_F(FileTransferMessageHandlerTest, ReadsFile) {
 
   fake_pipe_->OpenPipe();
   fake_pipe_->Receive(MessageToBuffer(fake_request_transfer_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   fake_pipe_->Receive(MessageToBuffer(fake_success_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -362,7 +368,8 @@ TEST_F(FileTransferMessageHandlerTest, ReadsFile) {
   base::queue<std::string> expected_sent_messages;
   expected_sent_messages.push(fake_metadata_.SerializeAsString());
   protocol::FileTransfer data;
-  data.mutable_data()->set_data(test_io.input_file->data);
+  data.mutable_data()->set_data(std::string(test_io.input_file->data.begin(),
+                                            test_io.input_file->data.end()));
   expected_sent_messages.push(data.SerializeAsString());
   expected_sent_messages.push(fake_end_.SerializeAsString());
   ASSERT_TRUE(QueuesEqual(expected_sent_messages, actual_sent_messages));
@@ -383,7 +390,7 @@ TEST_F(FileTransferMessageHandlerTest, ForwardsReaderOpenError) {
 
   fake_pipe_->OpenPipe();
   fake_pipe_->Receive(MessageToBuffer(fake_request_transfer_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -402,8 +409,8 @@ TEST_F(FileTransferMessageHandlerTest, ForwardsReadError) {
   auto file_operations = std::make_unique<FakeFileOperations>(&test_io);
 
   test_io.input_file = FakeFileOperations::InputFile(
-      base::FilePath::FromUTF8Unsafe(kTestFilename),
-      kTestDataOne + kTestDataTwo + kTestDataThree,
+      base::FilePath::FromASCII(kTestFilename),
+      ByteArrayFrom(kTestDataOne, kTestDataTwo, kTestDataThree),
       protocol::MakeFileTransferError(
           FROM_HERE, protocol::FileTransfer_Error_Type_IO_ERROR));
 
@@ -413,7 +420,7 @@ TEST_F(FileTransferMessageHandlerTest, ForwardsReadError) {
 
   fake_pipe_->OpenPipe();
   fake_pipe_->Receive(MessageToBuffer(fake_request_transfer_));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   fake_pipe_->ClosePipe();
 
@@ -422,7 +429,8 @@ TEST_F(FileTransferMessageHandlerTest, ForwardsReadError) {
   base::queue<std::string> expected_sent_messages;
   expected_sent_messages.push(fake_metadata_.SerializeAsString());
   protocol::FileTransfer data;
-  data.mutable_data()->set_data(test_io.input_file->data);
+  data.mutable_data()->set_data(std::string(test_io.input_file->data.begin(),
+                                            test_io.input_file->data.end()));
   expected_sent_messages.push(data.SerializeAsString());
   protocol::FileTransfer error;
   *error.mutable_error() = *test_io.input_file->io_error;

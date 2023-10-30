@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "net/socket/stream_socket.h"
 #include "remoting/base/compound_buffer.h"
@@ -19,8 +18,7 @@
 #include "remoting/protocol/message_serialization.h"
 #include "remoting/protocol/video_stub.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 struct ClientVideoDispatcher::PendingFrame {
   PendingFrame(int frame_id)
@@ -34,8 +32,7 @@ ClientVideoDispatcher::ClientVideoDispatcher(VideoStub* video_stub,
                                              ClientStub* client_stub)
     : ChannelDispatcherBase(kVideoChannelName),
       video_stub_(video_stub),
-      client_stub_(client_stub),
-      weak_factory_(this) {}
+      client_stub_(client_stub) {}
 
 ClientVideoDispatcher::~ClientVideoDispatcher() = default;
 
@@ -110,10 +107,9 @@ void ClientVideoDispatcher::OnPacketDone(
   while (!pending_frames_.empty() && pending_frames_.front().done) {
     VideoAck ack_message;
     ack_message.set_frame_id(pending_frames_.front().frame_id);
-    message_pipe()->Send(&ack_message, base::Closure());
+    message_pipe()->Send(&ack_message, {});
     pending_frames_.pop_front();
   }
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

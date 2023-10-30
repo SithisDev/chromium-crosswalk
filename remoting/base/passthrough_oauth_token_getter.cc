@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 
 namespace remoting {
+
+PassthroughOAuthTokenGetter::PassthroughOAuthTokenGetter() = default;
 
 PassthroughOAuthTokenGetter::PassthroughOAuthTokenGetter(
     const std::string& username,

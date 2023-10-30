@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 #include <Sensors.h>
 #include <comdef.h>
 #include <objbase.h>
+#include <wrl/implements.h>
 
 #include <iomanip>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/numerics/math_constants.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "base/win/iunknown_impl.h"
 #include "base/win/scoped_propvariant.h"
 #include "services/device/generic_sensor/generic_sensor_consts.h"
 #include "services/device/public/cpp/generic_sensor/platform_sensor_configuration.h"
@@ -102,9 +103,9 @@ std::unique_ptr<ReaderInitParams> CreateAccelerometerReaderInitParams() {
     // https://msdn.microsoft.com/en-us/library/windows/hardware/dn642102(v=vs.85).aspx
     // Change sign of values, to report 'reaction force', and convert values
     // from G/s^2 to m/s^2 units.
-    reading->accel.x = -x * kMeanGravity;
-    reading->accel.y = -y * kMeanGravity;
-    reading->accel.z = -z * kMeanGravity;
+    reading->accel.x = -x * base::kMeanGravityDouble;
+    reading->accel.y = -y * base::kMeanGravityDouble;
+    reading->accel.z = -z * base::kMeanGravityDouble;
     return S_OK;
   };
   return params;
@@ -248,37 +249,40 @@ std::unique_ptr<ReaderInitParams> CreateReaderInitParamsForSensor(
 
 }  // namespace
 
-// Class that implements ISensorEvents and IUnknown interfaces and used
-// by ISensor interface to dispatch state and data change events.
-class EventListener : public ISensorEvents, public base::win::IUnknownImpl {
+// Class that implements ISensorEvents used by the ISensor interface to dispatch
+// state and data change events.
+class EventListener
+    : public Microsoft::WRL::RuntimeClass<
+          Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
+          ISensorEvents> {
  public:
   explicit EventListener(PlatformSensorReaderWin32* platform_sensor_reader)
       : platform_sensor_reader_(platform_sensor_reader) {
     DCHECK(platform_sensor_reader_);
   }
 
-  // IUnknown interface
-  ULONG STDMETHODCALLTYPE AddRef() override { return IUnknownImpl::AddRef(); }
-  ULONG STDMETHODCALLTYPE Release() override { return IUnknownImpl::Release(); }
+  EventListener(const EventListener&) = delete;
+  EventListener& operator=(const EventListener&) = delete;
 
-  STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
-    if (riid == __uuidof(ISensorEvents)) {
-      *ppv = static_cast<ISensorEvents*>(this);
-      AddRef();
-      return S_OK;
-    }
-    return IUnknownImpl::QueryInterface(riid, ppv);
+  static Microsoft::WRL::ComPtr<ISensorEvents> CreateInstance(
+      PlatformSensorReaderWin32* platform_sensor_reader) {
+    Microsoft::WRL::ComPtr<EventListener> event_listener =
+        Microsoft::WRL::Make<EventListener>(platform_sensor_reader);
+    Microsoft::WRL::ComPtr<ISensorEvents> sensor_events;
+    HRESULT hr = event_listener.As(&sensor_events);
+    DCHECK(SUCCEEDED(hr));
+    return sensor_events;
   }
 
  protected:
   ~EventListener() override = default;
 
   // ISensorEvents interface
-  STDMETHODIMP OnEvent(ISensor*, REFGUID, IPortableDeviceValues*) override {
+  IFACEMETHODIMP OnEvent(ISensor*, REFGUID, IPortableDeviceValues*) override {
     return S_OK;
   }
 
-  STDMETHODIMP OnLeave(REFSENSOR_ID sensor_id) override {
+  IFACEMETHODIMP OnLeave(REFSENSOR_ID sensor_id) override {
     // If event listener is active and sensor is disconnected, notify client
     // about the error.
     platform_sensor_reader_->SensorError();
@@ -286,7 +290,7 @@ class EventListener : public ISensorEvents, public base::win::IUnknownImpl {
     return S_OK;
   }
 
-  STDMETHODIMP OnStateChanged(ISensor* sensor, SensorState state) override {
+  IFACEMETHODIMP OnStateChanged(ISensor* sensor, SensorState state) override {
     if (sensor == nullptr)
       return E_INVALIDARG;
 
@@ -298,8 +302,8 @@ class EventListener : public ISensorEvents, public base::win::IUnknownImpl {
     return S_OK;
   }
 
-  STDMETHODIMP OnDataUpdated(ISensor* sensor,
-                             ISensorDataReport* report) override {
+  IFACEMETHODIMP OnDataUpdated(ISensor* sensor,
+                               ISensorDataReport* report) override {
     if (sensor == nullptr || report == nullptr)
       return E_INVALIDARG;
 
@@ -345,10 +349,8 @@ class EventListener : public ISensorEvents, public base::win::IUnknownImpl {
   }
 
  private:
-  PlatformSensorReaderWin32* const platform_sensor_reader_;
+  const raw_ptr<PlatformSensorReaderWin32> platform_sensor_reader_;
   SensorReading last_sensor_reading_;
-
-  DISALLOW_COPY_AND_ASSIGN(EventListener);
 };
 
 // static
@@ -370,11 +372,11 @@ std::unique_ptr<PlatformSensorReaderWinBase> PlatformSensorReaderWin32::Create(
                                    min_interval.Receive());
   if (SUCCEEDED(hr) && min_interval.get().vt == VT_UI4) {
     params->min_reporting_interval =
-        base::TimeDelta::FromMilliseconds(min_interval.get().ulVal);
+        base::Milliseconds(min_interval.get().ulVal);
   }
 
   GUID interests[] = {SENSOR_EVENT_STATE_CHANGED, SENSOR_EVENT_DATA_UPDATED};
-  hr = sensor->SetEventInterest(interests, base::size(interests));
+  hr = sensor->SetEventInterest(interests, std::size(interests));
   if (FAILED(hr))
     return nullptr;
 
@@ -388,15 +390,15 @@ Microsoft::WRL::ComPtr<ISensor> PlatformSensorReaderWin32::GetSensorForType(
     Microsoft::WRL::ComPtr<ISensorManager> sensor_manager) {
   Microsoft::WRL::ComPtr<ISensor> sensor;
   Microsoft::WRL::ComPtr<ISensorCollection> sensor_collection;
-  HRESULT hr = sensor_manager->GetSensorsByType(
-      sensor_type, sensor_collection.GetAddressOf());
+  HRESULT hr =
+      sensor_manager->GetSensorsByType(sensor_type, &sensor_collection);
   if (FAILED(hr) || !sensor_collection)
     return sensor;
 
   ULONG count = 0;
   hr = sensor_collection->GetCount(&count);
   if (SUCCEEDED(hr) && count > 0)
-    sensor_collection->GetAt(0, sensor.GetAddressOf());
+    sensor_collection->GetAt(0, &sensor);
   return sensor;
 }
 
@@ -404,12 +406,11 @@ PlatformSensorReaderWin32::PlatformSensorReaderWin32(
     Microsoft::WRL::ComPtr<ISensor> sensor,
     std::unique_ptr<ReaderInitParams> params)
     : init_params_(std::move(params)),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      com_sta_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       sensor_active_(false),
       client_(nullptr),
       sensor_(sensor),
-      event_listener_(new EventListener(this)),
-      weak_factory_(this) {
+      event_listener_(EventListener::CreateInstance(this)) {
   DCHECK(init_params_);
   DCHECK(init_params_->reader_func);
   DCHECK(sensor_);
@@ -430,7 +431,7 @@ void PlatformSensorReaderWin32::StopSensor() {
 }
 
 PlatformSensorReaderWin32::~PlatformSensorReaderWin32() {
-  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(com_sta_task_runner_->BelongsToCurrentThread());
 }
 
 bool PlatformSensorReaderWin32::StartSensor(
@@ -441,7 +442,7 @@ bool PlatformSensorReaderWin32::StartSensor(
     return false;
 
   if (!sensor_active_) {
-    task_runner_->PostTask(
+    com_sta_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&PlatformSensorReaderWin32::ListenSensorEvent,
                                   weak_factory_.GetWeakPtr()));
     sensor_active_ = true;
@@ -452,7 +453,8 @@ bool PlatformSensorReaderWin32::StartSensor(
 
 void PlatformSensorReaderWin32::ListenSensorEvent() {
   // Set event listener.
-  if (FAILED(sensor_->SetEventSink(event_listener_.get()))) {
+  HRESULT hr = sensor_->SetEventSink(event_listener_.Get());
+  if (FAILED(hr)) {
     SensorError();
     StopSensor();
   }
@@ -483,13 +485,14 @@ bool PlatformSensorReaderWin32::SetReportingInterval(
     return false;
 
   Microsoft::WRL::ComPtr<IPortableDeviceValues> return_props;
-  hr = sensor_->SetProperties(props.Get(), return_props.GetAddressOf());
+  hr = sensor_->SetProperties(props.Get(), &return_props);
   return SUCCEEDED(hr);
 }
 
 HRESULT PlatformSensorReaderWin32::SensorReadingChanged(
     ISensorDataReport* report,
-    SensorReading* reading) const {
+    SensorReading* reading) {
+  base::AutoLock autolock(lock_);
   if (!client_)
     return E_FAIL;
 
@@ -500,6 +503,7 @@ HRESULT PlatformSensorReaderWin32::SensorReadingChanged(
 }
 
 void PlatformSensorReaderWin32::SensorError() {
+  base::AutoLock autolock(lock_);
   if (client_)
     client_->OnSensorError();
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,11 @@
 
 namespace network {
 
-TestDataPipeGetter::TestDataPipeGetter(const std::string& string_to_write,
-                                       mojom::DataPipeGetterRequest request)
+TestDataPipeGetter::TestDataPipeGetter(
+    const std::string& string_to_write,
+    mojo::PendingReceiver<mojom::DataPipeGetter> receiver)
     : string_to_write_(string_to_write) {
-  bindings_.AddBinding(this, std::move(request));
+  receivers_.Add(this, std::move(receiver));
 }
 
 TestDataPipeGetter::~TestDataPipeGetter() = default;
@@ -49,8 +50,9 @@ void TestDataPipeGetter::Read(mojo::ScopedDataPipeProducerHandle pipe,
   WriteData();
 }
 
-void TestDataPipeGetter::Clone(mojom::DataPipeGetterRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void TestDataPipeGetter::Clone(
+    mojo::PendingReceiver<mojom::DataPipeGetter> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void TestDataPipeGetter::MojoReadyCallback(

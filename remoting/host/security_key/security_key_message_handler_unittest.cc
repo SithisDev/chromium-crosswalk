@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/task_environment.h"
 #include "remoting/host/security_key/fake_security_key_ipc_client.h"
 #include "remoting/host/security_key/fake_security_key_message_reader.h"
 #include "remoting/host/security_key/fake_security_key_message_writer.h"
@@ -25,6 +25,11 @@ namespace remoting {
 class SecurityKeyMessageHandlerTest : public testing::Test {
  public:
   SecurityKeyMessageHandlerTest();
+
+  SecurityKeyMessageHandlerTest(const SecurityKeyMessageHandlerTest&) = delete;
+  SecurityKeyMessageHandlerTest& operator=(
+      const SecurityKeyMessageHandlerTest&) = delete;
+
   ~SecurityKeyMessageHandlerTest() override;
 
   // Passed to the object used for testing to be called back to signal
@@ -53,10 +58,9 @@ class SecurityKeyMessageHandlerTest : public testing::Test {
   std::unique_ptr<SecurityKeyMessageHandler> message_handler_;
 
  private:
-  base::MessageLoopForIO message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   std::unique_ptr<base::RunLoop> run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(SecurityKeyMessageHandlerTest);
 };
 
 SecurityKeyMessageHandlerTest::SecurityKeyMessageHandlerTest() = default;
@@ -68,23 +72,20 @@ void SecurityKeyMessageHandlerTest::OperationComplete() {
 }
 
 void SecurityKeyMessageHandlerTest::SetUp() {
-  run_loop_.reset(new base::RunLoop());
-  message_handler_.reset(new SecurityKeyMessageHandler());
+  run_loop_ = std::make_unique<base::RunLoop>();
+  message_handler_ = std::make_unique<SecurityKeyMessageHandler>();
 
-  std::unique_ptr<FakeSecurityKeyIpcClient> ipc_client(
-      new FakeSecurityKeyIpcClient(
-          base::Bind(&SecurityKeyMessageHandlerTest::OperationComplete,
-                     base::Unretained(this))));
+  auto ipc_client = std::make_unique<FakeSecurityKeyIpcClient>(
+      base::BindRepeating(&SecurityKeyMessageHandlerTest::OperationComplete,
+                          base::Unretained(this)));
   ipc_client_weak_ptr_ = ipc_client->AsWeakPtr();
 
-  std::unique_ptr<FakeSecurityKeyMessageReader> reader(
-      new FakeSecurityKeyMessageReader());
+  auto reader = std::make_unique<FakeSecurityKeyMessageReader>();
   reader_weak_ptr_ = reader->AsWeakPtr();
 
-  std::unique_ptr<FakeSecurityKeyMessageWriter> writer(
-      new FakeSecurityKeyMessageWriter(
-          base::Bind(&SecurityKeyMessageHandlerTest::OperationComplete,
-                     base::Unretained(this))));
+  auto writer = std::make_unique<FakeSecurityKeyMessageWriter>(
+      base::BindRepeating(&SecurityKeyMessageHandlerTest::OperationComplete,
+                          base::Unretained(this)));
   writer_weak_ptr_ = writer->AsWeakPtr();
 
   message_handler_->SetSecurityKeyMessageReaderForTest(std::move(reader));
@@ -96,13 +97,13 @@ void SecurityKeyMessageHandlerTest::SetUp() {
   ASSERT_TRUE(MakePipe(&read_file, &write_file));
   message_handler_->Start(
       std::move(read_file), std::move(write_file), std::move(ipc_client),
-      base::Bind(&SecurityKeyMessageHandlerTest::OperationComplete,
-                 base::Unretained(this)));
+      base::BindOnce(&SecurityKeyMessageHandlerTest::OperationComplete,
+                     base::Unretained(this)));
 }
 
 void SecurityKeyMessageHandlerTest::WaitForOperationComplete() {
   run_loop_->Run();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 void SecurityKeyMessageHandlerTest::OnSecurityKeyMessage(

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,7 @@
 #include "remoting/protocol/message_channel_factory.h"
 #include "remoting/protocol/message_pipe.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 ChannelDispatcherBase::ChannelDispatcherBase(const std::string& channel_name)
     : channel_name_(channel_name) {}
@@ -27,8 +26,9 @@ void ChannelDispatcherBase::Init(MessageChannelFactory* channel_factory,
   channel_factory_ = channel_factory;
   event_handler_ = event_handler;
 
-  channel_factory_->CreateChannel(channel_name_, base::Bind(
-      &ChannelDispatcherBase::OnChannelReady, base::Unretained(this)));
+  channel_factory_->CreateChannel(
+      channel_name_, base::BindOnce(&ChannelDispatcherBase::OnChannelReady,
+                                    base::Unretained(this)));
 }
 
 void ChannelDispatcherBase::Init(std::unique_ptr<MessagePipe> message_pipe,
@@ -61,5 +61,4 @@ void ChannelDispatcherBase::OnMessagePipeClosed() {
   event_handler_->OnChannelClosed(this);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

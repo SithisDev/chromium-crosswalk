@@ -1,17 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/session_cleanup_cookie_store.h"
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/test_net_log.h"
@@ -42,10 +43,9 @@ class SessionCleanupCookieStoreTest : public testing::Test {
   CanonicalCookieVector Load() {
     base::RunLoop run_loop;
     CanonicalCookieVector cookies;
-    store_->Load(
-        base::BindRepeating(&SessionCleanupCookieStoreTest::OnLoaded,
-                            base::Unretained(this), &run_loop, &cookies),
-        net_log_.bound());
+    store_->Load(base::BindOnce(&SessionCleanupCookieStoreTest::OnLoaded,
+                                base::Unretained(this), &run_loop, &cookies),
+                 net::NetLogWithSource::Make(net::NetLogSourceType::NONE));
     run_loop.Run();
     return cookies;
   }
@@ -54,7 +54,7 @@ class SessionCleanupCookieStoreTest : public testing::Test {
   CanonicalCookieVector CreateAndLoad() {
     auto sqlite_store = base::MakeRefCounted<net::SQLitePersistentCookieStore>(
         temp_dir_.GetPath().Append(kTestCookiesFilename),
-        base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()}),
+        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}),
         background_task_runner_, true, nullptr);
     store_ =
         base::MakeRefCounted<SessionCleanupCookieStore>(sqlite_store.get());
@@ -67,10 +67,10 @@ class SessionCleanupCookieStoreTest : public testing::Test {
                  const std::string& domain,
                  const std::string& path,
                  base::Time creation) {
-    store_->AddCookie(net::CanonicalCookie(name, value, domain, path, creation,
-                                           creation, base::Time(), false, false,
-                                           net::CookieSameSite::NO_RESTRICTION,
-                                           net::COOKIE_PRIORITY_DEFAULT));
+    store_->AddCookie(*net::CanonicalCookie::CreateUnsafeCookieForTesting(
+        name, value, domain, path, creation, creation, base::Time(),
+        base::Time(), false, false, net::CookieSameSite::NO_RESTRICTION,
+        net::COOKIE_PRIORITY_DEFAULT, false));
   }
 
   void DestroyStore() {
@@ -83,12 +83,12 @@ class SessionCleanupCookieStoreTest : public testing::Test {
 
   void TearDown() override { DestroyStore(); }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   const scoped_refptr<base::SequencedTaskRunner> background_task_runner_ =
-      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()});
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()});
   base::ScopedTempDir temp_dir_;
   scoped_refptr<SessionCleanupCookieStore> store_;
-  net::BoundTestNetLog net_log_;
+  net::RecordingNetLogObserver net_log_observer_;
 };
 
 TEST_F(SessionCleanupCookieStoreTest, TestPersistence) {
@@ -97,7 +97,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestPersistence) {
 
   base::Time t = base::Time::Now();
   AddCookie("A", "B", "foo.com", "/", t);
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "persistent.com", "/", t);
 
   // Replace the store, which forces the current store to flush data to
@@ -143,7 +143,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestNetLogIncludeCookies) {
       }));
   DestroyStore();
 
-  auto entries = net_log_.GetEntries();
+  auto entries = net_log_observer_.GetEntries();
   size_t pos = net::ExpectLogContainsSomewhere(
       entries, 0, net::NetLogEventType::COOKIE_PERSISTENT_STORE_ORIGIN_FILTERED,
       net::NetLogEventPhase::NONE);
@@ -162,7 +162,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestNetLogDoNotIncludeCookies) {
   base::Time t = base::Time::Now();
   AddCookie("A", "B", "nonpersistent.com", "/", t);
 
-  net_log_.SetObserverCaptureMode(net::NetLogCaptureMode::kDefault);
+  net_log_observer_.SetObserverCaptureMode(net::NetLogCaptureMode::kDefault);
   // Cookies from "nonpersistent.com" should be deleted.
   store_->DeleteSessionCookies(
       base::BindRepeating([](const std::string& domain, bool is_https) {
@@ -170,7 +170,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestNetLogDoNotIncludeCookies) {
       }));
   DestroyStore();
 
-  auto entries = net_log_.GetEntries();
+  auto entries = net_log_observer_.GetEntries();
   size_t pos = net::ExpectLogContainsSomewhere(
       entries, 0, net::NetLogEventType::COOKIE_PERSISTENT_STORE_ORIGIN_FILTERED,
       net::NetLogEventPhase::NONE);
@@ -190,9 +190,9 @@ TEST_F(SessionCleanupCookieStoreTest, TestDeleteSessionCookies) {
 
   base::Time t = base::Time::Now();
   AddCookie("A", "B", "foo.com", "/", t);
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "persistent.com", "/", t);
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "nonpersistent.com", "/", t);
 
   // Replace the store, which forces the current store to flush data to
@@ -205,7 +205,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestDeleteSessionCookies) {
   cookies = CreateAndLoad();
   EXPECT_EQ(3u, cookies.size());
 
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "nonpersistent.com", "/second", t);
 
   // Cookies from "nonpersistent.com" should be deleted.
@@ -213,7 +213,7 @@ TEST_F(SessionCleanupCookieStoreTest, TestDeleteSessionCookies) {
       base::BindRepeating([](const std::string& domain, bool is_https) {
         return domain == "nonpersistent.com";
       }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   DestroyStore();
   cookies = CreateAndLoad();
 
@@ -240,9 +240,9 @@ TEST_F(SessionCleanupCookieStoreTest, ForceKeepSessionState) {
   cookies = CreateAndLoad();
   EXPECT_EQ(1u, cookies.size());
 
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "persistent.com", "/", t);
-  t += base::TimeDelta::FromDays(10);
+  t += base::Days(10);
   AddCookie("A", "B", "nonpersistent.com", "/", t);
 
   store_->SetForceKeepSessionState();
@@ -251,7 +251,7 @@ TEST_F(SessionCleanupCookieStoreTest, ForceKeepSessionState) {
       base::BindRepeating([](const std::string& domain, bool is_https) {
         return domain == "nonpersistent.com";
       }));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   DestroyStore();
   cookies = CreateAndLoad();
 

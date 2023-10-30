@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/logging.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/channel_authenticator.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 const jingle_xmpp::StaticQName kPairingFailedTag =
@@ -20,7 +20,7 @@ const jingle_xmpp::StaticQName kPairingFailedTag =
 const jingle_xmpp::StaticQName kPairingErrorAttribute = { "", "error" };
 }  // namespace
 
-PairingAuthenticatorBase::PairingAuthenticatorBase() : weak_factory_(this) {}
+PairingAuthenticatorBase::PairingAuthenticatorBase() {}
 PairingAuthenticatorBase::~PairingAuthenticatorBase() = default;
 
 Authenticator::State PairingAuthenticatorBase::state() const {
@@ -38,14 +38,14 @@ bool PairingAuthenticatorBase::started() const {
 Authenticator::RejectionReason
 PairingAuthenticatorBase::rejection_reason() const {
   if (!spake2_authenticator_) {
-    return PROTOCOL_ERROR;
+    return RejectionReason::PROTOCOL_ERROR;
   }
   return spake2_authenticator_->rejection_reason();
 }
 
 void PairingAuthenticatorBase::ProcessMessage(
     const jingle_xmpp::XmlElement* message,
-    const base::Closure& resume_callback) {
+    base::OnceClosure resume_callback) {
   DCHECK_EQ(state(), WAITING_MESSAGE);
 
   // The client authenticator creates the underlying authenticator in the ctor
@@ -58,10 +58,11 @@ void PairingAuthenticatorBase::ProcessMessage(
     using_paired_secret_ = false;
     spake2_authenticator_.reset();
     CreateSpakeAuthenticatorWithPin(
-        WAITING_MESSAGE, base::Bind(&PairingAuthenticatorBase::ProcessMessage,
-                                    weak_factory_.GetWeakPtr(),
-                                    base::Owned(new jingle_xmpp::XmlElement(*message)),
-                                    resume_callback));
+        WAITING_MESSAGE,
+        base::BindOnce(&PairingAuthenticatorBase::ProcessMessage,
+                       weak_factory_.GetWeakPtr(),
+                       base::Owned(new jingle_xmpp::XmlElement(*message)),
+                       std::move(resume_callback)));
     return;
   }
 
@@ -71,11 +72,12 @@ void PairingAuthenticatorBase::ProcessMessage(
   // to the peer and retrying with the PIN.
   spake2_authenticator_->ProcessMessage(
       message,
-      base::Bind(&PairingAuthenticatorBase::CheckForFailedSpakeExchange,
-                 weak_factory_.GetWeakPtr(), resume_callback));
+      base::BindOnce(&PairingAuthenticatorBase::CheckForFailedSpakeExchange,
+                     weak_factory_.GetWeakPtr(), std::move(resume_callback)));
 }
 
-std::unique_ptr<jingle_xmpp::XmlElement> PairingAuthenticatorBase::GetNextMessage() {
+std::unique_ptr<jingle_xmpp::XmlElement>
+PairingAuthenticatorBase::GetNextMessage() {
   DCHECK_EQ(state(), MESSAGE_READY);
   std::unique_ptr<jingle_xmpp::XmlElement> result =
       spake2_authenticator_->GetNextMessage();
@@ -92,7 +94,8 @@ PairingAuthenticatorBase::CreateChannelAuthenticator() const {
   return spake2_authenticator_->CreateChannelAuthenticator();
 }
 
-void PairingAuthenticatorBase::MaybeAddErrorMessage(jingle_xmpp::XmlElement* message) {
+void PairingAuthenticatorBase::MaybeAddErrorMessage(
+    jingle_xmpp::XmlElement* message) {
   if (!error_message_.empty()) {
     jingle_xmpp::XmlElement* pairing_failed_tag =
         new jingle_xmpp::XmlElement(kPairingFailedTag);
@@ -114,22 +117,22 @@ bool PairingAuthenticatorBase::HasErrorMessage(
 }
 
 void PairingAuthenticatorBase::CheckForFailedSpakeExchange(
-    const base::Closure& resume_callback) {
+    base::OnceClosure resume_callback) {
   // If the SPAKE exchange failed due to invalid credentials, and those
   // credentials were the paired secret, then notify the peer that the
   // PIN-less connection failed and retry using the PIN.
   if (spake2_authenticator_->state() == REJECTED &&
-      spake2_authenticator_->rejection_reason() == INVALID_CREDENTIALS &&
+      spake2_authenticator_->rejection_reason() ==
+          RejectionReason::INVALID_CREDENTIALS &&
       using_paired_secret_) {
     using_paired_secret_ = false;
     error_message_ = "invalid-shared-secret";
     spake2_authenticator_.reset();
-    CreateSpakeAuthenticatorWithPin(MESSAGE_READY, resume_callback);
+    CreateSpakeAuthenticatorWithPin(MESSAGE_READY, std::move(resume_callback));
     return;
   }
 
-  resume_callback.Run();
+  std::move(resume_callback).Run();
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define REMOTING_BASE_GAIA_OAUTH_CLIENT_H_
 
 #include "base/containers/queue.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -23,6 +22,9 @@ class GaiaOAuthClient : public OAuthClient,
  public:
   GaiaOAuthClient(
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
+  GaiaOAuthClient(const GaiaOAuthClient&) = delete;
+  GaiaOAuthClient& operator=(const GaiaOAuthClient&) = delete;
 
   ~GaiaOAuthClient() override;
 
@@ -55,7 +57,8 @@ class GaiaOAuthClient : public OAuthClient,
             const std::string& auth_code,
             bool need_user_email,
             CompletionCallback on_done);
-    Request(const Request& other);
+    Request(Request&& other);
+    Request& operator=(Request&& other);
     virtual ~Request();
     gaia::OAuthClientInfo oauth_client_info;
     std::string auth_code;
@@ -71,8 +74,6 @@ class GaiaOAuthClient : public OAuthClient,
   std::string refresh_token_;
   bool need_user_email_;
   CompletionCallback on_done_;
-
-  DISALLOW_COPY_AND_ASSIGN(GaiaOAuthClient);
 };
 
 }  // namespace remoting

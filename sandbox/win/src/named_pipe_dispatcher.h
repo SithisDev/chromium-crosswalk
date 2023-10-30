@@ -1,15 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_NAMED_PIPE_DISPATCHER_H__
-#define SANDBOX_SRC_NAMED_PIPE_DISPATCHER_H__
+#ifndef SANDBOX_WIN_SRC_NAMED_PIPE_DISPATCHER_H_
+#define SANDBOX_WIN_SRC_NAMED_PIPE_DISPATCHER_H_
 
 #include <stdint.h>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
+#include "base/memory/raw_ptr.h"
 #include "sandbox/win/src/crosscall_server.h"
+#include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/sandbox_policy_base.h"
 
 namespace sandbox {
@@ -18,16 +20,20 @@ namespace sandbox {
 class NamedPipeDispatcher : public Dispatcher {
  public:
   explicit NamedPipeDispatcher(PolicyBase* policy_base);
+
+  NamedPipeDispatcher(const NamedPipeDispatcher&) = delete;
+  NamedPipeDispatcher& operator=(const NamedPipeDispatcher&) = delete;
+
   ~NamedPipeDispatcher() override {}
 
   // Dispatcher interface.
-  bool SetupService(InterceptionManager* manager, int service) override;
+  bool SetupService(InterceptionManager* manager, IpcTag service) override;
 
  private:
   // Processes IPC requests coming from calls to CreateNamedPipeW() in the
   // target.
   bool CreateNamedPipe(IPCInfo* ipc,
-                       base::string16* name,
+                       std::wstring* name,
                        uint32_t open_mode,
                        uint32_t pipe_mode,
                        uint32_t max_instances,
@@ -35,10 +41,9 @@ class NamedPipeDispatcher : public Dispatcher {
                        uint32_t in_buffer_size,
                        uint32_t default_timeout);
 
-  PolicyBase* policy_base_;
-  DISALLOW_COPY_AND_ASSIGN(NamedPipeDispatcher);
+  raw_ptr<PolicyBase> policy_base_;
 };
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_NAMED_PIPE_DISPATCHER_H__
+#endif  // SANDBOX_WIN_SRC_NAMED_PIPE_DISPATCHER_H_

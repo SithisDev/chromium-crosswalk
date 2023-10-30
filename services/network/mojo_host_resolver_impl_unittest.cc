@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/mojo_host_resolver_impl.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -11,17 +12,21 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/address_family.h"
+#include "net/base/address_list.h"
 #include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using net::test::IsError;
 using net::test::IsOk;
@@ -34,11 +39,11 @@ class TestRequestClient
     : public proxy_resolver::mojom::HostResolverRequestClient {
  public:
   explicit TestRequestClient(
-      mojo::InterfaceRequest<proxy_resolver::mojom::HostResolverRequestClient>
-          req)
-      : done_(false), binding_(this, std::move(req)) {
-    binding_.set_connection_error_handler(base::Bind(
-        &TestRequestClient::OnConnectionError, base::Unretained(this)));
+      mojo::PendingReceiver<proxy_resolver::mojom::HostResolverRequestClient>
+          receiver)
+      : done_(false), receiver_(this, std::move(receiver)) {
+    receiver_.set_disconnect_handler(base::BindOnce(
+        &TestRequestClient::OnMojoDisconnect, base::Unretained(this)));
   }
 
   void WaitForResult();
@@ -52,14 +57,14 @@ class TestRequestClient
   void ReportResult(int32_t error,
                     const std::vector<net::IPAddress>& results) override;
 
-  // Mojo error handler.
-  void OnConnectionError();
+  // Mojo disconnect handler.
+  void OnMojoDisconnect();
 
   bool done_;
-  base::Closure run_loop_quit_closure_;
-  base::Closure connection_error_quit_closure_;
+  base::OnceClosure run_loop_quit_closure_;
+  base::OnceClosure connection_error_quit_closure_;
 
-  mojo::Binding<proxy_resolver::mojom::HostResolverRequestClient> binding_;
+  mojo::Receiver<proxy_resolver::mojom::HostResolverRequestClient> receiver_;
 };
 
 void TestRequestClient::WaitForResult() {
@@ -82,7 +87,7 @@ void TestRequestClient::ReportResult(
     int32_t error,
     const std::vector<net::IPAddress>& results) {
   if (!run_loop_quit_closure_.is_null()) {
-    run_loop_quit_closure_.Run();
+    std::move(run_loop_quit_closure_).Run();
   }
   ASSERT_FALSE(done_);
   error_ = error;
@@ -90,9 +95,9 @@ void TestRequestClient::ReportResult(
   done_ = true;
 }
 
-void TestRequestClient::OnConnectionError() {
+void TestRequestClient::OnMojoDisconnect() {
   if (!connection_error_quit_closure_.is_null())
-    connection_error_quit_closure_.Run();
+    std::move(connection_error_quit_closure_).Run();
 }
 
 }  // namespace
@@ -105,16 +110,20 @@ class MojoHostResolverImplTest : public testing::Test {
   const net::IPAddress kChromiumOrgAddress{8, 8, 8, 8};
 
   void SetUp() override {
-    mock_host_resolver_.rules()->AddRuleForAddressFamily(
-        "example.com", net::ADDRESS_FAMILY_IPV4, kExampleComAddress.ToString());
-    mock_host_resolver_.rules()->AddRule("example.com",
-                                         kExampleComAddressIpv6.ToString());
+    net::HostResolverEndpointResults example_com_endpoints(1);
+    example_com_endpoints[0].ip_endpoints = {
+        net::IPEndPoint(kExampleComAddress, 0),
+        net::IPEndPoint(kExampleComAddressIpv6, 0)};
+    mock_host_resolver_.rules()->AddRule(
+        "example.com", net::MockHostResolverBase::RuleResolver::RuleResult(
+                           std::move(example_com_endpoints)));
     mock_host_resolver_.rules()->AddRule("chromium.org",
                                          kChromiumOrgAddress.ToString());
-    mock_host_resolver_.rules()->AddSimulatedFailure("failure.fail");
+    mock_host_resolver_.rules()->AddRule("failure.fail",
+                                         net::ERR_NAME_NOT_RESOLVED);
 
-    resolver_service_.reset(new MojoHostResolverImpl(&mock_host_resolver_,
-                                                     net::NetLogWithSource()));
+    resolver_service_ = std::make_unique<MojoHostResolverImpl>(
+        &mock_host_resolver_, net::NetLogWithSource());
   }
 
   // Wait until the mock resolver has received |num| resolve requests.
@@ -125,18 +134,19 @@ class MojoHostResolverImplTest : public testing::Test {
     }
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   net::MockHostResolver mock_host_resolver_;
   std::unique_ptr<MojoHostResolverImpl> resolver_service_;
 };
 
 TEST_F(MojoHostResolverImplTest, Resolve) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client_ptr;
-  TestRequestClient client(mojo::MakeRequest(&client_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  TestRequestClient client(client_remote.InitWithNewPipeAndPassReceiver());
 
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client_ptr));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client_remote));
   client.WaitForResult();
 
   EXPECT_THAT(client.error_, IsOk());
@@ -144,13 +154,14 @@ TEST_F(MojoHostResolverImplTest, Resolve) {
 }
 
 TEST_F(MojoHostResolverImplTest, ResolveSynchronous) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client_ptr;
-  TestRequestClient client(mojo::MakeRequest(&client_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  TestRequestClient client(client_remote.InitWithNewPipeAndPassReceiver());
 
   mock_host_resolver_.set_synchronous_mode(true);
 
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client_ptr));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client_remote));
   client.WaitForResult();
 
   EXPECT_THAT(client.error_, IsOk());
@@ -158,17 +169,19 @@ TEST_F(MojoHostResolverImplTest, ResolveSynchronous) {
 }
 
 TEST_F(MojoHostResolverImplTest, ResolveMultiple) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client1_ptr;
-  TestRequestClient client1(mojo::MakeRequest(&client1_ptr));
-  proxy_resolver::mojom::HostResolverRequestClientPtr client2_ptr;
-  TestRequestClient client2(mojo::MakeRequest(&client2_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client1_remote;
+  TestRequestClient client1(client1_remote.InitWithNewPipeAndPassReceiver());
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client2_remote;
+  TestRequestClient client2(client2_remote.InitWithNewPipeAndPassReceiver());
 
   mock_host_resolver_.set_ondemand_mode(true);
 
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client1_ptr));
-  resolver_service_->Resolve("chromium.org", false /* is_ex */,
-                             std::move(client2_ptr));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client1_remote));
+  resolver_service_->Resolve("chromium.org", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client2_remote));
   WaitForRequests(2);
   mock_host_resolver_.ResolveAllPending();
 
@@ -182,17 +195,19 @@ TEST_F(MojoHostResolverImplTest, ResolveMultiple) {
 }
 
 TEST_F(MojoHostResolverImplTest, ResolveDuplicate) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client1_ptr;
-  TestRequestClient client1(mojo::MakeRequest(&client1_ptr));
-  proxy_resolver::mojom::HostResolverRequestClientPtr client2_ptr;
-  TestRequestClient client2(mojo::MakeRequest(&client2_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client1_remote;
+  TestRequestClient client1(client1_remote.InitWithNewPipeAndPassReceiver());
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client2_remote;
+  TestRequestClient client2(client2_remote.InitWithNewPipeAndPassReceiver());
 
   mock_host_resolver_.set_ondemand_mode(true);
 
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client1_ptr));
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client2_ptr));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client1_remote));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client2_remote));
   WaitForRequests(2);
   mock_host_resolver_.ResolveAllPending();
 
@@ -206,11 +221,12 @@ TEST_F(MojoHostResolverImplTest, ResolveDuplicate) {
 }
 
 TEST_F(MojoHostResolverImplTest, ResolveFailure) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client_ptr;
-  TestRequestClient client(mojo::MakeRequest(&client_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  TestRequestClient client(client_remote.InitWithNewPipeAndPassReceiver());
 
-  resolver_service_->Resolve("failure.fail", false /* is_ex */,
-                             std::move(client_ptr));
+  resolver_service_->Resolve("failure.fail", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client_remote));
   client.WaitForResult();
 
   EXPECT_THAT(client.error_, IsError(net::ERR_NAME_NOT_RESOLVED));
@@ -218,26 +234,50 @@ TEST_F(MojoHostResolverImplTest, ResolveFailure) {
 }
 
 TEST_F(MojoHostResolverImplTest, ResolveEx) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client_ptr;
-  TestRequestClient client(mojo::MakeRequest(&client_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  TestRequestClient client(client_remote.InitWithNewPipeAndPassReceiver());
 
-  resolver_service_->Resolve("example.com", true /* is_ex */,
-                             std::move(client_ptr));
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             true /* is_ex */, std::move(client_remote));
   client.WaitForResult();
 
   EXPECT_THAT(client.error_, IsOk());
-  EXPECT_THAT(client.results_, testing::ElementsAre(kExampleComAddressIpv6));
+  EXPECT_THAT(client.results_, testing::UnorderedElementsAre(
+                                   kExampleComAddress, kExampleComAddressIpv6));
 }
 
-TEST_F(MojoHostResolverImplTest, DestroyClient) {
-  proxy_resolver::mojom::HostResolverRequestClientPtr client_ptr;
-  std::unique_ptr<TestRequestClient> client(
-      new TestRequestClient(mojo::MakeRequest(&client_ptr)));
+// Makes sure that the passed in NetworkAnonymizationKey is passed to the
+// HostResolver.
+TEST_F(MojoHostResolverImplTest, NetworkAnonymizationKeyUsed) {
+  const url::Origin kOrigin = url::Origin::Create(GURL("https://foo.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey(
+      (net::SchemefulSite(kOrigin)), (net::SchemefulSite(kOrigin)));
 
   mock_host_resolver_.set_ondemand_mode(true);
 
-  resolver_service_->Resolve("example.com", false /* is_ex */,
-                             std::move(client_ptr));
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  TestRequestClient client(client_remote.InitWithNewPipeAndPassReceiver());
+
+  resolver_service_->Resolve("example.com", kNetworkAnonymizationKey,
+                             false /* is_ex */, std::move(client_remote));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_EQ(1u, mock_host_resolver_.num_resolve());
+  EXPECT_EQ(kNetworkAnonymizationKey,
+            mock_host_resolver_.last_request_network_anonymization_key());
+}
+
+TEST_F(MojoHostResolverImplTest, DestroyClient) {
+  mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
+      client_remote;
+  std::unique_ptr<TestRequestClient> client(
+      new TestRequestClient(client_remote.InitWithNewPipeAndPassReceiver()));
+
+  mock_host_resolver_.set_ondemand_mode(true);
+
+  resolver_service_->Resolve("example.com", net::NetworkAnonymizationKey(),
+                             false /* is_ex */, std::move(client_remote));
   WaitForRequests(1);
 
   client.reset();

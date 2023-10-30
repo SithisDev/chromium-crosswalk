@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "services/device/geolocation/network_location_provider.h"
@@ -22,14 +22,18 @@ namespace device {
 // To avoid oscillations, set this to twice the expected update interval of a
 // a GPS-type location provider (in case it misses a beat) plus a little.
 const base::TimeDelta LocationArbitrator::kFixStaleTimeoutTimeDelta =
-    base::TimeDelta::FromSeconds(11);
+    base::Seconds(11);
 
 LocationArbitrator::LocationArbitrator(
     const CustomLocationProviderCallback& custom_location_provider_getter,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    GeolocationManager* geolocation_manager,
+    const scoped_refptr<base::SingleThreadTaskRunner>& main_task_runner,
+    const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
     const std::string& api_key,
     std::unique_ptr<PositionCache> position_cache)
     : custom_location_provider_getter_(custom_location_provider_getter),
+      geolocation_manager_(geolocation_manager),
+      main_task_runner_(main_task_runner),
       url_loader_factory_(url_loader_factory),
       api_key_(api_key),
       position_provider_(nullptr),
@@ -57,8 +61,7 @@ void LocationArbitrator::StartProvider(bool enable_high_accuracy) {
   enable_high_accuracy_ = enable_high_accuracy;
 
   if (providers_.empty()) {
-    RegisterSystemProvider();
-    RegisterNetworkProvider();
+    RegisterProviders();
   }
   DoStartProviders();
 }
@@ -92,29 +95,30 @@ void LocationArbitrator::RegisterProvider(
     std::unique_ptr<LocationProvider> provider) {
   if (!provider)
     return;
-  provider->SetUpdateCallback(base::Bind(&LocationArbitrator::OnLocationUpdate,
-                                         base::Unretained(this)));
+  provider->SetUpdateCallback(base::BindRepeating(
+      &LocationArbitrator::OnLocationUpdate, base::Unretained(this)));
   if (is_permission_granted_)
     provider->OnPermissionGranted();
   providers_.push_back(std::move(provider));
 }
 
-void LocationArbitrator::RegisterSystemProvider() {
-  std::unique_ptr<LocationProvider> provider;
-  if (custom_location_provider_getter_)
-    provider = custom_location_provider_getter_.Run();
+void LocationArbitrator::RegisterProviders() {
+  if (custom_location_provider_getter_) {
+    auto custom_provider = custom_location_provider_getter_.Run();
+    if (custom_provider) {
+      RegisterProvider(std::move(custom_provider));
+      return;
+    }
+  }
 
-  // Use the default system provider if the custom provider is null.
-  if (!provider)
-    provider = NewSystemLocationProvider();
-  RegisterProvider(std::move(provider));
-}
-
-void LocationArbitrator::RegisterNetworkProvider() {
-  if (!url_loader_factory_)
+  auto system_provider = NewSystemLocationProvider();
+  if (system_provider) {
+    RegisterProvider(std::move(system_provider));
     return;
+  }
 
-  RegisterProvider(NewNetworkLocationProvider(url_loader_factory_, api_key_));
+  if (url_loader_factory_)
+    RegisterProvider(NewNetworkLocationProvider(url_loader_factory_, api_key_));
 }
 
 void LocationArbitrator::OnLocationUpdate(
@@ -145,22 +149,23 @@ LocationArbitrator::NewNetworkLocationProvider(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const std::string& api_key) {
   DCHECK(url_loader_factory);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Android uses its own SystemLocationProvider.
   return nullptr;
 #else
   return std::make_unique<NetworkLocationProvider>(
-      std::move(url_loader_factory), api_key, position_cache_.get());
+      std::move(url_loader_factory), geolocation_manager_, main_task_runner_,
+      api_key, position_cache_.get());
 #endif
 }
 
 std::unique_ptr<LocationProvider>
 LocationArbitrator::NewSystemLocationProvider() {
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
-    defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
   return nullptr;
 #else
-  return device::NewSystemLocationProvider();
+  return device::NewSystemLocationProvider(main_task_runner_,
+                                           geolocation_manager_);
 #endif
 }
 

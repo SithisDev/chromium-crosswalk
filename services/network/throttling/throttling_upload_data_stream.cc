@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@ ThrottlingUploadDataStream::ThrottlingUploadDataStream(
     : net::UploadDataStream(upload_data_stream->is_chunked(),
                             upload_data_stream->identifier()),
       throttle_callback_(
-          base::Bind(&ThrottlingUploadDataStream::ThrottleCallback,
-                     base::Unretained(this))),
+          base::BindRepeating(&ThrottlingUploadDataStream::ThrottleCallback,
+                              base::Unretained(this))),
       throttled_byte_count_(0),
       upload_data_stream_(upload_data_stream) {}
 

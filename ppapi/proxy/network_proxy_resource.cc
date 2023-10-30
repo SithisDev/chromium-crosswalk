@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,12 +35,10 @@ int32_t NetworkProxyResource::GetProxyForURL(
   if (!string_url)
     return PP_ERROR_BADARGUMENT;
   Call<PpapiPluginMsg_NetworkProxy_GetProxyForURLReply>(
-      BROWSER,
-      PpapiHostMsg_NetworkProxy_GetProxyForURL(string_url->value()),
-      base::Bind(&NetworkProxyResource::OnPluginMsgGetProxyForURLReply,
-                 base::Unretained(this),
-                 base::Unretained(proxy_string),
-                 callback));
+      BROWSER, PpapiHostMsg_NetworkProxy_GetProxyForURL(string_url->value()),
+      base::BindOnce(&NetworkProxyResource::OnPluginMsgGetProxyForURLReply,
+                     base::Unretained(this), base::Unretained(proxy_string),
+                     callback));
   return PP_OK_COMPLETIONPENDING;
 }
 

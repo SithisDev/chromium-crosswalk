@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/prefs/testing_pref_service.h"
@@ -49,18 +48,18 @@ class SimpleInterceptablePrefFilter : public InterceptablePrefFilter {
   OnWriteCallbackPair FilterSerializeData(
       base::DictionaryValue* pref_store_contents) override {
     ADD_FAILURE();
-    return std::make_pair(base::Closure(),
-                          base::Callback<void(bool success)>());
+    return std::make_pair(base::OnceClosure(),
+                          base::OnceCallback<void(bool success)>());
   }
 
  private:
   // InterceptablePrefFilter implementation.
   void FinalizeFilterOnLoad(
-      const PostFilterOnLoadCallback& post_filter_on_load_callback,
+      PostFilterOnLoadCallback post_filter_on_load_callback,
       std::unique_ptr<base::DictionaryValue> pref_store_contents,
       bool prefs_altered) override {
-    post_filter_on_load_callback.Run(std::move(pref_store_contents),
-                                     prefs_altered);
+    std::move(post_filter_on_load_callback)
+        .Run(std::move(pref_store_contents), prefs_altered);
   }
 };
 
@@ -86,6 +85,11 @@ class TrackedPreferencesMigrationTest : public testing::Test {
         unprotected_store_migration_complete_(false),
         protected_store_migration_complete_(false) {}
 
+  TrackedPreferencesMigrationTest(const TrackedPreferencesMigrationTest&) =
+      delete;
+  TrackedPreferencesMigrationTest& operator=(
+      const TrackedPreferencesMigrationTest&) = delete;
+
   void SetUp() override { Reset(); }
 
   void Reset() {
@@ -106,14 +110,16 @@ class TrackedPreferencesMigrationTest : public testing::Test {
 
     SetupTrackedPreferencesMigration(
         unprotected_pref_names, protected_pref_names,
-        base::Bind(&TrackedPreferencesMigrationTest::RemovePathFromStore,
-                   base::Unretained(this), MOCK_UNPROTECTED_PREF_STORE),
-        base::Bind(&TrackedPreferencesMigrationTest::RemovePathFromStore,
-                   base::Unretained(this), MOCK_PROTECTED_PREF_STORE),
-        base::Bind(
+        base::BindRepeating(
+            &TrackedPreferencesMigrationTest::RemovePathFromStore,
+            base::Unretained(this), MOCK_UNPROTECTED_PREF_STORE),
+        base::BindRepeating(
+            &TrackedPreferencesMigrationTest::RemovePathFromStore,
+            base::Unretained(this), MOCK_PROTECTED_PREF_STORE),
+        base::BindRepeating(
             &TrackedPreferencesMigrationTest::RegisterSuccessfulWriteClosure,
             base::Unretained(this), MOCK_UNPROTECTED_PREF_STORE),
-        base::Bind(
+        base::BindRepeating(
             &TrackedPreferencesMigrationTest::RegisterSuccessfulWriteClosure,
             base::Unretained(this), MOCK_PROTECTED_PREF_STORE),
         std::unique_ptr<PrefHashStore>(
@@ -151,11 +157,13 @@ class TrackedPreferencesMigrationTest : public testing::Test {
     switch (store_id) {
       case MOCK_UNPROTECTED_PREF_STORE:
         store = unprotected_prefs_.get();
-        pref_hash_store.reset(new PrefHashStoreImpl(kSeed, kDeviceId, false));
+        pref_hash_store =
+            std::make_unique<PrefHashStoreImpl>(kSeed, kDeviceId, false);
         break;
       case MOCK_PROTECTED_PREF_STORE:
         store = protected_prefs_.get();
-        pref_hash_store.reset(new PrefHashStoreImpl(kSeed, kDeviceId, true));
+        pref_hash_store =
+            std::make_unique<PrefHashStoreImpl>(kSeed, kDeviceId, true);
         break;
     }
     DCHECK(store);
@@ -228,14 +236,14 @@ class TrackedPreferencesMigrationTest : public testing::Test {
     switch (store_id) {
       case MOCK_UNPROTECTED_PREF_STORE:
         mock_unprotected_pref_filter_.FilterOnLoad(
-            base::Bind(&TrackedPreferencesMigrationTest::GetPrefsBack,
-                       base::Unretained(this), MOCK_UNPROTECTED_PREF_STORE),
+            base::BindOnce(&TrackedPreferencesMigrationTest::GetPrefsBack,
+                           base::Unretained(this), MOCK_UNPROTECTED_PREF_STORE),
             std::move(unprotected_prefs_));
         break;
       case MOCK_PROTECTED_PREF_STORE:
         mock_protected_pref_filter_.FilterOnLoad(
-            base::Bind(&TrackedPreferencesMigrationTest::GetPrefsBack,
-                       base::Unretained(this), MOCK_PROTECTED_PREF_STORE),
+            base::BindOnce(&TrackedPreferencesMigrationTest::GetPrefsBack,
+                           base::Unretained(this), MOCK_PROTECTED_PREF_STORE),
             std::move(protected_prefs_));
         break;
     }
@@ -272,13 +280,11 @@ class TrackedPreferencesMigrationTest : public testing::Test {
     switch (store_id) {
       case MOCK_UNPROTECTED_PREF_STORE:
         EXPECT_FALSE(unprotected_store_successful_write_callback_.is_null());
-        unprotected_store_successful_write_callback_.Run();
-        unprotected_store_successful_write_callback_.Reset();
+        std::move(unprotected_store_successful_write_callback_).Run();
         break;
       case MOCK_PROTECTED_PREF_STORE:
         EXPECT_FALSE(protected_store_successful_write_callback_.is_null());
-        protected_store_successful_write_callback_.Run();
-        protected_store_successful_write_callback_.Reset();
+        std::move(protected_store_successful_write_callback_).Run();
         break;
     }
   }
@@ -286,15 +292,17 @@ class TrackedPreferencesMigrationTest : public testing::Test {
  private:
   void RegisterSuccessfulWriteClosure(
       MockPrefStoreID store_id,
-      const base::Closure& successful_write_closure) {
+      base::OnceClosure successful_write_closure) {
     switch (store_id) {
       case MOCK_UNPROTECTED_PREF_STORE:
         EXPECT_TRUE(unprotected_store_successful_write_callback_.is_null());
-        unprotected_store_successful_write_callback_ = successful_write_closure;
+        unprotected_store_successful_write_callback_ =
+            std::move(successful_write_closure);
         break;
       case MOCK_PROTECTED_PREF_STORE:
         EXPECT_TRUE(protected_store_successful_write_callback_.is_null());
-        protected_store_successful_write_callback_ = successful_write_closure;
+        protected_store_successful_write_callback_ =
+            std::move(successful_write_closure);
         break;
     }
   }
@@ -325,11 +333,11 @@ class TrackedPreferencesMigrationTest : public testing::Test {
     switch (store_id) {
       case MOCK_UNPROTECTED_PREF_STORE:
         ASSERT_TRUE(unprotected_prefs_);
-        unprotected_prefs_->RemovePath(key, NULL);
+        unprotected_prefs_->RemovePath(key);
         break;
       case MOCK_PROTECTED_PREF_STORE:
         ASSERT_TRUE(protected_prefs_);
-        protected_prefs_->RemovePath(key, NULL);
+        protected_prefs_->RemovePath(key);
         break;
     }
   }
@@ -362,8 +370,8 @@ class TrackedPreferencesMigrationTest : public testing::Test {
   SimpleInterceptablePrefFilter mock_unprotected_pref_filter_;
   SimpleInterceptablePrefFilter mock_protected_pref_filter_;
 
-  base::Closure unprotected_store_successful_write_callback_;
-  base::Closure protected_store_successful_write_callback_;
+  base::OnceClosure unprotected_store_successful_write_callback_;
+  base::OnceClosure protected_store_successful_write_callback_;
 
   bool migration_modified_unprotected_store_;
   bool migration_modified_protected_store_;
@@ -372,8 +380,6 @@ class TrackedPreferencesMigrationTest : public testing::Test {
   bool protected_store_migration_complete_;
 
   TestingPrefServiceSimple local_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrackedPreferencesMigrationTest);
 };
 
 // static

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_channel.h"
-#include "ipc/ipc_message.h"
-#include "ipc/ipc_message_macros.h"
 #include "mojo/public/cpp/system/isolated_connection.h"
-#include "remoting/host/chromoting_messages.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
 
 FakeSecurityKeyIpcClient::FakeSecurityKeyIpcClient(
-    const base::Closure& channel_event_callback)
-    : channel_event_callback_(channel_event_callback), weak_factory_(this) {
+    const base::RepeatingClosure& channel_event_callback)
+    : channel_event_callback_(channel_event_callback) {
   DCHECK(!channel_event_callback_.is_null());
 }
 
@@ -37,18 +34,18 @@ bool FakeSecurityKeyIpcClient::CheckForSecurityKeyIpcServerChannel() {
 }
 
 void FakeSecurityKeyIpcClient::EstablishIpcConnection(
-    const ConnectedCallback& connected_callback,
-    const base::Closure& connection_error_callback) {
+    ConnectedCallback connected_callback,
+    base::OnceClosure connection_error_callback) {
   if (establish_ipc_connection_should_succeed_) {
-    connected_callback.Run(/*connection_usable=*/true);
+    std::move(connected_callback).Run();
   } else {
-    connection_error_callback.Run();
+    std::move(connection_error_callback).Run();
   }
 }
 
 bool FakeSecurityKeyIpcClient::SendSecurityKeyRequest(
     const std::string& request_payload,
-    const ResponseCallback& response_callback) {
+    ResponseCallback response_callback) {
   if (send_security_request_should_succeed_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
@@ -60,6 +57,7 @@ bool FakeSecurityKeyIpcClient::SendSecurityKeyRequest(
 
 void FakeSecurityKeyIpcClient::CloseIpcConnection() {
   client_channel_.reset();
+  security_key_forwarder_.reset();
   mojo_connection_.reset();
   channel_event_callback_.Run();
 }
@@ -75,49 +73,41 @@ bool FakeSecurityKeyIpcClient::ConnectViaIpc(
   client_channel_ = IPC::Channel::CreateClient(
       mojo_connection_->Connect(std::move(endpoint)).release(), this,
       base::ThreadTaskRunnerHandle::Get());
-  return client_channel_->Connect();
+  if (!client_channel_->Connect()) {
+    ADD_FAILURE() << "Failed to connect to the IPC channel.";
+    return false;
+  }
+
+  auto* associated_interface_support =
+      client_channel_->GetAssociatedInterfaceSupport();
+  if (!associated_interface_support) {
+    ADD_FAILURE() << "Failed to retrieve associated interface support.";
+    return false;
+  }
+
+  associated_interface_support->GetRemoteAssociatedInterface(
+      security_key_forwarder_.BindNewEndpointAndPassReceiver());
+
+  return true;
 }
 
 void FakeSecurityKeyIpcClient::SendSecurityKeyRequestViaIpc(
     const std::string& request_payload) {
-  client_channel_->Send(
-      new ChromotingRemoteSecurityKeyToNetworkMsg_Request(request_payload));
+  security_key_forwarder_->OnSecurityKeyRequest(
+      request_payload,
+      base::BindOnce(&FakeSecurityKeyIpcClient::OnSecurityKeyResponse,
+                     base::Unretained(this)));
 }
 
 bool FakeSecurityKeyIpcClient::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(FakeSecurityKeyIpcClient, message)
-    IPC_MESSAGE_HANDLER(ChromotingNetworkToRemoteSecurityKeyMsg_Response,
-                        OnSecurityKeyResponse)
-    IPC_MESSAGE_HANDLER(ChromotingNetworkToRemoteSecurityKeyMsg_ConnectionReady,
-                        OnConnectionReady)
-    IPC_MESSAGE_HANDLER(ChromotingNetworkToRemoteSecurityKeyMsg_InvalidSession,
-                        OnInvalidSession)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  CHECK(handled) << "Received unexpected IPC type: " << message.type();
-  return handled;
-}
-
-void FakeSecurityKeyIpcClient::OnConnectionReady() {
-  connection_ready_ = true;
-  channel_event_callback_.Run();
-}
-
-void FakeSecurityKeyIpcClient::OnInvalidSession() {
-  invalid_session_error_ = true;
-  channel_event_callback_.Run();
+  ADD_FAILURE() << "Unexpected call to OnMessageReceived()";
+  return false;
 }
 
 void FakeSecurityKeyIpcClient::OnChannelConnected(int32_t peer_pid) {
   ipc_channel_connected_ = true;
-
-  // We don't always want to fire this event as only a subset of tests care
-  // about the channel being connected.  Tests that do care can register for it.
-  if (on_channel_connected_callback_) {
-    on_channel_connected_callback_.Run();
-  }
+  connection_ready_ = true;
+  channel_event_callback_.Run();
 }
 
 void FakeSecurityKeyIpcClient::OnChannelError() {

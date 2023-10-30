@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,8 +62,6 @@ class PPAPI_PROXY_EXPORT ResourceMessageParams {
   //          type and the functions will succeed.
   //       2) the caller is responsible for closing the returned handle, if it
   //          is valid.
-  bool TakeSharedMemoryHandleAtIndex(size_t index,
-                                     base::SharedMemoryHandle* handle) const;
   bool TakeReadOnlySharedMemoryRegionAtIndex(
       size_t index,
       base::ReadOnlySharedMemoryRegion* region) const;
@@ -74,8 +72,6 @@ class PPAPI_PROXY_EXPORT ResourceMessageParams {
                                IPC::PlatformFileForTransit* handle) const;
   bool TakeFileHandleAtIndex(size_t index,
                              IPC::PlatformFileForTransit* handle) const;
-  void TakeAllSharedMemoryHandles(
-      std::vector<base::SharedMemoryHandle>* handles) const;
   void TakeAllHandles(std::vector<SerializedHandle>* handles) const;
 
   // Appends the given handle to the list of handles sent with the call or

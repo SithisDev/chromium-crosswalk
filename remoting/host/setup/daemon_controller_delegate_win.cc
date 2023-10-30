@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 
 #include <stddef.h>
 
+#include <tuple>
+#include <utility>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/win/scoped_bstr.h"
@@ -65,8 +67,7 @@ const char* const kUnprivilegedConfigKeys[] = {
 
 // Reads and parses the configuration file up to |kMaxConfigFileSize| in
 // size.
-bool ReadConfig(const base::FilePath& filename,
-                std::unique_ptr<base::DictionaryValue>* config_out) {
+bool ReadConfig(const base::FilePath& filename, base::Value::Dict& config_out) {
   std::string file_content;
   if (!base::ReadFileToStringWithMaxSize(filename, &file_content,
                                          kMaxConfigFileSize)) {
@@ -75,17 +76,15 @@ bool ReadConfig(const base::FilePath& filename,
   }
 
   // Parse the JSON configuration, expecting it to contain a dictionary.
-  std::unique_ptr<base::Value> value = base::JSONReader::ReadDeprecated(
-      file_content, base::JSON_ALLOW_TRAILING_COMMAS);
+  absl::optional<base::Value> value =
+      base::JSONReader::Read(file_content, base::JSON_ALLOW_TRAILING_COMMAS);
 
-  base::DictionaryValue* dictionary;
-  if (!value || !value->GetAsDictionary(&dictionary)) {
+  if (!value || !value->is_dict()) {
     LOG(ERROR) << "Failed to parse '" << filename.value() << "'.";
     return false;
   }
 
-  ignore_result(value.release());
-  config_out->reset(dictionary);
+  config_out = std::move(value->GetDict());
   return true;
 }
 
@@ -159,33 +158,31 @@ bool WriteConfig(const std::string& content) {
   }
 
   // Extract the configuration data that the user will verify.
-  std::unique_ptr<base::Value> config_value =
-      base::JSONReader::ReadDeprecated(content);
-  if (!config_value.get()) {
+  absl::optional<base::Value> config_value = base::JSONReader::Read(content);
+  if (!config_value || !config_value->is_dict()) {
     return false;
   }
-  base::DictionaryValue* config_dict = nullptr;
-  if (!config_value->GetAsDictionary(&config_dict)) {
+
+  base::Value::Dict& config_dict = config_value->GetDict();
+
+  std::string* email;
+  if (!(email = config_dict.FindString(kHostOwnerEmailConfigPath)) &&
+      !(email = config_dict.FindString(kHostOwnerConfigPath)) &&
+      !(email = config_dict.FindString(kXmppLoginConfigPath))) {
     return false;
   }
-  std::string email;
-  if (!config_dict->GetString(kHostOwnerEmailConfigPath, &email) &&
-      !config_dict->GetString(kHostOwnerConfigPath, &email) &&
-      !config_dict->GetString(kXmppLoginConfigPath, &email)) {
-    return false;
-  }
-  std::string host_id, host_secret_hash;
-  if (!config_dict->GetString(kHostIdConfigPath, &host_id) ||
-      !config_dict->GetString(kHostSecretHashConfigPath, &host_secret_hash)) {
+  std::string* host_id = config_dict.FindString(kHostIdConfigPath);
+  std::string* host_secret_hash =
+      config_dict.FindString(kHostSecretHashConfigPath);
+  if (!host_id || !host_secret_hash) {
     return false;
   }
 
   // Extract the unprivileged fields from the configuration.
-  base::DictionaryValue unprivileged_config_dict;
+  base::Value::Dict unprivileged_config_dict;
   for (const char* key : kUnprivilegedConfigKeys) {
-    base::string16 value;
-    if (config_dict->GetString(key, &value)) {
-      unprivileged_config_dict.SetString(key, value);
+    if (std::string* value = config_dict.FindString(key)) {
+      unprivileged_config_dict.Set(key, std::move(*value));
     }
   }
   std::string unprivileged_config_str;
@@ -223,17 +220,14 @@ DaemonController::State ConvertToDaemonState(DWORD service_state) {
   case SERVICE_CONTINUE_PENDING:
   case SERVICE_START_PENDING:
     return DaemonController::STATE_STARTING;
-    break;
 
   case SERVICE_PAUSE_PENDING:
   case SERVICE_STOP_PENDING:
     return DaemonController::STATE_STOPPING;
-    break;
 
   case SERVICE_PAUSED:
   case SERVICE_STOPPED:
     return DaemonController::STATE_STOPPED;
-    break;
 
   default:
     NOTREACHED();
@@ -261,11 +255,11 @@ ScopedScHandle OpenService(DWORD access) {
   return service;
 }
 
-void InvokeCompletionCallback(
-    const DaemonController::CompletionCallback& done, bool success) {
+void InvokeCompletionCallback(DaemonController::CompletionCallback done,
+                              bool success) {
   DaemonController::AsyncResult async_result =
       success ? DaemonController::RESULT_OK : DaemonController::RESULT_FAILED;
-  done.Run(async_result);
+  std::move(done).Run(async_result);
 }
 
 bool StartDaemon() {
@@ -369,54 +363,53 @@ DaemonController::State DaemonControllerDelegateWin::GetState() {
   return ConvertToDaemonState(status.dwCurrentState);
 }
 
-std::unique_ptr<base::DictionaryValue>
-DaemonControllerDelegateWin::GetConfig() {
+absl::optional<base::Value::Dict> DaemonControllerDelegateWin::GetConfig() {
   base::FilePath config_dir = remoting::GetConfigDir();
 
   // Read the unprivileged part of host configuration.
-  std::unique_ptr<base::DictionaryValue> config;
-  if (!ReadConfig(config_dir.Append(kUnprivilegedConfigFileName), &config))
-    return nullptr;
+  base::Value::Dict config;
+  if (!ReadConfig(config_dir.Append(kUnprivilegedConfigFileName), config))
+    return absl::nullopt;
 
   return config;
 }
 
 void DaemonControllerDelegateWin::UpdateConfig(
-    std::unique_ptr<base::DictionaryValue> config,
-    const DaemonController::CompletionCallback& done) {
+    base::Value::Dict config,
+    DaemonController::CompletionCallback done) {
   // Check for bad keys.
-  for (size_t i = 0; i < base::size(kReadonlyKeys); ++i) {
-    if (config->HasKey(kReadonlyKeys[i])) {
+  for (size_t i = 0; i < std::size(kReadonlyKeys); ++i) {
+    if (config.Find(kReadonlyKeys[i])) {
       LOG(ERROR) << "Cannot update config: '" << kReadonlyKeys[i]
                  << "' is read only.";
-      InvokeCompletionCallback(done, false);
+      InvokeCompletionCallback(std::move(done), false);
       return;
     }
   }
   // Get the old config.
   base::FilePath config_dir = remoting::GetConfigDir();
-  std::unique_ptr<base::DictionaryValue> config_old;
-  if (!ReadConfig(config_dir.Append(kConfigFileName), &config_old)) {
-    InvokeCompletionCallback(done, false);
+  base::Value::Dict config_old;
+  if (!ReadConfig(config_dir.Append(kConfigFileName), config_old)) {
+    InvokeCompletionCallback(std::move(done), false);
     return;
   }
 
   // Merge items from the given config into the old config.
-  config_old->MergeDictionary(config.release());
+  config_old.Merge(std::move(config));
 
   // Write the updated config.
   std::string config_updated_str;
-  base::JSONWriter::Write(*config_old, &config_updated_str);
+  base::JSONWriter::Write(config_old, &config_updated_str);
   bool result = WriteConfig(config_updated_str);
 
-  InvokeCompletionCallback(done, result);
+  InvokeCompletionCallback(std::move(done), result);
 }
 
 void DaemonControllerDelegateWin::Stop(
-    const DaemonController::CompletionCallback& done) {
+    DaemonController::CompletionCallback done) {
   bool result = StopDaemon();
 
-  InvokeCompletionCallback(done, result);
+  InvokeCompletionCallback(std::move(done), result);
 }
 
 DaemonController::UsageStatsConsent
@@ -439,35 +432,41 @@ DaemonControllerDelegateWin::GetUsageStatsConsent() {
   return consent;
 }
 
+void DaemonControllerDelegateWin::CheckPermission(
+    bool it2me,
+    DaemonController::BoolCallback callback) {
+  std::move(callback).Run(true);
+}
+
 void DaemonControllerDelegateWin::SetConfigAndStart(
-    std::unique_ptr<base::DictionaryValue> config,
+    base::Value::Dict config,
     bool consent,
-    const DaemonController::CompletionCallback& done) {
+    DaemonController::CompletionCallback done) {
   // Record the user's consent.
   if (!remoting::SetUsageStatsConsent(consent)) {
-    InvokeCompletionCallback(done, false);
+    InvokeCompletionCallback(std::move(done), false);
     return;
   }
 
   // Set the configuration.
   std::string config_str;
-  base::JSONWriter::Write(*config, &config_str);
+  base::JSONWriter::Write(config, &config_str);
 
   // Determine the config directory path and create it if necessary.
   base::FilePath config_dir = remoting::GetConfigDir();
   if (!base::CreateDirectory(config_dir)) {
     PLOG(ERROR) << "Failed to create the config directory.";
-    InvokeCompletionCallback(done, false);
+    InvokeCompletionCallback(std::move(done), false);
     return;
   }
 
   if (!WriteConfig(config_str)) {
-    InvokeCompletionCallback(done, false);
+    InvokeCompletionCallback(std::move(done), false);
     return;
   }
 
   // Start daemon.
-  InvokeCompletionCallback(done, StartDaemon());
+  InvokeCompletionCallback(std::move(done), StartDaemon());
 }
 
 scoped_refptr<DaemonController> DaemonController::Create() {

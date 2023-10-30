@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "ipc/ipc_listener.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/platform/named_platform_channel.h"
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
 #include "mojo/public/cpp/system/isolated_connection.h"
+#include "remoting/host/mojom/remote_security_key.mojom.h"
 
 namespace IPC {
 class Channel;
@@ -29,14 +31,18 @@ namespace remoting {
 class SecurityKeyIpcClient : public IPC::Listener {
  public:
   SecurityKeyIpcClient();
+
+  SecurityKeyIpcClient(const SecurityKeyIpcClient&) = delete;
+  SecurityKeyIpcClient& operator=(const SecurityKeyIpcClient&) = delete;
+
   ~SecurityKeyIpcClient() override;
 
   // Used to send security key extension messages to the client.
-  typedef base::Callback<void(const std::string& response_data)>
-      ResponseCallback;
+  using ResponseCallback =
+      base::RepeatingCallback<void(const std::string& response_data)>;
 
-  // Used to indicate whether the channel can be used for request forwarding.
-  typedef base::Callback<void(bool connection_usable)> ConnectedCallback;
+  // Used to indicate when the channel can be used for request forwarding.
+  using ConnectedCallback = base::OnceCallback<void()>;
 
   // Returns true if there is an active remoting session which supports
   // security key request forwarding.
@@ -44,19 +50,17 @@ class SecurityKeyIpcClient : public IPC::Listener {
 
   // Begins the process of connecting to the IPC channel which will be used for
   // exchanging security key messages.
-  // |connected_callback| is called when a channel has been established and
-  // indicates whether security key requests can be sent using it.
+  // |connected_callback| is called when a channel has been established.
   // |connection_error_callback| is stored and will be called back for any
   // unexpected errors that occur while establishing, or during, the session.
   virtual void EstablishIpcConnection(
-      const ConnectedCallback& connected_callback,
-      const base::Closure& connection_error_callback);
+      ConnectedCallback connected_callback,
+      base::OnceClosure connection_error_callback);
 
   // Sends a security key request message to the network process to be forwarded
   // to the remote client.
-  virtual bool SendSecurityKeyRequest(
-      const std::string& request_payload,
-      const ResponseCallback& response_callback);
+  virtual bool SendSecurityKeyRequest(const std::string& request_payload,
+                                      ResponseCallback response_callback);
 
   // Closes the IPC channel if connected.
   virtual void CloseIpcConnection();
@@ -73,12 +77,6 @@ class SecurityKeyIpcClient : public IPC::Listener {
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnChannelConnected(int32_t peer_pid) override;
   void OnChannelError() override;
-
-  // Handles the ConnectionReady IPC message.
-  void OnConnectionReady();
-
-  // Handles the InvalidSession IPC message.
-  void OnInvalidSession();
 
   // Handles security key response IPC messages.
   void OnSecurityKeyResponse(const std::string& request_data);
@@ -100,7 +98,7 @@ class SecurityKeyIpcClient : public IPC::Listener {
   ConnectedCallback connected_callback_;
 
   // Signaled when an error occurs in either the IPC channel or communication.
-  base::Closure connection_error_callback_;
+  base::OnceClosure connection_error_callback_;
 
   // Signaled when a security key response has been received.
   ResponseCallback response_callback_;
@@ -109,11 +107,12 @@ class SecurityKeyIpcClient : public IPC::Listener {
   mojo::IsolatedConnection mojo_connection_;
   std::unique_ptr<IPC::Channel> ipc_channel_;
 
+  // Used for forwarding security key requests to the remote client.
+  mojo::AssociatedRemote<mojom::SecurityKeyForwarder> security_key_forwarder_;
+
   base::ThreadChecker thread_checker_;
 
-  base::WeakPtrFactory<SecurityKeyIpcClient> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SecurityKeyIpcClient);
+  base::WeakPtrFactory<SecurityKeyIpcClient> weak_factory_{this};
 };
 
 }  // namespace remoting

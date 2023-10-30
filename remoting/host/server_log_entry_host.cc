@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@ namespace remoting {
 
 namespace {
 const char kValueEventNameSessionState[] = "session-state";
-const char kValueEventNameHeartbeat[] = "heartbeat";
 
 const char kValueRoleHost[] = "host";
 
@@ -39,13 +38,6 @@ std::unique_ptr<ServerLogEntry> MakeLogEntryForSessionStateChange(
   entry->AddRoleField(kValueRoleHost);
   entry->AddEventNameField(kValueEventNameSessionState);
   entry->Set(kKeySessionState, GetValueSessionState(connected));
-  return entry;
-}
-
-std::unique_ptr<ServerLogEntry> MakeLogEntryForHeartbeat() {
-  std::unique_ptr<ServerLogEntry> entry(new ServerLogEntry());
-  entry->AddRoleField(kValueRoleHost);
-  entry->AddEventNameField(kValueEventNameHeartbeat);
   return entry;
 }
 

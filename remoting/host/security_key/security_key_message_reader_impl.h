@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "base/callback.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "remoting/host/security_key/security_key_message.h"
@@ -26,11 +25,16 @@ namespace remoting {
 class SecurityKeyMessageReaderImpl : public SecurityKeyMessageReader {
  public:
   explicit SecurityKeyMessageReaderImpl(base::File input_file);
+
+  SecurityKeyMessageReaderImpl(const SecurityKeyMessageReaderImpl&) = delete;
+  SecurityKeyMessageReaderImpl& operator=(const SecurityKeyMessageReaderImpl&) =
+      delete;
+
   ~SecurityKeyMessageReaderImpl() override;
 
   // SecurityKeyMessageReader interface.
   void Start(const SecurityKeyMessageCallback& message_callback,
-             const base::Closure& error_callback) override;
+             base::OnceClosure error_callback) override;
 
  private:
   // Reads a message from the remote_security_key process and passes it to
@@ -53,7 +57,7 @@ class SecurityKeyMessageReaderImpl : public SecurityKeyMessageReader {
 
   // Caller-supplied message and error callbacks.
   SecurityKeyMessageCallback message_callback_;
-  base::Closure error_callback_;
+  base::OnceClosure error_callback_;
 
   // Thread used for blocking IO operations.
   base::Thread reader_thread_;
@@ -61,9 +65,7 @@ class SecurityKeyMessageReaderImpl : public SecurityKeyMessageReader {
   scoped_refptr<base::SingleThreadTaskRunner> read_task_runner_;
 
   base::WeakPtr<SecurityKeyMessageReaderImpl> reader_;
-  base::WeakPtrFactory<SecurityKeyMessageReaderImpl> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SecurityKeyMessageReaderImpl);
+  base::WeakPtrFactory<SecurityKeyMessageReaderImpl> weak_factory_{this};
 };
 
 }  // namespace remoting

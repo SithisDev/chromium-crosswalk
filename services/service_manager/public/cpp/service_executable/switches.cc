@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,9 @@ namespace switches {
 // different services.
 const char kServiceName[] = "service-name";
 
-// The name of the |service_manager::mojom::ServiceRequest| message pipe handle
-// that is attached to the incoming Mojo invitation received by the service.
+// The name of the |mojo::PendingReceiver<service_manager::mojom::Service>|
+// message pipe handle that is attached to the incoming Mojo invitation received
+// by the service.
 const char kServiceRequestAttachmentName[] = "service-request-attachment-name";
 
 }  // namespace switches

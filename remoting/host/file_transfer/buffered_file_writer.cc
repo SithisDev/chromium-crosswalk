@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ void BufferedFileWriter::Start(const base::FilePath& filename) {
                                          base::Unretained(this)));
 }
 
-void BufferedFileWriter::Write(std::string data) {
+void BufferedFileWriter::Write(std::vector<std::uint8_t> data) {
   if (state_ == kFailed) {
     return;
   }
@@ -60,7 +60,7 @@ void BufferedFileWriter::Close() {
 void BufferedFileWriter::WriteNextChunk() {
   DCHECK(!chunks_.empty());
   DCHECK(state_ == kWorking || state_ == kClosing);
-  std::string data = std::move(chunks_.front());
+  std::vector<std::uint8_t> data = std::move(chunks_.front());
   chunks_.pop();
   writer_->WriteChunk(std::move(data),
                       base::BindOnce(&BufferedFileWriter::OnOperationResult,

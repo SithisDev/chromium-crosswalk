@@ -1,17 +1,19 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/preferences/tracked/pref_hash_filter.h"
 
 #include <stdint.h>
+
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -32,13 +34,12 @@ void CleanupDeprecatedTrackedPreferences(
   // Add deprecated previously tracked preferences below for them to be cleaned
   // up from both the pref files and the hash store.
   static const char* const kDeprecatedTrackedPreferences[] = {
-      // TODO(a-v-y): Remove in M60+,
-      "default_search_provider.search_url", "default_search_provider.name",
-      "default_search_provider.keyword"};
+      // TODO(pmonette): Remove in 2022+.
+      "module_blacklist_cache_md5_digest"};
 
-  for (size_t i = 0; i < base::size(kDeprecatedTrackedPreferences); ++i) {
+  for (size_t i = 0; i < std::size(kDeprecatedTrackedPreferences); ++i) {
     const char* key = kDeprecatedTrackedPreferences[i];
-    pref_store_contents->Remove(key, NULL);
+    pref_store_contents->RemovePath(key);
     hash_store_transaction->ClearHash(key);
   }
 }
@@ -53,16 +54,20 @@ PrefHashFilter::PrefHashFilter(
     StoreContentsPair external_validation_hash_store_pair,
     const std::vector<prefs::mojom::TrackedPreferenceMetadataPtr>&
         tracked_preferences,
-    prefs::mojom::ResetOnLoadObserverPtr reset_on_load_observer,
-    prefs::mojom::TrackedPreferenceValidationDelegate* delegate,
+    mojo::PendingRemote<prefs::mojom::ResetOnLoadObserver>
+        reset_on_load_observer,
+    scoped_refptr<base::RefCountedData<
+        mojo::Remote<prefs::mojom::TrackedPreferenceValidationDelegate>>>
+        delegate,
     size_t reporting_ids_count)
     : pref_hash_store_(std::move(pref_hash_store)),
       external_validation_hash_store_pair_(
           external_validation_hash_store_pair.first
-              ? base::make_optional(
+              ? absl::make_optional(
                     std::move(external_validation_hash_store_pair))
-              : base::nullopt),
-      reset_on_load_observer_(std::move(reset_on_load_observer)) {
+              : absl::nullopt),
+      reset_on_load_observer_(std::move(reset_on_load_observer)),
+      delegate_(std::move(delegate)) {
   DCHECK(pref_hash_store_);
   DCHECK_GE(reporting_ids_count, tracked_preferences.size());
   // Verify that, if |external_validation_hash_store_pair_| is present, both its
@@ -71,6 +76,8 @@ PrefHashFilter::PrefHashFilter(
          (external_validation_hash_store_pair_->first &&
           external_validation_hash_store_pair_->second));
 
+  prefs::mojom::TrackedPreferenceValidationDelegate* delegate_ptr =
+      (delegate_ ? delegate_->data.get() : nullptr);
   for (size_t i = 0; i < tracked_preferences.size(); ++i) {
     const prefs::mojom::TrackedPreferenceMetadata& metadata =
         *tracked_preferences[i];
@@ -78,14 +85,14 @@ PrefHashFilter::PrefHashFilter(
     std::unique_ptr<TrackedPreference> tracked_preference;
     switch (metadata.strategy) {
       case PrefTrackingStrategy::ATOMIC:
-        tracked_preference.reset(new TrackedAtomicPreference(
+        tracked_preference = std::make_unique<TrackedAtomicPreference>(
             metadata.name, metadata.reporting_id, reporting_ids_count,
-            metadata.enforcement_level, metadata.value_type, delegate));
+            metadata.enforcement_level, metadata.value_type, delegate_ptr);
         break;
       case PrefTrackingStrategy::SPLIT:
-        tracked_preference.reset(new TrackedSplitPreference(
+        tracked_preference = std::make_unique<TrackedSplitPreference>(
             metadata.name, metadata.reporting_id, reporting_ids_count,
-            metadata.enforcement_level, metadata.value_type, delegate));
+            metadata.enforcement_level, metadata.value_type, delegate_ptr);
         break;
     }
     DCHECK(tracked_preference);
@@ -142,8 +149,7 @@ void PrefHashFilter::Initialize(base::DictionaryValue* pref_store_contents) {
   for (auto it = tracked_paths_.begin(); it != tracked_paths_.end(); ++it) {
     const std::string& initialized_path = it->first;
     const TrackedPreference* initialized_preference = it->second.get();
-    const base::Value* value = nullptr;
-    pref_store_contents->Get(initialized_path, &value);
+    const base::Value* value = pref_store_contents->FindPath(initialized_path);
     initialized_preference->OnNewValue(value, hash_store_transaction.get());
   }
 }
@@ -184,8 +190,7 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::FilterSerializeData(
            it != changed_paths_.end(); ++it) {
         const std::string& changed_path = it->first;
         const TrackedPreference* changed_preference = it->second;
-        const base::Value* value = nullptr;
-        pref_store_contents->Get(changed_path, &value);
+        const base::Value* value = pref_store_contents->FindPath(changed_path);
         changed_preference->OnNewValue(value, hash_store_transaction.get());
       }
       changed_paths_.clear();
@@ -209,7 +214,7 @@ void PrefHashFilter::OnStoreDeletionFromDisk() {
 }
 
 void PrefHashFilter::FinalizeFilterOnLoad(
-    const PostFilterOnLoadCallback& post_filter_on_load_callback,
+    PostFilterOnLoadCallback post_filter_on_load_callback,
     std::unique_ptr<base::DictionaryValue> pref_store_contents,
     bool prefs_altered) {
   DCHECK(pref_store_contents);
@@ -258,19 +263,18 @@ void PrefHashFilter::FinalizeFilterOnLoad(
   UMA_HISTOGRAM_TIMES("Settings.FilterOnLoadTime",
                       base::TimeTicks::Now() - checkpoint);
 
-  post_filter_on_load_callback.Run(std::move(pref_store_contents),
-                                   prefs_altered);
+  std::move(post_filter_on_load_callback)
+      .Run(std::move(pref_store_contents), prefs_altered);
 }
 
 // static
 void PrefHashFilter::ClearFromExternalStore(
     HashStoreContents* external_validation_hash_store_contents,
     const base::DictionaryValue* changed_paths_and_macs) {
-  DCHECK(!changed_paths_and_macs->empty());
+  DCHECK(!changed_paths_and_macs->DictEmpty());
 
-  for (base::DictionaryValue::Iterator it(*changed_paths_and_macs);
-       !it.IsAtEnd(); it.Advance()) {
-    external_validation_hash_store_contents->RemoveEntry(it.key());
+  for (const auto item : changed_paths_and_macs->GetDict()) {
+    external_validation_hash_store_contents->RemoveEntry(item.first);
   }
 }
 
@@ -279,33 +283,28 @@ void PrefHashFilter::FlushToExternalStore(
     std::unique_ptr<HashStoreContents> external_validation_hash_store_contents,
     std::unique_ptr<base::DictionaryValue> changed_paths_and_macs,
     bool write_success) {
-  DCHECK(!changed_paths_and_macs->empty());
+  DCHECK(!changed_paths_and_macs->DictEmpty());
   DCHECK(external_validation_hash_store_contents);
   if (!write_success)
     return;
 
-  for (base::DictionaryValue::Iterator it(*changed_paths_and_macs);
-       !it.IsAtEnd(); it.Advance()) {
-    const std::string& changed_path = it.key();
+  for (const auto item : changed_paths_and_macs->GetDict()) {
+    const std::string& changed_path = item.first;
 
     const base::DictionaryValue* split_values = nullptr;
-    if (it.value().GetAsDictionary(&split_values)) {
-      for (base::DictionaryValue::Iterator inner_it(*split_values);
-           !inner_it.IsAtEnd(); inner_it.Advance()) {
-        std::string mac;
-        bool is_string = inner_it.value().GetAsString(&mac);
+    if (item.second.GetAsDictionary(&split_values)) {
+      for (const auto inner_item : split_values->GetDict()) {
+        const std::string* mac = inner_item.second.GetIfString();
+        bool is_string = !!mac;
         DCHECK(is_string);
 
         external_validation_hash_store_contents->SetSplitMac(
-            changed_path, inner_it.key(), mac);
+            changed_path, inner_item.first, *mac);
       }
     } else {
-      const base::Value* value_as_string;
-      bool is_string = it.value().GetAsString(&value_as_string);
-      DCHECK(is_string);
-
-      external_validation_hash_store_contents->SetMac(
-          changed_path, value_as_string->GetString());
+      DCHECK(item.second.is_string());
+      external_validation_hash_store_contents->SetMac(changed_path,
+                                                      item.second.GetString());
     }
   }
 }
@@ -313,8 +312,8 @@ void PrefHashFilter::FlushToExternalStore(
 PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
     base::DictionaryValue* pref_store_contents) {
   if (changed_paths_.empty() || !external_validation_hash_store_pair_) {
-    return std::make_pair(base::Closure(),
-                          base::Callback<void(bool success)>());
+    return std::make_pair(base::OnceClosure(),
+                          base::OnceCallback<void(bool success)>());
   }
 
   std::unique_ptr<base::DictionaryValue> changed_paths_macs =
@@ -327,8 +326,8 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
 
     switch (changed_preference->GetType()) {
       case TrackedPreferenceType::ATOMIC: {
-        const base::Value* new_value = nullptr;
-        pref_store_contents->Get(changed_path, &new_value);
+        const base::Value* new_value =
+            pref_store_contents->FindPath(changed_path);
         changed_paths_macs->SetKey(
             changed_path,
             base::Value(external_validation_hash_store_pair_->first->ComputeMac(
@@ -338,10 +337,11 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
       case TrackedPreferenceType::SPLIT: {
         const base::DictionaryValue* dict_value = nullptr;
         pref_store_contents->GetDictionary(changed_path, &dict_value);
-        changed_paths_macs->SetWithoutPathExpansion(
+        changed_paths_macs->SetKey(
             changed_path,
-            external_validation_hash_store_pair_->first->ComputeSplitMacs(
-                changed_path, dict_value));
+            base::Value::FromUniquePtrValue(
+                external_validation_hash_store_pair_->first->ComputeSplitMacs(
+                    changed_path, dict_value)));
         break;
       }
     }
@@ -361,8 +361,8 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
   base::DictionaryValue* raw_changed_paths_macs = changed_paths_macs.get();
 
   return std::make_pair(
-      base::Bind(&ClearFromExternalStore, base::Unretained(raw_contents),
-                 base::Unretained(raw_changed_paths_macs)),
-      base::Bind(&FlushToExternalStore, base::Passed(&hash_store_contents_copy),
-                 base::Passed(&changed_paths_macs)));
+      base::BindOnce(&ClearFromExternalStore, base::Unretained(raw_contents),
+                     base::Unretained(raw_changed_paths_macs)),
+      base::BindOnce(&FlushToExternalStore, std::move(hash_store_contents_copy),
+                     std::move(changed_paths_macs)));
 }

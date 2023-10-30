@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,18 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/constants.h"
@@ -39,25 +41,6 @@
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "ui/events/event.h"
 
-// TODO(crbug.com/961064): Fix memory leaks in tests and re-enable on LSAN.
-#ifdef LEAK_SANITIZER
-#define MAYBE_LocalInputTest DISABLED_LocalInputTest
-#define MAYBE_ClampMouseEvents DISABLED_ClampMouseEvents
-#define MAYBE_DisableInputs DISABLED_DisableInputs
-#define MAYBE_MultiMonMouseMove_SameSize DISABLED_MultiMonMouseMove_SameSize
-#define MAYBE_RestoreEventState DISABLED_RestoreEventState
-#define MAYBE_MultiMonMouseMove DISABLED_MultiMonMouseMove
-#define MAYBE_DisconnectOnLocalInputTest DISABLED_DisconnectOnLocalInputTest
-#else
-#define MAYBE_LocalInputTest LocalInputTest
-#define MAYBE_ClampMouseEvents ClampMouseEvents
-#define MAYBE_DisableInputs DisableInputs
-#define MAYBE_MultiMonMouseMove_SameSize MultiMonMouseMove_SameSize
-#define MAYBE_RestoreEventState RestoreEventState
-#define MAYBE_MultiMonMouseMove MultiMonMouseMove
-#define MAYBE_DisconnectOnLocalInputTest DisconnectOnLocalInputTest
-#endif
-
 namespace remoting {
 
 using protocol::FakeSession;
@@ -67,12 +50,13 @@ using protocol::MockInputStub;
 using protocol::MockVideoStub;
 using protocol::SessionConfig;
 using protocol::test::EqualsClipboardEvent;
+using protocol::test::EqualsKeyEvent;
 using protocol::test::EqualsMouseButtonEvent;
 using protocol::test::EqualsMouseMoveEvent;
-using protocol::test::EqualsKeyEvent;
 
 using testing::_;
 using testing::AtLeast;
+using testing::Eq;
 using testing::ReturnRef;
 using testing::StrictMock;
 
@@ -82,19 +66,24 @@ constexpr char kTestDataChannelCallbackName[] = "test_channel_name";
 
 // Matches a |protocol::Capabilities| argument against a list of capabilities
 // formatted as a space-separated string.
-MATCHER_P(EqCapabilities, expected_capabilities, "") {
+MATCHER_P(IncludesCapabilities, expected_capabilities, "") {
   if (!arg.has_capabilities())
     return false;
 
-  std::vector<std::string> words_args = base::SplitString(
-      arg.capabilities(), " ", base::KEEP_WHITESPACE,
-      base::SPLIT_WANT_NONEMPTY);
-  std::vector<std::string> words_expected = base::SplitString(
-      expected_capabilities, " ", base::KEEP_WHITESPACE,
-      base::SPLIT_WANT_NONEMPTY);
-  std::sort(words_args.begin(), words_args.end());
-  std::sort(words_expected.begin(), words_expected.end());
-  return words_args == words_expected;
+  std::vector<std::string> words_args =
+      base::SplitString(arg.capabilities(), " ", base::KEEP_WHITESPACE,
+                        base::SPLIT_WANT_NONEMPTY);
+  std::vector<std::string> words_expected =
+      base::SplitString(expected_capabilities, " ", base::KEEP_WHITESPACE,
+                        base::SPLIT_WANT_NONEMPTY);
+
+  for (const auto& word : words_expected) {
+    if (std::find(words_args.begin(), words_args.end(), word) ==
+        words_args.end()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 protocol::MouseEvent MakeMouseMoveEvent(int x, int y) {
@@ -133,10 +122,11 @@ class ClientSessionTest : public testing::Test {
       protocol::FakeDesktopCapturer::kWidth;  // 800
   static const int kDisplay1Height =
       protocol::FakeDesktopCapturer::kHeight;  // 600
+  static const int64_t kDisplay1Id = 1111111111111111;
   static const int kDisplay2Width = 1024;
   static const int kDisplay2Height = 768;
   static const int kDisplay2YOffset = 35;
-  static const int kInvalidDisplayIndex = -2;
+  static const int64_t kDisplay2Id = 2222222222222222;
 
   // Creates the client session from a FakeSession instance.
   void CreateClientSession(std::unique_ptr<protocol::FakeSession> session);
@@ -162,7 +152,8 @@ class ClientSessionTest : public testing::Test {
                           int width,
                           int height,
                           int dpi_x,
-                          int dpi_y);
+                          int dpi_y,
+                          int64_t display_id);
 
   // Fakes desktop display size notification from Webrtc.
   void NotifyDesktopDisplaySize(
@@ -182,13 +173,17 @@ class ClientSessionTest : public testing::Test {
   void MultiMon_SelectFirstDisplay();
   void MultiMon_SelectSecondDisplay();
   void MultiMon_SelectAllDisplays();
+  void MultiMon_SelectDisplay(std::string display_id);
+
+  // Return the identifier of the display that's currently selected.
+  webrtc::ScreenId GetSelectedSourceDisplayId();
 
   // Geometry info for displays being tested.
   DesktopDisplayInfo displays_;
   int curr_display_;
 
   // Message loop that will process all ClientSession tasks.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   // AutoThreadTaskRunner on which |client_session_| will be run.
   scoped_refptr<AutoThreadTaskRunner> task_runner_;
@@ -211,7 +206,7 @@ class ClientSessionTest : public testing::Test {
   MockClientStub client_stub_;
 
   // ClientSession owns |connection_| but tests need it to inject fake events.
-  protocol::FakeConnectionToClient* connection_;
+  raw_ptr<protocol::FakeConnectionToClient> connection_;
 
   std::unique_ptr<FakeDesktopEnvironmentFactory> desktop_environment_factory_;
 
@@ -219,13 +214,13 @@ class ClientSessionTest : public testing::Test {
 };
 
 void ClientSessionTest::SetUp() {
-  // Arrange to run |scoped_task_environment_| until no components depend on it.
+  // Arrange to run |task_environment_| until no components depend on it.
   task_runner_ = new AutoThreadTaskRunner(
-      scoped_task_environment_.GetMainThreadTaskRunner(),
-      run_loop_.QuitClosure());
+      task_environment_.GetMainThreadTaskRunner(), run_loop_.QuitClosure());
 
-  desktop_environment_factory_.reset(new FakeDesktopEnvironmentFactory(
-      scoped_task_environment_.GetMainThreadTaskRunner()));
+  desktop_environment_factory_ =
+      std::make_unique<FakeDesktopEnvironmentFactory>(
+          task_environment_.GetMainThreadTaskRunner());
   desktop_environment_options_ = DesktopEnvironmentOptions::CreateDefault();
 }
 
@@ -254,10 +249,10 @@ void ClientSessionTest::CreateClientSession(
   connection->set_client_stub(&client_stub_);
   connection_ = connection.get();
 
-  client_session_.reset(new ClientSession(
+  client_session_ = std::make_unique<ClientSession>(
       &session_event_handler_, std::move(connection),
       desktop_environment_factory_.get(), desktop_environment_options_,
-      base::TimeDelta(), nullptr, extensions_));
+      base::TimeDelta(), nullptr, extensions_);
 }
 
 void ClientSessionTest::CreateClientSession() {
@@ -314,7 +309,7 @@ void ClientSessionTest::NotifyVideoSizeAll() {
 
   int x_min, x_max, y_min, y_max;
   bool initialized = false;
-  for (DisplayGeometry disp : displays_.displays()) {
+  for (const auto& disp : displays_.displays()) {
     int disp_x_max = disp.x + disp.width;
     int disp_y_max = disp.y + disp.height;
     if (!initialized) {
@@ -345,7 +340,8 @@ void ClientSessionTest::AddDisplayToLayout(protocol::VideoLayout* displays,
                                            int width,
                                            int height,
                                            int dpi_x,
-                                           int dpi_y) {
+                                           int dpi_y,
+                                           int64_t display_id) {
   protocol::VideoTrackLayout* video_track = displays->add_video_track();
   video_track->set_position_x(x);
   video_track->set_position_y(y);
@@ -353,6 +349,7 @@ void ClientSessionTest::AddDisplayToLayout(protocol::VideoLayout* displays,
   video_track->set_height(height);
   video_track->set_x_dpi(dpi_x);
   video_track->set_y_dpi(dpi_y);
+  video_track->set_screen_id(display_id);
   displays_.AddDisplayFrom(*video_track);
 }
 
@@ -369,7 +366,7 @@ void ClientSessionTest::NotifySelectDesktopDisplay(std::string id) {
 
 void ClientSessionTest::ResetDisplayInfo() {
   displays_.Reset();
-  curr_display_ = kInvalidDisplayIndex;
+  curr_display_ = webrtc::kInvalidScreenId;
 }
 
 // Set up a single display (default size).
@@ -377,9 +374,9 @@ void ClientSessionTest::SetupSingleDisplay() {
   ResetDisplayInfo();
   auto displays = std::make_unique<protocol::VideoLayout>();
   AddDisplayToLayout(displays.get(), 0, 0, kDisplay1Width, kDisplay1Height,
-                     kDefaultDpi, kDefaultDpi);
-  NotifyDesktopDisplaySize(std::move(displays));
+                     kDefaultDpi, kDefaultDpi, kDisplay1Id);
   NotifyVideoSizeAll();
+  NotifyDesktopDisplaySize(std::move(displays));
 }
 
 // Set up multiple displays:
@@ -393,11 +390,12 @@ void ClientSessionTest::SetupMultiDisplay() {
   ResetDisplayInfo();
   auto displays = std::make_unique<protocol::VideoLayout>();
   AddDisplayToLayout(displays.get(), 0, 0, kDisplay1Width, kDisplay1Height,
-                     kDefaultDpi, kDefaultDpi);
+                     kDefaultDpi, kDefaultDpi, kDisplay1Id);
   AddDisplayToLayout(displays.get(), kDisplay1Width, kDisplay2YOffset,
-                     kDisplay2Width, kDisplay2Height, kDefaultDpi, kDefaultDpi);
-  NotifyDesktopDisplaySize(std::move(displays));
+                     kDisplay2Width, kDisplay2Height, kDefaultDpi, kDefaultDpi,
+                     kDisplay2Id);
   NotifyVideoSizeAll();
+  NotifyDesktopDisplaySize(std::move(displays));
 }
 
 // Set up multiple displays that are the same size:
@@ -410,11 +408,12 @@ void ClientSessionTest::SetupMultiDisplay_SameSize() {
   ResetDisplayInfo();
   auto displays = std::make_unique<protocol::VideoLayout>();
   AddDisplayToLayout(displays.get(), 0, 0, kDisplay1Width, kDisplay1Height,
-                     kDefaultDpi, kDefaultDpi);
+                     kDefaultDpi, kDefaultDpi, kDisplay1Id);
   AddDisplayToLayout(displays.get(), kDisplay1Width, kDisplay2YOffset,
-                     kDisplay1Width, kDisplay1Height, kDefaultDpi, kDefaultDpi);
-  NotifyDesktopDisplaySize(std::move(displays));
+                     kDisplay1Width, kDisplay1Height, kDefaultDpi, kDefaultDpi,
+                     kDisplay2Id);
   NotifyVideoSizeAll();
+  NotifyDesktopDisplaySize(std::move(displays));
 }
 
 void ClientSessionTest::MultiMon_SelectFirstDisplay() {
@@ -432,7 +431,15 @@ void ClientSessionTest::MultiMon_SelectAllDisplays() {
   NotifyVideoSizeAll();
 }
 
-TEST_F(ClientSessionTest, MAYBE_MultiMonMouseMove) {
+void ClientSessionTest::MultiMon_SelectDisplay(std::string display_id) {
+  NotifySelectDesktopDisplay(display_id);
+}
+
+webrtc::ScreenId ClientSessionTest::GetSelectedSourceDisplayId() {
+  return connection_->last_video_stream()->selected_source();
+}
+
+TEST_F(ClientSessionTest, MultiMonMouseMove) {
   CreateClientSession();
   ConnectClientSession();
   SetupMultiDisplay();
@@ -489,7 +496,7 @@ TEST_F(ClientSessionTest, MAYBE_MultiMonMouseMove) {
                                    kDisplay2Height + kDisplay2YOffset - 1));
 }
 
-TEST_F(ClientSessionTest, MAYBE_MultiMonMouseMove_SameSize) {
+TEST_F(ClientSessionTest, MultiMonMouseMove_SameSize) {
   CreateClientSession();
   ConnectClientSession();
   SetupMultiDisplay_SameSize();
@@ -545,7 +552,7 @@ TEST_F(ClientSessionTest, MAYBE_MultiMonMouseMove_SameSize) {
                                    kDisplay1Height + kDisplay2YOffset - 1));
 }
 
-TEST_F(ClientSessionTest, MAYBE_DisableInputs) {
+TEST_F(ClientSessionTest, DisableInputs) {
   CreateClientSession();
   ConnectClientSession();
   SetupSingleDisplay();
@@ -601,7 +608,7 @@ TEST_F(ClientSessionTest, MAYBE_DisableInputs) {
               EqualsClipboardEvent(kMimeTypeTextUtf8, "c"));
 }
 
-TEST_F(ClientSessionTest, MAYBE_LocalInputTest) {
+TEST_F(ClientSessionTest, LocalInputTest) {
   CreateClientSession();
   ConnectClientSession();
   SetupSingleDisplay();
@@ -613,11 +620,11 @@ TEST_F(ClientSessionTest, MAYBE_LocalInputTest) {
 
   connection_->input_stub()->InjectMouseEvent(MakeMouseMoveEvent(100, 101));
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_CHROMEOS)
   // The OS echoes the injected event back.
   client_session_->OnLocalPointerMoved(webrtc::DesktopVector(100, 101),
                                        ui::ET_MOUSE_MOVED);
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
   // This one should get throught as well.
   connection_->input_stub()->InjectMouseEvent(MakeMouseMoveEvent(200, 201));
@@ -630,7 +637,7 @@ TEST_F(ClientSessionTest, MAYBE_LocalInputTest) {
   connection_->input_stub()->InjectMouseEvent(MakeMouseMoveEvent(300, 301));
 
   // Verify that we've received correct set of mouse events.
-  EXPECT_EQ(2U, mouse_events.size());
+  ASSERT_EQ(2U, mouse_events.size());
   EXPECT_THAT(mouse_events[0], EqualsMouseMoveEvent(100, 101));
   EXPECT_THAT(mouse_events[1], EqualsMouseMoveEvent(200, 201));
 
@@ -641,7 +648,7 @@ TEST_F(ClientSessionTest, MAYBE_LocalInputTest) {
   // eventually (via dependency injection, not sleep!)
 }
 
-TEST_F(ClientSessionTest, MAYBE_DisconnectOnLocalInputTest) {
+TEST_F(ClientSessionTest, DisconnectOnLocalInputTest) {
   desktop_environment_options_.set_terminate_upon_input(true);
   CreateClientSession();
   ConnectClientSession();
@@ -652,7 +659,7 @@ TEST_F(ClientSessionTest, MAYBE_DisconnectOnLocalInputTest) {
   EXPECT_FALSE(connection_->is_connected());
 }
 
-TEST_F(ClientSessionTest, MAYBE_RestoreEventState) {
+TEST_F(ClientSessionTest, RestoreEventState) {
   CreateClientSession();
   ConnectClientSession();
   SetupSingleDisplay();
@@ -690,7 +697,7 @@ TEST_F(ClientSessionTest, MAYBE_RestoreEventState) {
   EXPECT_THAT(key_events[3], EqualsKeyEvent(2, false));
 }
 
-TEST_F(ClientSessionTest, MAYBE_ClampMouseEvents) {
+TEST_F(ClientSessionTest, ClampMouseEvents) {
   CreateClientSession();
   ConnectClientSession();
   SetupSingleDisplay();
@@ -733,7 +740,7 @@ TEST_F(ClientSessionTest, Extensions) {
   extensions_.push_back(&extension3);
 
   // Verify that the ClientSession reports the correct capabilities.
-  EXPECT_CALL(client_stub_, SetCapabilities(EqCapabilities("cap1 cap3")));
+  EXPECT_CALL(client_stub_, SetCapabilities(IncludesCapabilities("cap1 cap3")));
 
   CreateClientSession();
   ConnectClientSession();
@@ -779,10 +786,10 @@ TEST_F(ClientSessionTest, DataChannelCallbackIsCalled) {
   CreateClientSession();
   client_session_->RegisterCreateHandlerCallbackForTesting(
       kTestDataChannelCallbackName,
-      base::Bind([](bool* callback_was_called, const std::string& name,
-                    std::unique_ptr<protocol::MessagePipe> pipe)
-                     -> void { *callback_was_called = true; },
-                 &callback_called));
+      base::BindRepeating([](bool* callback_was_called, const std::string& name,
+                             std::unique_ptr<protocol::MessagePipe> pipe)
+                              -> void { *callback_was_called = true; },
+                          &callback_called));
   ConnectClientSession();
 
   std::unique_ptr<protocol::MessagePipe> pipe =
@@ -822,34 +829,59 @@ TEST_F(ClientSessionTest, ForwardHostSessionOptions2) {
                    ->detect_updated_region());
 }
 
-#if defined(OS_WIN)
-TEST_F(ClientSessionTest, ForwardDirectXHostSessionOptions1) {
-  auto session = std::make_unique<protocol::FakeSession>();
-  auto configuration = std::make_unique<jingle_xmpp::XmlElement>(
-      jingle_xmpp::QName(kChromotingXmlNamespace, "host-configuration"));
-  configuration->SetBodyText("DirectX-Capturer:true");
-  session->SetAttachment(0, std::move(configuration));
-  CreateClientSession(std::move(session));
+// Display selection behaves quite differently if capturing of the full desktop
+// is enabled or not. To simplify things these tests only handle the ChromeOS
+// situation, where full desktop capturing is disabled.
+#if BUILDFLAG(IS_CHROMEOS)
+TEST_F(ClientSessionTest, ShouldSelectFirstDesktopByDefault) {
+  CreateClientSession();
   ConnectClientSession();
-  ASSERT_TRUE(desktop_environment_factory_->last_desktop_environment()
-                  ->options()
-                  .desktop_capture_options()
-                  ->allow_directx_capturer());
+
+  SetupMultiDisplay();
+
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
 }
 
-TEST_F(ClientSessionTest, ForwardDirectXHostSessionOptions2) {
-  auto session = std::make_unique<protocol::FakeSession>();
-  auto configuration = std::make_unique<jingle_xmpp::XmlElement>(
-      jingle_xmpp::QName(kChromotingXmlNamespace, "host-configuration"));
-  configuration->SetBodyText("DirectX-Capturer:false");
-  session->SetAttachment(0, std::move(configuration));
-  CreateClientSession(std::move(session));
+TEST_F(ClientSessionTest,
+       ShouldChangeSelectedSourceDisplayWhenSwitchingDisplay) {
+  CreateClientSession();
   ConnectClientSession();
-  ASSERT_FALSE(desktop_environment_factory_->last_desktop_environment()
-                   ->options()
-                   .desktop_capture_options()
-                   ->allow_directx_capturer());
+  SetupMultiDisplay();
+
+  MultiMon_SelectSecondDisplay();
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay2Id));
+
+  MultiMon_SelectFirstDisplay();
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
 }
-#endif
+
+TEST_F(ClientSessionTest,
+       ShouldFallBackToPrimaryDisplayWhenSwitchingToInvalidDisplay) {
+  CreateClientSession();
+  ConnectClientSession();
+  SetupMultiDisplay();
+
+  MultiMon_SelectDisplay("Not an integer");
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
+
+  MultiMon_SelectDisplay("123456");  // There is no display with this id.
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
+
+  // Full desktop capturing is not supported on ChromeOS.
+  MultiMon_SelectDisplay("all");
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
+}
+
+TEST_F(ClientSessionTest,
+       ShouldFallBackToPrimaryDisplayWhenSelectedDisplayIsDisconnected) {
+  CreateClientSession();
+  ConnectClientSession();
+  SetupMultiDisplay();
+  MultiMon_SelectSecondDisplay();
+
+  SetupSingleDisplay();
+  EXPECT_THAT(GetSelectedSourceDisplayId(), Eq(kDisplay1Id));
+}
+#endif  // if BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace remoting

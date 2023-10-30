@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SANDBOX_WIN_SRC_POLICY_TARGET_H_
 #define SANDBOX_WIN_SRC_POLICY_TARGET_H_
 
+#include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/nt_internals.h"
 #include "sandbox/win/src/sandbox_types.h"
 
@@ -14,7 +15,7 @@ struct CountedParameterSetBase;
 
 // Performs a policy lookup and returns true if the request should be passed to
 // the broker process.
-bool QueryBroker(int ipc_id, CountedParameterSetBase* params);
+bool QueryBroker(IpcTag ipc_id, CountedParameterSetBase* params);
 
 extern "C" {
 

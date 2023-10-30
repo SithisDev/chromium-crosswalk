@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,22 +10,25 @@
 #include <stdint.h>
 
 #include <map>
+#include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "rlz/lib/rlz_lib.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/registry.h"
 #include "base/win/shlwapi.h"
-#elif defined(OS_POSIX)
+#include "rlz/lib/machine_deal_win.h"
+#elif BUILDFLAG(IS_POSIX)
 #include "base/files/file_path.h"
 #include "rlz/lib/rlz_value_store.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 namespace {
 
@@ -36,14 +39,14 @@ const wchar_t kHKLMAccessProviders[] =
     L"System\\CurrentControlSet\\Control\\Lsa\\AccessProviders";
 
 struct RegistryValue {
-  base::string16 name;
+  std::wstring name;
   DWORD type;
   std::vector<uint8_t> data;
 };
 
 struct RegistryKeyData {
   std::vector<RegistryValue> values;
-  std::map<base::string16, RegistryKeyData> keys;
+  std::map<std::wstring, RegistryKeyData> keys;
 };
 
 void ReadRegistryTree(const base::win::RegKey& src, RegistryKeyData* data) {
@@ -55,10 +58,10 @@ void ReadRegistryTree(const base::win::RegKey& src, RegistryKeyData* data) {
     for (; i.Valid(); ++i) {
       RegistryValue& value = *data->values.insert(data->values.end(),
                                                   RegistryValue());
-      const uint8_t* data = reinterpret_cast<const uint8_t*>(i.Value());
+      const uint8_t* value_bytes = reinterpret_cast<const uint8_t*>(i.Value());
       value.name.assign(i.Name());
       value.type = i.Type();
-      value.data.assign(data, data + i.ValueSize());
+      value.data.assign(value_bytes, value_bytes + i.ValueSize());
     }
   }
 
@@ -66,7 +69,7 @@ void ReadRegistryTree(const base::win::RegKey& src, RegistryKeyData* data) {
   for (base::win::RegistryKeyIterator i(src.Handle(), L"");
        i.Valid(); ++i) {
     ReadRegistryTree(base::win::RegKey(src.Handle(), i.Name(), KEY_READ),
-                     &data->keys[base::string16(i.Name())]);
+                     &data->keys[std::wstring(i.Name())]);
   }
 }
 
@@ -81,7 +84,7 @@ void WriteRegistryTree(const RegistryKeyData& data, base::win::RegKey* dest) {
   }
 
   // Next write values recursively.
-  for (std::map<base::string16, RegistryKeyData>::const_iterator iter =
+  for (std::map<std::wstring, RegistryKeyData>::const_iterator iter =
            data.keys.begin();
        iter != data.keys.end(); ++iter) {
     base::win::RegKey key(dest->Handle(), iter->first.c_str(), KEY_ALL_ACCESS);
@@ -123,35 +126,35 @@ void InitializeRegistryOverridesForTesting(
 
 }  // namespace
 
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 void RlzLibTestNoMachineStateHelper::SetUp() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   ASSERT_NO_FATAL_FAILURE(
       InitializeRegistryOverridesForTesting(&override_manager_));
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_APPLE)
   base::mac::ScopedNSAutoreleasePool pool;
-#endif  // defined(OS_WIN)
-#if defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_POSIX)
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   rlz_lib::testing::SetRlzStoreDirectory(temp_dir_.GetPath());
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 }
 
 void RlzLibTestNoMachineStateHelper::TearDown() {
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   rlz_lib::testing::SetRlzStoreDirectory(base::FilePath());
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 }
 
 void RlzLibTestNoMachineStateHelper::Reset() {
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   ASSERT_TRUE(temp_dir_.Delete());
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   rlz_lib::testing::SetRlzStoreDirectory(temp_dir_.GetPath());
 #else
   NOTREACHED();
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 }
 
 void RlzLibTestNoMachineState::SetUp() {
@@ -168,27 +171,27 @@ RlzLibTestBase::~RlzLibTestBase() = default;
 
 void RlzLibTestBase::SetUp() {
   RlzLibTestNoMachineState::SetUp();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   rlz_lib::CreateMachineState();
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   // Make sure the values of RLZ strings for access points used in tests start
   // out not set, since on Chrome OS RLZ string can only be set once.
   EXPECT_TRUE(rlz_lib::SetAccessPointRlz(rlz_lib::IETB_SEARCH_BOX, ""));
   EXPECT_TRUE(rlz_lib::SetAccessPointRlz(rlz_lib::IE_HOME_PAGE, ""));
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   statistics_provider_ =
       std::make_unique<chromeos::system::FakeStatisticsProvider>();
   chromeos::system::StatisticsProvider::SetTestProvider(
       statistics_provider_.get());
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 void RlzLibTestBase::TearDown() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::system::StatisticsProvider::SetTestProvider(nullptr);
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }

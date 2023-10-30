@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/completion_once_callback.h"
@@ -20,6 +21,7 @@
 #include "net/base/upload_data_stream.h"
 #include "services/network/public/cpp/resource_request_body.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 class IOBuffer;
@@ -36,11 +38,34 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ChunkedDataPipeUploadDataStream
   // life of the UploadDataStream.
   ChunkedDataPipeUploadDataStream(
       scoped_refptr<ResourceRequestBody> resource_request_body,
-      mojom::ChunkedDataPipeGetterPtr chunked_data_pipe_getter);
+      mojo::PendingRemote<mojom::ChunkedDataPipeGetter>
+          chunked_data_pipe_getter,
+      bool has_null_source = false);
+
+  ChunkedDataPipeUploadDataStream(const ChunkedDataPipeUploadDataStream&) =
+      delete;
+  ChunkedDataPipeUploadDataStream& operator=(
+      const ChunkedDataPipeUploadDataStream&) = delete;
 
   ~ChunkedDataPipeUploadDataStream() override;
 
+  bool AllowHTTP1() const override;
+
+  static const size_t kDefaultDestinationWindowSize = 65535;
+  // This has ChunkedDataPipeUploadDataStream cache each chunk from the datapipe
+  // up to the size that just exceeds |dst_window_size| so that the destination
+  // resends the data.
+  // InitInternal() doesn't reset the data pipe and this instance replays the
+  // all cached chunks and continues datapipe withdrawing after that.
+  void EnableCache(size_t dst_window_size = kDefaultDestinationWindowSize);
+
  private:
+  enum class CacheState {
+    kDisabled,
+    kActive,
+    kExhausted,
+  };
+
   // net::UploadDataStream implementation.
   int InitInternal(const net::NetLogWithSource& net_log) override;
   int ReadInternal(net::IOBuffer* buf, int buf_len) override;
@@ -58,8 +83,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ChunkedDataPipeUploadDataStream
 
   void OnDataPipeGetterClosed();
 
+  void WriteToCacheIfNeeded(net::IOBuffer* buf, uint32_t num_bytes);
+  int ReadFromCacheIfNeeded(net::IOBuffer* buf, int buf_len);
+
   scoped_refptr<ResourceRequestBody> resource_request_body_;
-  mojom::ChunkedDataPipeGetterPtr chunked_data_pipe_getter_;
+  mojo::Remote<mojom::ChunkedDataPipeGetter> chunked_data_pipe_getter_;
   mojo::ScopedDataPipeConsumerHandle data_pipe_;
   // Watcher for |data_pipe_|. Only armed while there's a pending read.
   mojo::SimpleWatcher handle_watcher_;
@@ -72,7 +100,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ChunkedDataPipeUploadDataStream
 
   // Total size of input, as passed to ReadCallback(). nullptr until size is
   // received.
-  base::Optional<uint64_t> size_;
+  absl::optional<uint64_t> size_;
 
   uint64_t bytes_read_ = 0;
 
@@ -80,7 +108,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ChunkedDataPipeUploadDataStream
   // error.
   int status_ = net::OK;
 
-  DISALLOW_COPY_AND_ASSIGN(ChunkedDataPipeUploadDataStream);
+  // Variables used for EnableCache().
+  CacheState cache_state_ = CacheState::kDisabled;
+  size_t dst_window_size_ = kDefaultDestinationWindowSize;
+  std::vector<char> cache_;
 };
 
 }  // namespace network

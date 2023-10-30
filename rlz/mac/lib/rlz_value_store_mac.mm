@@ -1,17 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "rlz/mac/lib/rlz_value_store_mac.h"
 
+#include <tuple>
+
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "rlz/lib/assert.h"
 #include "rlz/lib/lib_values.h"
 #include "rlz/lib/recursive_cross_process_lock_posix.h"
-#include "rlz/lib/rlz_lib.h"
+#include "rlz/lib/supplementary_branding.h"
 
 #import <Foundation/Foundation.h>
 #include <pthread.h>
@@ -41,10 +44,10 @@ NSString* GetNSAccessPointName(AccessPoint p) {
 // dictionary, that object is replaced with an empty mutable dictinary.
 NSMutableDictionary* GetOrCreateDict(
     NSMutableDictionary* p, NSString* k) {
-  NSMutableDictionary* d = ObjCCast<NSMutableDictionary>([p objectForKey:k]);
+  NSMutableDictionary* d = ObjCCast<NSMutableDictionary>(p[k]);
   if (!d) {
-    d = [NSMutableDictionary dictionaryWithCapacity:0];
-    [p setObject:d forKey:k];
+    d = [NSMutableDictionary dictionary];
+    p[k] = d;
   }
   return d;
 }
@@ -68,14 +71,12 @@ bool RlzValueStoreMac::HasAccess(AccessType type) {
 }
 
 bool RlzValueStoreMac::WritePingTime(Product product, int64_t time) {
-  NSNumber* n = [NSNumber numberWithLongLong:time];
-  [ProductDict(product) setObject:n forKey:kPingTimeKey];
+  ProductDict(product)[kPingTimeKey] = @(time);
   return true;
 }
 
 bool RlzValueStoreMac::ReadPingTime(Product product, int64_t* time) {
-  if (NSNumber* n =
-      ObjCCast<NSNumber>([ProductDict(product) objectForKey:kPingTimeKey])) {
+  if (NSNumber* n = ObjCCast<NSNumber>(ProductDict(product)[kPingTimeKey])) {
     *time = [n longLongValue];
     return true;
   }
@@ -91,8 +92,7 @@ bool RlzValueStoreMac::ClearPingTime(Product product) {
 bool RlzValueStoreMac::WriteAccessPointRlz(AccessPoint access_point,
                                            const char* new_rlz) {
   NSMutableDictionary* d = GetOrCreateDict(WorkingDict(), kAccessPointKey);
-  [d setObject:base::SysUTF8ToNSString(new_rlz)
-      forKey:GetNSAccessPointName(access_point)];
+  d[GetNSAccessPointName(access_point)] = base::SysUTF8ToNSString(new_rlz);
   return true;
 }
 
@@ -100,10 +100,9 @@ bool RlzValueStoreMac::ReadAccessPointRlz(AccessPoint access_point,
                                           char* rlz,
                                           size_t rlz_size) {
   // Reading a non-existent access point counts as success.
-  if (NSDictionary* d = ObjCCast<NSDictionary>(
-        [WorkingDict() objectForKey:kAccessPointKey])) {
-    NSString* val = ObjCCast<NSString>(
-        [d objectForKey:GetNSAccessPointName(access_point)]);
+  if (NSDictionary* d =
+          ObjCCast<NSDictionary>(WorkingDict()[kAccessPointKey])) {
+    NSString* val = ObjCCast<NSString>(d[GetNSAccessPointName(access_point)]);
     if (!val) {
       if (rlz_size > 0)
         rlz[0] = '\0';
@@ -125,8 +124,8 @@ bool RlzValueStoreMac::ReadAccessPointRlz(AccessPoint access_point,
 }
 
 bool RlzValueStoreMac::ClearAccessPointRlz(AccessPoint access_point) {
-  if (NSMutableDictionary* d = ObjCCast<NSMutableDictionary>(
-      [WorkingDict() objectForKey:kAccessPointKey])) {
+  if (NSMutableDictionary* d =
+          ObjCCast<NSMutableDictionary>(WorkingDict()[kAccessPointKey])) {
     [d removeObjectForKey:GetNSAccessPointName(access_point)];
   }
   return true;
@@ -138,16 +137,15 @@ bool RlzValueStoreMac::UpdateExistingAccessPointRlz(const std::string& brand) {
 
 bool RlzValueStoreMac::AddProductEvent(Product product,
                                        const char* event_rlz) {
-  [GetOrCreateDict(ProductDict(product), kProductEventKey)
-      setObject:[NSNumber numberWithBool:YES]
-      forKey:base::SysUTF8ToNSString(event_rlz)];
+  GetOrCreateDict(ProductDict(product),
+                  kProductEventKey)[base::SysUTF8ToNSString(event_rlz)] = @YES;
   return true;
 }
 
 bool RlzValueStoreMac::ReadProductEvents(Product product,
                                          std::vector<std::string>* events) {
-  if (NSDictionary* d = ObjCCast<NSDictionary>(
-      [ProductDict(product) objectForKey:kProductEventKey])) {
+  if (NSDictionary* d =
+          ObjCCast<NSDictionary>(ProductDict(product)[kProductEventKey])) {
     for (NSString* s in d)
       events->push_back(base::SysNSStringToUTF8(s));
     return true;
@@ -158,7 +156,7 @@ bool RlzValueStoreMac::ReadProductEvents(Product product,
 bool RlzValueStoreMac::ClearProductEvent(Product product,
                                          const char* event_rlz) {
   if (NSMutableDictionary* d = ObjCCast<NSMutableDictionary>(
-      [ProductDict(product) objectForKey:kProductEventKey])) {
+          ProductDict(product)[kProductEventKey])) {
     [d removeObjectForKey:base::SysUTF8ToNSString(event_rlz)];
     return true;
   }
@@ -173,17 +171,16 @@ bool RlzValueStoreMac::ClearAllProductEvents(Product product) {
 
 bool RlzValueStoreMac::AddStatefulEvent(Product product,
                                         const char* event_rlz) {
-  [GetOrCreateDict(ProductDict(product), kStatefulEventKey)
-      setObject:[NSNumber numberWithBool:YES]
-      forKey:base::SysUTF8ToNSString(event_rlz)];
+  GetOrCreateDict(ProductDict(product),
+                  kStatefulEventKey)[base::SysUTF8ToNSString(event_rlz)] = @YES;
   return true;
 }
 
 bool RlzValueStoreMac::IsStatefulEvent(Product product,
                                        const char* event_rlz) {
-  if (NSDictionary* d = ObjCCast<NSDictionary>(
-        [ProductDict(product) objectForKey:kStatefulEventKey])) {
-    return [d objectForKey:base::SysUTF8ToNSString(event_rlz)] != nil;
+  if (NSDictionary* d =
+          ObjCCast<NSDictionary>(ProductDict(product)[kStatefulEventKey])) {
+    return d[base::SysUTF8ToNSString(event_rlz)] != nil;
   }
   return false;
 }
@@ -245,7 +242,7 @@ NSString* CreateRlzDirectory() {
       NSApplicationSupportDirectory, NSUserDomainMask, /*expandTilde=*/YES);
   NSString* folder = nil;
   if ([paths count] > 0)
-    folder = ObjCCast<NSString>([paths objectAtIndex:0]);
+    folder = ObjCCast<NSString>(paths[0]);
   if (!folder)
     folder = [@"~/Library/Application Support" stringByStandardizingPath];
   folder = [folder stringByAppendingPathComponent:@"Google/RLZ"];
@@ -324,7 +321,7 @@ ScopedRlzValueStoreLock::~ScopedRlzValueStoreLock() {
 
   if (g_lock_depth > 0) {
     // Other locks are still using store_, don't free it yet.
-    ignore_result(store_.release());
+    std::ignore = store_.release();
     return;
   }
 
@@ -353,15 +350,15 @@ RlzValueStore* ScopedRlzValueStoreLock::GetStore() {
 namespace testing {
 
 void SetRlzStoreDirectory(const base::FilePath& directory) {
-  base::mac::ScopedNSAutoreleasePool pool;
-
-  [g_test_folder release];
-  if (directory.empty()) {
-    g_test_folder = nil;
-  } else {
-    // Not Unsafe on OS X.
-    g_test_folder =
-      [[NSString alloc] initWithUTF8String:directory.AsUTF8Unsafe().c_str()];
+  @autoreleasepool {
+    [g_test_folder release];
+    if (directory.empty()) {
+      g_test_folder = nil;
+    } else {
+      // Not Unsafe on OS X.
+      g_test_folder = [[NSString alloc]
+          initWithUTF8String:directory.AsUTF8Unsafe().c_str()];
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,34 @@
 
 #include <string>
 
-#include "base/optional.h"
 #include "base/run_loop.h"
-#include "media/mojo/interfaces/audio_input_stream.mojom.h"
-#include "media/mojo/interfaces/audio_logging.mojom.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "media/mojo/mojom/audio_input_stream.mojom.h"
+#include "media/mojo/mojom/audio_logging.mojom.h"
+#include "media/mojo/mojom/audio_processing.mojom.h"
+#include "media/mojo/mojom/audio_stream_factory.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
-#include "services/audio/public/mojom/audio_processing.mojom.h"
-#include "services/audio/public/mojom/stream_factory.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace audio {
 
-class FakeStreamFactory : public mojom::StreamFactory {
+class FakeStreamFactory : public media::mojom::AudioStreamFactory {
  public:
   FakeStreamFactory();
+
+  FakeStreamFactory(const FakeStreamFactory&) = delete;
+  FakeStreamFactory& operator=(const FakeStreamFactory&) = delete;
+
   ~FakeStreamFactory() override;
 
-  mojo::PendingRemote<mojom::StreamFactory> MakeRemote() {
+  mojo::PendingRemote<media::mojom::AudioStreamFactory> MakeRemote() {
     auto remote = receiver_.BindNewPipeAndPassRemote();
     receiver_.set_disconnect_handler(base::BindOnce(
-        &FakeStreamFactory::CloseBinding, base::Unretained(this)));
+        &FakeStreamFactory::ResetReceiver, base::Unretained(this)));
     return remote;
   }
 
-  void CloseBinding() {
+  void ResetReceiver() {
     receiver_.reset();
     if (disconnect_loop_)
       disconnect_loop_->Quit();
@@ -50,8 +54,8 @@ class FakeStreamFactory : public mojom::StreamFactory {
       const media::AudioParameters& params,
       uint32_t shared_memory_count,
       bool enable_agc,
-      mojo::ScopedSharedBufferHandle key_press_count_buffer,
-      mojom::AudioProcessingConfigPtr processing_config,
+      base::ReadOnlySharedMemoryRegion key_press_count_buffer,
+      media::mojom::AudioProcessingConfigPtr processing_config,
       CreateInputStreamCallback callback) override {}
 
   void AssociateInputAndOutputForAec(
@@ -66,10 +70,10 @@ class FakeStreamFactory : public mojom::StreamFactory {
       const std::string& output_device_id,
       const media::AudioParameters& params,
       const base::UnguessableToken& group_id,
-      const base::Optional<base::UnguessableToken>& processing_id,
       CreateOutputStreamCallback created_callback) override {}
-  void BindMuter(mojo::PendingAssociatedReceiver<mojom::LocalMuter> receiver,
-                 const base::UnguessableToken& group_id) override {}
+  void BindMuter(
+      mojo::PendingAssociatedReceiver<media::mojom::LocalMuter> receiver,
+      const base::UnguessableToken& group_id) override {}
   void CreateLoopbackStream(
       mojo::PendingReceiver<media::mojom::AudioInputStream> receiver,
       mojo::PendingRemote<media::mojom::AudioInputStreamClient> client,
@@ -79,12 +83,10 @@ class FakeStreamFactory : public mojom::StreamFactory {
       const base::UnguessableToken& group_id,
       CreateLoopbackStreamCallback created_callback) override {}
 
-  mojo::Receiver<mojom::StreamFactory> receiver_{this};
+  mojo::Receiver<media::mojom::AudioStreamFactory> receiver_{this};
 
  private:
-  base::Optional<base::RunLoop> disconnect_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeStreamFactory);
+  absl::optional<base::RunLoop> disconnect_loop_;
 };
 
 static_assert(

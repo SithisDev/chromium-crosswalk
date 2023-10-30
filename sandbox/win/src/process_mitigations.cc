@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,11 @@
 #include <wow64apiset.h>
 
 #include <algorithm>
+#include <ostream>
 
+#include "base/check_op.h"
 #include "base/files/file_path.h"
+#include "base/notreached.h"
 #include "base/scoped_native_library.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
@@ -19,9 +22,15 @@
 #include "sandbox/win/src/sandbox_rand.h"
 #include "sandbox/win/src/win_utils.h"
 
+// These are missing in 10.0.19551.0 but are in 10.0.19041.0 and 10.0.20226.0.
+#ifndef PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE
+#define PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE \
+  (0x00000003ui64 << 28)
+#define PROCESS_CREATION_MITIGATION_POLICY2_CET_DYNAMIC_APIS_OUT_OF_PROC_ONLY_ALWAYS_OFF \
+  (0x00000002ui64 << 48)
+#endif
+
 namespace {
-// API defined in winbase.h >= Vista.
-using SetProcessDEPPolicyFunction = decltype(&SetProcessDEPPolicy);
 
 // API defined in libloaderapi.h >= Win8.
 using SetDefaultDllDirectoriesFunction = decltype(&SetDefaultDllDirectories);
@@ -145,16 +154,10 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
     if (flags & MITIGATION_DEP_NO_ATL_THUNK)
       dep_flags |= PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION;
 
-    SetProcessDEPPolicyFunction set_process_dep_policy =
-        reinterpret_cast<SetProcessDEPPolicyFunction>(
-            ::GetProcAddress(module, "SetProcessDEPPolicy"));
-    if (set_process_dep_policy) {
-      if (!set_process_dep_policy(dep_flags) &&
-          ERROR_ACCESS_DENIED != ::GetLastError()) {
-        return false;
-      }
-    } else
+    if (!::SetProcessDEPPolicy(dep_flags) &&
+        ERROR_ACCESS_DENIED != ::GetLastError()) {
       return false;
+    }
   }
 #endif
 
@@ -225,16 +228,12 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
 
   // Enable dynamic code policies.
   if (!IsRunning32bitEmulatedOnArm64() &&
-      (flags & MITIGATION_DYNAMIC_CODE_DISABLE ||
-       flags & MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT)) {
+      (flags & MITIGATION_DYNAMIC_CODE_DISABLE)) {
+    // Verify caller is not accidentally setting both mutually exclusive
+    // policies.
+    DCHECK(!(flags & MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT));
     PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy = {};
     policy.ProhibitDynamicCode = true;
-
-    // Per-thread opt-out is only supported on >= Anniversary.
-    if (version >= base::win::Version::WIN10_RS1 &&
-        flags & MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT) {
-      policy.AllowThreadOptOut = true;
-    }
 
     if (!set_process_mitigation_policy(ProcessDynamicCodePolicy, &policy,
                                        sizeof(policy)) &&
@@ -293,6 +292,27 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
     }
 
     if (!set_process_mitigation_policy(ProcessImageLoadPolicy, &policy,
+                                       sizeof(policy)) &&
+        ERROR_ACCESS_DENIED != ::GetLastError()) {
+      return false;
+    }
+  }
+
+  if (version < base::win::Version::WIN10_RS1)
+    return true;
+
+  // Enable dynamic code policies.
+  // Per-thread opt-out is only supported on >= Anniversary (RS1).
+  if (!IsRunning32bitEmulatedOnArm64() &&
+      (flags & MITIGATION_DYNAMIC_CODE_DISABLE_WITH_OPT_OUT)) {
+    // Verify caller is not accidentally setting both mutually exclusive
+    // policies.
+    DCHECK(!(flags & MITIGATION_DYNAMIC_CODE_DISABLE));
+    PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy = {};
+    policy.ProhibitDynamicCode = true;
+    policy.AllowThreadOptOut = true;
+
+    if (!set_process_mitigation_policy(ProcessDynamicCodePolicy, &policy,
                                        sizeof(policy)) &&
         ERROR_ACCESS_DENIED != ::GetLastError()) {
       return false;
@@ -483,12 +503,36 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
     //       2018 security updates and any applicable firmware updates from the
     //       OEM device manufacturer.
     // Note: Applying this mitigation attribute on creation will succeed, even
-    // if
-    //       the underlying hardware does not support the implementation.
+    //       if the underlying hardware does not support the implementation.
     //       Windows just does its best under the hood for the given hardware.
     if (flags & MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION) {
       *policy_value_2 |=
           PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_INDIRECT_BRANCH_PREDICTION_ALWAYS_ON;
+    }
+  }
+
+  // Mitigations >= Win10 20H1
+  //----------------------------------------------------------------------------
+  if (version >= base::win::Version::WIN10_20H1) {
+    if (flags & MITIGATION_CET_DISABLED) {
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_ALWAYS_OFF;
+    }
+
+    if (flags & MITIGATION_CET_STRICT_MODE) {
+      DCHECK(!(flags & MITIGATION_CET_DISABLED))
+          << "Cannot enable CET strict mode if CET is disabled.";
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE;
+    }
+
+    if (flags & MITIGATION_CET_ALLOW_DYNAMIC_APIS) {
+      DCHECK(!(flags & MITIGATION_CET_DISABLED))
+          << "Cannot enable in-process CET apis if CET is disabled.";
+      DCHECK(!(flags & MITIGATION_DYNAMIC_CODE_DISABLE))
+          << "Cannot enable in-process CET apis if dynamic code is disabled.";
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_DYNAMIC_APIS_OUT_OF_PROC_ONLY_ALWAYS_OFF;
     }
   }
 
@@ -507,6 +551,14 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
   }
 
   return;
+}
+
+void ConvertProcessMitigationsToComponentFilter(MitigationFlags flags,
+                                                COMPONENT_FILTER* filter) {
+  filter->ComponentFlags = 0;
+  if (flags & MITIGATION_KTM_COMPONENT) {
+    filter->ComponentFlags = COMPONENT_KTM;
+  }
 }
 
 MitigationFlags FilterPostStartupProcessMitigations(MitigationFlags flags) {

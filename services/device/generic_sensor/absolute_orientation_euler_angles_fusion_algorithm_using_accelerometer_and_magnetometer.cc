@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <cmath>
 
-#include "base/logging.h"
-#include "services/device/generic_sensor/generic_sensor_consts.h"
+#include "base/check.h"
+#include "base/numerics/math_constants.h"
 #include "services/device/generic_sensor/orientation_util.h"
 #include "services/device/generic_sensor/platform_sensor_fusion.h"
 
@@ -34,7 +34,7 @@ bool ComputeRotationMatrixFromGravityAndGeomagnetic(double gravity_x,
   double gravity_squared =
       (gravity_x * gravity_x + gravity_y * gravity_y + gravity_z * gravity_z);
   double free_fall_gravity_squared =
-      0.01 * device::kMeanGravity * device::kMeanGravity;
+      0.01 * base::kMeanGravityDouble * base::kMeanGravityDouble;
   if (gravity_squared < free_fall_gravity_squared) {
     // gravity less than 10% of normal value
     return false;

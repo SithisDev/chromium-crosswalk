@@ -1,33 +1,37 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/task/single_thread_task_executor.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
 #include "services/service_manager/public/cpp/service_executable/service_main.h"
+#include "services/service_manager/public/cpp/service_receiver.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
 #include "services/service_manager/tests/connect/connect.test-mojom.h"
 
 using service_manager::test::mojom::ConnectTestService;
-using service_manager::test::mojom::ConnectTestServiceRequest;
 
 namespace {
 
 class Target : public service_manager::Service,
                public ConnectTestService {
  public:
-  explicit Target(service_manager::mojom::ServiceRequest request)
-      : service_binding_(this, std::move(request)) {
+  explicit Target(
+      mojo::PendingReceiver<service_manager::mojom::Service> receiver)
+      : service_receiver_(this, std::move(receiver)) {
     registry_.AddInterface<ConnectTestService>(
-        base::Bind(&Target::Create, base::Unretained(this)));
+        base::BindRepeating(&Target::Create, base::Unretained(this)));
   }
+
+  Target(const Target&) = delete;
+  Target& operator=(const Target&) = delete;
 
   ~Target() override = default;
 
@@ -39,8 +43,8 @@ class Target : public service_manager::Service,
     registry_.BindInterface(interface_name, std::move(interface_pipe));
   }
 
-  void Create(ConnectTestServiceRequest request) {
-    bindings_.AddBinding(this, std::move(request));
+  void Create(mojo::PendingReceiver<ConnectTestService> receiver) {
+    receivers_.Add(this, std::move(receiver));
   }
 
   // ConnectTestService:
@@ -49,19 +53,18 @@ class Target : public service_manager::Service,
   }
 
   void GetInstanceId(GetInstanceIdCallback callback) override {
-    std::move(callback).Run(service_binding_.identity().instance_id());
+    std::move(callback).Run(service_receiver_.identity().instance_id());
   }
 
-  service_manager::ServiceBinding service_binding_;
+  service_manager::ServiceReceiver service_receiver_;
   service_manager::BinderRegistry registry_;
-  mojo::BindingSet<ConnectTestService> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(Target);
+  mojo::ReceiverSet<ConnectTestService> receivers_;
 };
 
 }  // namespace
 
-void ServiceMain(service_manager::mojom::ServiceRequest request) {
-  base::MessageLoop message_loop;
-  Target(std::move(request)).RunUntilTermination();
+void ServiceMain(
+    mojo::PendingReceiver<service_manager::mojom::Service> receiver) {
+  base::SingleThreadTaskExecutor executor;
+  Target(std::move(receiver)).RunUntilTermination();
 }

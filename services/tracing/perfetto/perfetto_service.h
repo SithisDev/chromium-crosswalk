@@ -1,19 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_TRACING_PERFETTO_PERFETTO_SERVICE_H_
 #define SERVICES_TRACING_PERFETTO_PERFETTO_SERVICE_H_
 
+#include <map>
 #include <memory>
 #include <set>
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/strong_binding_set.h"
-#include "services/service_manager/public/cpp/identity.h"
+#include "base/tracing/perfetto_task_runner.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/unique_receiver_set.h"
 #include "services/tracing/perfetto/consumer_host.h"
-#include "services/tracing/public/cpp/perfetto/task_runner.h"
 #include "services/tracing/public/mojom/perfetto_service.mojom.h"
 
 namespace perfetto {
@@ -30,17 +29,25 @@ class PerfettoService : public mojom::PerfettoService {
  public:
   explicit PerfettoService(scoped_refptr<base::SequencedTaskRunner>
                                task_runner_for_testing = nullptr);
+
+  PerfettoService(const PerfettoService&) = delete;
+  PerfettoService& operator=(const PerfettoService&) = delete;
+
   ~PerfettoService() override;
 
   static PerfettoService* GetInstance();
   static bool ParsePidFromProducerName(const std::string& producer_name,
                                        base::ProcessId* pid);
 
-  void BindRequest(mojom::PerfettoServiceRequest request, uint32_t pid);
+  void BindReceiver(mojo::PendingReceiver<mojom::PerfettoService> receiver,
+                    uint32_t pid);
 
   // mojom::PerfettoService implementation.
-  void ConnectToProducerHost(mojom::ProducerClientPtr producer_client,
-                             mojom::ProducerHostRequest producer_host) override;
+  void ConnectToProducerHost(
+      mojo::PendingRemote<mojom::ProducerClient> producer_client,
+      mojo::PendingReceiver<mojom::ProducerHost> producer_host_receiver,
+      base::UnsafeSharedMemoryRegion shared_memory,
+      uint64_t shared_memory_buffer_page_size_bytes) override;
 
   perfetto::TracingService* GetService() const;
 
@@ -60,6 +67,7 @@ class PerfettoService : public mojom::PerfettoService {
   // actively running services (whenever a service starts or stops).
   void AddActiveServicePid(base::ProcessId pid);
   void RemoveActiveServicePid(base::ProcessId pid);
+  void RemoveActiveServicePidIfNoActiveConnections(base::ProcessId pid);
   void SetActiveServicePidsInitialized();
 
   std::set<base::ProcessId> active_service_pids() const {
@@ -70,19 +78,25 @@ class PerfettoService : public mojom::PerfettoService {
     return active_service_pids_initialized_;
   }
 
- private:
-  void BindOnSequence(mojom::PerfettoServiceRequest request);
-  void CreateServiceOnSequence();
+  base::tracing::PerfettoTaskRunner* perfetto_task_runner() {
+    return &perfetto_task_runner_;
+  }
 
-  PerfettoTaskRunner perfetto_task_runner_;
+ private:
+  void BindOnSequence(mojo::PendingReceiver<mojom::PerfettoService> receiver);
+  void CreateServiceOnSequence();
+  void OnProducerHostDisconnect();
+  void OnServiceDisconnect();
+  void OnDisconnectFromProcess(base::ProcessId pid);
+
+  base::tracing::PerfettoTaskRunner perfetto_task_runner_;
   std::unique_ptr<perfetto::TracingService> service_;
-  mojo::BindingSet<mojom::PerfettoService, uint32_t> bindings_;
-  mojo::StrongBindingSet<mojom::ProducerHost> producer_bindings_;
+  mojo::ReceiverSet<mojom::PerfettoService, uint32_t> receivers_;
+  mojo::UniqueReceiverSet<mojom::ProducerHost, uint32_t> producer_receivers_;
   std::set<ConsumerHost::TracingSession*> tracing_sessions_;  // Not owned.
   std::set<base::ProcessId> active_service_pids_;
+  std::map<base::ProcessId, int> num_active_connections_;
   bool active_service_pids_initialized_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PerfettoService);
 };
 
 }  // namespace tracing

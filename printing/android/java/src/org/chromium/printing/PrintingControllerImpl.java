@@ -1,11 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.printing;
 
-import android.annotation.TargetApi;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
@@ -13,9 +11,10 @@ import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentInfo;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.printing.PrintDocumentAdapterWrapper.PdfGenerator;
 
 import java.io.IOException;
@@ -30,7 +29,6 @@ import java.util.Iterator;
  * the print button. The singleton object lives in UI thread. Interaction with the native side is
  * carried through PrintingContext class.
  */
-@TargetApi(Build.VERSION_CODES.KITKAT)
 public class PrintingControllerImpl implements PrintingController, PdfGenerator {
     private static final String TAG = "printing";
 
@@ -47,7 +45,7 @@ public class PrintingControllerImpl implements PrintingController, PdfGenerator 
     @VisibleForTesting
     protected static PrintingController sInstance;
 
-    private final String mErrorMessage;
+    private String mErrorMessage;
 
     private PrintingContext mPrintingContext;
 
@@ -90,44 +88,22 @@ public class PrintingControllerImpl implements PrintingController, PdfGenerator 
     private PrintManagerDelegate mPrintManager;
 
     @VisibleForTesting
-    protected PrintingControllerImpl(
-            PrintDocumentAdapterWrapper printDocumentAdapterWrapper, String errorText) {
-        mErrorMessage = errorText;
-        mPrintDocumentAdapterWrapper = printDocumentAdapterWrapper;
+    protected PrintingControllerImpl() {
+        mPrintDocumentAdapterWrapper = new PrintDocumentAdapterWrapper();
         mPrintDocumentAdapterWrapper.setPdfGenerator(this);
     }
 
     /**
-     * Creates a controller for handling printing with the framework.
-     *
-     * The controller is a singleton, since there can be only one printing action at any time.
-     *
-     * @param printDocumentAdapterWrapper The object through which the framework will make calls
-     *                                    for generating PDF.
-     * @param errorText The error message to be shown to user in case something goes wrong in PDF
-     *                  generation in Chromium. We pass it here as a string so src/printing/android
-     *                  doesn't need any string dependency.
-     * @return The resulting PrintingController.
-     */
-    public static PrintingController create(
-            PrintDocumentAdapterWrapper printDocumentAdapterWrapper, String errorText) {
-        ThreadUtils.assertOnUiThread();
-
-        if (sInstance == null) {
-            sInstance = new PrintingControllerImpl(printDocumentAdapterWrapper, errorText);
-        }
-        return sInstance;
-    }
-
-    /**
-     * Returns the singleton instance, created by the {@link PrintingControllerImpl#create}.
-     *
-     * This method must be called once {@link PrintingControllerImpl#create} is called, and always
-     * thereafter.
+     * Returns the singleton instance, lazily creating one if needed.
      *
      * @return The singleton instance.
      */
     public static PrintingController getInstance() {
+        ThreadUtils.assertOnUiThread();
+
+        if (sInstance == null) {
+            sInstance = new PrintingControllerImpl();
+        }
         return sInstance;
     }
 
@@ -179,6 +155,7 @@ public class PrintingControllerImpl implements PrintingController, PdfGenerator 
             return;
         }
         mPrintable = printable;
+        mErrorMessage = mPrintable.getErrorMessage();
         mPrintManager = printManager;
         mRenderProcessId = renderProcessId;
         mRenderFrameId = renderFrameId;

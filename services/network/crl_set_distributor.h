@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include <stdint.h>
 
+#include "base/callback.h"
 #include "base/component_export.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -25,6 +25,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CRLSetDistributor {
  public:
   class Observer {
    public:
+    // Called whenever a new CRLSet, |crl_set|, has been received.
     virtual void OnNewCRLSet(scoped_refptr<net::CRLSet> crl_set) = 0;
 
    protected:
@@ -47,8 +48,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) CRLSetDistributor {
 
   // Notifies the distributor that a new encoded CRLSet, |crl_set|, has been
   // received. If the CRLSet successfully decodes and is newer than the
-  // current CRLSet, all observers will be notified.
-  void OnNewCRLSet(base::span<const uint8_t> crl_set);
+  // current CRLSet, all observers will be notified. |callback| will be
+  // notified once all observers have been notified. |callback| is guaranteed
+  // to run (e.g. even if this object is deleted prior to it being run).
+  void OnNewCRLSet(base::span<const uint8_t> crl_set,
+                   base::OnceClosure callback);
 
  private:
   void OnCRLSetParsed(scoped_refptr<net::CRLSet> crl_set);

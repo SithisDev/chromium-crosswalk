@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/device/device_service_test_base.h"
 #include "services/device/public/cpp/geolocation/geoposition.h"
@@ -35,7 +35,7 @@ class PublicIpAddressLocationNotifierTest : public testing::Test {
     // Optional. Wait until the callback from MakeCallback() is called.
     void Wait() { loop_.Run(); }
 
-    const base::Optional<mojom::Geoposition>& position() const {
+    const absl::optional<mojom::Geoposition>& position() const {
       return position_;
     }
 
@@ -46,7 +46,7 @@ class PublicIpAddressLocationNotifierTest : public testing::Test {
     }
 
     base::RunLoop loop_;
-    base::Optional<mojom::Geoposition> position_;
+    absl::optional<mojom::Geoposition> position_;
   };
 
   PublicIpAddressLocationNotifierTest()
@@ -85,7 +85,7 @@ class PublicIpAddressLocationNotifierTest : public testing::Test {
     std::string body =
         base::StringPrintf(kNetworkResponseFormatString, latitude);
     test_url_loader_factory_.AddResponse(request_url, body, net::HTTP_OK);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     test_url_loader_factory_.ClearResponses();
   }
 
@@ -102,28 +102,28 @@ class PublicIpAddressLocationNotifierTest : public testing::Test {
 
     test_url_loader_factory_.AddResponse(request_url, std::string(),
                                          net::HTTP_INTERNAL_SERVER_ERROR);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     test_url_loader_factory_.ClearResponses();
   }
 
   // Expects a non-empty and valid Geoposition, including the specified
   // |latitude|.
-  void ExpectValidPosition(const base::Optional<mojom::Geoposition>& position,
+  void ExpectValidPosition(const absl::optional<mojom::Geoposition>& position,
                            const float latitude) {
     ASSERT_TRUE(position);
     EXPECT_TRUE(ValidateGeoposition(*position));
     EXPECT_FLOAT_EQ(position->latitude, latitude);
   }
 
-  void ExpectError(const base::Optional<mojom::Geoposition>& position) {
+  void ExpectError(const absl::optional<mojom::Geoposition>& position) {
     ASSERT_TRUE(position);
     EXPECT_THAT(position->error_code,
                 mojom::Geoposition::ErrorCode::POSITION_UNAVAILABLE);
   }
 
   // Use a TaskRunner on which we can fast-forward time.
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
 
   // Test NetworkConnectionTracker instance.
   std::unique_ptr<network::TestNetworkConnectionTracker>
@@ -164,7 +164,7 @@ TEST_F(PublicIpAddressLocationNotifierTest, OlderQueryReturnsCached) {
 
   // Second query for an earlier time.
   TestPositionQuery query_2;
-  notifier_.QueryNextPosition(time - base::TimeDelta::FromMinutes(5),
+  notifier_.QueryNextPosition(time - base::Minutes(5),
                               PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS,
                               query_2.MakeCallback());
   // Expect a cached result, so no new network request.
@@ -198,7 +198,7 @@ TEST_F(PublicIpAddressLocationNotifierTest,
   network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
       network::mojom::ConnectionType::CONNECTION_UNKNOWN);
   // Wait for the notifier to complete its delayed reaction.
-  scoped_task_environment_.FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardUntilNoTasksRemain();
 
   // Now expect a network request and query_2 to return.
   RespondToFetchWithLatitude(2.0f);
@@ -230,14 +230,14 @@ TEST_F(PublicIpAddressLocationNotifierTest,
   for (int i = 0; i < 10; ++i) {
     network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
         network::mojom::ConnectionType::CONNECTION_UNKNOWN);
-    scoped_task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(5));
+    task_environment_.FastForwardBy(base::Seconds(5));
   }
   // Expect still no network request or callback.
   EXPECT_EQ(0, test_url_loader_factory_.NumPending());
   EXPECT_FALSE(query_2.position().has_value());
 
   // Wait longer.
-  scoped_task_environment_.FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardUntilNoTasksRemain();
 
   // Now expect a network request & query_2 to return.
   RespondToFetchWithLatitude(2.0f);
@@ -273,7 +273,7 @@ TEST_F(PublicIpAddressLocationNotifierTest, MutipleWaitingQueries) {
   network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
       network::mojom::ConnectionType::CONNECTION_UNKNOWN);
   // Wait for the notifier to complete its delayed reaction.
-  scoped_task_environment_.FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardUntilNoTasksRemain();
 
   // Now expect a network request & fake a valid response.
   RespondToFetchWithLatitude(2.0f);
@@ -282,7 +282,7 @@ TEST_F(PublicIpAddressLocationNotifierTest, MutipleWaitingQueries) {
   ExpectValidPosition(query_3.position(), 2.0f);
 }
 
-// Tests that server error is propogated to the client.
+// Tests that server error is propagated to the client.
 TEST_F(PublicIpAddressLocationNotifierTest, ServerError) {
   // Make query.
   TestPositionQuery query;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/logging.h"
+#include "base/task/single_thread_task_runner.h"
 #include "remoting/host/input_monitor/local_input_monitor_win.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace remoting {
 
@@ -26,8 +28,13 @@ class KeyboardRawInputHandlerWin
   KeyboardRawInputHandlerWin(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-      base::RepeatingClosure on_key_event_callback,
+      LocalInputMonitor::KeyPressedCallback on_key_event_callback,
       base::OnceClosure disconnect_callback);
+
+  KeyboardRawInputHandlerWin(const KeyboardRawInputHandlerWin&) = delete;
+  KeyboardRawInputHandlerWin& operator=(const KeyboardRawInputHandlerWin&) =
+      delete;
+
   ~KeyboardRawInputHandlerWin() override;
 
   // LocalInputMonitorWin::RawInputHandler implementation.
@@ -39,19 +46,17 @@ class KeyboardRawInputHandlerWin
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
-  base::RepeatingClosure on_key_event_callback_;
+  LocalInputMonitor::KeyPressedCallback on_key_event_callback_;
   base::OnceClosure disconnect_callback_;
 
   // Tracks whether the instance is registered to receive raw input events.
   bool registered_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(KeyboardRawInputHandlerWin);
 };
 
 KeyboardRawInputHandlerWin::KeyboardRawInputHandlerWin(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    base::RepeatingClosure on_key_event_callback,
+    LocalInputMonitor::KeyPressedCallback on_key_event_callback,
     base::OnceClosure disconnect_callback)
     : caller_task_runner_(caller_task_runner),
       ui_task_runner_(ui_task_runner),
@@ -99,7 +104,12 @@ void KeyboardRawInputHandlerWin::OnInputEvent(const RAWINPUT* input) {
 
   if (input->header.dwType == RIM_TYPEKEYBOARD &&
       input->header.hDevice != nullptr) {
-    caller_task_runner_->PostTask(FROM_HERE, on_key_event_callback_);
+    USHORT vkey = input->data.keyboard.VKey;
+    UINT scancode = MapVirtualKey(vkey, MAPVK_VK_TO_VSC);
+    uint32_t usb_keycode =
+        ui::KeycodeConverter::NativeKeycodeToUsbKeycode(scancode);
+    caller_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(on_key_event_callback_, usb_keycode));
   }
 }
 
@@ -133,7 +143,7 @@ std::unique_ptr<LocalKeyboardInputMonitor> LocalKeyboardInputMonitor::Create(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    base::RepeatingClosure on_key_event_callback,
+    LocalInputMonitor::KeyPressedCallback on_key_event_callback,
     base::OnceClosure disconnect_callback) {
   auto raw_input_handler = std::make_unique<KeyboardRawInputHandlerWin>(
       caller_task_runner, ui_task_runner, std::move(on_key_event_callback),

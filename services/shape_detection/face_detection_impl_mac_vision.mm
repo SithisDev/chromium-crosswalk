@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,15 +34,10 @@ mojom::LandmarkPtr BuildLandmark(VNFaceLandmarkRegion2D* landmark_region,
 }
 
 FaceDetectionImplMacVision::FaceDetectionImplMacVision() : weak_factory_(this) {
-  Class request_class = NSClassFromString(@"VNDetectFaceLandmarksRequest");
-  if (!request_class) {
-    DLOG(ERROR) << "Failed to load VNDetectFaceLandmarksRequest class";
-    return;
-  }
   // The repeating callback will not be run if FaceDetectionImplMacVision object
   // has already been destroyed.
   landmarks_async_request_ = VisionAPIAsyncRequestMac::Create(
-      request_class,
+      [VNDetectFaceLandmarksRequest class],
       base::BindRepeating(&FaceDetectionImplMacVision::OnFacesDetected,
                           weak_factory_.GetWeakPtr()));
 }
@@ -63,14 +58,14 @@ void FaceDetectionImplMacVision::Detect(const SkBitmap& bitmap,
   detected_callback_ = std::move(callback);
   // This prevents the Detect function from being called before the
   // VisionAPIAsyncRequestMac completes.
-  if (binding_)  // Can be unbound in unit testing.
-    binding_->PauseIncomingMethodCallProcessing();
+  if (receiver_)  // Can be unbound in unit testing.
+    receiver_->PauseIncomingMethodCallProcessing();
 }
 
 void FaceDetectionImplMacVision::OnFacesDetected(VNRequest* request,
                                                  NSError* error) {
-  if (binding_)  // Can be unbound in unit testing.
-    binding_->ResumeIncomingMethodCallProcessing();
+  if (receiver_)  // Can be unbound in unit testing.
+    receiver_->ResumeIncomingMethodCallProcessing();
 
   if (![request.results count] || error) {
     std::move(detected_callback_).Run({});

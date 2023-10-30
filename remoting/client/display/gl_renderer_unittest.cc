@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "remoting/client/display/fake_canvas.h"
 #include "remoting/client/display/gl_renderer_delegate.h"
@@ -20,7 +20,10 @@ namespace remoting {
 
 class FakeGlRendererDelegate : public GlRendererDelegate {
  public:
-  FakeGlRendererDelegate() : weak_factory_(this) {}
+  FakeGlRendererDelegate() {}
+
+  FakeGlRendererDelegate(const FakeGlRendererDelegate&) = delete;
+  FakeGlRendererDelegate& operator=(const FakeGlRendererDelegate&) = delete;
 
   bool CanRenderFrame() override {
     can_render_frame_call_count_++;
@@ -40,7 +43,7 @@ class FakeGlRendererDelegate : public GlRendererDelegate {
     on_size_changed_call_count_++;
   }
 
-  void SetOnFrameRenderedCallback(const base::Closure& callback) {
+  void SetOnFrameRenderedCallback(const base::RepeatingClosure& callback) {
     on_frame_rendered_callback_ = callback;
   }
 
@@ -68,15 +71,16 @@ class FakeGlRendererDelegate : public GlRendererDelegate {
   int canvas_width_ = 0;
   int canvas_height_ = 0;
 
-  base::Closure on_frame_rendered_callback_;
-  base::WeakPtrFactory<FakeGlRendererDelegate> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeGlRendererDelegate);
+  base::RepeatingClosure on_frame_rendered_callback_;
+  base::WeakPtrFactory<FakeGlRendererDelegate> weak_factory_{this};
 };
 
 class FakeDrawable : public Drawable {
  public:
-  FakeDrawable() : weak_factory_(this) {}
+  FakeDrawable() {}
+
+  FakeDrawable(const FakeDrawable&) = delete;
+  FakeDrawable& operator=(const FakeDrawable&) = delete;
 
   void SetId(int id) { id_ = id; }
   int GetId() { return id_; }
@@ -103,9 +107,7 @@ class FakeDrawable : public Drawable {
   int id_ = -1;
   int z_index_ = -1;
 
-  base::WeakPtrFactory<FakeDrawable> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeDrawable);
+  base::WeakPtrFactory<FakeDrawable> weak_factory_{this};
 };
 
 class GlRendererTest : public testing::Test {
@@ -125,7 +127,7 @@ class GlRendererTest : public testing::Test {
     return on_desktop_frame_processed_call_count_;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<GlRenderer> renderer_;
   FakeGlRendererDelegate delegate_;
 
@@ -134,7 +136,7 @@ class GlRendererTest : public testing::Test {
 };
 
 void GlRendererTest::SetUp() {
-  renderer_.reset(new GlRenderer());
+  renderer_ = std::make_unique<GlRenderer>();
   renderer_->SetDelegate(delegate_.GetWeakPtr());
 }
 
@@ -153,14 +155,14 @@ std::vector<base::WeakPtr<Drawable>> GlRendererTest::GetDrawables() {
 void GlRendererTest::SetDesktopFrameWithSize(const webrtc::DesktopSize& size) {
   renderer_->OnFrameReceived(
       std::make_unique<webrtc::BasicDesktopFrame>(size),
-      base::Bind(&GlRendererTest::OnDesktopFrameProcessed,
-                 base::Unretained(this)));
+      base::BindOnce(&GlRendererTest::OnDesktopFrameProcessed,
+                     base::Unretained(this)));
 }
 
 void GlRendererTest::PostSetDesktopFrameTasks(const webrtc::DesktopSize& size,
                                               int count) {
   for (int i = 0; i < count; i++) {
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&GlRendererTest::SetDesktopFrameWithSize,
                                   base::Unretained(this), size));
   }
@@ -172,8 +174,8 @@ void GlRendererTest::OnDesktopFrameProcessed() {
 
 void GlRendererTest::RunTasksInCurrentQueue() {
   base::RunLoop run_loop;
-  scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-      FROM_HERE, run_loop.QuitClosure());
+  task_environment_.GetMainThreadTaskRunner()->PostTask(FROM_HERE,
+                                                        run_loop.QuitClosure());
   run_loop.Run();
 }
 

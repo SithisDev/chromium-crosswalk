@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <string>
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/memory/raw_ptr.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/device/public/mojom/usb_manager_test.mojom.h"
 #include "services/device/usb/usb_service.h"
 
@@ -21,9 +22,14 @@ class DeviceManagerTest : public mojom::UsbDeviceManagerTest {
   // DeviceService and once created it will keep alive until the UsbService
   // is distroyed.
   explicit DeviceManagerTest(UsbService* usb_service);
+
+  DeviceManagerTest(const DeviceManagerTest&) = delete;
+  DeviceManagerTest& operator=(const DeviceManagerTest&) = delete;
+
   ~DeviceManagerTest() override;
 
-  void BindRequest(mojom::UsbDeviceManagerTestRequest request);
+  void BindReceiver(
+      mojo::PendingReceiver<mojom::UsbDeviceManagerTest> receiver);
 
  private:
   // mojom::DeviceManagerTest overrides:
@@ -36,10 +42,8 @@ class DeviceManagerTest : public mojom::UsbDeviceManagerTest {
   void GetTestDevices(GetTestDevicesCallback callback) override;
 
  private:
-  mojo::BindingSet<mojom::UsbDeviceManagerTest> bindings_;
-  UsbService* usb_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceManagerTest);
+  mojo::ReceiverSet<mojom::UsbDeviceManagerTest> receivers_;
+  raw_ptr<UsbService> usb_service_;
 };
 
 }  // namespace usb

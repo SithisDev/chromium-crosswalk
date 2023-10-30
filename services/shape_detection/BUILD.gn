@@ -1,8 +1,11 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//testing/test.gni")
+
+use_barhopper = is_chrome_branded && is_chromeos
 
 source_set("lib") {
   sources = [
@@ -11,16 +14,16 @@ source_set("lib") {
     "text_detection_impl.h",
   ]
 
+  deps = [
+    "//build:branding_buildflags",
+    "//build:chromeos_buildflags",
+    "//mojo/public/cpp/bindings",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+  ]
+
   if (is_mac) {
     sources += [
-      "barcode_detection_impl_mac.h",
-      "barcode_detection_impl_mac.mm",
-      "barcode_detection_impl_mac_vision.h",
-      "barcode_detection_impl_mac_vision.mm",
-      "barcode_detection_impl_mac_vision_api.h",
-      "barcode_detection_impl_mac_vision_api.mm",
-      "barcode_detection_provider_mac.h",
-      "barcode_detection_provider_mac.mm",
       "detection_utils_mac.h",
       "detection_utils_mac.mm",
       "face_detection_impl_mac.h",
@@ -32,11 +35,10 @@ source_set("lib") {
       "text_detection_impl_mac.h",
       "text_detection_impl_mac.mm",
     ]
-    libs = [ "QuartzCore.framework" ]
+    frameworks = [ "QuartzCore.framework" ]
+    weak_frameworks = [ "Vision.framework" ]
   } else if (is_win) {
     sources += [
-      "barcode_detection_provider_impl.cc",
-      "barcode_detection_provider_impl.h",
       "detection_utils_win.cc",
       "detection_utils_win.h",
       "face_detection_impl_win.cc",
@@ -46,28 +48,51 @@ source_set("lib") {
       "text_detection_impl_win.cc",
       "text_detection_impl_win.h",
     ]
+  } else if (is_android) {
+    # No C++ sources needed, face and text detection is provided by Java.
   } else {
     sources += [
-      "barcode_detection_provider_impl.cc",
-      "barcode_detection_provider_impl.h",
       "face_detection_provider_impl.cc",
       "face_detection_provider_impl.h",
       "text_detection_impl.cc",
     ]
   }
 
-  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+  if (is_mac) {
+    # On macOS there is a barcode detection API available from the platform.
+    sources += [
+      "barcode_detection_impl_mac.h",
+      "barcode_detection_impl_mac.mm",
+      "barcode_detection_impl_mac_vision.h",
+      "barcode_detection_impl_mac_vision.mm",
+      "barcode_detection_impl_mac_vision_api.h",
+      "barcode_detection_impl_mac_vision_api.mm",
+      "barcode_detection_provider_mac.h",
+      "barcode_detection_provider_mac.mm",
+    ]
+  } else if (is_android) {
+    # No C++ sources needed, barcode detection is provided by Java.
+  } else if (use_barhopper) {
+    sources += [
+      "barcode_detection_impl_barhopper.cc",
+      "barcode_detection_impl_barhopper.h",
+      "barcode_detection_provider_barhopper.cc",
+      "barcode_detection_provider_barhopper.h",
+    ]
+    deps += [ "//third_party/barhopper" ]
+  } else {
+    # Otherwise, use a stub implementation.
+    sources += [
+      "barcode_detection_provider_impl.cc",
+      "barcode_detection_provider_impl.h",
+    ]
+  }
 
-  deps = [
-    "//mojo/public/cpp/bindings",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
-  ]
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
   public_deps = [
     "//base",
     "//media/capture",
-    "//services/service_manager/public/cpp",
     "//services/shape_detection/public/mojom",
   ]
 
@@ -84,14 +109,14 @@ if (is_android) {
   }
 
   android_library("shape_detection_java") {
-    java_files = [
+    sources = [
       "android/java/src/org/chromium/shape_detection/BarcodeDetectionImpl.java",
       "android/java/src/org/chromium/shape_detection/BarcodeDetectionProviderImpl.java",
+      "android/java/src/org/chromium/shape_detection/BitmapUtils.java",
       "android/java/src/org/chromium/shape_detection/FaceDetectionImpl.java",
       "android/java/src/org/chromium/shape_detection/FaceDetectionImplGmsCore.java",
       "android/java/src/org/chromium/shape_detection/FaceDetectionProviderImpl.java",
       "android/java/src/org/chromium/shape_detection/InterfaceRegistrar.java",
-      "android/java/src/org/chromium/shape_detection/BitmapUtils.java",
       "android/java/src/org/chromium/shape_detection/TextDetectionImpl.java",
     ]
 
@@ -101,35 +126,44 @@ if (is_android) {
       "$google_play_services_package:google_play_services_vision_common_java",
       "$google_play_services_package:google_play_services_vision_java",
       "//base:base_java",
+      "//base:jni_java",
       "//mojo/public/java:base_java",
       "//mojo/public/java:bindings_java",
       "//mojo/public/java:system_java",
       "//mojo/public/java/system:system_impl_java",
-      "//services/service_manager/public/java:service_manager_java",
-      "//services/service_manager/public/mojom:mojom_java",
       "//services/shape_detection/public/mojom:mojom_java",
-      "//skia/public/interfaces:interfaces_java",
-      "//ui/gfx/geometry/mojo:mojo_java",
+      "//skia/public/mojom:mojom_java",
+      "//third_party/android_deps:chromium_play_services_availability_java",
+      "//ui/gfx/geometry/mojom:mojom_java",
     ]
   }
 }
 
 source_set("tests") {
   testonly = true
-  sources = [
-    "barcode_detection_impl_mac_unittest.mm",
-    "barcode_detection_provider_mac_unittest.mm",
-    "face_detection_impl_mac_unittest.mm",
-    "face_detection_impl_win_unittest.cc",
-    "text_detection_impl_mac_unittest.mm",
-    "text_detection_impl_win_unittest.cc",
-  ]
+  sources = []
   if (is_mac) {
-    libs = [
+    sources += [
+      "barcode_detection_impl_mac_unittest.mm",
+      "barcode_detection_provider_mac_unittest.mm",
+      "face_detection_impl_mac_unittest.mm",
+      "text_detection_impl_mac_unittest.mm",
+    ]
+    frameworks = [
       "CoreFoundation.framework",
       "CoreGraphics.framework",
       "QuartzCore.framework",
     ]
+  }
+  if (is_win) {
+    sources += [
+      "face_detection_impl_win_unittest.cc",
+      "text_detection_impl_win_unittest.cc",
+    ]
+  }
+
+  if (use_barhopper) {
+    sources += [ "barcode_detection_impl_barhopper_unittest.cc" ]
   }
 
   deps = [
@@ -144,8 +178,20 @@ source_set("tests") {
     "//ui/gl",
   ]
   data = [
+    "//services/test/data/codabar.png",
+    "//services/test/data/code_39.png",
+    "//services/test/data/code_93.png",
+    "//services/test/data/code_128.png",
+    "//services/test/data/data_matrix.png",
+    "//services/test/data/ean_8.png",
+    "//services/test/data/ean_13.png",
+    "//services/test/data/itf.png",
     "//services/test/data/mona_lisa.jpg",
+    "//services/test/data/pdf417.png",
+    "//services/test/data/qr_code.png",
     "//services/test/data/text_detection.png",
     "//services/test/data/the_beatles.jpg",
+    "//services/test/data/upc_a.png",
+    "//services/test/data/upc_e.png",
   ]
 }

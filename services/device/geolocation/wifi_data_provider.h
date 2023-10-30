@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <set>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/weak_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "services/device/geolocation/wifi_data.h"
 
 namespace device {
@@ -18,6 +18,9 @@ namespace device {
 class WifiDataProvider : public base::RefCountedThreadSafe<WifiDataProvider> {
  public:
   WifiDataProvider();
+
+  WifiDataProvider(const WifiDataProvider&) = delete;
+  WifiDataProvider& operator=(const WifiDataProvider&) = delete;
 
   // Tells the provider to start looking for data. Callbacks will start
   // receiving notifications after this call.
@@ -35,13 +38,19 @@ class WifiDataProvider : public base::RefCountedThreadSafe<WifiDataProvider> {
   // obtain.
   virtual bool GetData(WifiData* data) = 0;
 
-  typedef base::Closure WifiDataUpdateCallback;
+  virtual void ForceRescan() = 0;
+
+  typedef base::RepeatingClosure WifiDataUpdateCallback;
 
   void AddCallback(WifiDataUpdateCallback* callback);
 
   bool RemoveCallback(WifiDataUpdateCallback* callback);
 
   bool has_callbacks() const;
+
+  base::WeakPtr<WifiDataProvider> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
 
  protected:
   friend class base::RefCountedThreadSafe<WifiDataProvider>;
@@ -67,7 +76,7 @@ class WifiDataProvider : public base::RefCountedThreadSafe<WifiDataProvider> {
 
   CallbackSet callbacks_;
 
-  DISALLOW_COPY_AND_ASSIGN(WifiDataProvider);
+  base::WeakPtrFactory<WifiDataProvider> weak_factory_{this};
 };
 
 }  // namespace device

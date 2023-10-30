@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,47 +11,13 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/optional.h"
 #include "base/token.h"
 
 namespace base {
 class Value;
 }
 
-namespace service_manager {
-class Connector;
-}
-
 namespace data_decoder {
-
-// Callback invoked when parsing with ParseXml has finished.
-// |value| contains the base::Value dictionary structure representing the parsed
-// XML. See xml_parser.mojom for an example.
-// If the parsing failed, |error| contains an error message and |value| is null.
-using XmlParserCallback =
-    base::OnceCallback<void(std::unique_ptr<base::Value> value,
-                            const base::Optional<std::string>& error)>;
-
-// Parses |unsafe_xml| using the data_decoder service which, whenever feasible,
-// will be run in an isolated sandboxed process. Invokes |callback| when
-// done. The XML document is transformed into a base::Value dictionary
-// structure, with special keys holding the tag name and child nodes.
-// See xml_parser.mojom for details on the format.
-// |connector| is the Connector to use when connecting to the data_decoder
-// service. This should be retrieved from whichever service is requesting the
-// decode operation.
-// If |batch_id| is non-empty, the system may batch this parse request with
-// other parse requests using the same |batch_id| in an effort to amortize the
-// overhead of a single request. The trade-off is that batch requests may not be
-// well-isolated from each other, so this should be used with appropriate
-// caution.
-void ParseXml(service_manager::Connector* connector,
-              const std::string& unsafe_xml,
-              XmlParserCallback callback,
-              const base::Token& batch_id = base::Token{});
-
-// Below are convenience methods for handling the elements returned by
-// ParseXml().
 
 // Returns all the children of |element|.
 const base::Value* GetXmlElementChildren(const base::Value& element);

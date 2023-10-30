@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,15 @@
 
 #include <stdint.h>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "net/base/io_buffer.h"
 #include "remoting/base/compound_buffer.h"
 #include "remoting/proto/internal.pb.h"
 #include "third_party/webrtc/rtc_base/byte_order.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
-MessageDecoder::MessageDecoder()
-    : next_payload_(0),
-      next_payload_known_(false) {
-}
+MessageDecoder::MessageDecoder() = default;
 
 MessageDecoder::~MessageDecoder() = default;
 
@@ -68,5 +64,4 @@ bool MessageDecoder::GetPayloadSize(int* size) {
   return true;
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

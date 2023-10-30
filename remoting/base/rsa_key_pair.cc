@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ scoped_refptr<RsaKeyPair> RsaKeyPair::Generate() {
       crypto::RSAPrivateKey::Create(2048));
   if (!key) {
     LOG(ERROR) << "Cannot generate private key.";
-    return NULL;
+    return nullptr;
   }
   return new RsaKeyPair(std::move(key));
 }
@@ -45,7 +45,7 @@ scoped_refptr<RsaKeyPair> RsaKeyPair::FromString(
   std::string key_str;
   if (!base::Base64Decode(key_base64, &key_str)) {
     LOG(ERROR) << "Failed to decode private key.";
-    return NULL;
+    return nullptr;
   }
 
   std::vector<uint8_t> key_buf(key_str.begin(), key_str.end());
@@ -53,7 +53,7 @@ scoped_refptr<RsaKeyPair> RsaKeyPair::FromString(
       crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(key_buf));
   if (!key) {
     LOG(ERROR) << "Invalid private key.";
-    return NULL;
+    return nullptr;
   }
 
   return new RsaKeyPair(std::move(key));
@@ -61,7 +61,7 @@ scoped_refptr<RsaKeyPair> RsaKeyPair::FromString(
 
 std::string RsaKeyPair::ToString() const {
   // Check that the key initialized.
-  DCHECK(key_.get() != NULL);
+  DCHECK(key_.get() != nullptr);
 
   std::vector<uint8_t> key_buf;
   CHECK(key_->ExportPrivateKey(&key_buf));
@@ -99,7 +99,7 @@ std::string RsaKeyPair::GenerateCertificate() const {
   net::x509_util::CreateSelfSignedCert(
       key_->key(), net::x509_util::DIGEST_SHA256, "CN=chromoting",
       base::RandInt(1, std::numeric_limits<int>::max()), base::Time::Now(),
-      base::Time::Now() + base::TimeDelta::FromDays(1), {}, &der_cert);
+      base::Time::Now() + base::Days(1), {}, &der_cert);
   return der_cert;
 }
 

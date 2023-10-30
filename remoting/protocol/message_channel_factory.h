@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,13 @@
 
 #include "base/callback_forward.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class MessagePipe;
 
 class MessageChannelFactory {
  public:
-  typedef base::Callback<void(std::unique_ptr<MessagePipe>)>
+  typedef base::OnceCallback<void(std::unique_ptr<MessagePipe>)>
       ChannelCreatedCallback;
 
   virtual ~MessageChannelFactory() {}
@@ -28,7 +27,7 @@ class MessageChannelFactory {
   // channels must be destroyed, and CancelChannelCreation() called for any
   // pending channels, before the factory is destroyed.
   virtual void CreateChannel(const std::string& name,
-                             const ChannelCreatedCallback& callback) = 0;
+                             ChannelCreatedCallback callback) = 0;
 
   // Cancels a pending CreateChannel() operation for the named channel. If the
   // channel creation already completed then canceling it has no effect. When
@@ -36,7 +35,6 @@ class MessageChannelFactory {
   virtual void CancelChannelCreation(const std::string& name) = 0;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_MESSAGE_CHANNEL_FACTORY_H_

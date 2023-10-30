@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,18 @@
 #import "remoting/ios/domain/host_info.h"
 #import "remoting/ios/domain/host_settings.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 
 static NSString* const kActiveUserKey = @"kActiveUserKey";
 static NSString* const kHostSettingsKey = @"kHostSettingsKey";
 static NSString* const kFlagKey = @"kFlagKey";
 
 RemotingFlag const RemotingFlagUseWebRTC = @"UseWebRTC";
+RemotingFlag const RemotingFlagLastSeenNotificationMessageId =
+    @"LastSeenNotificationMessageId";
+RemotingFlag const RemotingFlagNotificationUiState = @"NotificationUiState";
+RemotingFlag const RemotingFlagNotificationShownTimes =
+    @"NotificationShownTimes";
 
 static NSString* KeyWithPrefix(NSString* prefix, NSString* key) {
   return [NSString stringWithFormat:@"%@-%@", prefix, key];

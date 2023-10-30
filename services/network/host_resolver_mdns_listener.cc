@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "net/base/host_port_pair.h"
+#include "net/dns/host_resolver.h"
+#include "net/dns/public/mdns_listener_update_type.h"
 
 namespace network {
 
@@ -23,11 +25,12 @@ HostResolverMdnsListener::HostResolverMdnsListener(
 
 HostResolverMdnsListener::~HostResolverMdnsListener() {
   internal_listener_ = nullptr;
-  response_client_ = nullptr;
+  response_client_.reset();
 }
 
-int HostResolverMdnsListener::Start(mojom::MdnsListenClientPtr response_client,
-                                    base::OnceClosure cancellation_callback) {
+int HostResolverMdnsListener::Start(
+    mojo::PendingRemote<mojom::MdnsListenClient> response_client,
+    base::OnceClosure cancellation_callback) {
   DCHECK(internal_listener_);
   DCHECK(!response_client_.is_bound());
 
@@ -35,10 +38,10 @@ int HostResolverMdnsListener::Start(mojom::MdnsListenClientPtr response_client,
   if (rv != net::OK)
     return rv;
 
-  response_client_ = std::move(response_client);
+  response_client_.Bind(std::move(response_client));
   // Unretained |this| reference is safe because connection error cannot occur
   // if |response_client_| goes out of scope.
-  response_client_.set_connection_error_handler(base::BindOnce(
+  response_client_.set_disconnect_handler(base::BindOnce(
       &HostResolverMdnsListener::OnConnectionError, base::Unretained(this)));
 
   cancellation_callback_ = std::move(cancellation_callback);
@@ -47,7 +50,7 @@ int HostResolverMdnsListener::Start(mojom::MdnsListenClientPtr response_client,
 }
 
 void HostResolverMdnsListener::OnAddressResult(
-    net::HostResolver::MdnsListener::Delegate::UpdateType update_type,
+    net::MdnsListenerUpdateType update_type,
     net::DnsQueryType query_type,
     net::IPEndPoint address) {
   DCHECK(response_client_.is_bound());
@@ -55,7 +58,7 @@ void HostResolverMdnsListener::OnAddressResult(
 }
 
 void HostResolverMdnsListener::OnTextResult(
-    net::HostResolver::MdnsListener::Delegate::UpdateType update_type,
+    net::MdnsListenerUpdateType update_type,
     net::DnsQueryType query_type,
     std::vector<std::string> text_records) {
   DCHECK(response_client_.is_bound());
@@ -63,7 +66,7 @@ void HostResolverMdnsListener::OnTextResult(
 }
 
 void HostResolverMdnsListener::OnHostnameResult(
-    net::HostResolver::MdnsListener::Delegate::UpdateType update_type,
+    net::MdnsListenerUpdateType update_type,
     net::DnsQueryType query_type,
     net::HostPortPair host) {
   DCHECK(response_client_.is_bound());
@@ -71,7 +74,7 @@ void HostResolverMdnsListener::OnHostnameResult(
 }
 
 void HostResolverMdnsListener::OnUnhandledResult(
-    net::HostResolver::MdnsListener::Delegate::UpdateType update_type,
+    net::MdnsListenerUpdateType update_type,
     net::DnsQueryType query_type) {
   DCHECK(response_client_.is_bound());
   response_client_->OnUnhandledResult(update_type, query_type);

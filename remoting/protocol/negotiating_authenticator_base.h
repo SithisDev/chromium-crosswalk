@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "remoting/protocol/authenticator.h"
 
@@ -18,8 +17,7 @@ namespace jingle_xmpp {
 struct StaticQName;
 }  // namespace jingle_xmpp
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // This class provides the common base for a meta-authenticator that allows
 // clients and hosts that support multiple authentication methods to negotiate a
@@ -89,6 +87,10 @@ class NegotiatingAuthenticatorBase : public Authenticator {
     THIRD_PARTY_SPAKE2_CURVE25519,
   };
 
+  NegotiatingAuthenticatorBase(const NegotiatingAuthenticatorBase&) = delete;
+  NegotiatingAuthenticatorBase& operator=(const NegotiatingAuthenticatorBase&) =
+      delete;
+
   ~NegotiatingAuthenticatorBase() override;
 
   // Authenticator interface.
@@ -102,7 +104,7 @@ class NegotiatingAuthenticatorBase : public Authenticator {
   // Calls |current_authenticator_| to process |message|, passing the supplied
   // |resume_callback|.
   void ProcessMessageInternal(const jingle_xmpp::XmlElement* message,
-                              const base::Closure& resume_callback);
+                              base::OnceClosure resume_callback);
 
  protected:
   friend class NegotiatingAuthenticatorTest;
@@ -127,7 +129,7 @@ class NegotiatingAuthenticatorBase : public Authenticator {
 
   // Updates |state_| to reflect the current underlying authenticator state.
   // |resume_callback| is called after the state is updated.
-  void UpdateState(const base::Closure& resume_callback);
+  void UpdateState(base::OnceClosure resume_callback);
 
   // Gets the next message from |current_authenticator_|, if any, and fills in
   // the 'method' tag with |current_method_|.
@@ -137,13 +139,9 @@ class NegotiatingAuthenticatorBase : public Authenticator {
   Method current_method_ = Method::INVALID;
   std::unique_ptr<Authenticator> current_authenticator_;
   State state_;
-  RejectionReason rejection_reason_ = INVALID_CREDENTIALS;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NegotiatingAuthenticatorBase);
+  RejectionReason rejection_reason_ = RejectionReason::INVALID_CREDENTIALS;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_NEGOTIATING_AUTHENTICATOR_BASE_H_

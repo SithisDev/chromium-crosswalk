@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <utility>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace network {
@@ -18,20 +19,17 @@ class TestDnsConfigChangeManagerClient
     : public mojom::DnsConfigChangeManagerClient {
  public:
   explicit TestDnsConfigChangeManagerClient(DnsConfigChangeManager* manager) {
-    mojom::DnsConfigChangeManagerPtr manager_ptr;
-    mojom::DnsConfigChangeManagerRequest manager_request(
-        mojo::MakeRequest(&manager_ptr));
-    manager->AddBinding(std::move(manager_request));
-
-    mojom::DnsConfigChangeManagerClientPtr client_ptr;
-    mojom::DnsConfigChangeManagerClientRequest client_request(
-        mojo::MakeRequest(&client_ptr));
-    binding_.Bind(std::move(client_request));
-
-    manager_ptr->RequestNotifications(std::move(client_ptr));
+    mojo::Remote<mojom::DnsConfigChangeManager> manager_remote;
+    manager->AddReceiver(manager_remote.BindNewPipeAndPassReceiver());
+    manager_remote->RequestNotifications(receiver_.BindNewPipeAndPassRemote());
   }
 
-  void OnSystemDnsConfigChanged() override {
+  TestDnsConfigChangeManagerClient(const TestDnsConfigChangeManagerClient&) =
+      delete;
+  TestDnsConfigChangeManagerClient& operator=(
+      const TestDnsConfigChangeManagerClient&) = delete;
+
+  void OnDnsConfigChanged() override {
     num_notifications_++;
     if (num_notifications_ >= num_notifications_expected_)
       run_loop_.Quit();
@@ -49,43 +47,32 @@ class TestDnsConfigChangeManagerClient
   int num_notifications_ = 0;
   int num_notifications_expected_ = INT_MAX;
   base::RunLoop run_loop_;
-  mojo::Binding<mojom::DnsConfigChangeManagerClient> binding_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TestDnsConfigChangeManagerClient);
+  mojo::Receiver<mojom::DnsConfigChangeManagerClient> receiver_{this};
 };
 
 class DnsConfigChangeManagerTest : public testing::Test {
  public:
   DnsConfigChangeManagerTest() {}
 
+  DnsConfigChangeManagerTest(const DnsConfigChangeManagerTest&) = delete;
+  DnsConfigChangeManagerTest& operator=(const DnsConfigChangeManagerTest&) =
+      delete;
+
   DnsConfigChangeManager* manager() { return &manager_; }
   TestDnsConfigChangeManagerClient* client() { return &client_; }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<net::NetworkChangeNotifier> notifier_mock_ =
-      net::NetworkChangeNotifier::CreateMock();
+      net::NetworkChangeNotifier::CreateMockIfNeeded();
   DnsConfigChangeManager manager_;
   TestDnsConfigChangeManagerClient client_{&manager_};
-
-  DISALLOW_COPY_AND_ASSIGN(DnsConfigChangeManagerTest);
 };
 
 TEST_F(DnsConfigChangeManagerTest, Notification) {
   EXPECT_EQ(0, client()->num_notifications());
 
   net::NetworkChangeNotifier::NotifyObserversOfDNSChangeForTests();
-  client()->WaitForNotification(1);
-  EXPECT_EQ(1, client()->num_notifications());
-
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(1, client()->num_notifications());
-}
-
-TEST_F(DnsConfigChangeManagerTest, Notification_InitialRead) {
-  EXPECT_EQ(0, client()->num_notifications());
-
-  net::NetworkChangeNotifier::NotifyObserversOfInitialDNSConfigReadForTests();
   client()->WaitForNotification(1);
   EXPECT_EQ(1, client()->num_notifications());
 

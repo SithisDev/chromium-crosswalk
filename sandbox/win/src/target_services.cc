@@ -1,14 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "sandbox/win/src/target_services.h"
+
+#include <windows.h>
+#include <winsock2.h>
 
 #include <new>
 
 #include <process.h>
 #include <stdint.h>
 
+#include "base/logging.h"
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/crosscall_client.h"
 #include "sandbox/win/src/handle_closer_agent.h"
@@ -164,7 +168,7 @@ TargetServicesBase* TargetServicesBase::GetInstance() {
   return g_target_services;
 }
 
-// The broker services a 'test' IPC service with the IPC_PING_TAG tag.
+// The broker services a 'test' IPC service with the PING tag.
 bool TargetServicesBase::TestIPCPing(int version) {
   void* memory = GetGlobalIPCMemory();
   if (!memory)
@@ -175,7 +179,7 @@ bool TargetServicesBase::TestIPCPing(int version) {
   if (1 == version) {
     uint32_t tick1 = ::GetTickCount();
     uint32_t cookie = 717115;
-    ResultCode code = CrossCall(ipc, IPC_PING1_TAG, cookie, &answer);
+    ResultCode code = CrossCall(ipc, IpcTag::PING1, cookie, &answer);
 
     if (SBOX_ALL_OK != code) {
       return false;
@@ -201,7 +205,7 @@ bool TargetServicesBase::TestIPCPing(int version) {
   } else if (2 == version) {
     uint32_t cookie = 717111;
     InOutCountedBuffer counted_buffer(&cookie, sizeof(cookie));
-    ResultCode code = CrossCall(ipc, IPC_PING2_TAG, counted_buffer, &answer);
+    ResultCode code = CrossCall(ipc, IpcTag::PING2, counted_buffer, &answer);
 
     if (SBOX_ALL_OK != code) {
       return false;

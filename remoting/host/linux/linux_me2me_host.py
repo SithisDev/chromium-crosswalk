@@ -1,5 +1,5 @@
-#!/usr/bin/python2
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 # This script is intended to run continuously as a background daemon
 # process, running under an ordinary (non-root) user account.
 
-from __future__ import print_function
-
 import sys
-if sys.version_info[0] != 2 or sys.version_info[1] < 7:
-  print("This script requires Python version 2.7")
+if sys.version_info[0] != 3 or sys.version_info[1] < 3:
+  print("This script requires Python version 3.3")
   sys.exit(1)
 
+import abc
 import argparse
 import atexit
 import errno
@@ -26,15 +25,16 @@ import hashlib
 import json
 import logging
 import os
-import pipes
 import platform
 import psutil
-import platform
 import pwd
 import re
+import shlex
 import signal
 import socket
+import struct
 import subprocess
+import syslog
 import tempfile
 import threading
 import time
@@ -51,18 +51,11 @@ HOST_EXTRA_PARAMS_ENV_VAR = "CHROME_REMOTE_DESKTOP_HOST_EXTRA_PARAMS"
 # list of sizes in this environment variable.
 DEFAULT_SIZES_ENV_VAR = "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES"
 
-# By default, this script launches Xvfb as the virtual X display. When this
-# environment variable is set, the script will instead launch an instance of
-# Xorg using the dummy display driver and void input device. In order for this
-# to work, both the dummy display driver and void input device need to be
-# installed:
-#
-#     sudo apt-get install xserver-xorg-video-dummy
-#     sudo apt-get install xserver-xorg-input-void
-#
-# TODO(rkjnsn): Add xserver-xorg-video-dummy and xserver-xorg-input-void as
-# package dependencies at the same time we switch the default to Xorg
-USE_XORG_ENV_VAR = "CHROME_REMOTE_DESKTOP_USE_XORG"
+# By default, this script launches Xorg as the virtual X display, using the
+# dummy display driver and void input device, unless Xorg+Dummy is deemed
+# unsupported. When this environment variable is set, the script will instead
+# launch Xvfb.
+USE_XVFB_ENV_VAR = "CHROME_REMOTE_DESKTOP_USE_XVFB"
 
 # The amount of video RAM the dummy driver should claim to have, which limits
 # the maximum possible resolution.
@@ -77,9 +70,13 @@ XORG_DUMMY_VIDEO_RAM = 1048576 # KiB
 # defaults can be overridden in ~/.profile.
 DEFAULT_SIZES = "1600x1200,3840x2560"
 
-# If RANDR is not available, use a smaller default size. Only a single
-# resolution is supported in this case.
-DEFAULT_SIZE_NO_RANDR = "1600x1200"
+# Decides number of monitors and their resolution that should be run for the
+# wayland session.
+WAYLAND_DESKTOP_SIZES_ENV = "CHROME_REMOTE_DESKTOP_WAYLAND_DESKTOP_SIZES"
+
+# Default wayland monitor size if `CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES`
+# env variable is not set.
+DEFAULT_WAYLAND_DESKTOP_SIZES = "1280x720"
 
 SCRIPT_PATH = os.path.abspath(sys.argv[0])
 SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
@@ -99,6 +96,9 @@ HOME_DIR = os.environ["HOME"]
 CONFIG_DIR = os.path.join(HOME_DIR, ".config/chrome-remote-desktop")
 SESSION_FILE_PATH = os.path.join(HOME_DIR, ".chrome-remote-desktop-session")
 SYSTEM_SESSION_FILE_PATH = "/etc/chrome-remote-desktop-session"
+SYSTEM_PRE_SESSION_FILE_PATH = "/etc/chrome-remote-desktop-pre-session"
+
+DEBIAN_XSESSION_PATH = "/etc/X11/Xsession"
 
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
@@ -119,8 +119,15 @@ MAX_LAUNCH_FAILURES = SHORT_BACKOFF_THRESHOLD + 10
 # Number of seconds to save session output to the log.
 SESSION_OUTPUT_TIME_LIMIT_SECONDS = 300
 
+# Number of seconds to save the display server output to the log.
+SERVER_OUTPUT_TIME_LIMIT_SECONDS = 300
+
 # Host offline reason if the X server retry count is exceeded.
 HOST_OFFLINE_REASON_X_SERVER_RETRIES_EXCEEDED = "X_SERVER_RETRIES_EXCEEDED"
+
+# Host offline reason if the wayland server retry count is exceeded.
+HOST_OFFLINE_REASON_WAYLAND_SERVER_RETRIES_EXCEEDED = (
+  "WAYLAND_SERVER_RETRIES_EXCEEDED")
 
 # Host offline reason if the X session retry count is exceeded.
 HOST_OFFLINE_REASON_SESSION_RETRIES_EXCEEDED = "SESSION_RETRIES_EXCEEDED"
@@ -136,7 +143,8 @@ USER_SESSION_MESSAGE_FD = 202
 
 # This is the exit code used to signal to wrapper that it should restart instead
 # of exiting. It must be kept in sync with kRelaunchExitCode in
-# remoting_user_session.cc.
+# remoting_user_session.cc and RestartForceExitStatus in
+# chrome-remote-desktop@.service.
 RELAUNCH_EXIT_CODE = 41
 
 # This exit code is returned when a needed binary such as user-session or sg
@@ -146,11 +154,15 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 # This exit code is returned when a needed binary exists but cannot be executed.
 COMMAND_NOT_EXECUTABLE_EXIT_CODE = 126
 
+# User runtime directory. This is where the wayland socket is created by the
+# wayland compositor/server for clients to connect to.
+RUNTIME_DIR_TEMPLATE = "/run/user/%s"
+
 # Globals needed by the atexit cleanup() handler.
 g_desktop = None
-g_host_hash = hashlib.md5(socket.gethostname()).hexdigest()
+g_host_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()
 
-def gen_xorg_config(sizes):
+def gen_xorg_config():
   return (
       # This causes X to load the default GLX module, even if a proprietary one
       # is installed in a different directory.
@@ -187,16 +199,6 @@ def gen_xorg_config(sizes):
       '\n'
       'Section "Monitor"\n'
       '  Identifier "Chrome Remote Desktop Monitor"\n'
-      # The horizontal sync rate was calculated from the vertical refresh rate
-      # and the modline template:
-      # (33000 (vert total) * 0.1 Hz = 3.3 kHz)
-      '  HorizSync   3.3\n' # kHz
-      # The vertical refresh rate was chosen both to be low enough to have an
-      # acceptable dot clock at high resolutions, and then bumped down a little
-      # more so that in the unlikely event that a low refresh rate would break
-      # something, it would break obviously.
-      '  VertRefresh 0.1\n' # Hz
-      '{modelines}'
       'EndSection\n'
       '\n'
       'Section "Screen"\n'
@@ -207,7 +209,6 @@ def gen_xorg_config(sizes):
       '  SubSection "Display"\n'
       '    Viewport 0 0\n'
       '    Depth 24\n'
-      '    Modes {modes}\n'
       '  EndSubSection\n'
       'EndSection\n'
       '\n'
@@ -216,22 +217,25 @@ def gen_xorg_config(sizes):
       '  Screen       "Chrome Remote Desktop Screen"\n'
       '  InputDevice  "Chrome Remote Desktop Input"\n'
       'EndSection\n'.format(
-          # This Modeline template allows resolutions up to the dummy driver's
-          # max supported resolution of 32767x32767 without additional
-          # calculation while meeting the driver's dot clock requirements. Note
-          # that VP8 (and thus the amount of video RAM chosen) only support a
-          # maximum resolution of 16384x16384.
-          # 32767x32767 should be possible if we switch fully to VP9 and
-          # increase the video RAM to 4GiB.
-          # The dot clock was calculated to match the VirtRefresh chosen above.
-          # (33000 * 33000 * 0.1 Hz = 108.9 MHz)
-          # Changes this line require matching changes to HorizSync and
-          # VertRefresh.
-          modelines="".join(
-              '  Modeline "{0}x{1}" 108.9 {0} 32998 32999 33000 '
-              '{1} 32998 32999 33000\n'.format(w, h) for w, h in sizes),
-          modes=" ".join('"{0}x{1}"'.format(w, h) for w, h in sizes),
           video_ram=XORG_DUMMY_VIDEO_RAM))
+
+
+def display_manager_is_gdm():
+  try:
+    # Open as binary to avoid any encoding errors
+    with open('/etc/X11/default-display-manager', 'rb') as file:
+      if file.read().strip() in [b'/usr/sbin/gdm', b'/usr/sbin/gdm3']:
+        return True
+    # Fall through to process checking even if the file doesn't contain gdm.
+  except:
+    # If we can't read the file, move on to checking the process list.
+    pass
+
+  for process in psutil.process_iter():
+    if process.name() in ['gdm', 'gdm3']:
+      return True
+
+  return False
 
 
 def is_supported_platform():
@@ -241,24 +245,20 @@ def is_supported_platform():
       os.path.isfile(SYSTEM_SESSION_FILE_PATH)):
     return True
 
-  # The host has been tested only on Ubuntu.
-  distribution = platform.linux_distribution()
-  return (distribution[0]).lower() == 'ubuntu'
+  # There's a bug in recent versions of GDM that will prevent a user from
+  # logging in via GDM when there is already an x11 session running for that
+  # user (such as the one started by CRD). Since breaking local login is a
+  # pretty serious issue, we want to disallow host set up through the website.
+  # Unfortunately, there's no way to return a specific error to the website, so
+  # we just return False to indicate an unsupported platform. The user can still
+  # set up the host using the headless setup flow, where we can at least display
+  # a warning. See https://gitlab.gnome.org/GNOME/gdm/-/issues/580 for details
+  # of the bug and fix.
+  if display_manager_is_gdm():
+    return False;
 
-
-def locate_xvfb_randr():
-  """Returns a path to our RANDR-supporting Xvfb server, if it is found on the
-  system. Otherwise returns None."""
-
-  xvfb = "/usr/bin/Xvfb-randr"
-  if os.path.exists(xvfb):
-    return xvfb
-
-  xvfb = os.path.join(SCRIPT_DIR, "Xvfb-randr")
-  if os.path.exists(xvfb):
-    return xvfb
-
-  return None
+  # The session chooser expects a Debian-style Xsession script.
+  return os.path.isfile(DEBIAN_XSESSION_PATH);
 
 
 class Config:
@@ -347,7 +347,6 @@ class Host:
   def __init__(self):
     # Note: Initial values are never used.
     self.host_id = None
-    self.gcd_device_id = None
     self.host_name = None
     self.host_secret_hash = None
     self.private_key = None
@@ -355,32 +354,32 @@ class Host:
   def copy_from(self, config):
     try:
       self.host_id = config.get("host_id")
-      self.gcd_device_id = config.get("gcd_device_id")
       self.host_name = config["host_name"]
       self.host_secret_hash = config.get("host_secret_hash")
       self.private_key = config["private_key"]
     except KeyError:
       return False
-    return bool(self.host_id or self.gcd_device_id)
+    return bool(self.host_id)
 
   def copy_to(self, config):
     if self.host_id:
       config["host_id"] = self.host_id
-    if self.gcd_device_id:
-      config["gcd_device_id"] = self.gcd_device_id
     config["host_name"] = self.host_name
     config["host_secret_hash"] = self.host_secret_hash
     config["private_key"] = self.private_key
 
 
 class SessionOutputFilterThread(threading.Thread):
-  """Reads session log from a pipe and logs the output for amount of time
-  defined by SESSION_OUTPUT_TIME_LIMIT_SECONDS."""
+  """Reads session log from a pipe and logs the output with the provided prefix
+  for amount of time defined by time_limit, or indefinitely if time_limit is
+  None."""
 
-  def __init__(self, stream):
+  def __init__(self, stream, prefix, time_limit):
     threading.Thread.__init__(self)
     self.stream = stream
     self.daemon = True
+    self.prefix = prefix
+    self.time_limit = time_limit
 
   def run(self):
     started_time = time.time()
@@ -392,50 +391,48 @@ class SessionOutputFilterThread(threading.Thread):
         print("IOError when reading session output: ", e)
         return
 
-      if line == "":
+      if line == b"":
         # EOF reached. Just stop the thread.
         return
 
       if not is_logging:
         continue
 
-      if time.time() - started_time >= SESSION_OUTPUT_TIME_LIMIT_SECONDS:
+      if self.time_limit and time.time() - started_time >= self.time_limit:
         is_logging = False
-        print("Suppressing rest of the session output.")
-        sys.stdout.flush()
+        print("Suppressing rest of the session output.", flush=True)
       else:
-        print("Session output: %s" % line.strip("\n"))
+        # Pass stream bytes through as is instead of decoding and encoding.
+        sys.stdout.buffer.write(self.prefix.encode(sys.stdout.encoding) + line);
         sys.stdout.flush()
 
 
-class Desktop:
+class Desktop(abc.ABC):
   """Manage a single virtual desktop"""
 
-  def __init__(self, sizes):
-    self.x_proc = None
+  def __init__(self, sizes, server_inhibitor=None, session_inhibitor=None,
+               host_inhibitor=None):
+    self.sizes = sizes
+    self.server_proc = None
+    self.pre_session_proc = None
     self.session_proc = None
     self.host_proc = None
     self.child_env = None
-    self.sizes = sizes
-    self.xorg_conf = None
-    self.pulseaudio_pipe = None
-    self.server_supports_exact_resize = False
-    self.server_supports_randr = False
-    self.randr_add_sizes = False
     self.host_ready = False
-    self.ssh_auth_sockname = None
-    global g_desktop
-    assert(g_desktop is None)
-    g_desktop = self
-
-  @staticmethod
-  def get_unused_display_number():
-    """Return a candidate display number for which there is currently no
-    X Server lock file"""
-    display = FIRST_X_DISPLAY_NUMBER
-    while os.path.exists(X_LOCK_FILE_TEMPLATE % display):
-      display += 1
-    return display
+    self.server_inhibitor = server_inhibitor
+    self.session_inhibitor = session_inhibitor
+    self.host_inhibitor = host_inhibitor
+    if self.server_inhibitor is None:
+      self.server_inhibitor = RelaunchInhibitor("Display server")
+    if self.session_inhibitor is None:
+      self.session_inhibitor = RelaunchInhibitor("session")
+    if self.host_inhibitor is None:
+      self.host_inhibitor = RelaunchInhibitor("host")
+    self.inhibitors = {
+        self.server_inhibitor: HOST_OFFLINE_REASON_X_SERVER_RETRIES_EXCEEDED,
+        self.session_inhibitor: HOST_OFFLINE_REASON_SESSION_RETRIES_EXCEEDED,
+        self.host_inhibitor: HOST_OFFLINE_REASON_HOST_RETRIES_EXCEEDED
+    }
 
   def _init_child_env(self):
     self.child_env = dict(os.environ)
@@ -454,8 +451,247 @@ class Desktop:
 
     self.child_env["LD_LIBRARY_PATH"] = library_path
 
-  def _setup_pulseaudio(self):
-    self.pulseaudio_pipe = None
+  def _setup_gnubby(self):
+    self.ssh_auth_sockname = ("/tmp/chromoting.%s.ssh_auth_sock" %
+                              os.environ["USER"])
+
+  def _launch_pre_session(self):
+    # Launch the pre-session script, if it exists. Returns true if the script
+    # was launched, false if it didn't exist.
+    if os.path.exists(SYSTEM_PRE_SESSION_FILE_PATH):
+      pre_session_command = bash_invocation_for_script(
+          SYSTEM_PRE_SESSION_FILE_PATH)
+
+      logging.info("Launching pre-session: %s" % pre_session_command)
+      self.pre_session_proc = subprocess.Popen(pre_session_command,
+                                               stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.STDOUT,
+                                               cwd=HOME_DIR,
+                                               env=self.child_env)
+
+      if not self.pre_session_proc.pid:
+        raise Exception("Could not start pre-session")
+
+      output_filter_thread = SessionOutputFilterThread(
+          self.pre_session_proc.stdout, "Pre-session output: ", None)
+      output_filter_thread.start()
+
+      return True
+    return False
+
+  def launch_session(self, server_args, backoff_time):
+    """Launches process required for session and records the backoff time
+    for inhibitors so that process restarts are not attempted again until
+    that time has passed."""
+    logging.info("Setting up and launching session")
+    self._init_child_env()
+    self.setup_audio()
+    self._setup_gnubby()
+    self._launch_server(server_args)
+    if not self._launch_pre_session():
+      # If there was no pre-session script, launch the session immediately.
+      self.launch_desktop_session()
+    self.server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                      backoff_time)
+    self.session_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
+                                     backoff_time)
+
+  def _wait_for_setup_before_host_launch(self):
+    """
+    If a virtual desktop needs to do some setup before launching the host
+    process, it can override this method and ensure that the required setup is
+    done before returning from this process.
+    """
+    pass
+
+  def launch_host(self, host_config, extra_start_host_args, backoff_time):
+    self._wait_for_setup_before_host_launch()
+    logging.info("Launching host process")
+    # Start remoting host
+    args = [HOST_BINARY_PATH, "--host-config=-"]
+    if self.audio_pipe:
+      args.append("--audio-pipe-name=%s" % self.audio_pipe)
+    if self.ssh_auth_sockname:
+      args.append("--ssh-auth-sockname=%s" % self.ssh_auth_sockname)
+
+    args.extend(extra_start_host_args)
+
+    # Have the host process use SIGUSR1 to signal a successful start.
+    def sigusr1_handler(signum, frame):
+      _ = signum, frame
+      logging.info("Host ready to receive connections.")
+      self.host_ready = True
+      ParentProcessLogger.release_parent_if_connected(True)
+
+    signal.signal(signal.SIGUSR1, sigusr1_handler)
+    args.append("--signal-parent")
+
+    logging.info(args)
+    self.host_proc = subprocess.Popen(args, env=self.child_env,
+                                      stdin=subprocess.PIPE)
+    if not self.host_proc.pid:
+      raise Exception("Could not start Chrome Remote Desktop host")
+
+    try:
+      self.host_proc.stdin.write(json.dumps(host_config.data).encode('UTF-8'))
+      self.host_proc.stdin.flush()
+    except IOError as e:
+      # This can occur in rare situations, for example, if the machine is
+      # heavily loaded and the host process dies quickly (maybe if the X
+      # connection failed), the host process might be gone before this code
+      # writes to the host's stdin. Catch and log the exception, allowing
+      # the process to be retried instead of exiting the script completely.
+      logging.error("Failed writing to host's stdin: " + str(e))
+    finally:
+      self.host_proc.stdin.close()
+    self.host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME, backoff_time)
+
+  def cleanup(self):
+    """Send SIGTERM to all procs and wait for them to exit. Will fallback to
+    SIGKILL if a process doesn't exit within 10 seconds.
+    """
+    for proc, name in [(self.host_proc, "host"),
+                       (self.session_proc, "session"),
+                       (self.pre_session_proc, "pre-session"),
+                       (self.server_proc, "display server")]:
+      if proc is not None:
+        logging.info("Sending SIGTERM to %s proc (pid=%s)",
+                     name, proc and proc.pid)
+        try:
+          psutil_proc = psutil.Process(proc.pid)
+          psutil_proc.terminate()
+
+          # Use a short timeout, to avoid delaying service shutdown if the
+          # process refuses to die for some reason.
+          psutil_proc.wait(timeout=10)
+        except psutil.TimeoutExpired:
+          logging.error("Timed out - sending SIGKILL")
+          psutil_proc.kill()
+        except psutil.Error:
+          logging.error("Error terminating process")
+    self.server_proc = None
+    self.pre_session_proc = None
+    self.session_proc = None
+    self.host_proc = None
+
+  def report_offline_reason(self, host_config, reason):
+    """Attempt to report the specified offline reason to the registry. This
+    is best effort, and requires a valid host config.
+    """
+    logging.info("Attempting to report offline reason: " + reason)
+    args = [HOST_BINARY_PATH, "--host-config=-",
+            "--report-offline-reason=" + reason]
+    proc = subprocess.Popen(args, env=self.child_env, stdin=subprocess.PIPE)
+    proc.communicate(json.dumps(host_config.data).encode('UTF-8'))
+
+  def on_process_exit(self, pid, status):
+    """Checks for which process has exited and whether or not the exit was
+    expected. Returns a boolean indicating whether or not tear down of the
+    processes is needed."""
+    tear_down = False
+    if self.server_proc is not None and pid == self.server_proc.pid:
+      logging.info("Display server process terminated")
+      self.server_proc = None
+      self.server_inhibitor.record_stopped(expected=False)
+      tear_down = True
+
+    if (self.pre_session_proc is not None and
+        pid == self.pre_session_proc.pid):
+      self.pre_session_proc = None
+      if status == 0:
+        logging.info("Pre-session terminated successfully. Starting session.")
+        self.launch_desktop_session()
+      else:
+        logging.info("Pre-session failed. Tearing down.")
+        # The pre-session may have exited on its own or been brought down by
+        # the display server dying. Check if the display server is still running
+        # so we know whom to penalize.
+        if self.check_server_responding():
+          # Pre-session and session use the same inhibitor.
+          self.session_inhibitor.record_stopped(expected=False)
+        else:
+          self.server_inhibitor.record_stopped(expected=False)
+        # Either way, we want to tear down the session.
+        tear_down = True
+
+    if self.session_proc is not None and pid == self.session_proc.pid:
+      logging.info("Session process terminated")
+      self.session_proc = None
+      # The session may have exited on its own or been brought down by the
+      # display server dying. Check if the display server is still running so we
+      # know whom to penalize.
+      if self.check_server_responding():
+        self.session_inhibitor.record_stopped(expected=False)
+      else:
+        self.server_inhibitor.record_stopped(expected=False)
+      # Either way, we want to tear down the session.
+      tear_down = True
+
+    if self.host_proc is not None and pid == self.host_proc.pid:
+      logging.info("Host process terminated")
+      self.host_proc = None
+      self.host_ready = False
+
+      # These exit-codes must match the ones used by the host.
+      # See remoting/host/base/host_exit_codes.h.
+      # Delete the host or auth configuration depending on the returned error
+      # code, so the next time this script is run, a new configuration
+      # will be created and registered.
+      if os.WIFEXITED(status):
+        if os.WEXITSTATUS(status) == 100:
+          logging.info("Host configuration is invalid - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 101:
+          logging.info("Host ID has been deleted - exiting.")
+          host_config.clear()
+          host_config.save_and_log_errors()
+          return 0
+        elif os.WEXITSTATUS(status) == 102:
+          logging.info("OAuth credentials are invalid - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 103:
+          logging.info("Host domain is blocked by policy - exiting.")
+          return 0
+        # Nothing to do for Mac-only status 104 (login screen unsupported)
+        elif os.WEXITSTATUS(status) == 105:
+          logging.info("Username is blocked by policy - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 106:
+          logging.info("Host has been deleted - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 107:
+          logging.info("Remote access is disallowed by policy - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 108:
+          logging.info("This CPU is not supported - exiting.")
+          return 0
+        else:
+          logging.info("Host exited with status %s." % os.WEXITSTATUS(status))
+      elif os.WIFSIGNALED(status):
+        logging.info("Host terminated by signal %s." % os.WTERMSIG(status))
+
+      # The host may have exited on it's own or been brought down by the display
+      # server dying. Check if the display server is still running so we know
+      # whom to penalize.
+      if self.check_server_responding():
+        self.host_inhibitor.record_stopped(expected=False)
+      else:
+        self.server_inhibitor.record_stopped(expected=False)
+        # Only tear down if the display server isn't responding.
+        tear_down = True
+    return tear_down
+
+  def aggregate_failure_count(self):
+    failure_count = 0
+    for inhibitor in self.inhibitors:
+      if inhibitor.running:
+        inhibitor.record_stopped(True)
+      failure_count += inhibitor.failures
+    return failure_count
+
+  def setup_audio(self):
+    self.audio_pipe = None
 
     # pulseaudio uses UNIX sockets for communication. Length of UNIX socket
     # name is limited to 108 characters, so audio will not work properly if
@@ -500,13 +736,324 @@ class Desktop:
     self.child_env["PULSE_RUNTIME_PATH"] = pulse_path
     self.child_env["PULSE_STATE_PATH"] = pulse_path
     self.child_env["PULSE_SINK"] = sink_name
-    self.pulseaudio_pipe = pipe_name
+    self.audio_pipe = pipe_name
 
     return True
 
-  def _setup_gnubby(self):
-    self.ssh_auth_sockname = ("/tmp/chromoting.%s.ssh_auth_sock" %
-                              os.environ["USER"])
+
+  @abc.abstractmethod
+  def launch_desktop_session(self):
+    """Start desktop session."""
+    pass
+
+  @abc.abstractmethod
+  def check_server_responding(self):
+    """Checks if the display server is responding to connections."""
+    return False
+
+
+class WaylandDesktop(Desktop):
+  """Manage a single virtual wayland based desktop"""
+
+  WL_SOCKET_CHECK_DELAY_SECONDS = 1
+  WL_SOCKET_CHECK_TIMEOUT_SECONDS = 30
+  WL_SERVER_REPLY_TIMEOUT_SECONDS = 1
+  # We scan for the unused socket starting from number 1. If we are not able to
+  # find anything between 1 and 100 then we error out since there could be a
+  # socket leak and we don't want to keep retrying forever.
+  MAX_WAYLAND_SOCKET_NUM = 100
+
+  def __init__(self, sizes):
+    super(WaylandDesktop, self).__init__(sizes)
+    self.debug = False
+    self._wayland_socket = None
+    self._runtime_dir = None
+    self.inhibitors = {
+        self.server_inhibitor:
+          HOST_OFFLINE_REASON_WAYLAND_SERVER_RETRIES_EXCEEDED,
+        self.host_inhibitor: HOST_OFFLINE_REASON_HOST_RETRIES_EXCEEDED
+    }
+    global g_desktop
+    assert(g_desktop is None)
+    g_desktop = self
+
+  @property
+  def runtime_dir(self):
+    if not self._runtime_dir:
+      self._runtime_dir = RUNTIME_DIR_TEMPLATE % os.getuid()
+    return self._runtime_dir
+
+  def _init_child_env(self):
+    super(WaylandDesktop, self)._init_child_env()
+    self.child_env["GDK_BACKEND"] = "wayland"
+    self.child_env["XDG_SESSION_TYPE"] = "wayland"
+    self.child_env["XDG_RUNTIME_DIR"] = self.runtime_dir
+    self._wayland_socket = self._get_unused_wayland_socket()
+    if self._wayland_socket is None:
+      logging.error("Unable to find unused wayland socket, running compositor "
+                    "is going to fail")
+      sys.exit(1)
+    else:
+      self.child_env["WAYLAND_DISPLAY"] = self._wayland_socket
+      self.child_env["DISPLAY"] = self._wayland_socket
+    self.child_env["CHROME_REMOTE_DESKTOP_SESSION"] = "1"
+    chrome_profile = os.path.join(CONFIG_DIR, "chrome-profile")
+    chrome_config_home = os.path.join(CONFIG_DIR, "chrome-config")
+    if (os.path.exists(chrome_profile)
+        and not os.path.exists(chrome_config_home)):
+      self.child_env["CHROME_USER_DATA_DIR"] = chrome_profile
+    elif os.path.exists(chrome_config_home):
+      self.child_env["CHROME_CONFIG_HOME"] = chrome_config_home
+
+    if self.debug:
+      self.child_env["G_MESSAGES_DEBUG"] = "all"
+      self.child_env["GDK_DEBUG"]  = "all"
+      self.child_env["G_DEBUG"] = "fatal-criticals"
+      self.child_env["WAYLAND_DEBUG"] = 1
+
+  def _get_unused_wayland_socket(self):
+    """
+    Return a candidate wayland socket that is not already taken by another
+    compositor.
+    """
+    socket_num = starting_socket_num = 0
+    full_sock_path = os.path.join(self.runtime_dir, "wayland-%s" % socket_num)
+    while ((os.path.exists(full_sock_path)) and
+            socket_num <= self.MAX_WAYLAND_SOCKET_NUM):
+      socket_num += 1
+      full_sock_path = os.path.join(self.runtime_dir, "wayland-%s" % socket_num)
+    if socket_num > self.MAX_WAYLAND_SOCKET_NUM:
+      logging.error("Unable to find an unused wayland socket (searched between "
+                    "'wayland-%s' to 'wayland-%s' under runtime directory",
+                    starting_socket_num,
+                    self.MAX_WAYLAND_SOCKET_NUM, self.runtime_dir)
+      return None
+    return "wayland-%s" % socket_num
+
+  @staticmethod
+  def _is_gnome_shell_present():
+    try:
+      subprocess.check_output(["gnome-shell", "--help"],
+                              stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as err:
+      logging.warning("Unable to find 'gnome-shell' on the host, "
+                      "returncode: %s, output: %s" % (err.returncode,
+                                                      err.output))
+      return False
+    return True
+
+  def _gnome_shell_cmd(self):
+    gnome_shell_cmd = [
+      "gnome-shell", "--wayland", "--headless", "--wayland-display",
+      self._wayland_socket, "--no-x11", "--replace"]
+    return gnome_shell_cmd
+
+  def _launch_server(self, *args, **kwargs):
+    if not self._is_gnome_shell_present():
+      logging.error("Only GNOME based wayland hosts are supported currently. "
+                    "If the host is a GNOME host, please ensure that "
+                    "'gnome-shell' is installed on it")
+      # Error won't be fixed without user intervention so we quit here without
+      # attempting to relaunch.
+      sys.exit(1)
+    logging.info("Launching wayland server.")
+    if self.ssh_auth_sockname:
+      self.child_env["SSH_AUTH_SOCK"] = self.ssh_auth_sockname
+    self.server_proc = subprocess.Popen(self._gnome_shell_cmd(),
+                                         stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT,
+                                         env=self.child_env)
+
+    if not self.server_proc.pid:
+      raise Exception("Could not start wayland session")
+
+    output_filter_thread = SessionOutputFilterThread(self.server_proc.stdout,
+        "Wayland server output: ", SERVER_OUTPUT_TIME_LIMIT_SECONDS)
+    output_filter_thread.start()
+
+  def _wait_for_wayland_compositor_running(self):
+    """
+    Waits for wayland socket to be created by the wayland compositor. Returns
+    true if socket is created within the allowed timeout, else false.
+    """
+    full_socket_path = os.path.join(self.runtime_dir, self._wayland_socket)
+    start_time = time.time()
+    while not (os.path.exists(full_socket_path) and
+               time.time() - start_time < self.WL_SOCKET_CHECK_TIMEOUT_SECONDS):
+      logging.info("Wayland socket not yet present. Will wait for %s seconds "
+                   "for compositor to create it" %
+                   self.WL_SOCKET_CHECK_DELAY_SECONDS)
+      time.sleep(self.WL_SOCKET_CHECK_DELAY_SECONDS)
+    if not os.path.exists(full_socket_path):
+      logging.error("Waited for wayland compositor to create wayland "
+                    "socket: %s, but it didn't happen in %s seconds" %
+                    (full_socket_path, self.WL_SOCKET_CHECK_TIMEOUT_SECONDS))
+      return False
+    logging.info("Wayland socket detected in %s seconds: " %
+                 str(time.time() - start_time))
+    return True
+
+  def launch_desktop_session(self):
+    """
+    Restarts the portal services so that they can connect to the wayland socket.
+    This helps host process to talk to call into the the xdg-desktop-portal
+    APIs.
+    """
+    if not self._wait_for_wayland_compositor_running():
+      logging.error("Aborting wayland session since compositor isn't running")
+      return
+    logging.info("Wayland compositor is running, restarting the portal "
+                 "services now")
+    try:
+      subprocess.check_output(["systemctl", "--user", "import-environment"],
+                              stderr=subprocess.STDOUT,
+                              env=self.child_env)
+    except subprocess.CalledProcessError as err:
+      logging.error("Unable to import env vars into systemd, "
+                    "returncode: %s, output: %s" % (err.returncode,
+                                                    err.output))
+      # Host process will not be functional without these services.
+      sys.exit(1)
+
+    try:
+      subprocess.check_output(["systemctl", "--user", "restart",
+                               "xdg-desktop-portal",
+                               "xdg-desktop-portal-gnome",
+                               "xdg-desktop-portal-gtk"],
+                               stderr=subprocess.STDOUT, env=self.child_env)
+    except subprocess.CalledProcessError as err:
+      logging.error("Unable to restart portal services on the host, "
+                    "returncode: %s, output: %s" % (err.returncode, err.output))
+      # Host process will not be functional without these services.
+      sys.exit(1)
+    logging.info("Done restarting the portal services")
+
+  def _wait_for_setup_before_host_launch(self):
+    return self._wait_for_wayland_compositor_running()
+
+  def cleanup(self):
+    super(WaylandDesktop, self).cleanup()
+    if self._wayland_socket:
+      full_socket_path = os.path.join(self.runtime_dir, self._wayland_socket)
+      for to_remove in (full_socket_path, "%s.lock" % full_socket_path):
+        try:
+          os.remove(to_remove)
+        except FileNotFoundError:
+          pass
+      self._wayland_socket = None
+
+  def check_server_responding(self):
+    """
+    Connects to the server that is listening on the wayland socket.
+    If the connection succeeds, it means that the server is still up and
+    running.
+    """
+    try:
+      with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.connect(os.path.join(self.runtime_dir, self._wayland_socket))
+        # Asks the server for the global registry object
+        # (See: https://wayland-book.com/registry.html)
+        sock.sendall(struct.pack("<III", 0x00000001, 0x000C0001, 0x00000002))
+
+        num_bytes_received = 0
+        NUM_BYTES_EXPECTED = 32
+        # We don't want to wait forever for a reply so we set a timeout here.
+        sock.settimeout(self.WL_SERVER_REPLY_TIMEOUT_SECONDS)
+        while num_bytes_received < NUM_BYTES_EXPECTED:
+            data = sock.recv(NUM_BYTES_EXPECTED)
+            if len(data) == 0:  # Expect empty reply if server dies
+               break
+            num_bytes_received += len(data)
+            logging.debug("Wayland server replied with: %s" % data)
+        if not num_bytes_received:
+          # If we don't receive a reply at all then the server is likely not
+          # listening on the socket.
+          return False
+    except socket.error as err:
+        logging.error("Wayland server is not responding: %s" % err)
+        return False
+    return True
+
+
+class XDesktop(Desktop):
+  """Manage a single virtual X desktop"""
+
+  def __init__(self, sizes):
+    super(XDesktop, self).__init__(sizes)
+    self.xorg_conf = None
+    self.audio_pipe = None
+    self.server_supports_randr = False
+    self.randr_add_sizes = False
+    self.ssh_auth_sockname = None
+    self.use_xvfb = self.should_use_xvfb()
+    global g_desktop
+    assert(g_desktop is None)
+    g_desktop = self
+
+  @staticmethod
+  def should_use_xvfb():
+    """Return whether XVFB should be used. This will be true if USE_XVFB_ENV_VAR
+    is set, or if installed dependencies can't support Xorg+Dummy. Note that
+    this method performs expensive IO so the output should be cached."""
+
+    if USE_XVFB_ENV_VAR in os.environ:
+      return True
+
+    # xserver-xorg-input-void is no longer available in Debian stable. If we
+    # don't see the driver then Xorg+Dummy will be broken, and we fallback to
+    # XVFB.
+    if not os.path.exists('/usr/lib/xorg/modules/input/void_drv.so'):
+      logging.info('xserver-xorg-input-void is not installed')
+      return True
+
+    # Check if xserver-xorg-video-dummy is up-to-date. Older versions don't
+    # support the DUMMY* outputs and can't be used.
+    # Unfortunately, dummy_drv.so doesn't seem to have any version info so we
+    # have to query the dpkg database.
+    try:
+      video_dummy_info = subprocess.check_output(
+          ['dpkg-query', '-s', 'xserver-xorg-video-dummy'])
+      matches = re.search(
+          br'^Version: (\S+)$', video_dummy_info, re.MULTILINE)
+      if not matches:
+        logging.error('Version line is not found')
+        return False
+      version = matches[1]
+      retcode = subprocess.call(
+          ['dpkg', '--compare-versions', version, 'ge', '1:0.4.0'])
+      if retcode != 0:
+        logging.info('xserver-xorg-video-dummy is not up-to-date')
+        return True
+    except subprocess.CalledProcessError:
+      logging.info('xserver-xorg-video-dummy is not installed')
+      return True
+    except Exception as e:
+      logging.warning(
+          'Failed to get xserver-xorg-video-dummy version: ' + str(e))
+
+    return False
+
+  @staticmethod
+  def get_unused_display_number():
+    """Return a candidate display number for which there is currently no
+    X Server lock file"""
+    display = FIRST_X_DISPLAY_NUMBER
+    while os.path.exists(X_LOCK_FILE_TEMPLATE % display):
+      display += 1
+    return display
+
+  def _init_child_env(self):
+    super(XDesktop, self)._init_child_env()
+    # Force GDK to use the X11 backend, as otherwise parts of the host that use
+    # GTK can end up connecting to an active Wayland display instead of the
+    # CRD X11 session.
+    self.child_env["GDK_BACKEND"] = "x11"
+    if self.use_xvfb:
+      self.child_env[USE_XVFB_ENV_VAR] = "true"
+
+  def launch_session(self, *args, **kwargs):
+    logging.info("Launching X server and X session.")
+    super(XDesktop, self).launch_session(*args, **kwargs)
 
   # Returns child environment not containing TMPDIR.
   # Certain values of TMPDIR can break the X server (crbug.com/672684), so we
@@ -520,17 +1067,16 @@ class Desktop:
       del env_copy["TMPDIR"]
       return env_copy
 
-  def check_x_responding(self):
+  def check_server_responding(self):
     """Checks if the X server is responding to connections."""
-    with open(os.devnull, "r+") as devnull:
-      exit_code = subprocess.call("xdpyinfo", env=self.child_env,
-                                  stdout=devnull)
+    exit_code = subprocess.call("xdpyinfo", env=self.child_env,
+                                stdout=subprocess.DEVNULL)
     return exit_code == 0
 
   def _wait_for_x(self):
     # Wait for X to be active.
     for _test in range(20):
-      if self.check_x_responding():
+      if self.check_server_responding():
         logging.info("X server is active.")
         return
       time.sleep(0.5)
@@ -541,30 +1087,25 @@ class Desktop:
     max_width = max([width for width, height in self.sizes])
     max_height = max([height for width, height in self.sizes])
 
-    xvfb = locate_xvfb_randr()
-    if not xvfb:
-      xvfb = "Xvfb"
-
-    logging.info("Starting %s on display :%d" % (xvfb, display))
+    logging.info("Starting Xvfb on display :%d" % display)
     screen_option = "%dx%dx24" % (max_width, max_height)
-    self.x_proc = subprocess.Popen(
-        [xvfb, ":%d" % display,
+    self.server_proc = subprocess.Popen(
+        ["Xvfb", ":%d" % display,
          "-auth", x_auth_file,
          "-nolisten", "tcp",
          "-noreset",
          "-screen", "0", screen_option
         ] + extra_x_args, env=self._x_env())
-    if not self.x_proc.pid:
+    if not self.server_proc.pid:
       raise Exception("Could not start Xvfb.")
 
     self._wait_for_x()
 
-    with open(os.devnull, "r+") as devnull:
-      exit_code = subprocess.call("xrandr", env=self.child_env,
-                                  stdout=devnull, stderr=devnull)
+    exit_code = subprocess.call("xrandr", env=self.child_env,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
     if exit_code == 0:
       # RandR is supported
-      self.server_supports_exact_resize = True
       self.server_supports_randr = True
       self.randr_add_sizes = True
 
@@ -572,22 +1113,24 @@ class Desktop:
     with tempfile.NamedTemporaryFile(
         prefix="chrome_remote_desktop_",
         suffix=".conf", delete=False) as config_file:
-      config_file.write(gen_xorg_config(self.sizes))
+      config_file.write(gen_xorg_config().encode())
 
-    # We can't support exact resize with the current Xorg dummy driver.
-    self.server_supports_exact_resize = False
-    # But dummy does support RandR 1.0.
     self.server_supports_randr = True
+    self.randr_add_sizes = True
     self.xorg_conf = config_file.name
 
-    logging.info("Starting Xorg on display :%d" % display)
+    xorg_binary = "/usr/lib/xorg/Xorg";
+    if not os.access(xorg_binary, os.X_OK):
+      xorg_binary = "Xorg";
+
+    logging.info("Starting %s on display :%d" % (xorg_binary, display))
     # We use the child environment so the Xorg server picks up the Mesa libGL
     # instead of any proprietary versions that may be installed, thanks to
     # LD_LIBRARY_PATH.
     # Note: This prevents any environment variable the user has set from
     # affecting the Xorg server.
-    self.x_proc = subprocess.Popen(
-        ["Xorg", ":%d" % display,
+    self.server_proc = subprocess.Popen(
+        [xorg_binary, ":%d" % display,
          "-auth", x_auth_file,
          "-nolisten", "tcp",
          "-noreset",
@@ -597,11 +1140,11 @@ class Desktop:
          "-verbose", "3",
          "-config", config_file.name
         ] + extra_x_args, env=self._x_env())
-    if not self.x_proc.pid:
+    if not self.server_proc.pid:
       raise Exception("Could not start Xorg.")
     self._wait_for_x()
 
-  def _launch_x_server(self, extra_x_args):
+  def _launch_server(self, extra_x_args):
     x_auth_file = os.path.expanduser("~/.Xauthority")
     self.child_env["XAUTHORITY"] = x_auth_file
     display = self.get_unused_display_number()
@@ -624,20 +1167,34 @@ class Desktop:
     self.child_env["DISPLAY"] = ":%d" % display
     self.child_env["CHROME_REMOTE_DESKTOP_SESSION"] = "1"
 
-    # Use a separate profile for any instances of Chrome that are started in
-    # the virtual session. Chrome doesn't support sharing a profile between
-    # multiple DISPLAYs, but Chrome Sync allows for a reasonable compromise.
+    # We used to create a separate profile/chrome config home for the virtual
+    # session since the virtual session was independent of the local session in
+    # curtain mode, and using the same Chrome profile between sessions would
+    # lead to cross talk issues. This is no longer the case given modern desktop
+    # environments don't support running two graphical sessions simultaneously.
+    # Therefore, we don't set the env var unless the directory already exists.
+    #
+    # M61 introduced CHROME_CONFIG_HOME, which allows specifying a different
+    # config base path while still using different user data directories for
+    # different channels (Stable, Beta, Dev). For existing users who only have
+    # chrome-profile, continue using CHROME_USER_DATA_DIR so they don't have to
+    # set up their profile again.
     chrome_profile = os.path.join(CONFIG_DIR, "chrome-profile")
-    self.child_env["CHROME_USER_DATA_DIR"] = chrome_profile
+    chrome_config_home = os.path.join(CONFIG_DIR, "chrome-config")
+    if (os.path.exists(chrome_profile)
+        and not os.path.exists(chrome_config_home)):
+      self.child_env["CHROME_USER_DATA_DIR"] = chrome_profile
+    elif os.path.exists(chrome_config_home):
+      self.child_env["CHROME_CONFIG_HOME"] = chrome_config_home
 
     # Set SSH_AUTH_SOCK to the file name to listen on.
     if self.ssh_auth_sockname:
       self.child_env["SSH_AUTH_SOCK"] = self.ssh_auth_sockname
 
-    if USE_XORG_ENV_VAR in os.environ:
-      self._launch_xorg(display, x_auth_file, extra_x_args)
-    else:
+    if self.use_xvfb:
       self._launch_xvfb(display, x_auth_file, extra_x_args)
+    else:
+      self._launch_xorg(display, x_auth_file, extra_x_args)
 
     # The remoting host expects the server to use "evdev" keycodes, but Xvfb
     # starts configured to use the "base" ruleset, resulting in XKB configuring
@@ -653,45 +1210,53 @@ class Desktop:
     if not self.server_supports_randr:
       return
 
-    with open(os.devnull, "r+") as devnull:
-      # Register the screen sizes with RandR, if needed.  Errors here are
-      # non-fatal; the X server will continue to run with the dimensions from
-      # the "-screen" option.
-      if self.randr_add_sizes:
-        for width, height in self.sizes:
-          label = "%dx%d" % (width, height)
-          args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
-                  str(height), "0", "0", "0"]
-          subprocess.call(args, env=self.child_env, stdout=devnull,
-                          stderr=devnull)
-          args = ["xrandr", "--addmode", "screen", label]
-          subprocess.call(args, env=self.child_env, stdout=devnull,
-                          stderr=devnull)
+    # Register the screen sizes with RandR, if needed.  Errors here are
+    # non-fatal; the X server will continue to run with the dimensions from
+    # the "-screen" option.
+    if self.randr_add_sizes:
+      for width, height in self.sizes:
+        label = "%dx%d" % (width, height)
+        args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
+                str(height), "0", "0", "0"]
+        subprocess.call(args, env=self.child_env, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
+        output_name = "screen" if self.use_xvfb else "DUMMY0"
+        args = ["xrandr", "--addmode", output_name, label]
+        subprocess.call(args, env=self.child_env, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
 
-      # Set the initial mode to the first size specified, otherwise the X server
-      # would default to (max_width, max_height), which might not even be in the
-      # list.
-      initial_size = self.sizes[0]
-      label = "%dx%d" % initial_size
-      args = ["xrandr", "-s", label]
-      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+    # Set the initial mode to the first size specified, otherwise the X server
+    # would default to (max_width, max_height), which might not even be in the
+    # list.
+    initial_size = self.sizes[0]
+    label = "%dx%d" % initial_size
+    args = ["xrandr", "-s", label]
+    subprocess.call(args, env=self.child_env, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
 
-      # Set the physical size of the display so that the initial mode is running
-      # at approximately 96 DPI, since some desktops require the DPI to be set
-      # to something realistic.
-      args = ["xrandr", "--dpi", "96"]
-      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+    # Set the physical size of the display so that the initial mode is running
+    # at approximately 96 DPI, since some desktops require the DPI to be set
+    # to something realistic.
+    args = ["xrandr", "--dpi", "96"]
+    subprocess.call(args, env=self.child_env, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
 
+    if self.use_xvfb:
       # Monitor for any automatic resolution changes from the desktop
-      # environment.
+      # environment. This is needed only for Xvfb sessions because Xvfb sets
+      # the first mode to be the maximum supported resolution, and some
+      # desktop-environments would mistakenly set this as the preferred mode,
+      # leading to a huge desktop with tiny text. With Xorg, the modes are
+      # all reasonably sized, so the problem doesn't occur.
       args = [SCRIPT_PATH, "--watch-resolution", str(initial_size[0]),
               str(initial_size[1])]
 
       # It is not necessary to wait() on the process here, as this script's main
       # loop will reap the exit-codes of all child processes.
-      subprocess.Popen(args, env=self.child_env, stdout=devnull, stderr=devnull)
+      subprocess.Popen(args, env=self.child_env, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
 
-  def _launch_x_session(self):
+  def launch_desktop_session(self):
     # Start desktop session.
     # The /dev/null input redirection is necessary to prevent the X session
     # reading from stdin.  If this code runs as a shell background job in a
@@ -704,100 +1269,18 @@ class Desktop:
 
     logging.info("Launching X session: %s" % xsession_command)
     self.session_proc = subprocess.Popen(xsession_command,
-                                         stdin=open(os.devnull, "r"),
+                                         stdin=subprocess.DEVNULL,
                                          stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT,
                                          cwd=HOME_DIR,
                                          env=self.child_env)
 
-    output_filter_thread = SessionOutputFilterThread(self.session_proc.stdout)
-    output_filter_thread.start()
-
     if not self.session_proc.pid:
       raise Exception("Could not start X session")
 
-  def launch_session(self, x_args):
-    self._init_child_env()
-    self._setup_pulseaudio()
-    self._setup_gnubby()
-    self._launch_x_server(x_args)
-    self._launch_x_session()
-
-  def launch_host(self, host_config, extra_start_host_args):
-    # Start remoting host
-    args = [HOST_BINARY_PATH, "--host-config=-"]
-    if self.pulseaudio_pipe:
-      args.append("--audio-pipe-name=%s" % self.pulseaudio_pipe)
-    if self.server_supports_exact_resize:
-      args.append("--server-supports-exact-resize")
-    if self.ssh_auth_sockname:
-      args.append("--ssh-auth-sockname=%s" % self.ssh_auth_sockname)
-
-    args.extend(extra_start_host_args)
-
-    # Have the host process use SIGUSR1 to signal a successful start.
-    def sigusr1_handler(signum, frame):
-      _ = signum, frame
-      logging.info("Host ready to receive connections.")
-      self.host_ready = True
-      ParentProcessLogger.release_parent_if_connected(True)
-
-    signal.signal(signal.SIGUSR1, sigusr1_handler)
-    args.append("--signal-parent")
-
-    logging.info(args)
-    self.host_proc = subprocess.Popen(args, env=self.child_env,
-                                      stdin=subprocess.PIPE)
-    if not self.host_proc.pid:
-      raise Exception("Could not start Chrome Remote Desktop host")
-
-    try:
-      self.host_proc.stdin.write(json.dumps(host_config.data).encode('UTF-8'))
-      self.host_proc.stdin.flush()
-    except IOError as e:
-      # This can occur in rare situations, for example, if the machine is
-      # heavily loaded and the host process dies quickly (maybe if the X
-      # connection failed), the host process might be gone before this code
-      # writes to the host's stdin. Catch and log the exception, allowing
-      # the process to be retried instead of exiting the script completely.
-      logging.error("Failed writing to host's stdin: " + str(e))
-    finally:
-      self.host_proc.stdin.close()
-
-  def shutdown_all_procs(self):
-    """Send SIGTERM to all procs and wait for them to exit. Will fallback to
-    SIGKILL if a process doesn't exit within 10 seconds.
-    """
-    for proc, name in [(self.x_proc, "X server"),
-                       (self.session_proc, "session"),
-                       (self.host_proc, "host")]:
-      if proc is not None:
-        logging.info("Terminating " + name)
-        try:
-          psutil_proc = psutil.Process(proc.pid)
-          psutil_proc.terminate()
-
-          # Use a short timeout, to avoid delaying service shutdown if the
-          # process refuses to die for some reason.
-          psutil_proc.wait(timeout=10)
-        except psutil.TimeoutExpired:
-          logging.error("Timed out - sending SIGKILL")
-          psutil_proc.kill()
-        except psutil.Error:
-          logging.error("Error terminating process")
-    self.x_proc = None
-    self.session_proc = None
-    self.host_proc = None
-
-  def report_offline_reason(self, host_config, reason):
-    """Attempt to report the specified offline reason to the registry. This
-    is best effort, and requires a valid host config.
-    """
-    logging.info("Attempting to report offline reason: " + reason)
-    args = [HOST_BINARY_PATH, "--host-config=-",
-            "--report-offline-reason=" + reason]
-    proc = subprocess.Popen(args, env=self.child_env, stdin=subprocess.PIPE)
-    proc.communicate(json.dumps(host_config.data).encode('UTF-8'))
+    output_filter_thread = SessionOutputFilterThread(self.session_proc.stdout,
+        "Session output: ", SESSION_OUTPUT_TIME_LIMIT_SECONDS)
+    output_filter_thread.start()
 
 
 def parse_config_arg(args):
@@ -898,6 +1381,20 @@ def get_daemon_proc(config_file, require_child_process=False):
   return non_child_process if not require_child_process else None
 
 
+def bash_invocation_for_script(script):
+  """Chooses the appropriate bash command to run the provided script."""
+  if os.path.exists(script):
+    if os.access(script, os.X_OK):
+      # "/bin/sh -c" is smart about how to execute the session script and
+      # works in cases where plain exec() fails (for example, if the file is
+      # marked executable, but is a plain script with no shebang line).
+      return ["/bin/sh", "-c", shlex.quote(script)]
+    else:
+      # If this is a system-wide session script, it should be run using the
+      # system shell, ignoring any login shell that might be set for the
+      # current user.
+      return ["/bin/sh", script]
+
 def choose_x_session():
   """Chooses the most appropriate X session command for this system.
 
@@ -913,40 +1410,10 @@ def choose_x_session():
   for startup_file in XSESSION_FILES:
     startup_file = os.path.expanduser(startup_file)
     if os.path.exists(startup_file):
-      if os.access(startup_file, os.X_OK):
-        # "/bin/sh -c" is smart about how to execute the session script and
-        # works in cases where plain exec() fails (for example, if the file is
-        # marked executable, but is a plain script with no shebang line).
-        return ["/bin/sh", "-c", pipes.quote(startup_file)]
-      else:
-        # If this is a system-wide session script, it should be run using the
-        # system shell, ignoring any login shell that might be set for the
-        # current user.
-        return ["/bin/sh", startup_file]
+      return bash_invocation_for_script(startup_file)
 
-  # Choose a session wrapper script to run the session. On some systems,
-  # /etc/X11/Xsession fails to load the user's .profile, so look for an
-  # alternative wrapper that is more likely to match the script that the
-  # system actually uses for console desktop sessions.
-  SESSION_WRAPPERS = [
-    "/usr/sbin/lightdm-session",
-    "/etc/gdm/Xsession",
-    "/etc/X11/Xsession" ]
-  for session_wrapper in SESSION_WRAPPERS:
-    if os.path.exists(session_wrapper):
-      if os.path.exists("/usr/bin/unity-2d-panel"):
-        # On Ubuntu 12.04, the default session relies on 3D-accelerated
-        # hardware. Trying to run this with a virtual X display produces
-        # weird results on some systems (for example, upside-down and
-        # corrupt displays).  So if the ubuntu-2d session is available,
-        # choose it explicitly.
-        return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
-      else:
-        # Use the session wrapper by itself, and let the system choose a
-        # session.
-        return [session_wrapper]
-  return None
-
+  # If there's no configuration, show the user a session chooser.
+  return [HOST_BINARY_PATH, "--type=xsession_chooser"]
 
 class ParentProcessLogger(object):
   """Redirects logs to the parent process, until the host is ready or quits.
@@ -1019,7 +1486,10 @@ class ParentProcessLogger(object):
           # for the host to start).
           # Trapping the error here means the host can continue running.
           logging.info("Caught IOError writing READY message.")
-      self._write_file.close()
+      try:
+        self._write_file.close()
+      except IOError:
+        pass
 
   @staticmethod
   def try_start_logging(write_fd):
@@ -1045,6 +1515,7 @@ class ParentProcessLogger(object):
     """
     instance = ParentProcessLogger.__instance
     if instance is not None:
+      ParentProcessLogger.__instance = None
       instance._release_parent(success)
 
 
@@ -1103,8 +1574,12 @@ def run_command_with_group(command, group):
            "0<&7 1>&8 2>&9 "
            # Close no-longer-needed file descriptors
            "6>&- 7<&- 8>&- 9>&-"
-           .format(command=" ".join(map(pipes.quote, command)))],
-        preexec_fn=lambda: pre_exec(read_fd, write_fd))
+           .format(command=" ".join(map(shlex.quote, command)))],
+        # It'd be nice to use pass_fds instead close_fds=False. Unfortunately,
+        # pass_fds doesn't seem usable with remapping. It runs after preexec_fn,
+        # which does the remapping, but complains if the specified fds don't
+        # exist ahead of time.
+        close_fds=False, preexec_fn=lambda: pre_exec(read_fd, write_fd))
     result = process.wait()
   except OSError as e:
     logging.error("Failed to execute sg: {}".format(e.strerror))
@@ -1136,6 +1611,62 @@ def run_command_with_group(command, group):
     result = COMMAND_NOT_EXECUTABLE_EXIT_CODE
 
   return result
+
+
+def run_command_as_root(command):
+  if os.getenv("DISPLAY"):
+    # TODO(rickyz): Add a Polkit policy that includes a more friendly
+    # message about what this command does.
+    command = ["/usr/bin/pkexec"] + command
+  else:
+    command = ["/usr/bin/sudo", "-k", "--"] + command
+
+  return subprocess.call(command)
+
+
+def exec_self_via_login_shell():
+  """Attempt to run the user's login shell and run this script under it. This
+  will allow the user's ~/.profile or similar to be processed, which may set
+  environment variables to configure Chrome Remote Desktop."""
+  args = [sys.argv[0], "--child-process"] + [arg for arg in sys.argv[1:]
+                                             if arg != "--new-session"]
+  try:
+    shell = os.getenv("SHELL")
+
+    if shell is not None:
+      # Shells consider themselves a login shell if arg0 starts with a '-'.
+      shell_arg0 = "-" + os.path.basename(shell)
+
+      # First, ensure we can execute commands via the user's login shell. Some
+      # users have an incorrect .profile or similar that breaks this.
+      output = subprocess.check_output(
+          [shell_arg0], executable=shell,
+          input=b"exec echo CRD_SHELL_TEST_OUTPUT",
+          timeout=15)
+
+      if b"CRD_SHELL_TEST_OUTPUT" in output:
+        # subprocess doesn't support calling exec without fork, so we need to
+        # set up our pipe manually.
+        read_fd, write_fd = os.pipe()
+        # The command line should easily fit in the 16KiB pipe buffer.
+        os.write(
+            write_fd,
+            b"exec " + os.fsencode(" ".join(map(shlex.quote, args))))
+        os.close(write_fd)
+        os.dup2(read_fd, 0)
+        os.close(read_fd)
+        os.execv(shell, [shell_arg0])
+      else:
+        logging.warning("Login shell doesn't execute standard input.")
+    else:
+      logging.warning("SHELL envirionment variable not set.")
+  except Exception as e:
+    logging.warning(str(e))
+
+  logging.warning(
+      "Failed to run via login shell; continuing without. Environment "
+      "variables set via ~/.profile or similar won't be processed.")
+  os.execv(args[0], args)
 
 
 def start_via_user_session(foreground):
@@ -1173,12 +1704,13 @@ def cleanup():
 
   global g_desktop
   if g_desktop is not None:
-    g_desktop.shutdown_all_procs()
-    if g_desktop.xorg_conf is not None:
+    g_desktop.cleanup()
+    if getattr(g_desktop, 'xorg_conf', None) is not None:
       os.remove(g_desktop.xorg_conf)
 
   g_desktop = None
   ParentProcessLogger.release_parent_if_connected(False)
+
 
 class SignalHandler:
   """Reload the config file on SIGHUP. Since we pass the configuration to the
@@ -1348,7 +1880,7 @@ def watch_for_resolution_changes(initial_size):
 
     xrandr_output = subprocess.Popen(["xrandr"],
                                      stdout=subprocess.PIPE).communicate()[0]
-    matches = re.search(r'current (\d+) x (\d+), maximum (\d+) x (\d+)',
+    matches = re.search(br'current (\d+) x (\d+), maximum (\d+) x (\d+)',
                         xrandr_output)
 
     # No need to handle ValueError. If xrandr fails to give valid output,
@@ -1371,8 +1903,8 @@ def watch_for_resolution_changes(initial_size):
       break
 
 
-def main():
-  EPILOG = """This script is not intended for use by end-users.  To configure
+def setup_argument_parser():
+  EPILOG = """This script is not intended for use by end-users. To configure
 Chrome Remote Desktop, please install the app from the Chrome
 Web Store: https://chrome.google.com/remotedesktop"""
   parser = argparse.ArgumentParser(
@@ -1403,10 +1935,10 @@ Web Store: https://chrome.google.com/remotedesktop"""
                       action="store_true",
                       help="Signal currently running host to reload the "
                       "config.")
-  parser.add_argument("--add-user", dest="add_user", default=False,
-                      action="store_true",
-                      help="Add current user to the chrome-remote-desktop "
-                      "group.")
+  parser.add_argument("--enable-and-start", dest="enable_and_start",
+                      default=False, action="store_true",
+                      help="Enable and start chrome-remote-desktop for the "
+                      "current user.")
   parser.add_argument("--add-user-as-root", dest="add_user_as_root",
                       action="store", metavar="USER",
                       help="Adds the specified user to the "
@@ -1416,13 +1948,24 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_argument("--child-process", dest="child_process", default=False,
                       action="store_true",
                       help=argparse.SUPPRESS)
+  # The script is being run in a new PAM session. Don't daemonize so the parent
+  # knows when to clean up the PAM session, and attempt to exec a login shell to
+  # allow the user's ~/.profile or similar to run.
+  parser.add_argument("--new-session", dest="new_session", default=False,
+                      action="store_true",
+                      help=argparse.SUPPRESS)
   parser.add_argument("--watch-resolution", dest="watch_resolution",
                       type=int, nargs=2, default=False, action="store",
                       help=argparse.SUPPRESS)
-  parser.add_argument("--skip-config-upgrade", dest="skip_config_upgrade",
-                      default=False, action="store_true",
-                      help="Skip running the config upgrade tool.")
   parser.add_argument(dest="args", nargs="*", help=argparse.SUPPRESS)
+  parser.add_argument("--is-wayland", dest="is_wayland",
+                      default=False, action="store_true",
+                      help="If true, starts wayland session on the host.")
+  return parser
+
+
+def main():
+  parser = setup_argument_parser()
   options = parser.parse_args()
 
   # Determine the filename of the host configuration.
@@ -1470,30 +2013,36 @@ Web Store: https://chrome.google.com/remotedesktop"""
     proc.send_signal(signal.SIGHUP)
     return 0
 
-  if options.add_user:
+  if options.enable_and_start:
     user = getpass.getuser()
 
-    try:
-      if user in grp.getgrnam(CHROME_REMOTING_GROUP_NAME).gr_mem:
-        logging.info("User '%s' is already a member of '%s'." %
-                     (user, CHROME_REMOTING_GROUP_NAME))
-        return 0
-    except KeyError:
-      logging.info("Group '%s' not found." % CHROME_REMOTING_GROUP_NAME)
-
-    command = [SCRIPT_PATH, '--add-user-as-root', user]
-    if os.getenv("DISPLAY"):
-      # TODO(rickyz): Add a Polkit policy that includes a more friendly message
-      # about what this command does.
-      command = ["/usr/bin/pkexec"] + command
+    if os.path.isdir("/run/systemd/system"):
+      # While systemd will generally prompt for a password via polkit if run by
+      # a normal user, it won't properly fall back to prompting on the TTY if
+      # stdin is redirected, such as is done by the start-host binary.
+      # Additionally, some configurations can result in systemctl prompting the
+      # user for their password multiple times, which can be confusing and
+      # annoying. Running it as root avoids both issues.
+      return run_command_as_root(["systemctl", "enable", "--now",
+                                  "chrome-remote-desktop@" + user])
     else:
-      command = ["/usr/bin/sudo", "-k", "--"] + command
+      try:
+        if user in grp.getgrnam(CHROME_REMOTING_GROUP_NAME).gr_mem:
+          logging.info("User '%s' is already a member of '%s'." %
+                       (user, CHROME_REMOTING_GROUP_NAME))
+          return 0
+      except KeyError:
+        logging.info("Group '%s' not found." % CHROME_REMOTING_GROUP_NAME)
 
-    # Run with an empty environment out of paranoia, though if an attacker
-    # controls the environment this script is run under, we're already screwed
-    # anyway.
-    os.execve(command[0], command, {})
-    return 1
+      if run_command_as_root([SCRIPT_PATH, '--add-user-as-root', user]) != 0:
+        logging.error("Failed to add user to group")
+        return 1
+
+      # Replace --enable-and-start with --start in the command-line arguments,
+      # which are used later to reinvoke the script as a child of user-session.
+      sys.argv = [arg if arg != "--enable-and-start" else "--start"
+                  for arg in sys.argv]
+      options.start = True
 
   if options.add_user_as_root is not None:
     if os.getuid() != 0:
@@ -1519,7 +2068,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.watch_resolution:
-    watch_for_resolution_changes(options.watch_resolution)
+    watch_for_resolution_changes(tuple(options.watch_resolution))
     return 0
 
   if not options.start:
@@ -1547,18 +2096,36 @@ Web Store: https://chrome.google.com/remotedesktop"""
     if options.child_process:
       os.execvp(sys.argv[0], sys.argv)
 
+  if options.new_session:
+    exec_self_via_login_shell()
+
   if not options.child_process:
-    return start_via_user_session(options.foreground)
+    if os.path.isdir("/run/systemd/system"):
+      return run_command_as_root(["systemctl", "start",
+                                  "chrome-remote-desktop@" + getpass.getuser()])
+    else:
+      return start_via_user_session(options.foreground)
 
   # Start logging to user-session messaging pipe if it exists.
   ParentProcessLogger.try_start_logging(USER_SESSION_MESSAGE_FD)
 
-  # If a RANDR-supporting Xvfb is not available, limit the default size to
-  # something more sensible.
-  if USE_XORG_ENV_VAR not in os.environ and locate_xvfb_randr():
-    default_sizes = DEFAULT_SIZES
-  else:
-    default_sizes = DEFAULT_SIZE_NO_RANDR
+  if display_manager_is_gdm():
+    # See https://gitlab.gnome.org/GNOME/gdm/-/issues/580 for details on the
+    # bug.
+    gdm_message = (
+        "WARNING: This system uses GDM. Some GDM versions have a bug that "
+        "prevents local login while Chrome Remote Desktop is running. If you "
+        "run into this issue, you can stop Chrome Remote Desktop by visiting "
+        "https://remotedesktop.google.com/access on another machine and "
+        "clicking the delete icon next to this machine. It may take up to five "
+        "minutes for the Chrome Remote Desktop to exit on this machine and for "
+        "local login to start working again.")
+    logging.warning(gdm_message)
+    # Also log to syslog so the user has a higher change of discovering the
+    # message if they go searching.
+    syslog.syslog(syslog.LOG_WARNING | syslog.LOG_DAEMON, gdm_message)
+
+  default_sizes = DEFAULT_SIZES
 
   # Collate the list of sizes that XRANDR should support.
   if not options.size:
@@ -1588,15 +2155,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
   # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
 
-  # Run the config upgrade tool, to update the refresh token if needed.
-  # TODO(lambroslambrou): Respect CHROME_REMOTE_DESKTOP_HOST_EXTRA_PARAMS
-  # and the GOOGLE_CLIENT... variables, and fix the tool to work in a
-  # test environment.
-  if not options.skip_config_upgrade:
-    args = [HOST_BINARY_PATH, "--upgrade-token",
-            "--host-config=%s" % config_file]
-    subprocess.check_call(args);
-
   # Load the initial host configuration.
   host_config = Config(config_file)
   try:
@@ -1620,44 +2178,25 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   if host.host_id:
     logging.info("Using host_id: " + host.host_id)
-  if host.gcd_device_id:
-    logging.info("Using gcd_device_id: " + host.gcd_device_id)
 
-  desktop = Desktop(sizes)
+  if options.is_wayland:
+    desktop = WaylandDesktop(sizes)
+  else:
+    desktop = XDesktop(sizes)
 
-  # Keep track of the number of consecutive failures of any child process to
-  # run for longer than a set period of time. The script will exit after a
-  # threshold is exceeded.
-  # There is no point in tracking the X session process separately, since it is
-  # launched at (roughly) the same time as the X server, and the termination of
-  # one of these triggers the termination of the other.
-  x_server_inhibitor = RelaunchInhibitor("X server")
-  session_inhibitor = RelaunchInhibitor("session")
-  host_inhibitor = RelaunchInhibitor("host")
-  all_inhibitors = [
-      (x_server_inhibitor, HOST_OFFLINE_REASON_X_SERVER_RETRIES_EXCEEDED),
-      (session_inhibitor, HOST_OFFLINE_REASON_SESSION_RETRIES_EXCEEDED),
-      (host_inhibitor, HOST_OFFLINE_REASON_HOST_RETRIES_EXCEEDED)
-  ]
-
-  # Whether we are tearing down because the X server and/or session exited.
-  # This keeps us from counting processes exiting because we've terminated them
-  # as errors.
+  # Whether we are tearing down because the display server and/or session
+  # exited. This keeps us from counting processes exiting because we've
+  # terminated them as errors.
   tear_down = False
 
   while True:
-    # If the session process or X server stops running (e.g. because the user
-    # logged out), terminate all processes. The session will be restarted once
-    # everything has exited.
+    # If the session process or display server stops running (e.g. because the
+    # user logged out), terminate all processes. The session will be restarted
+    # once everything has exited.
     if tear_down:
-      desktop.shutdown_all_procs()
+      desktop.cleanup()
 
-      failure_count = 0
-      for inhibitor, _ in all_inhibitors:
-        if inhibitor.running:
-          inhibitor.record_stopped(True)
-        failure_count += inhibitor.failures
-
+      failure_count = desktop.aggregate_failure_count()
       tear_down = False
 
       if (failure_count == 0):
@@ -1676,7 +2215,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
     # Set the backoff interval and exit if a process failed too many times.
     backoff_time = SHORT_BACKOFF_TIME
-    for inhibitor, offline_reason in all_inhibitors:
+    for inhibitor, offline_reason in desktop.inhibitors.items():
       if inhibitor.failures >= MAX_LAUNCH_FAILURES:
         logging.error("Too many launch failures of '%s', exiting."
                       % inhibitor.label)
@@ -1693,23 +2232,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
       # launching things in the wrong order due to differing relaunch times.
       logging.info("Waiting before relaunching")
     else:
-      if desktop.x_proc is None and desktop.session_proc is None:
-        logging.info("Launching X server and X session.")
-        desktop.launch_session(options.args)
-        x_server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
-                                          backoff_time)
-        session_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
-                                         backoff_time)
+      if (desktop.server_proc is None and desktop.pre_session_proc is None and
+          desktop.session_proc is None):
+        desktop.launch_session(options.args, backoff_time)
       if desktop.host_proc is None:
-        logging.info("Launching host process")
-
         extra_start_host_args = []
         if HOST_EXTRA_PARAMS_ENV_VAR in os.environ:
             extra_start_host_args = \
                 re.split('\s+', os.environ[HOST_EXTRA_PARAMS_ENV_VAR].strip())
-        desktop.launch_host(host_config, extra_start_host_args)
-
-        host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME, backoff_time)
+        desktop.launch_host(host_config, extra_start_host_args, backoff_time)
 
     deadline = max(relaunch_times) if relaunch_times else 0
     pid, status = waitpid_handle_exceptions(-1, deadline)
@@ -1721,72 +2252,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
     # When a process has terminated, and we've reaped its exit-code, any Popen
     # instance for that process is no longer valid. Reset any affected instance
     # to None.
-    if desktop.x_proc is not None and pid == desktop.x_proc.pid:
-      logging.info("X server process terminated")
-      desktop.x_proc = None
-      x_server_inhibitor.record_stopped(False)
-      tear_down = True
-
-    if desktop.session_proc is not None and pid == desktop.session_proc.pid:
-      logging.info("Session process terminated")
-      desktop.session_proc = None
-      # The session may have exited on its own or been brought down by the X
-      # server dying. Check if the X server is still running so we know whom
-      # to penalize.
-      if desktop.check_x_responding():
-        session_inhibitor.record_stopped(False)
-      else:
-        x_server_inhibitor.record_stopped(False)
-      # Either way, we want to tear down the session.
-      tear_down = True
-
-    if desktop.host_proc is not None and pid == desktop.host_proc.pid:
-      logging.info("Host process terminated")
-      desktop.host_proc = None
-      desktop.host_ready = False
-
-      # These exit-codes must match the ones used by the host.
-      # See remoting/host/host_error_codes.h.
-      # Delete the host or auth configuration depending on the returned error
-      # code, so the next time this script is run, a new configuration
-      # will be created and registered.
-      if os.WIFEXITED(status):
-        if os.WEXITSTATUS(status) == 100:
-          logging.info("Host configuration is invalid - exiting.")
-          return 0
-        elif os.WEXITSTATUS(status) == 101:
-          logging.info("Host ID has been deleted - exiting.")
-          host_config.clear()
-          host_config.save_and_log_errors()
-          return 0
-        elif os.WEXITSTATUS(status) == 102:
-          logging.info("OAuth credentials are invalid - exiting.")
-          return 0
-        elif os.WEXITSTATUS(status) == 103:
-          logging.info("Host domain is blocked by policy - exiting.")
-          return 0
-        # Nothing to do for Mac-only status 104 (login screen unsupported)
-        elif os.WEXITSTATUS(status) == 105:
-          logging.info("Username is blocked by policy - exiting.")
-          return 0
-        elif os.WEXITSTATUS(status) == 106:
-          logging.info("Host has been deleted - exiting.")
-          return 0
-        else:
-          logging.info("Host exited with status %s." % os.WEXITSTATUS(status))
-      elif os.WIFSIGNALED(status):
-        logging.info("Host terminated by signal %s." % os.WTERMSIG(status))
-
-      # The host may have exited on it's own or been brought down by the X
-      # server dying. Check if the X server is still running so we know whom to
-      # penalize.
-      if desktop.check_x_responding():
-        host_inhibitor.record_stopped(False)
-      else:
-        x_server_inhibitor.record_stopped(False)
-        # Only tear down if the X server isn't responding.
-        tear_down = True
-
+    tear_down = desktop.on_process_exit(pid, status)
 
 if __name__ == "__main__":
   logging.basicConfig(level=logging.DEBUG,

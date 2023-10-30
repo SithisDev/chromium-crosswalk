@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,11 @@
 
 #include <map>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "net/base/net_errors.h"
 #include "remoting/protocol/stream_channel_factory.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class Authenticator;
 class ChannelAuthenticator;
@@ -27,34 +26,35 @@ class SecureChannelFactory : public StreamChannelFactory {
   // Both parameters must outlive the object.
   SecureChannelFactory(StreamChannelFactory* channel_factory,
                        Authenticator* authenticator);
+
+  SecureChannelFactory(const SecureChannelFactory&) = delete;
+  SecureChannelFactory& operator=(const SecureChannelFactory&) = delete;
+
   ~SecureChannelFactory() override;
 
   // StreamChannelFactory interface.
   void CreateChannel(const std::string& name,
-                     const ChannelCreatedCallback& callback) override;
+                     ChannelCreatedCallback callback) override;
   void CancelChannelCreation(const std::string& name) override;
 
  private:
   typedef std::map<std::string, ChannelAuthenticator*> AuthenticatorMap;
 
   void OnBaseChannelCreated(const std::string& name,
-                            const ChannelCreatedCallback& callback,
+                            ChannelCreatedCallback callback,
                             std::unique_ptr<P2PStreamSocket> socket);
 
   void OnSecureChannelCreated(const std::string& name,
-                              const ChannelCreatedCallback& callback,
+                              ChannelCreatedCallback callback,
                               int error,
                               std::unique_ptr<P2PStreamSocket> socket);
 
-  StreamChannelFactory* channel_factory_;
-  Authenticator* authenticator_;
+  raw_ptr<StreamChannelFactory> channel_factory_;
+  raw_ptr<Authenticator> authenticator_;
 
   AuthenticatorMap channel_authenticators_;
-
-  DISALLOW_COPY_AND_ASSIGN(SecureChannelFactory);
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_SECURE_CHANNEL_FACTORY_H_

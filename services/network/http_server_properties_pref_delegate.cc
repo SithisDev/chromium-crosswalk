@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/http_server_properties_pref_delegate.h"
 
 #include "base/bind.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -26,29 +27,34 @@ void HttpServerPropertiesPrefDelegate::RegisterPrefs(
   pref_registry->RegisterDictionaryPref(kPrefPath);
 }
 
-const base::DictionaryValue*
-HttpServerPropertiesPrefDelegate::GetServerProperties() const {
-  return pref_service_->GetDictionary(kPrefPath);
+const base::Value* HttpServerPropertiesPrefDelegate::GetServerProperties()
+    const {
+  return &pref_service_->GetValue(kPrefPath);
 }
 
 void HttpServerPropertiesPrefDelegate::SetServerProperties(
-    const base::DictionaryValue& value,
+    const base::Value& value,
     base::OnceClosure callback) {
   pref_service_->Set(kPrefPath, value);
   if (callback)
     pref_service_->CommitPendingWrite(std::move(callback));
 }
 
-void HttpServerPropertiesPrefDelegate::StartListeningForUpdates(
-    const base::RepeatingClosure& callback) {
-  pref_change_registrar_.Add(kPrefPath, callback);
-  // PrefChangeRegistrar isn't notified of initial pref load, so watch for that,
-  // too.
+void HttpServerPropertiesPrefDelegate::WaitForPrefLoad(
+    base::OnceClosure callback) {
+  // If prefs haven't loaded yet, set up a pref init observer.
   if (pref_service_->GetInitializationStatus() ==
       PrefService::INITIALIZATION_STATUS_WAITING) {
     pref_service_->AddPrefInitObserver(base::BindOnce(
-        [](const base::Closure& callback, bool) { callback.Run(); }, callback));
+        [](base::OnceClosure callback, bool) { std::move(callback).Run(); },
+        std::move(callback)));
+    return;
   }
+
+  // If prefs have already loaded (currently doesn't happen), invoke the pref
+  // observer asynchronously.
+  base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                   std::move(callback));
 }
 
 }  // namespace network

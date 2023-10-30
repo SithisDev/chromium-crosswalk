@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
-
+#include "base/files/scoped_file.h"
+#include "base/memory/raw_ptr.h"
+#include "base/types/pass_key.h"
 #include "sandbox/linux/syscall_broker/broker_file_permission.h"
 
 namespace sandbox {
@@ -25,11 +26,16 @@ class BrokerPermissionList {
  public:
   // |denied_errno| is the error code returned when IPC requests for system
   // calls such as open() or access() are denied because a file is not in the
-  // whitelist. EACCESS would be a typical value.
+  // allowlist. EACCESS would be a typical value.
   // |permissions| is a list of BrokerPermission objects that define
   // what the broker will allow.
   BrokerPermissionList(int denied_errno,
-                       const std::vector<BrokerFilePermission>& permissions);
+                       std::vector<BrokerFilePermission> permissions);
+
+  BrokerPermissionList(BrokerPermissionList&&) = delete;
+  BrokerPermissionList& operator=(BrokerPermissionList&&) = delete;
+  BrokerPermissionList(const BrokerPermissionList&) = delete;
+  BrokerPermissionList& operator=(const BrokerPermissionList&) = delete;
 
   ~BrokerPermissionList();
 
@@ -40,7 +46,7 @@ class BrokerPermissionList {
   // If |file_to_open| is not NULL, a pointer to the path will be returned.
   // In the case of a recursive match, this will be the requested_filename,
   // otherwise it will return the matching pointer from the
-  // whitelist. For paranoia a caller should then use |file_to_access|. See
+  // allowlist. For paranoia a caller should then use |file_to_access|. See
   // GetFileNameIfAllowedToOpen() for more explanation.
   // return true if calling access() on this file should be allowed, false
   // otherwise.
@@ -53,7 +59,7 @@ class BrokerPermissionList {
   // If |file_to_open| is not NULL, a pointer to the path will be returned.
   // In the case of a recursive match, this will be the requested_filename,
   // otherwise it will return the matching pointer from the
-  // whitelist. For paranoia, a caller should then use |file_to_open| rather
+  // allowlist. For paranoia, a caller should then use |file_to_open| rather
   // than |requested_filename|, so that it never attempts to open an
   // attacker-controlled file name, even if an attacker managed to fool the
   // string comparison mechanism.
@@ -79,17 +85,18 @@ class BrokerPermissionList {
   int denied_errno() const { return denied_errno_; }
 
  private:
+  friend class BrokerSandboxConfigSerializer;
+
   const int denied_errno_;
+
   // The permissions_ vector is used as storage for the BrokerFilePermission
   // objects but is not referenced outside of the constructor as
   // vectors are unfriendly in async signal safe code.
   const std::vector<BrokerFilePermission> permissions_;
   // permissions_array_ is set up to point to the backing store of
   // permissions_ and is used in async signal safe methods.
-  const BrokerFilePermission* permissions_array_;
+  raw_ptr<const BrokerFilePermission> permissions_array_;
   const size_t num_of_permissions_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrokerPermissionList);
 };
 
 }  // namespace syscall_broker

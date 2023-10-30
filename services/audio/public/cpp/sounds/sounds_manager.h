@@ -1,18 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_AUDIO_PUBLIC_CPP_SOUNDS_SOUNDS_MANAGER_H_
 #define SERVICES_AUDIO_PUBLIC_CPP_SOUNDS_SOUNDS_MANAGER_H_
 
-#include <memory>
-
-#include "base/macros.h"
+#include "base/callback.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "media/base/media_export.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "media/mojo/mojom/audio_stream_factory.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace audio {
 
@@ -23,13 +22,18 @@ class SoundsManager {
   typedef int SoundKey;
 
   // Creates a singleton instance of the SoundsManager.
-  static void Create(std::unique_ptr<service_manager::Connector> connector);
+  using StreamFactoryBinder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<media::mojom::AudioStreamFactory>)>;
+  static void Create(StreamFactoryBinder stream_factory_binder);
 
   // Removes a singleton instance of the SoundsManager.
   static void Shutdown();
 
   // Returns a pointer to a singleton instance of the SoundsManager.
   static SoundsManager* Get();
+
+  SoundsManager(const SoundsManager&) = delete;
+  SoundsManager& operator=(const SoundsManager&) = delete;
 
   // Initializes sounds manager for testing. The |manager| will be owned
   // by the internal pointer and will be deleted by Shutdown().
@@ -58,9 +62,6 @@ class SoundsManager {
   virtual ~SoundsManager();
 
   SEQUENCE_CHECKER(sequence_checker_);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SoundsManager);
 };
 
 }  // namespace audio

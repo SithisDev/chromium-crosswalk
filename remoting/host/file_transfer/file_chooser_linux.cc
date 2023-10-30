@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@ class GtkFileChooserOnUiThread {
       scoped_refptr<base::SequencedTaskRunner> caller_task_runner,
       base::WeakPtr<FileChooserLinux> file_chooser_linux);
 
+  GtkFileChooserOnUiThread(const GtkFileChooserOnUiThread&) = delete;
+  GtkFileChooserOnUiThread& operator=(const GtkFileChooserOnUiThread&) = delete;
+
   ~GtkFileChooserOnUiThread();
 
   void Show();
@@ -46,14 +49,15 @@ class GtkFileChooserOnUiThread {
   GObject* file_dialog_ = nullptr;
   scoped_refptr<base::SequencedTaskRunner> caller_task_runner_;
   base::WeakPtr<FileChooserLinux> file_chooser_linux_;
-
-  DISALLOW_COPY_AND_ASSIGN(GtkFileChooserOnUiThread);
 };
 
 class FileChooserLinux : public FileChooser {
  public:
   FileChooserLinux(scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
                    ResultCallback callback);
+
+  FileChooserLinux(const FileChooserLinux&) = delete;
+  FileChooserLinux& operator=(const FileChooserLinux&) = delete;
 
   ~FileChooserLinux() override;
 
@@ -65,9 +69,7 @@ class FileChooserLinux : public FileChooser {
  private:
   FileChooser::ResultCallback callback_;
   base::SequenceBound<GtkFileChooserOnUiThread> gtk_file_chooser_on_ui_thread_;
-  base::WeakPtrFactory<FileChooserLinux> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileChooserLinux);
+  base::WeakPtrFactory<FileChooserLinux> weak_ptr_factory_{this};
 };
 
 GtkFileChooserOnUiThread::GtkFileChooserOnUiThread(
@@ -151,7 +153,7 @@ void GtkFileChooserOnUiThread::OnResponse(GtkWidget* dialog, int response_id) {
 FileChooserLinux::FileChooserLinux(
     scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
     ResultCallback callback)
-    : callback_(std::move(callback)), weak_ptr_factory_(this) {
+    : callback_(std::move(callback)) {
   gtk_file_chooser_on_ui_thread_ =
       base::SequenceBound<GtkFileChooserOnUiThread>(
           ui_task_runner, base::SequencedTaskRunnerHandle::Get(),
@@ -159,8 +161,7 @@ FileChooserLinux::FileChooserLinux(
 }
 
 void FileChooserLinux::Show() {
-  gtk_file_chooser_on_ui_thread_.Post(FROM_HERE,
-                                      &GtkFileChooserOnUiThread::Show);
+  gtk_file_chooser_on_ui_thread_.AsyncCall(&GtkFileChooserOnUiThread::Show);
 }
 
 void FileChooserLinux::RunCallback(FileChooser::Result result) {

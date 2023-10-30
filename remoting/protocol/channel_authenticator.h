@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 
 #include "base/callback_forward.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class P2PStreamSocket;
 
@@ -20,7 +19,7 @@ class P2PStreamSocket;
 // should be used only once for one channel.
 class ChannelAuthenticator {
  public:
-  typedef base::Callback<void(int error, std::unique_ptr<P2PStreamSocket>)>
+  typedef base::OnceCallback<void(int error, std::unique_ptr<P2PStreamSocket>)>
       DoneCallback;
 
   virtual ~ChannelAuthenticator() {}
@@ -29,10 +28,9 @@ class ChannelAuthenticator {
   // authentication is finished. Callback may be invoked before this method
   // returns, and may delete the calling authenticator.
   virtual void SecureAndAuthenticate(std::unique_ptr<P2PStreamSocket> socket,
-                                     const DoneCallback& done_callback) = 0;
+                                     DoneCallback done_callback) = 0;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_CHANNEL_AUTHENTICATOR_H_

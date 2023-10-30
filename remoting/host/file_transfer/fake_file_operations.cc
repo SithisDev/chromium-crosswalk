@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 
@@ -31,12 +32,12 @@ class FakeFileOperations::FakeFileReader : public FileOperations::Reader {
   void DoReadChunk(std::size_t size, ReadCallback callback);
 
   FileOperations::State state_ = FileOperations::kCreated;
-  TestIo* test_io_;
+  raw_ptr<TestIo> test_io_;
   protocol::FileTransferResult<InputFile> input_file_;
   base::FilePath filename_;
   std::size_t filesize_ = 0;
   std::size_t read_offset_ = 0;
-  base::WeakPtrFactory<FakeFileReader> weak_ptr_factory_;
+  base::WeakPtrFactory<FakeFileReader> weak_ptr_factory_{this};
 };
 
 class FakeFileOperations::FakeFileWriter : public FileOperations::Writer {
@@ -45,19 +46,19 @@ class FakeFileOperations::FakeFileWriter : public FileOperations::Writer {
   ~FakeFileWriter() override;
 
   void Open(const base::FilePath& filename, Callback callback) override;
-  void WriteChunk(std::string data, Callback callback) override;
+  void WriteChunk(std::vector<std::uint8_t> data, Callback callback) override;
   void Close(Callback callback) override;
   FileOperations::State state() const override;
 
  private:
   void DoOpen(Callback callback);
-  void DoWrite(std::string data, Callback callback);
+  void DoWrite(std::vector<std::uint8_t> data, Callback callback);
   void DoClose(Callback callback);
   FileOperations::State state_ = FileOperations::kCreated;
-  TestIo* test_io_;
+  raw_ptr<TestIo> test_io_;
   base::FilePath filename_;
-  std::vector<std::string> chunks_;
-  base::WeakPtrFactory<FakeFileWriter> weak_ptr_factory_;
+  std::vector<std::vector<std::uint8_t>> chunks_;
+  base::WeakPtrFactory<FakeFileWriter> weak_ptr_factory_{this};
 };
 
 std::unique_ptr<FileOperations::Reader> FakeFileOperations::CreateReader() {
@@ -73,9 +74,10 @@ FakeFileOperations::FakeFileOperations(FakeFileOperations::TestIo* test_io)
 
 FakeFileOperations::~FakeFileOperations() = default;
 
-FakeFileOperations::OutputFile::OutputFile(base::FilePath filename,
-                                           bool failed,
-                                           std::vector<std::string> chunks)
+FakeFileOperations::OutputFile::OutputFile(
+    base::FilePath filename,
+    bool failed,
+    std::vector<std::vector<std::uint8_t>> chunks)
     : filename(std::move(filename)),
       failed(failed),
       chunks(std::move(chunks)) {}
@@ -90,8 +92,8 @@ FakeFileOperations::OutputFile::~OutputFile() = default;
 
 FakeFileOperations::InputFile::InputFile(
     base::FilePath filename,
-    std::string data,
-    base::Optional<protocol::FileTransfer_Error> io_error)
+    std::vector<std::uint8_t> data,
+    absl::optional<protocol::FileTransfer_Error> io_error)
     : filename(std::move(filename)),
       data(std::move(data)),
       io_error(std::move(io_error)) {}
@@ -110,7 +112,7 @@ FakeFileOperations::TestIo::TestIo(const TestIo& other) = default;
 FakeFileOperations::TestIo::~TestIo() = default;
 
 FakeFileOperations::FakeFileReader::FakeFileReader(TestIo* test_io)
-    : test_io_(test_io), weak_ptr_factory_(this) {}
+    : test_io_(test_io) {}
 
 FakeFileOperations::FakeFileReader::~FakeFileReader() = default;
 
@@ -166,7 +168,7 @@ void FakeFileOperations::FakeFileReader::DoReadChunk(
     FileOperations::Reader::ReadCallback callback) {
   if (size == 0) {
     state_ = kReady;
-    std::move(callback).Run(std::string());
+    std::move(callback).Run(std::vector<std::uint8_t>());
     return;
   }
 
@@ -178,20 +180,21 @@ void FakeFileOperations::FakeFileReader::DoReadChunk(
       std::move(callback).Run(*input_file_->io_error);
     } else {
       state_ = kComplete;
-      std::move(callback).Run(std::string());
+      std::move(callback).Run(std::vector<std::uint8_t>());
     }
     return;
   }
 
   std::size_t read_size = std::min(size, remaining_data);
   state_ = kReady;
-  std::move(callback).Run(
-      std::string(input_file_->data, read_offset_, read_size));
+  std::move(callback).Run(std::vector<std::uint8_t>(
+      input_file_->data.begin() + read_offset_,
+      input_file_->data.begin() + read_offset_ + read_size));
   read_offset_ += read_size;
 }
 
 FakeFileOperations::FakeFileWriter::FakeFileWriter(TestIo* test_io)
-    : test_io_(test_io), weak_ptr_factory_(this) {}
+    : test_io_(test_io) {}
 
 FakeFileOperations::FakeFileWriter::~FakeFileWriter() {
   if (state_ == FileOperations::kCreated ||
@@ -215,8 +218,9 @@ void FakeFileOperations::FakeFileWriter::Open(const base::FilePath& filename,
                      std::move(callback)));
 }
 
-void FakeFileOperations::FakeFileWriter::WriteChunk(std::string data,
-                                                    Callback callback) {
+void FakeFileOperations::FakeFileWriter::WriteChunk(
+    std::vector<std::uint8_t> data,
+    Callback callback) {
   CHECK_EQ(kReady, state_) << "WriteChunk called when writer not ready";
   state_ = kBusy;
   base::SequencedTaskRunnerHandle::Get()->PostTask(
@@ -248,7 +252,7 @@ void FakeFileOperations::FakeFileWriter::DoOpen(Callback callback) {
   }
 }
 
-void FakeFileOperations::FakeFileWriter::DoWrite(std::string data,
+void FakeFileOperations::FakeFileWriter::DoWrite(std::vector<std::uint8_t> data,
                                                  Callback callback) {
   if (!test_io_->io_error) {
     chunks_.push_back(std::move(data));

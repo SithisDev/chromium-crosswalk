@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@ namespace protocol {
 class ClipboardStub;
 class CursorShapeStub;
 class ExtensionMessage;
+class KeyboardLayoutStub;
 class PairingResponse;
 }  // namespace protocol
 
@@ -63,6 +64,9 @@ class ClientUserInterface {
 
   // Get the view's CursorShapeStub implementation.
   virtual protocol::CursorShapeStub* GetCursorShapeStub() = 0;
+
+  // Get the view's KeyboardLayoutStub implementation.
+  virtual protocol::KeyboardLayoutStub* GetKeyboardLayoutStub() = 0;
 };
 
 }  // namespace remoting

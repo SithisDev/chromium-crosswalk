@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,7 +13,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "rlz/lib/rlz_value_store.h"
@@ -28,14 +28,14 @@ int main(int argc, char **argv) {
 
   mojo::core::Init();
 
-  // RlzLibTest uses base::test::ScopedTaskEnvironment that needs TestTimeouts.
+  // RlzLibTest uses base::test::TaskEnvironment that needs TestTimeouts.
   TestTimeouts::Initialize();
 
   int ret = RUN_ALL_TESTS();
   if (ret == 0) {
     // Now re-run all the tests using a supplementary brand code.  This brand
     // code will remain in effect for the lifetime of the branding object.
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
     // Set a temporary directory for RLZ here, because SupplementaryBranding
     // creates and owns RlzValueStore object for its lifetime.
     base::ScopedTempDir temp_dir;

@@ -1,26 +1,23 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/shape_detection/text_detection_impl_mac.h"
 
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/shape_detection/detection_utils_mac.h"
 #include "services/shape_detection/text_detection_impl.h"
 
 namespace shape_detection {
 
 // static
-void TextDetectionImpl::Create(mojom::TextDetectionRequest request) {
-  // Text detection needs at least MAC OS X 10.11.
-  if (@available(macOS 10.11, *)) {
-    mojo::MakeStrongBinding(std::make_unique<TextDetectionImplMac>(),
-                            std::move(request));
-  }
+void TextDetectionImpl::Create(
+    mojo::PendingReceiver<mojom::TextDetection> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<TextDetectionImplMac>(),
+                              std::move(receiver));
 }
 
 TextDetectionImplMac::TextDetectionImplMac() {
@@ -34,8 +31,6 @@ TextDetectionImplMac::~TextDetectionImplMac() {}
 
 void TextDetectionImplMac::Detect(const SkBitmap& bitmap,
                                   DetectCallback callback) {
-  DCHECK(base::mac::IsAtLeastOS10_11());
-
   base::scoped_nsobject<CIImage> ci_image = CreateCIImageFromSkBitmap(bitmap);
   if (!ci_image) {
     std::move(callback).Run({});

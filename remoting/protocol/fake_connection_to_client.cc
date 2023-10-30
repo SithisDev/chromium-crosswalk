@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,9 @@
 #include "remoting/protocol/video_frame_pump.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
-FakeVideoStream::FakeVideoStream() : weak_factory_(this) {}
+FakeVideoStream::FakeVideoStream() = default;
 FakeVideoStream::~FakeVideoStream() = default;
 
 void FakeVideoStream::SetEventTimestampsSource(
@@ -32,7 +31,13 @@ void FakeVideoStream::SetObserver(Observer* observer) {
   observer_ = observer;
 }
 
-void FakeVideoStream::SelectSource(int id) {}
+void FakeVideoStream::SelectSource(webrtc::ScreenId id) {
+  selected_source_ = id;
+}
+
+webrtc::ScreenId FakeVideoStream::selected_source() const {
+  return selected_source_;
+}
 
 base::WeakPtr<FakeVideoStream> FakeVideoStream::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
@@ -48,16 +53,16 @@ void FakeConnectionToClient::SetEventHandler(EventHandler* event_handler) {
 }
 
 std::unique_ptr<VideoStream> FakeConnectionToClient::StartVideoStream(
+    const std::string& stream_name,
     std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) {
+  desktop_capturer_ = std::move(desktop_capturer);
   if (video_stub_ && video_encode_task_runner_) {
     std::unique_ptr<VideoEncoder> video_encoder =
         VideoEncoder::Create(session_->config());
 
-    std::unique_ptr<protocol::VideoFramePump> pump(
-        new protocol::VideoFramePump(video_encode_task_runner_,
-                                     std::move(desktop_capturer),
-                                     std::move(video_encoder),
-                                     video_stub_));
+    std::unique_ptr<protocol::VideoFramePump> pump(new protocol::VideoFramePump(
+        video_encode_task_runner_, std::move(desktop_capturer_),
+        std::move(video_encoder), video_stub_));
     video_feedback_stub_ = pump->video_feedback_stub();
     return std::move(pump);
   }
@@ -102,5 +107,12 @@ void FakeConnectionToClient::set_input_stub(InputStub* input_stub) {
   input_stub_ = input_stub;
 }
 
-}  // namespace protocol
-}  // namespace remoting
+PeerConnectionControls* FakeConnectionToClient::peer_connection_controls() {
+  return nullptr;
+}
+
+WebrtcEventLogData* FakeConnectionToClient::rtc_event_log() {
+  return nullptr;
+}
+
+}  // namespace remoting::protocol

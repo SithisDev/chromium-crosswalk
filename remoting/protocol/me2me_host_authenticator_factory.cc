@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "remoting/base/rsa_key_pair.h"
@@ -14,17 +15,15 @@
 #include "remoting/protocol/negotiating_host_authenticator.h"
 #include "remoting/protocol/rejecting_authenticator.h"
 #include "remoting/protocol/token_validator.h"
-#include "remoting/signaling/jid_util.h"
 #include "remoting/signaling/signaling_address.h"
+#include "remoting/signaling/signaling_id_util.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // static
 std::unique_ptr<AuthenticatorFactory>
 Me2MeHostAuthenticatorFactory::CreateWithPin(
-    bool use_service_account,
     const std::string& host_owner,
     const std::string& local_cert,
     scoped_refptr<RsaKeyPair> key_pair,
@@ -33,7 +32,6 @@ Me2MeHostAuthenticatorFactory::CreateWithPin(
     scoped_refptr<PairingRegistry> pairing_registry) {
   std::unique_ptr<Me2MeHostAuthenticatorFactory> result(
       new Me2MeHostAuthenticatorFactory());
-  result->use_service_account_ = use_service_account;
   result->canonical_host_owner_email_ = GetCanonicalEmail(host_owner);
   result->local_cert_ = local_cert;
   result->key_pair_ = key_pair;
@@ -46,7 +44,6 @@ Me2MeHostAuthenticatorFactory::CreateWithPin(
 // static
 std::unique_ptr<AuthenticatorFactory>
 Me2MeHostAuthenticatorFactory::CreateWithThirdPartyAuth(
-    bool use_service_account,
     const std::string& host_owner,
     const std::string& local_cert,
     scoped_refptr<RsaKeyPair> key_pair,
@@ -54,7 +51,6 @@ Me2MeHostAuthenticatorFactory::CreateWithThirdPartyAuth(
     scoped_refptr<TokenValidatorFactory> token_validator_factory) {
   std::unique_ptr<Me2MeHostAuthenticatorFactory> result(
       new Me2MeHostAuthenticatorFactory());
-  result->use_service_account_ = use_service_account;
   result->canonical_host_owner_email_ = GetCanonicalEmail(host_owner);
   result->local_cert_ = local_cert;
   result->key_pair_ = key_pair;
@@ -71,34 +67,19 @@ std::unique_ptr<Authenticator>
 Me2MeHostAuthenticatorFactory::CreateAuthenticator(
     const std::string& original_local_jid,
     const std::string& original_remote_jid) {
-  std::string local_jid = NormalizeJid(original_local_jid);
-  std::string remote_jid = NormalizeJid(original_remote_jid);
-
-  std::string remote_jid_prefix;
-
-  if (!use_service_account_) {
-    // JID prefixes may not match the host owner email, for example, in cases
-    // where the host owner account does not have an email associated with it.
-    // In those cases, the only guarantee we have is that JIDs for the same
-    // account will have the same prefix.
-    if (!SplitJidResource(local_jid, &remote_jid_prefix, nullptr)) {
-      LOG(DFATAL) << "Invalid local JID:" << local_jid;
-      return base::WrapUnique(
-          new RejectingAuthenticator(Authenticator::INVALID_CREDENTIALS));
-    }
-  } else {
-    remote_jid_prefix = canonical_host_owner_email_;
-  }
+  std::string local_jid = NormalizeSignalingId(original_local_jid);
+  std::string remote_jid = NormalizeSignalingId(original_remote_jid);
 
   // Verify that the client's jid is an ASCII string, and then check that the
   // client JID has the expected prefix. Comparison is case insensitive.
   if (!base::IsStringASCII(remote_jid) ||
-      !base::StartsWith(remote_jid, remote_jid_prefix + '/',
+      !base::StartsWith(remote_jid, canonical_host_owner_email_ + '/',
                         base::CompareCase::INSENSITIVE_ASCII)) {
     LOG(ERROR) << "Rejecting incoming connection from " << remote_jid
-               << ": Prefix mismatch.  Expected: " << remote_jid_prefix;
-    return base::WrapUnique(
-        new RejectingAuthenticator(Authenticator::INVALID_CREDENTIALS));
+               << ": Prefix mismatch.  Expected: "
+               << canonical_host_owner_email_;
+    return base::WrapUnique(new RejectingAuthenticator(
+        Authenticator::RejectionReason::INVALID_CREDENTIALS));
   }
 
   // If necessary, verify that the client's jid belongs to the correct domain.
@@ -120,13 +101,13 @@ Me2MeHostAuthenticatorFactory::CreateAuthenticator(
       LOG(ERROR) << "Rejecting incoming connection from " << remote_jid
                  << ": Domain not allowed.";
       return std::make_unique<RejectingAuthenticator>(
-          Authenticator::INVALID_ACCOUNT);
+          Authenticator::RejectionReason::INVALID_ACCOUNT_ID);
     }
   }
 
   if (!local_cert_.empty() && key_pair_.get()) {
-    std::string normalized_local_jid = NormalizeJid(local_jid);
-    std::string normalized_remote_jid = NormalizeJid(remote_jid);
+    std::string normalized_local_jid = NormalizeSignalingId(local_jid);
+    std::string normalized_remote_jid = NormalizeSignalingId(remote_jid);
 
     if (token_validator_factory_) {
       return NegotiatingHostAuthenticator::CreateWithThirdPartyAuth(
@@ -139,9 +120,8 @@ Me2MeHostAuthenticatorFactory::CreateAuthenticator(
         pin_hash_, pairing_registry_);
   }
 
-  return base::WrapUnique(
-      new RejectingAuthenticator(Authenticator::INVALID_CREDENTIALS));
+  return base::WrapUnique(new RejectingAuthenticator(
+      Authenticator::RejectionReason::INVALID_CREDENTIALS));
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

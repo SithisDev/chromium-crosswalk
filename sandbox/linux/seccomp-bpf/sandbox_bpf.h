@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include <memory>
 
 #include "base/files/scoped_file.h"
-#include "base/macros.h"
 #include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/sandbox_export.h"
 
-namespace sandbox {
 struct arch_seccomp_data;
+
+namespace sandbox {
 
 // This class can be used to apply a syscall sandboxing policy expressed in a
 // bpf_dsl::Policy object to the current process.
@@ -32,6 +32,10 @@ class SANDBOX_EXPORT SandboxBPF {
   // Ownership of |policy| is transfered here to the sandbox object.
   // nullptr is allowed for unit tests.
   explicit SandboxBPF(std::unique_ptr<bpf_dsl::Policy> policy);
+
+  SandboxBPF(const SandboxBPF&) = delete;
+  SandboxBPF& operator=(const SandboxBPF&) = delete;
+
   // NOTE: Setting a policy and starting the sandbox is a one-way operation.
   // The kernel does not provide any option for unloading a loaded sandbox. The
   // sandbox remains engaged even when the object is destructed.
@@ -61,7 +65,10 @@ class SANDBOX_EXPORT SandboxBPF {
   // disallowed.
   // Finally, stacking does add more kernel overhead than having a single
   // combined policy. So, it should only be used if there are no alternatives.
-  bool StartSandbox(SeccompLevel level) WARN_UNUSED_RESULT;
+  //
+  // |enable_ibpb| controls if the sandbox will forcibly enable indirect branch
+  // prediction barrier through prctl(2) to mitigate Spectre variant 2.
+  [[nodiscard]] bool StartSandbox(SeccompLevel level, bool enable_ibpb = true);
 
   // The sandbox needs to be able to access files in "/proc/self/". If
   // this directory is not accessible when "StartSandbox()" gets called, the
@@ -99,13 +106,18 @@ class SANDBOX_EXPORT SandboxBPF {
 
   // Assembles and installs a filter based on the policy that has previously
   // been configured with SetSandboxPolicy().
-  void InstallFilter(bool must_sync_threads);
+  void InstallFilter(bool must_sync_threads, bool enable_ibpb);
+
+  // Disable indirect branch speculation by prctl. This will be done by
+  // seccomp if SECCOMP_FILTER_FLAG_SPEC_ALLOW is not set. Seccomp will
+  // disable indirect branch speculation and speculative store bypass
+  // simultaneously. We use prctl in supplement to control the speculation
+  // features separately.
+  void DisableIBSpec();
 
   base::ScopedFD proc_fd_;
   bool sandbox_has_started_;
   std::unique_ptr<bpf_dsl::Policy> policy_;
-
-  DISALLOW_COPY_AND_ASSIGN(SandboxBPF);
 };
 
 }  // namespace sandbox

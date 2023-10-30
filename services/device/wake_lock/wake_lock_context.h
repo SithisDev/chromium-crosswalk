@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/device/public/mojom/wake_lock_context.mojom.h"
 #include "services/device/wake_lock/wake_lock.h"
 #include "ui/gfx/native_widget_types.h"
@@ -26,13 +27,17 @@ class WakeLockContext : public mojom::WakeLockContext,
   WakeLockContext(int context_id,
                   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
                   const WakeLockContextCallback& native_view_getter);
+
+  WakeLockContext(const WakeLockContext&) = delete;
+  WakeLockContext& operator=(const WakeLockContext&) = delete;
+
   ~WakeLockContext() override;
 
   // mojom::WakeLockContext:
   void GetWakeLock(mojom::WakeLockType type,
                    mojom::WakeLockReason reason,
                    const std::string& description,
-                   mojom::WakeLockRequest request) override;
+                   mojo::PendingReceiver<mojom::WakeLock> receiver) override;
 
   static const int WakeLockInvalidContextId;
 
@@ -51,8 +56,6 @@ class WakeLockContext : public mojom::WakeLockContext,
 
   // All wake locks acquired via this class are managed here.
   std::vector<std::unique_ptr<WakeLock>> wake_locks_;
-
-  DISALLOW_COPY_AND_ASSIGN(WakeLockContext);
 };
 
 }  // namespace device

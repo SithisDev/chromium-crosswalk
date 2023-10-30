@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,25 +10,28 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "remoting/base/result.h"
+#include "remoting/protocol/authenticator.h"
 #include "url/gurl.h"
 
-namespace remoting {
-
-namespace protocol {
+namespace remoting::protocol {
 
 // The |TokenValidator| encapsulates the parameters to be sent to the client
 // to obtain a token, and the method to validate that token and obtain the
 // shared secret for the connection.
 class TokenValidator {
  public:
-  // Callback passed to |ValidateThirdPartyToken|, and called once the host
-  // authentication finishes. |shared_secret| should be used by the host to
-  // create a V2Authenticator. In case of failure, the callback is called with
-  // an empty |shared_secret|.
-  typedef base::Callback<void(
-      const std::string& shared_secret)> TokenValidatedCallback;
+  using ValidationResult =
+      Result<std::string, protocol::Authenticator::RejectionReason>;
 
-  virtual ~TokenValidator() {}
+  // Callback passed to |ValidateThirdPartyToken|, and called once the host
+  // authentication finishes. |validation_result.success()| should be used by
+  // the host to create a V2Authenticator. In case of failure, the rejection
+  // reason can be found via |validation_result.error()|.
+  typedef base::OnceCallback<void(const ValidationResult& validation_result)>
+      TokenValidatedCallback;
+
+  virtual ~TokenValidator() = default;
 
   // Validates |token| with the server and exchanges it for a |shared_secret|.
   // |token_validated_callback| is called when the host authentication ends,
@@ -36,7 +39,7 @@ class TokenValidator {
   // The request is canceled if this object is destroyed.
   virtual void ValidateThirdPartyToken(
       const std::string& token,
-      const TokenValidatedCallback& token_validated_callback) = 0;
+      TokenValidatedCallback token_validated_callback) = 0;
 
   // URL sent to the client, to be used by its |TokenFetcher| to get a token.
   virtual const GURL& token_url() const = 0;
@@ -59,10 +62,9 @@ class TokenValidatorFactory
  protected:
   friend class base::RefCountedThreadSafe<TokenValidatorFactory>;
 
-  virtual ~TokenValidatorFactory() {}
+  virtual ~TokenValidatorFactory() = default;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_TOKEN_VALIDATOR_H_

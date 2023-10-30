@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/usb/mojo/device_manager_test.h"
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
 #include "base/strings/utf_string_conversions.h"
 #include "services/device/usb/usb_device.h"
 #include "services/device/usb/usb_device_handle.h"
@@ -22,13 +22,14 @@ class TestUsbDevice : public UsbDevice {
                 const std::string& serial_number,
                 const GURL& landing_page);
 
+  TestUsbDevice(const TestUsbDevice&) = delete;
+  TestUsbDevice& operator=(const TestUsbDevice&) = delete;
+
   // device::UsbDevice overrides:
   void Open(OpenCallback callback) override;
 
  private:
   ~TestUsbDevice() override;
-
-  DISALLOW_COPY_AND_ASSIGN(TestUsbDevice);
 };
 
 TestUsbDevice::TestUsbDevice(const std::string& name,
@@ -41,7 +42,7 @@ TestUsbDevice::TestUsbDevice(const std::string& name,
                 0x0000,
                 0x000,
                 0x0100,
-                base::string16(),
+                std::u16string(),
                 base::UTF8ToUTF16(name),
                 base::UTF8ToUTF16(serial_number),
                 0,
@@ -62,9 +63,9 @@ DeviceManagerTest::DeviceManagerTest(UsbService* usb_service)
 
 DeviceManagerTest::~DeviceManagerTest() {}
 
-void DeviceManagerTest::BindRequest(
-    mojom::UsbDeviceManagerTestRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void DeviceManagerTest::BindReceiver(
+    mojo::PendingReceiver<device::mojom::UsbDeviceManagerTest> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void DeviceManagerTest::AddDeviceForTesting(

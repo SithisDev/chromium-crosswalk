@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@ import android.location.Location;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.concurrent.FutureTask;
 
@@ -21,9 +21,8 @@ import java.util.concurrent.FutureTask;
  * content/browser/geolocation/location_api_adapter_android.h.
  * Based on android.webkit.GeolocationService.java
  */
-@VisibleForTesting
 public class LocationProviderAdapter {
-    private static final String TAG = "cr_LocationProvider";
+    private static final String TAG = "LocationProvider";
 
     // Delegate handling the real work in the main thread.
     private LocationProvider mImpl;
@@ -76,20 +75,24 @@ public class LocationProviderAdapter {
     }
 
     public static void onNewLocationAvailable(Location location) {
-        nativeNewLocationAvailable(location.getLatitude(), location.getLongitude(),
-                location.getTime() / 1000.0, location.hasAltitude(), location.getAltitude(),
-                location.hasAccuracy(), location.getAccuracy(), location.hasBearing(),
-                location.getBearing(), location.hasSpeed(), location.getSpeed());
+        LocationProviderAdapterJni.get().newLocationAvailable(location.getLatitude(),
+                location.getLongitude(), location.getTime() / 1000.0, location.hasAltitude(),
+                location.getAltitude(), location.hasAccuracy(), location.getAccuracy(),
+                location.hasBearing(), location.getBearing(), location.hasSpeed(),
+                location.getSpeed());
     }
 
     public static void newErrorAvailable(String message) {
         Log.e(TAG, "newErrorAvailable %s", message);
-        nativeNewErrorAvailable(message);
+        LocationProviderAdapterJni.get().newErrorAvailable(message);
     }
 
-    // Native functions
-    private static native void nativeNewLocationAvailable(double latitude, double longitude,
-            double timeStamp, boolean hasAltitude, double altitude, boolean hasAccuracy,
-            double accuracy, boolean hasHeading, double heading, boolean hasSpeed, double speed);
-    private static native void nativeNewErrorAvailable(String message);
+    @NativeMethods
+    interface Natives {
+        void newLocationAvailable(double latitude, double longitude, double timeStamp,
+                boolean hasAltitude, double altitude, boolean hasAccuracy, double accuracy,
+                boolean hasHeading, double heading, boolean hasSpeed, double speed);
+
+        void newErrorAvailable(String message);
+    }
 }

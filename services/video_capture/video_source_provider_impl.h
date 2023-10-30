@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,10 @@
 
 #include <map>
 
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/memory/raw_ptr.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/video_capture/device_factory.h"
 #include "services/video_capture/public/mojom/video_source_provider.mojom.h"
 
@@ -20,24 +23,31 @@ class VideoSourceProviderImpl : public mojom::VideoSourceProvider {
   VideoSourceProviderImpl(
       DeviceFactory* device_factory,
       base::RepeatingClosure on_last_client_disconnected_cb);
+
+  VideoSourceProviderImpl(const VideoSourceProviderImpl&) = delete;
+  VideoSourceProviderImpl& operator=(const VideoSourceProviderImpl&) = delete;
+
   ~VideoSourceProviderImpl() override;
 
-  void AddClient(mojom::VideoSourceProviderRequest request);
+  void AddClient(mojo::PendingReceiver<mojom::VideoSourceProvider> receiver);
 
   // mojom::VideoSourceProvider implementation.
   void GetSourceInfos(GetSourceInfosCallback callback) override;
-  void GetVideoSource(const std::string& device_id,
-                      mojom::VideoSourceRequest source_request) override;
+  void GetVideoSource(
+      const std::string& device_id,
+      mojo::PendingReceiver<mojom::VideoSource> source_receiver) override;
   void AddSharedMemoryVirtualDevice(
       const media::VideoCaptureDeviceInfo& device_info,
-      mojom::ProducerPtr producer,
+      mojo::PendingRemote<mojom::Producer> producer,
       bool send_buffer_handles_to_producer_as_raw_file_descriptors,
-      mojom::SharedMemoryVirtualDeviceRequest virtual_device) override;
+      mojo::PendingReceiver<mojom::SharedMemoryVirtualDevice>
+          virtual_device_receiver) override;
   void AddTextureVirtualDevice(
       const media::VideoCaptureDeviceInfo& device_info,
-      mojom::TextureVirtualDeviceRequest virtual_device) override;
+      mojo::PendingReceiver<mojom::TextureVirtualDevice>
+          virtual_device_receiver) override;
   void RegisterVirtualDevicesChangedObserver(
-      mojom::DevicesChangedObserverPtr observer,
+      mojo::PendingRemote<mojom::DevicesChangedObserver> observer,
       bool raise_event_if_virtual_devices_already_present) override;
   void Close(CloseCallback callback) override;
 
@@ -46,14 +56,12 @@ class VideoSourceProviderImpl : public mojom::VideoSourceProvider {
   void OnClientDisconnectedOrClosed();
   void OnVideoSourceLastClientDisconnected(const std::string& device_id);
 
-  DeviceFactory* const device_factory_;
+  const raw_ptr<DeviceFactory> device_factory_;
   base::RepeatingClosure on_last_client_disconnected_cb_;
   int client_count_ = 0;
   int closed_but_not_yet_disconnected_client_count_ = 0;
-  mojo::BindingSet<mojom::VideoSourceProvider> bindings_;
-  std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
+  mojo::ReceiverSet<mojom::VideoSourceProvider> receivers_;
   std::map<std::string, std::unique_ptr<VideoSourceImpl>> sources_;
-  DISALLOW_COPY_AND_ASSIGN(VideoSourceProviderImpl);
 };
 
 }  // namespace video_capture

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/android/jni_android.h"
@@ -13,10 +15,10 @@
 #include "base/android/jni_string.h"
 #include "base/files/file.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "printing/metafile.h"
+#include "printing/mojom/print.mojom.h"
 #include "printing/print_job_constants.h"
 #include "printing/printing_jni_headers/PrintingContext_jni.h"
 #include "printing/units.h"
@@ -31,7 +33,7 @@ namespace printing {
 
 namespace {
 
-// Sets the page sizes for a |PrintSettings| object.  |width| and |height|
+// Sets the page sizes for a `PrintSettings` object.  `width` and `height`
 // arguments should be in device units.
 void SetSizes(PrintSettings* settings, int dpi, int width, int height) {
   gfx::Size physical_size_device_units(width, height);
@@ -59,8 +61,11 @@ void GetPageRanges(JNIEnv* env,
 }  // namespace
 
 // static
-std::unique_ptr<PrintingContext> PrintingContext::Create(Delegate* delegate) {
-  return base::WrapUnique(new PrintingContextAndroid(delegate));
+std::unique_ptr<PrintingContext> PrintingContext::CreateImpl(
+    Delegate* delegate,
+    bool skip_system_calls) {
+  DCHECK(!skip_system_calls);
+  return std::make_unique<PrintingContextAndroid>(delegate);
 }
 
 // static
@@ -115,8 +120,8 @@ void PrintingContextAndroid::AskUserForSettingsReply(
     jboolean success) {
   DCHECK(callback_);
   if (!success) {
-    // TODO(cimamoglu): Differentiate between FAILED And CANCEL.
-    std::move(callback_).Run(FAILED);
+    // TODO(cimamoglu): Differentiate between `kFailed` And `kCancel`.
+    std::move(callback_).Run(mojom::ResultCode::kFailed);
     return;
   }
 
@@ -126,14 +131,14 @@ void PrintingContextAndroid::AskUserForSettingsReply(
   // TODO(thestig): See if the call to set_device_name() can be removed.
   fd_ = Java_PrintingContext_getFileDescriptor(env, j_printing_context_);
   DCHECK(is_file_descriptor_valid());
-  settings_.set_device_name(base::NumberToString16(fd_));
+  settings_->set_device_name(base::NumberToString16(fd_));
 
   ScopedJavaLocalRef<jintArray> intArr =
       Java_PrintingContext_getPages(env, j_printing_context_);
   if (!intArr.is_null()) {
     PageRanges range_vector;
     GetPageRanges(env, intArr, &range_vector);
-    settings_.set_ranges(range_vector);
+    settings_->set_ranges(range_vector);
   }
 
   int dpi = Java_PrintingContext_getDpi(env, j_printing_context_);
@@ -141,9 +146,9 @@ void PrintingContextAndroid::AskUserForSettingsReply(
   int height = Java_PrintingContext_getHeight(env, j_printing_context_);
   width = ConvertUnit(width, kMilsPerInch, dpi);
   height = ConvertUnit(height, kMilsPerInch, dpi);
-  SetSizes(&settings_, dpi, width, height);
+  SetSizes(settings_.get(), dpi, width, height);
 
-  std::move(callback_).Run(OK);
+  std::move(callback_).Run(mojom::ResultCode::kSuccess);
 }
 
 void PrintingContextAndroid::ShowSystemDialogDone(
@@ -151,26 +156,18 @@ void PrintingContextAndroid::ShowSystemDialogDone(
     const JavaParamRef<jobject>& obj) {
   DCHECK(callback_);
   // Settings are not updated, callback is called only to unblock javascript.
-  std::move(callback_).Run(CANCEL);
+  std::move(callback_).Run(mojom::ResultCode::kCanceled);
 }
 
-void PrintingContextAndroid::PrintDocument(const MetafilePlayer& metafile) {
-  DCHECK(is_file_descriptor_valid());
-
-  base::File file(fd_);
-  metafile.SaveTo(&file);
-  file.TakePlatformFile();
-}
-
-PrintingContext::Result PrintingContextAndroid::UseDefaultSettings() {
+mojom::ResultCode PrintingContextAndroid::UseDefaultSettings() {
   DCHECK(!in_print_job_);
 
   ResetSettings();
-  settings_.set_dpi(kDefaultPdfDpi);
+  settings_->set_dpi(kDefaultPdfDpi);
   gfx::Size physical_size = GetPdfPaperSizeDeviceUnits();
-  SetSizes(&settings_, kDefaultPdfDpi, physical_size.width(),
+  SetSizes(settings_.get(), kDefaultPdfDpi, physical_size.width(),
            physical_size.height());
-  return OK;
+  return mojom::ResultCode::kSuccess;
 }
 
 gfx::Size PrintingContextAndroid::GetPdfPaperSizeDeviceUnits() {
@@ -185,66 +182,57 @@ gfx::Size PrintingContextAndroid::GetPdfPaperSizeDeviceUnits() {
     LOG(WARNING) << "ulocdata_getPaperSize failed, using 8.5 x 11, error: "
                  << error;
     width =
-        static_cast<int>(kLetterWidthInch * settings_.device_units_per_inch());
-    height =
-        static_cast<int>(kLetterHeightInch * settings_.device_units_per_inch());
+        static_cast<int>(kLetterWidthInch * settings_->device_units_per_inch());
+    height = static_cast<int>(kLetterHeightInch *
+                              settings_->device_units_per_inch());
   } else {
     // ulocdata_getPaperSize returns the width and height in mm.
     // Convert this to pixels based on the dpi.
-    float multiplier = settings_.device_units_per_inch() / kMicronsPerMil;
+    float multiplier = settings_->device_units_per_inch() / kMicronsPerMil;
     width *= multiplier;
     height *= multiplier;
   }
   return gfx::Size(width, height);
 }
 
-PrintingContext::Result PrintingContextAndroid::UpdatePrinterSettings(
-    bool external_preview,
-    bool show_system_dialog,
-    int page_count) {
-  DCHECK(!show_system_dialog);
+mojom::ResultCode PrintingContextAndroid::UpdatePrinterSettings(
+    const PrinterSettings& printer_settings) {
+  DCHECK(!printer_settings.show_system_dialog);
   DCHECK(!in_print_job_);
 
   // Intentional No-op.
 
-  return OK;
+  return mojom::ResultCode::kSuccess;
 }
 
-PrintingContext::Result PrintingContextAndroid::NewDocument(
-    const base::string16& document_name) {
+mojom::ResultCode PrintingContextAndroid::NewDocument(
+    const std::u16string& document_name) {
   DCHECK(!in_print_job_);
   in_print_job_ = true;
 
-  return OK;
+  return mojom::ResultCode::kSuccess;
 }
 
-PrintingContext::Result PrintingContextAndroid::NewPage() {
+mojom::ResultCode PrintingContextAndroid::PrintDocument(
+    const MetafilePlayer& metafile,
+    const PrintSettings& settings,
+    uint32_t num_pages) {
   if (abort_printing_)
-    return CANCEL;
+    return mojom::ResultCode::kCanceled;
   DCHECK(in_print_job_);
+  DCHECK(is_file_descriptor_valid());
 
-  // Intentional No-op.
-
-  return OK;
+  return metafile.SaveToFileDescriptor(fd_) ? mojom::ResultCode::kSuccess
+                                            : mojom::ResultCode::kFailed;
 }
 
-PrintingContext::Result PrintingContextAndroid::PageDone() {
+mojom::ResultCode PrintingContextAndroid::DocumentDone() {
   if (abort_printing_)
-    return CANCEL;
-  DCHECK(in_print_job_);
-
-  // Intentional No-op.
-
-  return OK;
-}
-
-PrintingContext::Result PrintingContextAndroid::DocumentDone() {
-  if (abort_printing_)
-    return CANCEL;
+    return mojom::ResultCode::kCanceled;
   DCHECK(in_print_job_);
 
   ResetSettings();
-  return OK;
+  return mojom::ResultCode::kSuccess;
 }
 
 void PrintingContextAndroid::Cancel() {

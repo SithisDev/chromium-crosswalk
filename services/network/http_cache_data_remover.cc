@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,10 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
+#include "net/http/http_network_session.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -129,13 +131,13 @@ void HttpCacheDataRemover::CacheRetrieved(int rv) {
   }
 
   if (delete_begin_.is_null() && delete_end_.is_max()) {
-    rv = backend_->DoomAllEntries(base::Bind(
+    rv = backend_->DoomAllEntries(base::BindOnce(
         &HttpCacheDataRemover::ClearHttpCacheDone, weak_factory_.GetWeakPtr()));
   } else {
     rv = backend_->DoomEntriesBetween(
         delete_begin_, delete_end_,
-        base::Bind(&HttpCacheDataRemover::ClearHttpCacheDone,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&HttpCacheDataRemover::ClearHttpCacheDone,
+                       weak_factory_.GetWeakPtr()));
   }
   if (rv != net::ERR_IO_PENDING) {
     // Notify by posting a task to avoid reentrency.

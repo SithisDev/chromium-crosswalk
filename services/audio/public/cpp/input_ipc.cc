@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,23 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "media/mojo/interfaces/audio_data_pipe.mojom.h"
+#include "base/callback_helpers.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "media/mojo/common/input_error_code_converter.h"
+#include "media/mojo/mojom/audio_data_pipe.mojom.h"
+#include "media/mojo/mojom/audio_processing.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "mojo/public/cpp/system/platform_handle.h"
-#include "services/audio/public/mojom/audio_processing.mojom.h"
-#include "services/audio/public/mojom/constants.mojom.h"
 
 namespace audio {
 
-InputIPC::InputIPC(std::unique_ptr<service_manager::Connector> connector,
-                   const std::string& device_id,
-                   mojo::PendingRemote<media::mojom::AudioLog> log)
-    : device_id_(device_id), log_(std::move(log)) {
+InputIPC::InputIPC(
+    mojo::PendingRemote<media::mojom::AudioStreamFactory> stream_factory,
+    const std::string& device_id,
+    mojo::PendingRemote<media::mojom::AudioLog> log)
+    : device_id_(device_id),
+      pending_stream_factory_(std::move(stream_factory)),
+      log_(std::move(log)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
-  DCHECK(connector);
-
-  connector->Connect(audio::mojom::kServiceName,
-                     pending_stream_factory_.InitWithNewPipeAndPassReceiver());
 }
 
 InputIPC::~InputIPC() = default;
@@ -46,31 +45,33 @@ void InputIPC::CreateStream(media::AudioInputIPCDelegate* delegate,
 
   // Unretained is safe because we own the receiver.
   stream_client_receiver_.set_disconnect_handler(
-      base::BindOnce(&InputIPC::OnError, base::Unretained(this)));
+      base::BindOnce(&InputIPC::OnError, base::Unretained(this),
+                     media::mojom::InputStreamErrorCode::kUnknown));
 
   // For now we don't care about key presses, so we pass a invalid buffer.
-  mojo::ScopedSharedBufferHandle invalid_key_press_count_buffer;
+  base::ReadOnlySharedMemoryRegion invalid_key_press_count_buffer;
 
   mojo::PendingRemote<media::mojom::AudioLog> log;
   if (log_)
     log = log_.Unbind();
+
   stream_factory_->CreateInputStream(
       stream_.BindNewPipeAndPassReceiver(), std::move(client), {},
       std::move(log), device_id_, params, total_segments,
       automatic_gain_control, std::move(invalid_key_press_count_buffer),
-      /*processing config*/ nullptr,
+      /*processing_config=*/nullptr,
       base::BindOnce(&InputIPC::StreamCreated, weak_factory_.GetWeakPtr()));
 }
 
 void InputIPC::StreamCreated(
     media::mojom::ReadOnlyAudioDataPipePtr data_pipe,
     bool initially_muted,
-    const base::Optional<base::UnguessableToken>& stream_id) {
+    const absl::optional<base::UnguessableToken>& stream_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(delegate_);
 
   if (data_pipe.is_null()) {
-    OnError();
+    OnError(media::mojom::InputStreamErrorCode::kUnknown);
     return;
   }
 
@@ -78,16 +79,14 @@ void InputIPC::StreamCreated(
   // but Loopback streams do not.
   stream_id_ = stream_id;
 
-  base::PlatformFile socket_handle;
-  auto result =
-      mojo::UnwrapPlatformFile(std::move(data_pipe->socket), &socket_handle);
-  DCHECK_EQ(result, MOJO_RESULT_OK);
+  DCHECK(data_pipe->socket.is_valid_platform_file());
+  base::ScopedPlatformFile socket_handle = data_pipe->socket.TakePlatformFile();
   base::ReadOnlySharedMemoryRegion& shared_memory_region =
       data_pipe->shared_memory;
   DCHECK(shared_memory_region.IsValid());
 
-  delegate_->OnStreamCreated(std::move(shared_memory_region), socket_handle,
-                             initially_muted);
+  delegate_->OnStreamCreated(std::move(shared_memory_region),
+                             std::move(socket_handle), initially_muted);
 }
 
 void InputIPC::RecordStream() {
@@ -123,10 +122,11 @@ void InputIPC::CloseStream() {
   weak_factory_.InvalidateWeakPtrs();
 }
 
-void InputIPC::OnError() {
+void InputIPC::OnError(media::mojom::InputStreamErrorCode code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(delegate_);
-  delegate_->OnError();
+
+  delegate_->OnError(media::ConvertToCaptureCallbackCode(code));
 }
 
 void InputIPC::OnMutedStateChanged(bool is_muted) {

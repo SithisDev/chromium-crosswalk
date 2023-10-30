@@ -1,12 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_TRACING_PUBLIC_CPP_STACK_SAMPLING_STACK_SAMPLER_ANDROID_H_
 #define SERVICES_TRACING_PUBLIC_CPP_STACK_SAMPLING_STACK_SAMPLER_ANDROID_H_
 
+#include "base/memory/raw_ptr.h"
+#include "base/profiler/module_cache.h"
+#include "base/profiler/sampling_profiler_thread_token.h"
 #include "base/profiler/stack_sampler.h"
-#include "base/sampling_heap_profiler/module_cache.h"
 #include "base/threading/platform_thread.h"
 #include "services/tracing/public/cpp/stack_sampling/stack_unwinder_android.h"
 
@@ -19,7 +21,7 @@ class StackSamplerAndroid : public base::StackSampler {
   // StackUnwinderAndroid only supports sampling one thread at a time. So, the
   // clients of this class must ensure synchronization between multiple
   // instances of the sampler.
-  explicit StackSamplerAndroid(base::PlatformThreadId thread_id,
+  explicit StackSamplerAndroid(base::SamplingProfilerThreadToken thread_token,
                                base::ModuleCache*);
   ~StackSamplerAndroid() override;
 
@@ -28,12 +30,13 @@ class StackSamplerAndroid : public base::StackSampler {
 
   // StackSampler:
   void AddAuxUnwinder(std::unique_ptr<base::Unwinder> unwinder) override;
-  void RecordStackFrames(StackBuffer* stack_buffer,
-                         base::ProfileBuilder* profile_builder) override;
+  void RecordStackFrames(base::StackBuffer* stack_buffer,
+                         base::ProfileBuilder* profile_builder,
+                         base::PlatformThreadId thread_id) override;
 
  private:
-  base::PlatformThreadId tid_;
-  base::ModuleCache* module_cache_;
+  base::SamplingProfilerThreadToken thread_token_;
+  raw_ptr<base::ModuleCache> module_cache_;
   StackUnwinderAndroid unwinder_;
 };
 

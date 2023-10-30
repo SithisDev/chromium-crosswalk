@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,37 +6,32 @@
 #define PRINTING_BACKEND_CUPS_DELETERS_H_
 
 #include <cups/cups.h>
+#include <memory>
 
-#include "base/macros.h"
+#include "base/component_export.h"
 
 namespace printing {
 
-struct HttpDeleter {
+struct COMPONENT_EXPORT(PRINT_BACKEND) HttpDeleter {
   void operator()(http_t* http) const;
 };
 
-struct DestinationDeleter {
+struct COMPONENT_EXPORT(PRINT_BACKEND) DestinationDeleter {
   void operator()(cups_dest_t* dest) const;
 };
 
-struct DestInfoDeleter {
+struct COMPONENT_EXPORT(PRINT_BACKEND) DestInfoDeleter {
   void operator()(cups_dinfo_t* info) const;
 };
 
-struct OptionDeleter {
+struct COMPONENT_EXPORT(PRINT_BACKEND) OptionDeleter {
   void operator()(cups_option_t* option) const;
 };
 
-class JobsDeleter {
- public:
-  explicit JobsDeleter(int num_jobs);
-  void operator()(cups_job_t* jobs) const;
-
- private:
-  int num_jobs_;
-
-  DISALLOW_COPY_AND_ASSIGN(JobsDeleter);
-};
+using ScopedHttpPtr = std::unique_ptr<http_t, HttpDeleter>;
+using ScopedDestination = std::unique_ptr<cups_dest_t, DestinationDeleter>;
+using ScopedDestInfo = std::unique_ptr<cups_dinfo_t, DestInfoDeleter>;
+using ScopedCupsOption = std::unique_ptr<cups_option_t, OptionDeleter>;
 
 }  // namespace printing
 

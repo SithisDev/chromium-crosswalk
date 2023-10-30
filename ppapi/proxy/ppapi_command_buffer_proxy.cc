@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -118,11 +118,12 @@ void PpapiCommandBufferProxy::SetGetBuffer(int32_t transfer_buffer_id) {
 
 scoped_refptr<gpu::Buffer> PpapiCommandBufferProxy::CreateTransferBuffer(
     uint32_t size,
-    int32_t* id) {
+    int32_t* id,
+    gpu::TransferBufferAllocationOption option) {
   *id = -1;
 
   if (last_state_.error != gpu::error::kNoError)
-    return NULL;
+    return nullptr;
 
   // Assuming we are in the renderer process, the service is responsible for
   // duplicating the handle. This might not be true for NaCl.
@@ -132,13 +133,13 @@ scoped_refptr<gpu::Buffer> PpapiCommandBufferProxy::CreateTransferBuffer(
           ppapi::API_ID_PPB_GRAPHICS_3D, resource_, size, id, &handle))) {
     if (last_state_.error == gpu::error::kNoError)
       last_state_.error = gpu::error::kLostContext;
-    return NULL;
+    return nullptr;
   }
 
   if (*id <= 0 || !handle.is_shmem_region()) {
     if (last_state_.error == gpu::error::kNoError)
       last_state_.error = gpu::error::kOutOfBounds;
-    return NULL;
+    return nullptr;
   }
 
   base::UnsafeSharedMemoryRegion shared_memory_region =
@@ -152,7 +153,7 @@ scoped_refptr<gpu::Buffer> PpapiCommandBufferProxy::CreateTransferBuffer(
     if (last_state_.error == gpu::error::kNoError)
       last_state_.error = gpu::error::kOutOfBounds;
     *id = -1;
-    return NULL;
+    return nullptr;
   }
 
   return gpu::MakeBufferFromSharedMemory(std::move(shared_memory_region),
@@ -168,6 +169,12 @@ void PpapiCommandBufferProxy::DestroyTransferBuffer(int32_t id) {
 
   Send(new PpapiHostMsg_PPBGraphics3D_DestroyTransferBuffer(
       ppapi::API_ID_PPB_GRAPHICS_3D, resource_, id));
+}
+
+void PpapiCommandBufferProxy::ForceLostContext(gpu::error::ContextLostReason) {
+  // This entry point was added to CommandBuffer well after PPAPI's
+  // deprecation. No current clients determined its necessity, so it
+  // will not be implemented.
 }
 
 void PpapiCommandBufferProxy::SetLock(base::Lock*) {
@@ -226,11 +233,6 @@ bool PpapiCommandBufferProxy::CanWaitUnverifiedSyncToken(
   return false;
 }
 
-void PpapiCommandBufferProxy::SetDisplayTransform(
-    gfx::OverlayTransform transform) {
-  NOTREACHED();
-}
-
 void PpapiCommandBufferProxy::SignalQuery(uint32_t query,
                                           base::OnceClosure callback) {
   NOTREACHED();
@@ -254,17 +256,6 @@ void PpapiCommandBufferProxy::SetGpuControlClient(gpu::GpuControlClient*) {
 
 const gpu::Capabilities& PpapiCommandBufferProxy::GetCapabilities() const {
   return capabilities_;
-}
-
-int32_t PpapiCommandBufferProxy::CreateImage(ClientBuffer buffer,
-                                             size_t width,
-                                             size_t height) {
-  NOTREACHED();
-  return -1;
-}
-
-void PpapiCommandBufferProxy::DestroyImage(int32_t id) {
-  NOTREACHED();
 }
 
 bool PpapiCommandBufferProxy::Send(IPC::Message* msg) {

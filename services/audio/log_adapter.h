@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <string>
 
 #include "media/audio/audio_logging.h"
-#include "media/mojo/interfaces/audio_logging.mojom.h"
+#include "media/mojo/mojom/audio_logging.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
 
 namespace media {
@@ -17,10 +17,14 @@ class AudioParameters;
 
 namespace audio {
 
-// This class wraps a media::mojom::AudioLogPtr into a media::AudioLog.
+// This class wraps a Remote<media::mojom::AudioLog> into a media::AudioLog.
 class LogAdapter : public media::AudioLog {
  public:
   explicit LogAdapter(mojo::PendingRemote<media::mojom::AudioLog> audio_log);
+
+  LogAdapter(const LogAdapter&) = delete;
+  LogAdapter& operator=(const LogAdapter&) = delete;
+
   ~LogAdapter() override;
 
   // media::AudioLog implementation.
@@ -36,8 +40,6 @@ class LogAdapter : public media::AudioLog {
 
  private:
   mojo::Remote<media::mojom::AudioLog> audio_log_;
-
-  DISALLOW_COPY_AND_ASSIGN(LogAdapter);
 };
 
 }  // namespace audio

@@ -1,8 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "printing/print_job_constants.h"
+
+#include <limits>
 
 namespace printing {
 
@@ -17,12 +19,6 @@ const char kPreviewUIID[] = "previewUIID";
 
 // Capabilities option. Contains the capabilities in CDD format.
 const char kSettingCapabilities[] = "capabilities";
-
-// Print using cloud print: true if selected, false if not.
-const char kSettingCloudPrintId[] = "cloudPrintID";
-
-// Print using cloud print dialog: true if selected, false if not.
-const char kSettingCloudPrintDialog[] = "printWithCloudPrint";
 
 // Print job setting 'collate'.
 const char kSettingCollate[] = "collate";
@@ -63,10 +59,6 @@ const char kSettingFitToPageScaling[] = "fitToPageScaling";
 // Print job duplex mode. Value is an int from DuplexMode enum.
 const char kSettingDuplexMode[] = "duplex";
 
-// Option to fit source page contents to printer paper size: true if
-// selected else false.
-const char kSettingFitToPageEnabled[] = "fitToPageEnabled";
-
 // Option to print headers and Footers: true if selected, false if not.
 const char kSettingHeaderFooterEnabled[] = "headerFooterEnabled";
 
@@ -97,6 +89,24 @@ const char kSettingMediaSizeHeightMicrons[] = "height_microns";
 
 // Key that specifies the requested media width in microns.
 const char kSettingMediaSizeWidthMicrons[] = "width_microns";
+
+// Key that specifies the left side of the bounding box for the requested
+// media's printable area.
+const char kSettingsImageableAreaLeftMicrons[] = "imageable_area_left_microns";
+
+// Key that specifies the bottom side of the bounding box for the requested
+// media's printable area.
+const char kSettingsImageableAreaBottomMicrons[] =
+    "imageable_area_bottom_microns";
+
+// Key that specifies the right side of the bounding box for the requested
+// media's printable area.
+const char kSettingsImageableAreaRightMicrons[] =
+    "imageable_area_right_microns";
+
+// Key that specifies the top side of the bounding box for the requested
+// media's printable area.
+const char kSettingsImageableAreaTopMicrons[] = "imageable_area_top_microns";
 
 // Key that specifies the requested media platform specific vendor id.
 const char kSettingMediaSizeVendorId[] = "vendor_id";
@@ -145,6 +155,11 @@ const char kSettingPinValue[] = "pinValue";
 // Policies affecting printing destination.
 const char kSettingPolicies[] = "policies";
 
+// Whether the source page content is from ARC or not.
+const char kSettingPreviewIsFromArc[] = "previewIsFromArc";
+
+// Whether the source page content is modifiable. True for web content.
+// i.e. Anything from Blink. False for everything else. e.g. PDF/Flash.
 const char kSettingPreviewModifiable[] = "previewModifiable";
 
 // Keys that specifies the printable area details.
@@ -153,37 +168,35 @@ const char kSettingPrintableAreaY[] = "printableAreaY";
 const char kSettingPrintableAreaWidth[] = "printableAreaWidth";
 const char kSettingPrintableAreaHeight[] = "printableAreaHeight";
 
-// Printer name.
-const char kSettingPrinterName[] = "printerName";
-
 // Printer description.
 const char kSettingPrinterDescription[] = "printerDescription";
+
+// Printer name.
+const char kSettingPrinterName[] = "printerName";
 
 // Additional printer options.
 const char kSettingPrinterOptions[] = "printerOptions";
 
+// The printer type is an enum PrinterType.
+const char kSettingPrinterType[] = "printerType";
+
 // Print to Google Drive option: true if selected, false if not.
 const char kSettingPrintToGoogleDrive[] = "printToGoogleDrive";
 
-// Print to PDF option: true if selected, false if not.
-const char kSettingPrintToPDF[] = "printToPDF";
-
-// Print using Privet option: true if destination is a Privet printer, false if
-// not.
-const char kSettingPrintWithPrivet[] = "printWithPrivet";
-
-// Print using extension option: true if destination is an extension printer,
-// false if not.
-const char kSettingPrintWithExtension[] = "printWithExtension";
-
 // Scaling factor
 const char kSettingScaleFactor[] = "scaleFactor";
+
+// Scaling type
+const char kSettingScalingType[] = "scalingType";
 
 // Number of pages per sheet.
 const char kSettingPagesPerSheet[] = "pagesPerSheet";
 
 // Whether to rasterize the PDF for printing.
 const char kSettingRasterizePdf[] = "rasterizePDF";
+
+// The DPI override to use when rasterize the PDF for printing.
+const char kSettingRasterizePdfDpi[] = "rasterizePdfDpi";
 
 // Ticket option. Contains the ticket in CJT format.
 const char kSettingTicket[] = "ticket";
@@ -203,12 +216,18 @@ const char kSettingShowSystemDialog[] = "showSystemDialog";
 // Username to be sent to printer.
 const char kSettingUsername[] = "username";
 
+// Advanced settings items.
+const char kSettingAdvancedSettings[] = "advancedSettings";
+
 // Indices used to represent first preview page and complete preview document.
 const int FIRST_PAGE_INDEX = 0;
 const int COMPLETE_PREVIEW_DOCUMENT_INDEX = -1;
 
 // Whether to show PDF in view provided by OS. Implemented for MacOS only.
-const char kSettingOpenPDFInPreview[] = "OpenPDFInPreview";
+const char kSettingOpenPDFInPreview[] = "openPDFInPreview";
+
+const uint32_t kInvalidPageIndex = std::numeric_limits<int>::max();
+const uint32_t kMaxPageCount = std::numeric_limits<int>::max();
 
 #if defined(USE_CUPS)
 const char kBlack[] = "Black";
@@ -217,6 +236,8 @@ const char kKCMY[] = "KCMY";
 const char kCMY_K[] = "CMY+K";
 const char kCMY[] = "CMY";
 const char kColor[] = "Color";
+const char kEpsonColor[] = "COLOR";
+const char kEpsonMono[] = "MONO";
 const char kFullColor[] = "FullColor";
 const char kGray[] = "Gray";
 const char kGrayscale[] = "Grayscale";
@@ -228,6 +249,10 @@ const char kNormalGray[] = "Normal.Gray";
 const char kRGB[] = "RGB";
 const char kRGBA[] = "RGBA";
 const char kRGB16[] = "RGB16";
+const char kSharpCMColor[] = "CMColor";
+const char kSharpCMBW[] = "CMBW";
+const char kXeroxAutomatic[] = "Automatic";
+const char kXeroxBW[] = "BW";
 #endif
 
 }  // namespace printing

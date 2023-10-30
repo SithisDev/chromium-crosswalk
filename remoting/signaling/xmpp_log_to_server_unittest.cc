@@ -1,11 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/signaling/xmpp_log_to_server.h"
 
+#include <memory>
+
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "remoting/signaling/mock_signal_strategy.h"
 #include "remoting/signaling/server_log_entry_unittest.h"
 #include "remoting/signaling/signaling_address.h"
@@ -16,6 +18,7 @@ using jingle_xmpp::QName;
 using jingle_xmpp::XmlElement;
 using testing::_;
 using testing::DeleteArg;
+using testing::DoAll;
 using testing::InSequence;
 using testing::Return;
 
@@ -43,12 +46,12 @@ class XmppLogToServerTest : public testing::Test {
   void SetUp() override {
     EXPECT_CALL(signal_strategy_, AddListener(_));
     EXPECT_CALL(signal_strategy_, RemoveListener(_));
-    xmpp_log_to_server_.reset(new XmppLogToServer(
-        ServerLogEntry::ME2ME, &signal_strategy_, kTestBotJid));
+    xmpp_log_to_server_ = std::make_unique<XmppLogToServer>(
+        ServerLogEntry::ME2ME, &signal_strategy_, kTestBotJid);
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   MockSignalStrategy signal_strategy_;
   std::unique_ptr<XmppLogToServer> xmpp_log_to_server_;

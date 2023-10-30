@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/callback.h"
 #include "base/environment.h"
 #include "remoting/base/logging.h"
-#include "remoting/host/username.h"
+#include "remoting/host/base/username.h"
 #include "remoting/protocol/channel_authenticator.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 
@@ -21,15 +21,15 @@ namespace remoting {
 namespace {
 class PamAuthorizer : public protocol::Authenticator {
  public:
-  PamAuthorizer(std::unique_ptr<protocol::Authenticator> underlying);
+  explicit PamAuthorizer(std::unique_ptr<protocol::Authenticator> underlying);
   ~PamAuthorizer() override;
 
-  // protocol::Authenticator interface.
+  // protocol::Authenticator:
   State state() const override;
   bool started() const override;
   RejectionReason rejection_reason() const override;
   void ProcessMessage(const jingle_xmpp::XmlElement* message,
-                      const base::Closure& resume_callback) override;
+                      base::OnceClosure resume_callback) override;
   std::unique_ptr<jingle_xmpp::XmlElement> GetNextMessage() override;
   const std::string& GetAuthKey() const override;
   std::unique_ptr<protocol::ChannelAuthenticator> CreateChannelAuthenticator()
@@ -38,7 +38,7 @@ class PamAuthorizer : public protocol::Authenticator {
  private:
   void MaybeCheckLocalLogin();
   bool IsLocalLoginAllowed();
-  void OnMessageProcessed(const base::Closure& resume_callback);
+  void OnMessageProcessed(base::OnceClosure resume_callback);
 
   static int PamConversation(int num_messages,
                              const struct pam_message** messages,
@@ -72,23 +72,24 @@ bool PamAuthorizer::started() const {
 protocol::Authenticator::RejectionReason
 PamAuthorizer::rejection_reason() const {
   if (local_login_status_ == DISALLOWED) {
-    return INVALID_CREDENTIALS;
+    return RejectionReason::INVALID_CREDENTIALS;
   } else {
     return underlying_->rejection_reason();
   }
 }
 
 void PamAuthorizer::ProcessMessage(const jingle_xmpp::XmlElement* message,
-                                   const base::Closure& resume_callback) {
+                                   base::OnceClosure resume_callback) {
   // |underlying_| is owned, so Unretained() is safe here.
-  underlying_->ProcessMessage(message, base::Bind(
-      &PamAuthorizer::OnMessageProcessed,
-      base::Unretained(this), resume_callback));
+  underlying_->ProcessMessage(
+      message,
+      base::BindOnce(&PamAuthorizer::OnMessageProcessed, base::Unretained(this),
+                     std::move(resume_callback)));
 }
 
-void PamAuthorizer::OnMessageProcessed(const base::Closure& resume_callback) {
+void PamAuthorizer::OnMessageProcessed(base::OnceClosure resume_callback) {
   MaybeCheckLocalLogin();
-  resume_callback.Run();
+  std::move(resume_callback).Run();
 }
 
 std::unique_ptr<jingle_xmpp::XmlElement> PamAuthorizer::GetNextMessage() {

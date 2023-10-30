@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,14 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/battery/battery_status_manager.h"
 #include "services/device/battery/battery_status_service.h"
 #include "services/device/device_service_test_base.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
-#include "services/device/public/mojom/constants.mojom.h"
 
 // These tests run against the implementation of the BatteryMonitor interface
 // inside Device Service, with a dummy BatteryManager set as a source of the
@@ -28,7 +28,7 @@ namespace {
 
 void ExpectBatteryStatus(bool* out_called,
                          const mojom::BatteryStatus& expected,
-                         const base::Closure& quit_closure,
+                         base::OnceClosure quit_closure,
                          mojom::BatteryStatusPtr status) {
   if (out_called)
     *out_called = true;
@@ -36,7 +36,7 @@ void ExpectBatteryStatus(bool* out_called,
   EXPECT_EQ(expected.charging_time, status->charging_time);
   EXPECT_EQ(expected.discharging_time, status->discharging_time);
   EXPECT_EQ(expected.level, status->level);
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 class FakeBatteryStatusManager : public BatteryStatusManager {
@@ -44,6 +44,10 @@ class FakeBatteryStatusManager : public BatteryStatusManager {
   explicit FakeBatteryStatusManager(
       const BatteryStatusService::BatteryUpdateCallback& callback)
       : callback_(callback), battery_status_available_(true), started_(false) {}
+
+  FakeBatteryStatusManager(const FakeBatteryStatusManager&) = delete;
+  FakeBatteryStatusManager& operator=(const FakeBatteryStatusManager&) = delete;
+
   ~FakeBatteryStatusManager() override {}
 
   // Methods from BatteryStatusManager.
@@ -77,13 +81,15 @@ class FakeBatteryStatusManager : public BatteryStatusManager {
   bool battery_status_available_;
   bool started_;
   mojom::BatteryStatus status_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeBatteryStatusManager);
 };
 
 class BatteryMonitorImplTest : public DeviceServiceTestBase {
  public:
   BatteryMonitorImplTest() = default;
+
+  BatteryMonitorImplTest(const BatteryMonitorImplTest&) = delete;
+  BatteryMonitorImplTest& operator=(const BatteryMonitorImplTest&) = delete;
+
   ~BatteryMonitorImplTest() override = default;
 
  protected:
@@ -96,7 +102,8 @@ class BatteryMonitorImplTest : public DeviceServiceTestBase {
     battery_manager_ = battery_manager.get();
     battery_service->SetBatteryManagerForTesting(std::move(battery_manager));
 
-    connector()->BindInterface(mojom::kServiceName, &battery_monitor_);
+    device_service()->BindBatteryMonitor(
+        battery_monitor_.BindNewPipeAndPassReceiver());
   }
 
   void TearDown() override {
@@ -110,12 +117,10 @@ class BatteryMonitorImplTest : public DeviceServiceTestBase {
 
   FakeBatteryStatusManager* battery_manager() { return battery_manager_; }
 
-  mojom::BatteryMonitorPtr battery_monitor_;
+  mojo::Remote<mojom::BatteryMonitor> battery_monitor_;
 
  private:
-  FakeBatteryStatusManager* battery_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(BatteryMonitorImplTest);
+  raw_ptr<FakeBatteryStatusManager> battery_manager_;
 };
 
 TEST_F(BatteryMonitorImplTest, BatteryManagerDefaultValues) {
@@ -129,7 +134,7 @@ TEST_F(BatteryMonitorImplTest, BatteryManagerDefaultValues) {
   default_status.discharging_time = std::numeric_limits<double>::infinity();
   default_status.level = 1.0;
   base::RunLoop run_loop;
-  battery_monitor_->QueryNextStatus(base::Bind(
+  battery_monitor_->QueryNextStatus(base::BindOnce(
       &ExpectBatteryStatus, nullptr, default_status, run_loop.QuitClosure()));
   run_loop.Run();
   EXPECT_TRUE(battery_manager()->started());
@@ -147,8 +152,8 @@ TEST_F(BatteryMonitorImplTest, BatteryManagerPredefinedValues) {
   battery_manager()->set_battery_status(status);
 
   base::RunLoop run_loop;
-  battery_monitor_->QueryNextStatus(base::Bind(&ExpectBatteryStatus, nullptr,
-                                               status, run_loop.QuitClosure()));
+  battery_monitor_->QueryNextStatus(base::BindOnce(
+      &ExpectBatteryStatus, nullptr, status, run_loop.QuitClosure()));
   run_loop.Run();
   EXPECT_TRUE(battery_manager()->started());
 }
@@ -167,7 +172,7 @@ TEST_F(BatteryMonitorImplTest, BatteryManagerInvokeUpdate) {
 
   // The first time query should succeed.
   base::RunLoop run_loop1;
-  battery_monitor_->QueryNextStatus(base::Bind(
+  battery_monitor_->QueryNextStatus(base::BindOnce(
       &ExpectBatteryStatus, nullptr, status, run_loop1.QuitClosure()));
   run_loop1.Run();
   EXPECT_TRUE(battery_manager()->started());
@@ -176,7 +181,7 @@ TEST_F(BatteryMonitorImplTest, BatteryManagerInvokeUpdate) {
   bool called = false;
   status.level = 0.6;
   base::RunLoop run_loop2;
-  battery_monitor_->QueryNextStatus(base::Bind(
+  battery_monitor_->QueryNextStatus(base::BindOnce(
       &ExpectBatteryStatus, &called, status, run_loop2.QuitClosure()));
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(called);

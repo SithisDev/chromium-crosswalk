@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/sys_byteorder.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
@@ -19,7 +20,7 @@ namespace network {
 
 const int kStunHeaderSize = 20;
 const uint16_t kStunBindingRequest = 0x0001;
-const uint16_t kStunBindingResponse = 0x0102;
+const uint16_t kStunBindingResponse = 0x0101;
 const uint16_t kStunBindingError = 0x0111;
 const uint32_t kStunMagicCookie = 0x2112A442;
 
@@ -202,35 +203,20 @@ bool FakeSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
   return false;
 }
 
-void FakeSocket::GetConnectionAttempts(net::ConnectionAttempts* out) const {
-  out->clear();
-}
-
 int64_t FakeSocket::GetTotalReceivedBytes() const {
   NOTIMPLEMENTED();
   return 0;
 }
 
-FakeSocketClient::FakeSocketClient(mojom::P2PSocketPtr socket,
-                                   mojom::P2PSocketClientRequest client_request)
-    : socket_(std::move(socket)), binding_(this, std::move(client_request)) {
-  binding_.set_connection_error_handler(
-      base::BindLambdaForTesting([&]() { connection_error_ = true; }));
+FakeSocketClient::FakeSocketClient(
+    mojo::PendingRemote<mojom::P2PSocket> socket,
+    mojo::PendingReceiver<mojom::P2PSocketClient> client_receiver)
+    : socket_(std::move(socket)), receiver_(this, std::move(client_receiver)) {
+  receiver_.set_disconnect_handler(
+      base::BindLambdaForTesting([&]() { disconnect_error_ = true; }));
 }
 
 FakeSocketClient::~FakeSocketClient() {}
-
-void FakeSocketClient::IncomingTcpConnection(
-    const net::IPEndPoint& endpoint,
-    network::mojom::P2PSocketPtr socket,
-    network::mojom::P2PSocketClientRequest client_request) {
-  accepted_.push_back(
-      std::make_pair(std::move(socket), std::move(client_request)));
-}
-
-void FakeSocketClient::CloseAccepted() {
-  accepted_.clear();
-}
 
 void CreateRandomPacket(std::vector<int8_t>* packet) {
   size_t size = kStunHeaderSize + rand() % 1000;

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump_for_io.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "services/device/serial/serial_io_handler.h"
 
@@ -18,6 +18,10 @@ namespace device {
 
 class SerialIoHandlerWin : public SerialIoHandler,
                            public base::MessagePumpForIO::IOHandler {
+ public:
+  SerialIoHandlerWin(const SerialIoHandlerWin&) = delete;
+  SerialIoHandlerWin& operator=(const SerialIoHandlerWin&) = delete;
+
  protected:
   // SerialIoHandler implementation.
   void ReadImpl() override;
@@ -25,13 +29,12 @@ class SerialIoHandlerWin : public SerialIoHandler,
   void CancelReadImpl() override;
   void CancelWriteImpl() override;
   bool ConfigurePortImpl() override;
-  bool Flush() const override;
+  void Flush(mojom::SerialPortFlushMode mode) const override;
+  void Drain() override;
   mojom::SerialPortControlSignalsPtr GetControlSignals() const override;
   bool SetControlSignals(
       const mojom::SerialHostControlSignals& control_signals) override;
   mojom::SerialConnectionInfoPtr GetPortInfo() const override;
-  bool SetBreak() override;
-  bool ClearBreak() override;
   bool PostOpen() override;
 
  private:
@@ -48,10 +51,8 @@ class SerialIoHandlerWin : public SerialIoHandler,
                      DWORD bytes_transfered,
                      DWORD error) override;
 
-  void OnDeviceRemoved(const std::string& device_path);
-
-  // Context used for asynchronous WaitCommEvent calls.
-  std::unique_ptr<base::MessagePumpForIO::IOContext> comm_context_;
+  void ClearPendingError();
+  void OnDeviceRemoved(const std::wstring& device_path);
 
   // Context used for overlapped reads.
   std::unique_ptr<base::MessagePumpForIO::IOContext> read_context_;
@@ -59,20 +60,10 @@ class SerialIoHandlerWin : public SerialIoHandler,
   // Context used for overlapped writes.
   std::unique_ptr<base::MessagePumpForIO::IOContext> write_context_;
 
-  // Asynchronous event mask state
-  DWORD event_mask_;
-
-  // Indicates if a pending read is waiting on initial data arrival via
-  // WaitCommEvent, as opposed to waiting on actual ReadFile completion
-  // after a corresponding WaitCommEvent has completed.
-  bool is_comm_pending_;
-
   // The helper lives on the UI thread and holds a weak reference back to the
   // handler that owns it.
-  UiThreadHelper* helper_;
-  base::WeakPtrFactory<SerialIoHandlerWin> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SerialIoHandlerWin);
+  raw_ptr<UiThreadHelper> helper_ = nullptr;
+  base::WeakPtrFactory<SerialIoHandlerWin> weak_factory_{this};
 };
 
 }  // namespace device

@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/proxy_resolving_client_socket_factory.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/time/time.h"
 #include "net/base/ip_address.h"
 #include "net/http/http_network_session.h"
@@ -19,16 +19,16 @@ ProxyResolvingClientSocketFactory::ProxyResolvingClientSocketFactory(
     : request_context_(request_context) {
   DCHECK(request_context);
 
-  net::HttpNetworkSession::Context session_context;
+  net::HttpNetworkSessionContext session_context;
   session_context.client_socket_factory =
       request_context->GetNetworkSessionContext()->client_socket_factory;
   session_context.host_resolver = request_context->host_resolver();
   session_context.cert_verifier = request_context->cert_verifier();
   session_context.transport_security_state =
       request_context->transport_security_state();
-  session_context.cert_transparency_verifier =
-      request_context->cert_transparency_verifier();
   session_context.ct_policy_enforcer = request_context->ct_policy_enforcer();
+  session_context.sct_auditing_delegate =
+      request_context->sct_auditing_delegate();
   session_context.proxy_resolution_service =
       request_context->proxy_resolution_service();
   session_context.proxy_delegate = request_context->proxy_delegate();
@@ -37,11 +37,12 @@ ProxyResolvingClientSocketFactory::ProxyResolvingClientSocketFactory(
       request_context->http_auth_handler_factory();
   session_context.http_server_properties =
       request_context->http_server_properties();
+  session_context.quic_context = request_context->quic_context();
   session_context.net_log = request_context->net_log();
 
-  const net::HttpNetworkSession::Params* reference_params =
+  const net::HttpNetworkSessionParams* reference_params =
       request_context->GetNetworkSessionParams();
-  net::HttpNetworkSession::Params session_params;
+  net::HttpNetworkSessionParams session_params;
   if (reference_params) {
     // TODO(mmenke):  Just copying specific parameters seems highly regression
     // prone.  Should have a better way to do this.
@@ -75,24 +76,29 @@ ProxyResolvingClientSocketFactory::~ProxyResolvingClientSocketFactory() {}
 std::unique_ptr<ProxyResolvingClientSocket>
 ProxyResolvingClientSocketFactory::CreateSocket(
     const GURL& url,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
     bool use_tls) {
   // |request_context|'s HttpAuthCache might have updates. For example, a user
   // might have since entered proxy credentials. Clear the http auth of
   // |network_session_| and copy over the data from |request_context|'s auth
   // cache.
+  //
+  // TODO(davidben): This does not share the SSLClientContext, so proxy client
+  // certificate credentials do not work. However, client certificates for both
+  // proxy and origin are handled at the socket layer, so doing so would pick up
+  // both sets. Depending on how these sockets are used, this may not be what we
+  // want. Toggling privacy mode (i.e. CORS uncredentialed mode) on the
+  // ConnectJob should give proxy auth without origin auth, but only after
+  // https://crbug.com/775438 is fixed.
   network_session_->http_auth_cache()->ClearAllEntries();
   net::HttpAuthCache* other_auth_cache =
       request_context_->http_transaction_factory()
           ->GetSession()
           ->http_auth_cache();
-  network_session_->http_auth_cache()->UpdateAllFrom(*other_auth_cache);
-  net::SSLConfig ssl_config;
-  // Unconditionally get the |ssl_config| regardless of |use_tls|, because
-  // SSLConfig is used for the proxy even !|use_tls|.
-  request_context_->ssl_config_service()->GetSSLConfig(&ssl_config);
+  network_session_->http_auth_cache()->CopyProxyEntriesFrom(*other_auth_cache);
   return std::make_unique<ProxyResolvingClientSocket>(
-      network_session_.get(), common_connect_job_params_.get(), ssl_config, url,
-      use_tls);
+      network_session_.get(), common_connect_job_params_.get(), url,
+      network_anonymization_key, use_tls, connect_job_factory_.get());
 }
 
 }  // namespace network

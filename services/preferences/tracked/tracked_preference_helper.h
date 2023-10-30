@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "services/preferences/tracked/pref_hash_filter.h"
 #include "services/preferences/tracked/pref_hash_store_transaction.h"
 
@@ -34,6 +33,9 @@ class TrackedPreferenceHelper {
           enforcement_level,
       prefs::mojom::TrackedPreferenceMetadata::ValueType value_type);
 
+  TrackedPreferenceHelper(const TrackedPreferenceHelper&) = delete;
+  TrackedPreferenceHelper& operator=(const TrackedPreferenceHelper&) = delete;
+
   // Returns a ResetAction stating whether a reset is desired (DO_RESET) or not
   // (DONT_RESET) based on observing |value_state|. Can also return WANTED_RESET
   // if a reset would have been desired but the current |enforcement_level|
@@ -54,10 +56,6 @@ class TrackedPreferenceHelper {
   // Reports |reset_action| via UMA under |reporting_id_|.
   void ReportAction(ResetAction reset_action) const;
 
-  // Reports, via UMA, the |count| of split preference entries that were
-  // considered invalid in a CHANGED event.
-  void ReportSplitPreferenceChangedCount(size_t count) const;
-
  private:
   const std::string pref_path_;
 
@@ -68,8 +66,6 @@ class TrackedPreferenceHelper {
   const bool enforce_;
 
   const bool personal_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrackedPreferenceHelper);
 };
 
 #endif  // SERVICES_PREFERENCES_TRACKED_TRACKED_PREFERENCE_HELPER_H_

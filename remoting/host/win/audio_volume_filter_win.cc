@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/win/audio_volume_filter_win.h"
 
+#include "base/check.h"
 #include "base/logging.h"
 
 namespace remoting {
@@ -44,7 +45,7 @@ float AudioVolumeFilterWin::GetAudioLevel() {
   float level;
   hr = audio_volume_->GetMasterVolumeLevelScalar(&level);
   if (FAILED(hr) || level > 1) {
-    LOG(ERROR) << "Failed to get master volume from IAudioEndpointVolume, "
+    LOG(ERROR) << "Failed to get volume level from IAudioEndpointVolume, "
                   "error "
                << hr;
     return 1;

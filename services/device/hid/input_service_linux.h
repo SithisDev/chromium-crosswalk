@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,11 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "services/device/public/mojom/input_service.mojom.h"
 
 namespace device {
@@ -27,10 +28,15 @@ class InputServiceLinux : public mojom::InputDeviceManager {
   using DeviceMap = std::map<std::string, mojom::InputDeviceInfoPtr>;
 
   InputServiceLinux();
+
+  InputServiceLinux(const InputServiceLinux&) = delete;
+  InputServiceLinux& operator=(const InputServiceLinux&) = delete;
+
   ~InputServiceLinux() override;
 
-  // Binds the |request| to an InputServiceLinux instance.
-  static void BindRequest(mojom::InputDeviceManagerRequest request);
+  // Binds the |receiver| to an InputServiceLinux instance.
+  static void BindReceiver(
+      mojo::PendingReceiver<mojom::InputDeviceManager> receiver);
 
   // Returns the InputServiceLinux instance for the current process. Creates one
   // if none has been set.
@@ -46,11 +52,11 @@ class InputServiceLinux : public mojom::InputDeviceManager {
   // current process. |service| will never be deleted.
   static void SetForTesting(std::unique_ptr<InputServiceLinux> service);
 
-  void AddBinding(mojom::InputDeviceManagerRequest request);
+  void AddReceiver(mojo::PendingReceiver<mojom::InputDeviceManager> receiver);
 
   // mojom::InputDeviceManager implementation:
   void GetDevicesAndSetClient(
-      mojom::InputDeviceManagerClientAssociatedPtrInfo client,
+      mojo::PendingAssociatedRemote<mojom::InputDeviceManagerClient> client,
       GetDevicesCallback callback) override;
   void GetDevices(GetDevicesCallback callback) override;
 
@@ -64,10 +70,8 @@ class InputServiceLinux : public mojom::InputDeviceManager {
 
  private:
   base::ThreadChecker thread_checker_;
-  mojo::BindingSet<mojom::InputDeviceManager> bindings_;
-  mojo::AssociatedInterfacePtrSet<mojom::InputDeviceManagerClient> clients_;
-
-  DISALLOW_COPY_AND_ASSIGN(InputServiceLinux);
+  mojo::ReceiverSet<mojom::InputDeviceManager> receivers_;
+  mojo::AssociatedRemoteSet<mojom::InputDeviceManagerClient> clients_;
 };
 
 }  // namespace device

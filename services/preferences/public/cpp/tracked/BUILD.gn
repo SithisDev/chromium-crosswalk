@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,12 +11,8 @@ static_library("tracked") {
     "tracked_preference_histogram_names.cc",
     "tracked_preference_histogram_names.h",
   ]
-  public_deps = [
-    "//services/preferences/public/mojom",
-  ]
-  deps = [
-    "//base",
-  ]
+  public_deps = [ "//services/preferences/public/mojom" ]
+  deps = [ "//base" ]
 }
 
 static_library("test_support") {

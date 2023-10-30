@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
@@ -30,8 +30,8 @@ class SequencedTaskRunner;
 namespace device {
 
 struct EndpointMapValue {
-  const mojom::UsbInterfaceInfo* interface;
-  const mojom::UsbEndpointInfo* endpoint;
+  raw_ptr<const mojom::UsbInterfaceInfo> interface;
+  raw_ptr<const mojom::UsbEndpointInfo> endpoint;
 };
 
 class UsbDeviceImpl;
@@ -42,6 +42,9 @@ typedef libusb_transfer* PlatformUsbTransferHandle;
 // UsbDeviceHandle class provides basic I/O related functionalities.
 class UsbDeviceHandleImpl : public UsbDeviceHandle {
  public:
+  UsbDeviceHandleImpl(const UsbDeviceHandleImpl&) = delete;
+  UsbDeviceHandleImpl& operator=(const UsbDeviceHandleImpl&) = delete;
+
   scoped_refptr<UsbDevice> GetDevice() const override;
   void Close() override;
   void SetConfiguration(int configuration_value,
@@ -52,7 +55,9 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
                                     int alternate_setting,
                                     ResultCallback callback) override;
   void ResetDevice(ResultCallback callback) override;
-  void ClearHalt(uint8_t endpoint, ResultCallback callback) override;
+  void ClearHalt(mojom::UsbTransferDirection direction,
+                 uint8_t endpoint_number,
+                 ResultCallback callback) override;
 
   void ControlTransfer(mojom::UsbTransferDirection direction,
                        mojom::UsbControlTransferType request_type,
@@ -114,16 +119,16 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
                                             bool success,
                                             ResultCallback callback);
   void ResetDeviceBlocking(ResultCallback callback);
-  void ClearHaltBlocking(uint8_t endpoint, ResultCallback callback);
+  void ClearHaltBlocking(uint8_t endpoint_address, ResultCallback callback);
 
   // Refresh endpoint_map_ after ClaimInterface, ReleaseInterface and
   // SetInterfaceAlternateSetting.
   void RefreshEndpointMap();
 
-  // Look up the claimed interface by endpoint. Return NULL if the interface
-  // of the endpoint is not found.
+  // Look up the claimed interface by endpoint address. Returns nullptr if an
+  // interface containing the endpoint is not found.
   scoped_refptr<InterfaceClaimer> GetClaimedInterfaceForEndpoint(
-      uint8_t endpoint);
+      uint8_t endpoint_address);
 
   void ReportIsochronousTransferError(
       UsbDeviceHandle::IsochronousTransferCallback callback,
@@ -157,8 +162,6 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(UsbDeviceHandleImpl);
 };
 
 }  // namespace device

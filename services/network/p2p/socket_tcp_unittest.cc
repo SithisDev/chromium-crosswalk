@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,26 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
-#include "jingle/glue/fake_ssl_client_socket.h"
+#include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/task_environment.h"
+#include "components/webrtc/fake_ssl_client_socket.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "net/base/features.h"
+#include "net/base/network_anonymization_key.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/stream_socket.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "services/network/p2p/socket_test_utils.h"
 #include "services/network/proxy_resolving_client_socket_factory.h"
@@ -34,25 +45,23 @@ class P2PSocketTcpTestBase : public testing::Test {
   explicit P2PSocketTcpTestBase(P2PSocketType type) : socket_type_(type) {}
 
   void SetUp() override {
-    mojom::P2PSocketClientPtr socket_client;
-    auto socket_client_request = mojo::MakeRequest(&socket_client);
+    mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+    mojo::PendingRemote<mojom::P2PSocket> socket;
+    auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
-    mojom::P2PSocketPtr socket;
-    auto socket_request = mojo::MakeRequest(&socket);
-
-    fake_client_.reset(new FakeSocketClient(std::move(socket),
-                                            std::move(socket_client_request)));
+    fake_client_ = std::make_unique<FakeSocketClient>(
+        std::move(socket), socket_client.InitWithNewPipeAndPassReceiver());
 
     EXPECT_CALL(*fake_client_.get(), SocketCreated(_, _)).Times(1);
 
     if (socket_type_ == P2P_SOCKET_TCP_CLIENT) {
       socket_impl_ = std::make_unique<P2PSocketTcp>(
           &socket_delegate_, std::move(socket_client),
-          std::move(socket_request), P2P_SOCKET_TCP_CLIENT, nullptr);
+          std::move(socket_receiver), P2P_SOCKET_TCP_CLIENT, nullptr);
     } else {
       socket_impl_ = std::make_unique<P2PSocketStunTcp>(
           &socket_delegate_, std::move(socket_client),
-          std::move(socket_request), P2P_SOCKET_STUN_TCP_CLIENT, nullptr);
+          std::move(socket_receiver), P2P_SOCKET_STUN_TCP_CLIENT, nullptr);
     }
 
     socket_ = new FakeSocket(&sent_data_);
@@ -76,9 +85,9 @@ class P2PSocketTcpTestBase : public testing::Test {
     return result;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::string sent_data_;
-  FakeSocket* socket_;  // Owned by |socket_impl_|.
+  raw_ptr<FakeSocket> socket_;  // Owned by |socket_impl_|.
   std::unique_ptr<P2PSocketTcpBase> socket_impl_;
   FakeP2PSocketDelegate socket_delegate_;
   std::unique_ptr<FakeSocketClient> fake_client_;
@@ -178,7 +187,7 @@ TEST_F(P2PSocketTcpTest, ReceiveStun) {
     size_t step_size = std::min(step_sizes[step], received_data.size() - pos);
     socket_->AppendInputData(&received_data[pos], step_size);
     pos += step_size;
-    if (++step >= base::size(step_sizes))
+    if (++step >= std::size(step_sizes))
       step = 0;
   }
 
@@ -332,6 +341,24 @@ TEST_F(P2PSocketTcpTest, SendDataWithPacketOptions) {
   base::RunLoop().RunUntilIdle();
 }
 
+// Verify that we ignore an empty frame.
+TEST_F(P2PSocketTcpTest, IgnoreEmptyFrame) {
+  std::vector<int8_t> response_packet;
+  CreateStunResponse(&response_packet);
+
+  std::string received_data;
+  received_data.append(IntToSize(response_packet.size()));
+  received_data.append(response_packet.begin(), response_packet.end());
+  socket_->AppendInputData(&received_data[0], received_data.size());
+
+  std::vector<int8_t> empty_packet;
+  received_data.resize(0);
+  received_data.append(IntToSize(empty_packet.size()));
+  received_data.append(empty_packet.begin(), empty_packet.end());
+  socket_->AppendInputData(&received_data[0], received_data.size());
+  EXPECT_CALL(*fake_client_.get(), DataReceived(_, _, _)).Times(0);
+}
+
 // Verify that we can send STUN message and that they are formatted
 // properly.
 TEST_F(P2PSocketStunTcpTest, SendStunNoAuth) {
@@ -406,7 +433,7 @@ TEST_F(P2PSocketStunTcpTest, ReceiveStun) {
     size_t step_size = std::min(step_sizes[step], received_data.size() - pos);
     socket_->AppendInputData(&received_data[pos], step_size);
     pos += step_size;
-    if (++step >= base::size(step_sizes))
+    if (++step >= std::size(step_sizes))
       step = 0;
   }
 
@@ -465,28 +492,27 @@ TEST_F(P2PSocketStunTcpTest, AsyncWrites) {
 // ProxyResolvingClientSocket::Connect() won't be called twice.
 // Regression test for crbug.com/840797.
 TEST(P2PSocketTcpWithPseudoTlsTest, Basic) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::IO);
 
-  mojom::P2PSocketClientPtr socket_client;
-  auto socket_client_request = mojo::MakeRequest(&socket_client);
-  mojom::P2PSocketPtr socket;
-  auto socket_request = mojo::MakeRequest(&socket);
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
   FakeSocketClient fake_client2(std::move(socket),
-                                std::move(socket_client_request));
+                                socket_client.InitWithNewPipeAndPassReceiver());
   EXPECT_CALL(fake_client2, SocketCreated(_, _)).Times(1);
 
-  net::TestURLRequestContext context(true);
   net::MockClientSocketFactory mock_socket_factory;
-  context.set_client_socket_factory(&mock_socket_factory);
-  context.Init();
-  ProxyResolvingClientSocketFactory factory(&context);
+  auto context_builder = net::CreateTestURLRequestContextBuilder();
+  context_builder->set_client_socket_factory_for_testing(&mock_socket_factory);
+  auto context = context_builder->Build();
+  ProxyResolvingClientSocketFactory factory(context.get());
 
   base::StringPiece ssl_client_hello =
-      jingle_glue::FakeSSLClientSocket::GetSslClientHello();
+      webrtc::FakeSSLClientSocket::GetSslClientHello();
   base::StringPiece ssl_server_hello =
-      jingle_glue::FakeSSLClientSocket::GetSslServerHello();
+      webrtc::FakeSSLClientSocket::GetSslServerHello();
   net::MockRead reads[] = {
       net::MockRead(net::ASYNC, ssl_server_hello.data(),
                     ssl_server_hello.size()),
@@ -501,15 +527,107 @@ TEST(P2PSocketTcpWithPseudoTlsTest, Basic) {
 
   FakeP2PSocketDelegate socket_delegate;
   P2PSocketTcp host(&socket_delegate, std::move(socket_client),
-                    std::move(socket_request), P2P_SOCKET_SSLTCP_CLIENT,
+                    std::move(socket_receiver), P2P_SOCKET_SSLTCP_CLIENT,
                     &factory);
   P2PHostAndIPEndPoint dest;
   dest.ip_address = server_addr;
-  host.Init(net::IPEndPoint(net::IPAddress::IPv4Localhost(), 0), 0, 0, dest);
+  host.Init(net::IPEndPoint(net::IPAddress::IPv4Localhost(), 0), 0, 0, dest,
+            net::NetworkAnonymizationKey());
 
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(data_provider.AllReadDataConsumed());
   EXPECT_TRUE(data_provider.AllWriteDataConsumed());
+}
+
+// Test the case where P2PHostAndIPEndPoint::hostname is populated. Make sure
+// there's a DNS lookup using the right hostname and NetworkAnonymizationKey.
+TEST(P2PSocketTcpWithPseudoTlsTest, Hostname) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      net::features::kSplitHostCacheByNetworkIsolationKey);
+
+  const char kHostname[] = "foo.test";
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::IO);
+
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
+
+  FakeSocketClient fake_client2(std::move(socket),
+                                socket_client.InitWithNewPipeAndPassReceiver());
+  EXPECT_CALL(fake_client2, SocketCreated(_, _)).Times(1);
+
+  net::MockClientSocketFactory mock_socket_factory;
+  auto context_builder = net::CreateTestURLRequestContextBuilder();
+  context_builder->set_client_socket_factory_for_testing(&mock_socket_factory);
+  auto host_resolver = std::make_unique<net::MockCachingHostResolver>();
+  host_resolver->rules()->AddRule(kHostname, "1.2.3.4");
+  context_builder->set_host_resolver(std::move(host_resolver));
+  auto context = context_builder->Build();
+  ProxyResolvingClientSocketFactory factory(context.get());
+
+  base::StringPiece ssl_client_hello =
+      webrtc::FakeSSLClientSocket::GetSslClientHello();
+  base::StringPiece ssl_server_hello =
+      webrtc::FakeSSLClientSocket::GetSslServerHello();
+  net::MockRead reads[] = {
+      net::MockRead(net::ASYNC, ssl_server_hello.data(),
+                    ssl_server_hello.size()),
+      net::MockRead(net::SYNCHRONOUS, net::ERR_IO_PENDING)};
+  net::MockWrite writes[] = {net::MockWrite(
+      net::SYNCHRONOUS, ssl_client_hello.data(), ssl_client_hello.size())};
+  net::StaticSocketDataProvider data_provider(reads, writes);
+  net::IPEndPoint server_addr(net::IPAddress::IPv4Localhost(), 1234);
+  data_provider.set_connect_data(
+      net::MockConnect(net::SYNCHRONOUS, net::OK, server_addr));
+  mock_socket_factory.AddSocketDataProvider(&data_provider);
+
+  FakeP2PSocketDelegate socket_delegate;
+  P2PSocketTcp host(&socket_delegate, std::move(socket_client),
+                    std::move(socket_receiver), P2P_SOCKET_SSLTCP_CLIENT,
+                    &factory);
+  P2PHostAndIPEndPoint dest;
+  dest.ip_address = server_addr;
+  dest.hostname = kHostname;
+  net::NetworkAnonymizationKey network_anonymization_key =
+      net::NetworkAnonymizationKey::CreateTransient();
+  host.Init(net::IPEndPoint(net::IPAddress::IPv4Localhost(), 0), 0, 0, dest,
+            network_anonymization_key);
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(data_provider.AllReadDataConsumed());
+  EXPECT_TRUE(data_provider.AllWriteDataConsumed());
+
+  // Check that the URL in kHostname is in the HostCache, with
+  // |network_anonymization_key|.
+  const net::HostPortPair kHostPortPair = net::HostPortPair(kHostname, 0);
+  net::HostResolver::ResolveHostParameters params;
+  params.source = net::HostResolverSource::LOCAL_ONLY;
+  std::unique_ptr<net::HostResolver::ResolveHostRequest> request1 =
+      context->host_resolver()->CreateRequest(kHostPortPair,
+                                              network_anonymization_key,
+                                              net::NetLogWithSource(), params);
+  net::TestCompletionCallback callback1;
+  int result = request1->Start(callback1.callback());
+  EXPECT_EQ(net::OK, callback1.GetResult(result));
+
+  // Check that the hostname is not in the DNS cache for other possible NIKs.
+  const url::Origin kDestinationOrigin =
+      url::Origin::Create(GURL(base::StringPrintf("https://%s", kHostname)));
+  const net::NetworkAnonymizationKey kOtherNaks[] = {
+      net::NetworkAnonymizationKey(),
+      net::NetworkAnonymizationKey(
+          net::SchemefulSite(kDestinationOrigin) /* top_frame_origin */,
+          net::SchemefulSite(kDestinationOrigin) /* frame_origin */)};
+  for (const auto& other_nak : kOtherNaks) {
+    std::unique_ptr<net::HostResolver::ResolveHostRequest> request2 =
+        context->host_resolver()->CreateRequest(
+            kHostPortPair, other_nak, net::NetLogWithSource(), params);
+    net::TestCompletionCallback callback2;
+    result = request2->Start(callback2.callback());
+    EXPECT_EQ(net::ERR_NAME_NOT_RESOLVED, callback2.GetResult(result));
+  }
 }
 
 class P2PSocketTcpWithTlsTest
@@ -525,23 +643,22 @@ INSTANTIATE_TEST_SUITE_P(
 // Tests that if a socket type satisfies IsTlsClientSocket(), TLS connection is
 // established.
 TEST_P(P2PSocketTcpWithTlsTest, Basic) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::IO);
 
-  mojom::P2PSocketClientPtr socket_client;
-  auto socket_client_request = mojo::MakeRequest(&socket_client);
-  mojom::P2PSocketPtr socket;
-  auto socket_request = mojo::MakeRequest(&socket);
+  mojo::PendingRemote<mojom::P2PSocketClient> socket_client;
+  mojo::PendingRemote<mojom::P2PSocket> socket;
+  auto socket_receiver = socket.InitWithNewPipeAndPassReceiver();
 
   FakeSocketClient fake_client2(std::move(socket),
-                                std::move(socket_client_request));
+                                socket_client.InitWithNewPipeAndPassReceiver());
   EXPECT_CALL(fake_client2, SocketCreated(_, _)).Times(1);
 
-  net::TestURLRequestContext context(true);
   net::MockClientSocketFactory mock_socket_factory;
-  context.set_client_socket_factory(&mock_socket_factory);
-  context.Init();
-  ProxyResolvingClientSocketFactory factory(&context);
+  auto context_builder = net::CreateTestURLRequestContextBuilder();
+  context_builder->set_client_socket_factory_for_testing(&mock_socket_factory);
+  auto context = context_builder->Build();
+  ProxyResolvingClientSocketFactory factory(context.get());
   const net::IoMode io_mode = std::get<0>(GetParam());
   const P2PSocketType socket_type = std::get<1>(GetParam());
   // OnOpen() calls DoRead(), so populate the mock socket with a pending read.
@@ -560,16 +677,17 @@ TEST_P(P2PSocketTcpWithTlsTest, Basic) {
   std::unique_ptr<P2PSocketTcpBase> host;
   if (socket_type == P2P_SOCKET_STUN_TLS_CLIENT) {
     host = std::make_unique<P2PSocketStunTcp>(
-        &socket_delegate, std::move(socket_client), std::move(socket_request),
+        &socket_delegate, std::move(socket_client), std::move(socket_receiver),
         socket_type, &factory);
   } else {
     host = std::make_unique<P2PSocketTcp>(
-        &socket_delegate, std::move(socket_client), std::move(socket_request),
+        &socket_delegate, std::move(socket_client), std::move(socket_receiver),
         socket_type, &factory);
   }
   P2PHostAndIPEndPoint dest;
   dest.ip_address = server_addr;
-  host->Init(net::IPEndPoint(net::IPAddress::IPv4Localhost(), 0), 0, 0, dest);
+  host->Init(net::IPEndPoint(net::IPAddress::IPv4Localhost(), 0), 0, 0, dest,
+             net::NetworkAnonymizationKey());
 
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(data_provider.AllReadDataConsumed());

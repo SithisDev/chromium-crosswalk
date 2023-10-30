@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor_monitor.h"
@@ -25,23 +25,30 @@ class MouseShapePump : public webrtc::MouseCursorMonitor::Callback {
   MouseShapePump(
       std::unique_ptr<webrtc::MouseCursorMonitor> mouse_cursor_monitor,
       protocol::CursorShapeStub* cursor_shape_stub);
+
+  MouseShapePump(const MouseShapePump&) = delete;
+  MouseShapePump& operator=(const MouseShapePump&) = delete;
+
   ~MouseShapePump() override;
+
+  // Sets or unsets the callback to which to delegate MouseCursorMonitor events
+  // after they have been processed.
+  void SetMouseCursorMonitorCallback(
+      webrtc::MouseCursorMonitor::Callback* callback);
 
  private:
   void Capture();
 
   // webrtc::MouseCursorMonitor::Callback implementation.
   void OnMouseCursor(webrtc::MouseCursor* mouse_cursor) override;
-  void OnMouseCursorPosition(webrtc::MouseCursorMonitor::CursorState state,
-                             const webrtc::DesktopVector& position) override;
+  void OnMouseCursorPosition(const webrtc::DesktopVector& position) override;
 
   base::ThreadChecker thread_checker_;
   std::unique_ptr<webrtc::MouseCursorMonitor> mouse_cursor_monitor_;
-  protocol::CursorShapeStub* cursor_shape_stub_;
+  raw_ptr<protocol::CursorShapeStub> cursor_shape_stub_;
 
   base::RepeatingTimer capture_timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(MouseShapePump);
+  raw_ptr<webrtc::MouseCursorMonitor::Callback> callback_ = nullptr;
 };
 
 }  // namespace remoting

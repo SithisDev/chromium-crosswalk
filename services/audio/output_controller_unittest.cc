@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,16 @@
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
+#include "base/check.h"
 #include "base/environment.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/thread.h"
@@ -33,9 +32,11 @@
 #include "media/audio/test_audio_thread.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
+#include "services/audio/concurrent_stream_metric_reporter.h"
 #include "services/audio/loopback_group_member.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using ::testing::_;
 using ::testing::AtLeast;
@@ -57,7 +58,8 @@ namespace audio {
 namespace {
 
 constexpr int kSampleRate = AudioParameters::kAudioCDSampleRate;
-constexpr media::ChannelLayout kChannelLayout = media::CHANNEL_LAYOUT_STEREO;
+const media::ChannelLayoutConfig kChannelLayoutConfig =
+    media::ChannelLayoutConfig::Stereo();
 constexpr int kSamplesPerPacket = kSampleRate / 1000;
 constexpr double kTestVolume = 0.25;
 constexpr float kBufferNonZeroData = 1.0f;
@@ -66,47 +68,53 @@ AudioParameters GetTestParams() {
   // AudioManagerForControllerTest only creates FakeAudioOutputStreams
   // behind-the-scenes. So, the use of PCM_LOW_LATENCY won't actually result in
   // any real system audio output during these tests.
-  return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY, kChannelLayout,
-                         kSampleRate, kSamplesPerPacket);
+  return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                         kChannelLayoutConfig, kSampleRate, kSamplesPerPacket);
 }
 
 class MockOutputControllerEventHandler : public OutputController::EventHandler {
  public:
   MockOutputControllerEventHandler() = default;
 
+  MockOutputControllerEventHandler(const MockOutputControllerEventHandler&) =
+      delete;
+  MockOutputControllerEventHandler& operator=(
+      const MockOutputControllerEventHandler&) = delete;
+
   MOCK_METHOD0(OnControllerPlaying, void());
   MOCK_METHOD0(OnControllerPaused, void());
   MOCK_METHOD0(OnControllerError, void());
   void OnLog(base::StringPiece) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockOutputControllerEventHandler);
 };
 
 class MockOutputControllerSyncReader : public OutputController::SyncReader {
  public:
   MockOutputControllerSyncReader() = default;
 
+  MockOutputControllerSyncReader(const MockOutputControllerSyncReader&) =
+      delete;
+  MockOutputControllerSyncReader& operator=(
+      const MockOutputControllerSyncReader&) = delete;
+
   MOCK_METHOD3(RequestMoreData,
                void(base::TimeDelta delay,
                     base::TimeTicks delay_timestamp,
                     int prior_frames_skipped));
-  MOCK_METHOD1(Read, void(AudioBus* dest));
+  MOCK_METHOD2(Read, void(AudioBus* dest, bool is_mixing));
   MOCK_METHOD0(Close, void());
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockOutputControllerSyncReader);
 };
 
-class MockStreamMonitor : public StreamMonitor {
+class MockOutputStreamActivityMonitor : public OutputStreamActivityMonitor {
  public:
-  MockStreamMonitor() = default;
+  MockOutputStreamActivityMonitor() = default;
 
-  MOCK_METHOD1(OnStreamActive, void(Snoopable* snoopable));
-  MOCK_METHOD1(OnStreamInactive, void(Snoopable* snoopable));
+  MockOutputStreamActivityMonitor(const MockOutputStreamActivityMonitor&) =
+      delete;
+  MockOutputStreamActivityMonitor& operator=(
+      const MockOutputStreamActivityMonitor&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockStreamMonitor);
+  MOCK_METHOD0(OnOutputStreamActive, void());
+  MOCK_METHOD0(OnOutputStreamInactive, void());
 };
 
 // Wraps an AudioOutputStream instance, calling DidXYZ() mock methods for test
@@ -119,6 +127,9 @@ class MockAudioOutputStream : public AudioOutputStream,
  public:
   MockAudioOutputStream(AudioOutputStream* impl, AudioParameters::Format format)
       : impl_(impl), format_(format) {}
+
+  MockAudioOutputStream(const MockAudioOutputStream&) = delete;
+  MockAudioOutputStream& operator=(const MockAudioOutputStream&) = delete;
 
   AudioParameters::Format format() const { return format_; }
 
@@ -143,7 +154,7 @@ class MockAudioOutputStream : public AudioOutputStream,
   }
 
   void Start(AudioOutputStream::AudioSourceCallback* cb) override {
-    EXPECT_EQ(nullptr, callback_);
+    EXPECT_EQ(nullptr, callback_.get());
     callback_ = cb;
     if (impl_) {
       impl_->Start(this);
@@ -220,24 +231,26 @@ class MockAudioOutputStream : public AudioOutputStream,
     return res;
   }
 
-  void OnError() override {
+  void OnError(ErrorType type) override {
     // Fake stream doesn't send errors.
     NOTREACHED();
   }
 
-  AudioOutputStream* impl_;
+  raw_ptr<AudioOutputStream> impl_;
   const AudioParameters::Format format_;
   base::OnceClosure close_callback_;
-  AudioOutputStream::AudioSourceCallback* callback_ = nullptr;
+  raw_ptr<AudioOutputStream::AudioSourceCallback> callback_ = nullptr;
   double volume_ = 1.0;
   std::unique_ptr<base::Thread> data_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockAudioOutputStream);
 };
 
 class MockSnooper : public Snoopable::Snooper {
  public:
   MockSnooper() = default;
+
+  MockSnooper(const MockSnooper&) = delete;
+  MockSnooper& operator=(const MockSnooper&) = delete;
+
   ~MockSnooper() override = default;
 
   MOCK_METHOD0(DidProvideData, void());
@@ -262,19 +275,17 @@ class MockSnooper : public Snoopable::Snooper {
 
  private:
   base::TimeTicks last_reference_time_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockSnooper);
 };
 
 // A FakeAudioManager that produces MockAudioOutputStreams, and tracks the last
 // stream that was created and the last stream that was closed.
-class AudioManagerForControllerTest : public media::FakeAudioManager {
+class AudioManagerForControllerTest final : public media::FakeAudioManager {
  public:
   AudioManagerForControllerTest()
       : media::FakeAudioManager(std::make_unique<media::TestAudioThread>(false),
                                 &fake_audio_log_factory_) {}
 
-  ~AudioManagerForControllerTest() final = default;
+  ~AudioManagerForControllerTest() override = default;
 
   MockAudioOutputStream* last_created_stream() const {
     return last_created_stream_;
@@ -308,14 +319,19 @@ class AudioManagerForControllerTest : public media::FakeAudioManager {
     return last_created_stream_;
   }
 
+  void SimulateDeviceChange() { NotifyAllOutputDeviceChangeListeners(); }
+
  private:
   void SetLastClosedStream(MockAudioOutputStream* stream) {
     last_closed_stream_ = stream;
   }
 
   media::FakeAudioLogFactory fake_audio_log_factory_;
-  MockAudioOutputStream* last_created_stream_ = nullptr;
-  MockAudioOutputStream* last_closed_stream_ = nullptr;
+  // TODO(crbug.com/1298696): Breaks services_unittests.
+  raw_ptr<MockAudioOutputStream, DegradeToNoOpWhenMTE> last_created_stream_ =
+      nullptr;
+  raw_ptr<MockAudioOutputStream, DegradeToNoOpWhenMTE> last_closed_stream_ =
+      nullptr;
 };
 
 ACTION(PopulateBuffer) {
@@ -327,20 +343,21 @@ ACTION(PopulateBuffer) {
 
 class OutputControllerTest : public ::testing::Test {
  public:
-  OutputControllerTest()
-      : group_id_(base::UnguessableToken::Create()),
-        processing_id_(base::UnguessableToken::Create()) {}
+  OutputControllerTest() : group_id_(base::UnguessableToken::Create()) {}
+
+  OutputControllerTest(const OutputControllerTest&) = delete;
+  OutputControllerTest& operator=(const OutputControllerTest&) = delete;
 
   ~OutputControllerTest() override { audio_manager_.Shutdown(); }
 
   void SetUp() override {
-    controller_.emplace(&audio_manager_, &mock_event_handler_, GetTestParams(),
-                        std::string(), &mock_sync_reader_,
-                        &stream_monitor_coordinator_, processing_id_);
+    controller_.emplace(&audio_manager_, &mock_event_handler_,
+                        &mock_stream_activity_monitor_, GetTestParams(),
+                        std::string(), &mock_sync_reader_);
     controller_->SetVolume(kTestVolume);
   }
 
-  void TearDown() override { controller_ = base::nullopt; }
+  void TearDown() override { controller_ = absl::nullopt; }
 
  protected:
   // Returns the last-created or last-closed AudioOuptutStream.
@@ -366,8 +383,8 @@ class OutputControllerTest : public ::testing::Test {
     EXPECT_CALL(mock_sync_reader_, RequestMoreData(_, _, _))
         .WillOnce(RunClosure(barrier))
         .WillRepeatedly(Return());
-    EXPECT_CALL(mock_sync_reader_, Read(_))
-        .WillOnce(Invoke([barrier](AudioBus* data) {
+    EXPECT_CALL(mock_sync_reader_, Read(_, false))
+        .WillOnce(Invoke([barrier](AudioBus* data, bool /*is_mixing*/) {
           data->Zero();
           data->channel(0)[0] = kBufferNonZeroData;
           barrier.Run();
@@ -381,6 +398,8 @@ class OutputControllerTest : public ::testing::Test {
     loop.Run();
   }
 
+  void PlayWhilePlaying() { controller_->Play(); }
+
   void Pause() {
     base::RunLoop loop;
     EXPECT_CALL(mock_event_handler_, OnControllerPaused())
@@ -390,16 +409,23 @@ class OutputControllerTest : public ::testing::Test {
     Mock::VerifyAndClearExpectations(&mock_event_handler_);
   }
 
-  void ChangeDevice() {
-    // Expect the event handler to receive one OnControllerPaying() call and no
-    // OnControllerPaused() call.
-    EXPECT_CALL(mock_event_handler_, OnControllerPlaying());
+  void ChangeDevice(bool expect_play_event = true) {
+    // If the stream was already playing before the device change, expect the
+    // event handler to receive one OnControllerPaying() call.
+    if (expect_play_event) {
+      EXPECT_CALL(mock_event_handler_, OnControllerPlaying());
+    } else {
+      EXPECT_CALL(mock_event_handler_, OnControllerPlaying()).Times(0);
+    }
+
+    // Never expect a OnControllerPaused() call.
     EXPECT_CALL(mock_event_handler_, OnControllerPaused()).Times(0);
 
     // Simulate a device change event to OutputController from the AudioManager.
     audio_manager_.GetTaskRunner()->PostTask(
-        FROM_HERE, base::BindOnce(&OutputController::OnDeviceChange,
-                                  base::Unretained(&(*controller_))));
+        FROM_HERE,
+        base::BindOnce(&AudioManagerForControllerTest::SimulateDeviceChange,
+                       base::Unretained(&audio_manager_)));
 
     // Wait for device change to take effect.
     base::RunLoop loop;
@@ -417,7 +443,9 @@ class OutputControllerTest : public ::testing::Test {
     Mock::VerifyAndClearExpectations(&mock_event_handler_);
   }
 
-  void StopMuting() {
+  void StopMutingBeforePlaying() { controller_->StopMuting(); }
+
+  void StopMutingWhilePlaying() {
     EXPECT_CALL(mock_event_handler_, OnControllerPlaying());
     controller_->StopMuting();
     Mock::VerifyAndClearExpectations(&mock_event_handler_);
@@ -442,14 +470,6 @@ class OutputControllerTest : public ::testing::Test {
 
   Snoopable* GetSnoopable() { return &(*controller_); }
 
-  void JoinProcessingGroup(StreamMonitor* monitor) {
-    stream_monitor_coordinator_.RegisterMember(processing_id_, monitor);
-  }
-
-  void LeaveProcessingGroup(StreamMonitor* monitor) {
-    stream_monitor_coordinator_.UnregisterMember(processing_id_, monitor);
-  }
-
   void Close() {
     EXPECT_CALL(mock_sync_reader_, Close());
     controller_->Close();
@@ -462,43 +482,15 @@ class OutputControllerTest : public ::testing::Test {
 
   void Flush() { controller_->Flush(); }
 
-  void SimulateErrorThenDeviceChange() {
-    audio_manager_.GetTaskRunner()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&OutputControllerTest::TriggerErrorThenDeviceChange,
-                       base::Unretained(this)));
-
-    base::RunLoop loop;
-    audio_manager_.GetTaskRunner()->PostTask(FROM_HERE, loop.QuitClosure());
-    loop.Run();
-  }
-
-  void TriggerErrorThenDeviceChange() {
-    DCHECK(audio_manager_.GetTaskRunner()->BelongsToCurrentThread());
-
-    // Errors should be deferred; the device change should ensure it's dropped.
-    EXPECT_CALL(mock_event_handler_, OnControllerError()).Times(0);
-    controller_->OnError();
-
-    EXPECT_CALL(mock_event_handler_, OnControllerPlaying());
-    EXPECT_CALL(mock_event_handler_, OnControllerPaused()).Times(0);
-    controller_->OnDeviceChange();
-
-    Mock::VerifyAndClearExpectations(&mock_event_handler_);
-  }
-
   StrictMock<MockOutputControllerEventHandler> mock_event_handler_;
+  StrictMock<MockOutputStreamActivityMonitor> mock_stream_activity_monitor_;
 
  private:
   base::TestMessageLoop message_loop_;
   AudioManagerForControllerTest audio_manager_;
   base::UnguessableToken group_id_;
-  base::UnguessableToken processing_id_;
   StrictMock<MockOutputControllerSyncReader> mock_sync_reader_;
-  base::Optional<OutputController> controller_;
-  StreamMonitorCoordinator stream_monitor_coordinator_;
-
-  DISALLOW_COPY_AND_ASSIGN(OutputControllerTest);
+  absl::optional<OutputController> controller_;
 };
 
 TEST_F(OutputControllerTest, CreateAndClose) {
@@ -507,12 +499,17 @@ TEST_F(OutputControllerTest, CreateAndClose) {
 }
 
 TEST_F(OutputControllerTest, PlayAndClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
   Create();
   Play();
   Close();
 }
 
 TEST_F(OutputControllerTest, PlayPauseClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   Play();
   Pause();
@@ -520,6 +517,9 @@ TEST_F(OutputControllerTest, PlayPauseClose) {
 }
 
 TEST_F(OutputControllerTest, PlayPausePlayClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(2);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(2);
+
   Create();
   Play();
   Pause();
@@ -528,16 +528,43 @@ TEST_F(OutputControllerTest, PlayPausePlayClose) {
 }
 
 TEST_F(OutputControllerTest, PlayDeviceChangeClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   Play();
   ChangeDevice();
   Close();
 }
 
-TEST_F(OutputControllerTest, PlayDeviceChangeError) {
+TEST_F(OutputControllerTest, PlayDeviceChangeDeviceChangeClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   Play();
-  SimulateErrorThenDeviceChange();
+  ChangeDevice();
+  ChangeDevice();
+  Close();
+}
+
+TEST_F(OutputControllerTest, PlayPauseDeviceChangeClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
+  Create();
+  Play();
+  Pause();
+  ChangeDevice(/*expect_play_event=*/false);
+  Close();
+}
+
+TEST_F(OutputControllerTest, CreateDeviceChangeClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(0);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(0);
+
+  Create();
+  ChangeDevice(/*expect_play_event=*/false);
   Close();
 }
 
@@ -575,6 +602,9 @@ TEST_F(OutputControllerTest, MuteCreatePlayClose) {
 // Tests that a local playout stream is shut-down and replaced with a "muting
 // stream" if StartMuting() is called after playback begins.
 TEST_F(OutputControllerTest, CreatePlayMuteClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   MockAudioOutputStream* const playout_stream = last_created_stream();
   ASSERT_TRUE(playout_stream);
@@ -599,7 +629,10 @@ TEST_F(OutputControllerTest, CreatePlayMuteClose) {
 
 // Tests that the "muting stream" is shut down and replaced with the normal
 // playout stream after StopMuting() is called.
-TEST_F(OutputControllerTest, PlayMuteUnmuteClose) {
+TEST_F(OutputControllerTest, MutePlayUnmuteClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   StartMutingBeforePlaying();
   Create();
   Play();
@@ -608,7 +641,7 @@ TEST_F(OutputControllerTest, PlayMuteUnmuteClose) {
   EXPECT_EQ(nullptr, last_closed_stream());
   EXPECT_EQ(AudioParameters::AUDIO_FAKE, mute_stream->format());
 
-  StopMuting();
+  StopMutingWhilePlaying();
   MockAudioOutputStream* const playout_stream = last_created_stream();
   ASSERT_TRUE(playout_stream);
   EXPECT_EQ(mute_stream, last_closed_stream());
@@ -621,6 +654,9 @@ TEST_F(OutputControllerTest, PlayMuteUnmuteClose) {
 }
 
 TEST_F(OutputControllerTest, SnoopCreatePlayStopClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   NiceMock<MockSnooper> snooper;
   StartSnooping(&snooper);
   Create();
@@ -631,6 +667,9 @@ TEST_F(OutputControllerTest, SnoopCreatePlayStopClose) {
 }
 
 TEST_F(OutputControllerTest, CreatePlaySnoopStopClose) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   NiceMock<MockSnooper> snooper;
   Create();
   Play();
@@ -641,6 +680,9 @@ TEST_F(OutputControllerTest, CreatePlaySnoopStopClose) {
 }
 
 TEST_F(OutputControllerTest, CreatePlaySnoopCloseStop) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   NiceMock<MockSnooper> snooper;
   Create();
   Play();
@@ -651,6 +693,9 @@ TEST_F(OutputControllerTest, CreatePlaySnoopCloseStop) {
 }
 
 TEST_F(OutputControllerTest, TwoSnoopers_StartAtDifferentTimes) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   NiceMock<MockSnooper> snooper1;
   NiceMock<MockSnooper> snooper2;
   StartSnooping(&snooper1);
@@ -667,6 +712,9 @@ TEST_F(OutputControllerTest, TwoSnoopers_StartAtDifferentTimes) {
 }
 
 TEST_F(OutputControllerTest, TwoSnoopers_StopAtDifferentTimes) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   NiceMock<MockSnooper> snooper1;
   NiceMock<MockSnooper> snooper2;
   Create();
@@ -714,41 +762,10 @@ TEST_F(OutputControllerTest, SnoopWhileMuting) {
   EXPECT_EQ(mute_stream, last_closed_stream());
 }
 
-TEST_F(OutputControllerTest, InformsStreamMonitorsAlreadyInGroup) {
-  MockStreamMonitor monitor;
-  EXPECT_CALL(monitor, OnStreamActive(GetSnoopable()));
-  EXPECT_CALL(monitor, OnStreamInactive(GetSnoopable()));
-  JoinProcessingGroup(&monitor);
-  Create();
-  Play();
-  Close();
-  LeaveProcessingGroup(&monitor);
-}
-
-TEST_F(OutputControllerTest, InformsStreamMonitorsJoiningInGroup) {
-  MockStreamMonitor monitor;
-  EXPECT_CALL(monitor, OnStreamActive(GetSnoopable()));
-  EXPECT_CALL(monitor, OnStreamInactive(GetSnoopable()));
-  Create();
-  Play();
-  JoinProcessingGroup(&monitor);
-  Close();
-  LeaveProcessingGroup(&monitor);
-}
-
-TEST_F(OutputControllerTest,
-       DoesNotInformStreamMonitorsJoiningInGroupAfterClose) {
-  MockStreamMonitor monitor;
-  EXPECT_CALL(monitor, OnStreamActive(GetSnoopable())).Times(0);
-  EXPECT_CALL(monitor, OnStreamInactive(GetSnoopable())).Times(0);
-  Create();
-  Play();
-  Close();
-  JoinProcessingGroup(&monitor);
-  LeaveProcessingGroup(&monitor);
-}
-
 TEST_F(OutputControllerTest, FlushWhenStreamIsPlayingTriggersError) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   Play();
 
@@ -761,6 +778,9 @@ TEST_F(OutputControllerTest, FlushWhenStreamIsPlayingTriggersError) {
 }
 
 TEST_F(OutputControllerTest, FlushesWhenStreamIsNotPlaying) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+
   Create();
   Play();
   Pause();
@@ -770,6 +790,267 @@ TEST_F(OutputControllerTest, FlushesWhenStreamIsNotPlaying) {
   Flush();
 
   Close();
+}
+
+TEST_F(OutputControllerTest, FlushesAfterDeviceChange) {
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(0);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(0);
+
+  Create();
+  ChangeDevice(/*expect_play_event=*/false);
+
+  MockAudioOutputStream* const mock_stream = last_created_stream();
+  EXPECT_CALL(*mock_stream, DidFlush()).Times(1);
+  Flush();
+
+  Close();
+}
+
+// Tests that stream activity (play/pause, taking muting into account) is
+// correctly signalled to the OutputStreamActivityMonitor.
+TEST_F(OutputControllerTest, ReportActivity) {
+  Create();
+
+  // The stream is expected to only report state changes once. This variable
+  // tracks this throughout the test.
+  bool stream_active_state = false;
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive())
+      .WillRepeatedly([&stream_active_state]() {
+        EXPECT_FALSE(stream_active_state);
+        stream_active_state = true;
+      });
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive())
+      .WillRepeatedly([&stream_active_state]() {
+        EXPECT_TRUE(stream_active_state);
+        stream_active_state = false;
+      });
+
+  // Playing -> active.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(0);
+  Play();
+
+  // Pausing -> inactive.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(0);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+  Pause();
+
+  // Repeated Play()/Pause() calls do not change active state.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+  Play();
+  PlayWhilePlaying();
+  Pause();
+  Pause();
+
+  // Playing during muting -> stream is never active.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(0);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(0);
+  StartMutingBeforePlaying();
+  Play();
+  Pause();
+  StopMutingBeforePlaying();
+
+  // Muting while playing -> stream becomes inactive.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+  Play();
+  StartMutingWhilePlaying();
+
+  // Unmuting while playing -> stream becomes active.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(1);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(0);
+  StopMutingWhilePlaying();
+
+  // Closing a playing stream triggers a final inactivation.
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamActive()).Times(0);
+  EXPECT_CALL(mock_stream_activity_monitor_, OnOutputStreamInactive()).Times(1);
+  Close();
+
+  EXPECT_FALSE(stream_active_state);
+}
+
+class MockAudioOutputStreamForMixing : public AudioOutputStream {
+ public:
+  MOCK_METHOD0(Open, bool());
+  MOCK_METHOD0(DidStart, void());
+  MOCK_METHOD0(Stop, void());
+  MOCK_METHOD0(Close, void());
+  MOCK_METHOD0(Flush, void());
+
+  void SetVolume(double volume) override {}
+  void GetVolume(double* volume) override {}
+
+  void Start(AudioSourceCallback* callback) override {
+    callback_ = callback;
+    DidStart();
+  }
+
+  void SimulateOnMoreDataCalled(const AudioParameters& params, bool is_mixing) {
+    DCHECK(callback_);
+    auto audio_bus = media::AudioBus::Create(params);
+    callback_->OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), 0,
+                          audio_bus.get(), is_mixing);
+  }
+
+ private:
+  raw_ptr<AudioSourceCallback> callback_;
+};
+
+TEST(OutputControllerMixingTest,
+     ControllerUsesProvidedCManagedDeviceOutputStreamCreateCallbackCorrectly) {
+  base::TestMessageLoop message_loop_;
+  // Controller creation parameters.
+  AudioManagerForControllerTest audio_manager;
+  NiceMock<MockOutputControllerEventHandler> mock_event_handler;
+  NiceMock<MockOutputStreamActivityMonitor> mock_stream_activity_monitor;
+  NiceMock<MockOutputControllerSyncReader> mock_sync_reader;
+  const std::string controller_device_id("device id");
+  const AudioParameters controller_params(GetTestParams());
+
+  // Callback that OutputController should provide when calling
+  // ManagedDeviceOutputStreamCreateCallback to create a stream.
+  base::OnceClosure provided_on_device_change_callback;
+
+  // Mock outputstream which will be returned to the OutputController when it
+  // calls ManagedDeviceOutputStreamCreateCallback.
+  StrictMock<MockAudioOutputStreamForMixing> mock_output_stream;
+
+  // Mock to be used for ManagedDeviceOutputStreamCreateCallback implementation.
+  auto CreateStream =
+      [](const std::string& controller_device_id,
+         const AudioParameters& controller_params,
+         MockAudioOutputStreamForMixing* const mock_output_stream,
+         base::OnceClosure* provided_on_device_change_callback,
+         const std::string& device_id, const AudioParameters& params,
+         base::OnceClosure on_device_change_callback) -> AudioOutputStream* {
+    EXPECT_TRUE(params.Equals(controller_params));
+    EXPECT_EQ(device_id, controller_device_id);
+    *provided_on_device_change_callback = std::move(on_device_change_callback);
+    return mock_output_stream;
+  };
+
+  ON_CALL(mock_output_stream, Open()).WillByDefault(Return(true));
+
+  OutputController::ManagedDeviceOutputStreamCreateCallback
+      mock_create_stream_cb = base::BindRepeating(
+          CreateStream, controller_device_id, controller_params,
+          &mock_output_stream, &provided_on_device_change_callback);
+
+  EXPECT_FALSE(provided_on_device_change_callback);
+
+  // Check that controller called |mock_create_stream_cb| on its CreateStream(),
+  // and uses the result AudioOutputStream.
+  EXPECT_CALL(mock_output_stream, Open()).Times(1);
+
+  OutputController controller(&audio_manager, &mock_event_handler,
+                              &mock_stream_activity_monitor, controller_params,
+                              controller_device_id, &mock_sync_reader,
+                              std::move(mock_create_stream_cb));
+
+  controller.CreateStream();
+
+  // When invoking |mock_create_stream_cb|, OutputController
+  // provided a callback to handle device changes.
+  EXPECT_TRUE(provided_on_device_change_callback);
+  Mock::VerifyAndClearExpectations(&mock_output_stream);
+
+  {
+    // When |provided_on_device_change_callback| is called, OutputController
+    // must synchronously close the output stream, and then it will call
+    // |mock_create_stream_cb| to create a new one.
+    testing::InSequence s;
+    EXPECT_CALL(mock_output_stream, Close()).Times(1);
+    EXPECT_CALL(mock_output_stream, Open()).Times(1);
+    EXPECT_TRUE(provided_on_device_change_callback);
+
+    std::move(provided_on_device_change_callback).Run();
+    Mock::VerifyAndClearExpectations(&mock_output_stream);
+  }
+
+  {
+    // After the first device change, OutputController handles the next device
+    // change correctly as well.
+    testing::InSequence s;
+    EXPECT_CALL(mock_output_stream, Close()).Times(1);
+    EXPECT_CALL(mock_output_stream, Open()).Times(1);
+    EXPECT_TRUE(provided_on_device_change_callback);
+
+    std::move(provided_on_device_change_callback).Run();
+    Mock::VerifyAndClearExpectations(&mock_output_stream);
+  }
+
+  EXPECT_CALL(mock_output_stream, Close()).Times(1);
+  controller.Close();
+  audio_manager.Shutdown();
+}
+
+TEST(OutputControllerMixingTest, ControllerForwardsMixingFlagToSyncReader) {
+  base::TestMessageLoop message_loop_;
+  // Controller creation parameters.
+  AudioManagerForControllerTest audio_manager;
+  NiceMock<MockOutputControllerEventHandler> mock_event_handler;
+  NiceMock<MockOutputStreamActivityMonitor> mock_stream_activity_monitor;
+  NiceMock<MockOutputControllerSyncReader> mock_sync_reader;
+  const std::string controller_device_id("device id");
+  const AudioParameters controller_params(GetTestParams());
+
+  // Mock outputstream which will be returned to the OutputController when it
+  // calls ManagedDeviceOutputStreamCreateCallback.
+  NiceMock<MockAudioOutputStreamForMixing> mock_output_stream;
+
+  // Mock to be used for ManagedDeviceOutputStreamCreateCallback implementation.
+  auto CreateStream =
+      [](const std::string& controller_device_id,
+         const AudioParameters& controller_params,
+         MockAudioOutputStreamForMixing* const mock_output_stream,
+         const std::string& device_id, const AudioParameters& params,
+         base::OnceClosure on_device_change_callback) -> AudioOutputStream* {
+    EXPECT_TRUE(params.Equals(controller_params));
+    EXPECT_EQ(device_id, controller_device_id);
+    return mock_output_stream;
+  };
+
+  ON_CALL(mock_output_stream, Open()).WillByDefault(Return(true));
+
+  OutputController::ManagedDeviceOutputStreamCreateCallback
+      mock_create_stream_cb =
+          base::BindRepeating(CreateStream, controller_device_id,
+                              controller_params, &mock_output_stream);
+
+  // Check that controller called |mock_create_stream_cb| on its CreateStream(),
+  // and uses the result AudioOutputStream.
+  EXPECT_CALL(mock_output_stream, Open()).Times(1);
+  EXPECT_CALL(mock_output_stream, DidStart()).Times(1);
+
+  OutputController controller(&audio_manager, &mock_event_handler,
+                              &mock_stream_activity_monitor, controller_params,
+                              controller_device_id, &mock_sync_reader,
+                              std::move(mock_create_stream_cb));
+
+  controller.CreateStream();
+  controller.Play();
+
+  // The stream should have been started.
+  Mock::VerifyAndClearExpectations(&mock_output_stream);
+  Mock::VerifyAndClearExpectations(&mock_sync_reader);
+
+  // Verify OutputController forwards the mixing flag from OnMoreDataCalled when
+  // it is true.
+  EXPECT_CALL(mock_sync_reader, Read(_, /*is_mixing=*/true)).Times(1);
+  mock_output_stream.SimulateOnMoreDataCalled(controller_params, true);
+
+  Mock::VerifyAndClearExpectations(&mock_sync_reader);
+
+  // Verify OutputController forwards the mixing flag from OnMoreDataCalled when
+  // it is false.
+  EXPECT_CALL(mock_sync_reader, Read(_, /*is_mixing=*/false)).Times(1);
+  mock_output_stream.SimulateOnMoreDataCalled(controller_params, false);
+
+  Mock::VerifyAndClearExpectations(&mock_sync_reader);
+
+  controller.Close();
+  audio_manager.Shutdown();
 }
 
 }  // namespace

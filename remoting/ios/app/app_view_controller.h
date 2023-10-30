@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,10 @@
 #define REMOTING_IOS_APP_APP_VIEW_CONTROLLER_H_
 
 #import <UIKit/UIKit.h>
+
+// DEPRECATED.
+// TODO(yuweih): Remove this file once the down stream implementation is
+// removed.
 
 @protocol AppController<NSObject>
 

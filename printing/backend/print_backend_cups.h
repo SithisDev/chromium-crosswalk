@@ -1,16 +1,19 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PRINTING_BACKEND_PRINT_BACKEND_CUPS_H_
 #define PRINTING_BACKEND_PRINT_BACKEND_CUPS_H_
 
+#include <cups/cups.h>
+
+#include <memory>
 #include <string>
 
-#include "base/files/file_util.h"
-#include "printing/backend/cups_helper.h"
+#include "base/component_export.h"
+#include "base/files/file_path.h"
 #include "printing/backend/print_backend.h"
-#include "printing/printing_export.h"
+#include "printing/mojom/print.mojom.h"
 #include "url/gurl.h"
 
 namespace printing {
@@ -19,26 +22,38 @@ class PrintBackendCUPS : public PrintBackend {
  public:
   PrintBackendCUPS(const GURL& print_server_url,
                    http_encryption_t encryption,
-                   bool blocking);
+                   bool blocking,
+                   const std::string& locale);
 
-  // This static function is exposed here for use in the tests.
-  PRINTING_EXPORT static bool PrinterBasicInfoFromCUPS(
+  // These static functions are exposed here for use in the tests.
+  COMPONENT_EXPORT(PRINT_BACKEND)
+  static mojom::ResultCode PrinterBasicInfoFromCUPS(
       const cups_dest_t& printer,
       PrinterBasicInfo* printer_info);
+  COMPONENT_EXPORT(PRINT_BACKEND)
+  static std::string PrinterDriverInfoFromCUPS(const cups_dest_t& printer);
 
  private:
-  ~PrintBackendCUPS() override {}
+  struct DestinationDeleter {
+    void operator()(cups_dest_t* dest) const;
+  };
+  using ScopedDestination = std::unique_ptr<cups_dest_t, DestinationDeleter>;
+
+  ~PrintBackendCUPS() override;
 
   // PrintBackend implementation.
-  bool EnumeratePrinters(PrinterList* printer_list) override;
-  std::string GetDefaultPrinterName() override;
-  bool GetPrinterBasicInfo(const std::string& printer_name,
-                           PrinterBasicInfo* printer_info) override;
-  bool GetPrinterSemanticCapsAndDefaults(
+  mojom::ResultCode EnumeratePrinters(PrinterList& printer_list) override;
+  mojom::ResultCode GetDefaultPrinterName(
+      std::string& default_printer) override;
+  mojom::ResultCode GetPrinterBasicInfo(
+      const std::string& printer_name,
+      PrinterBasicInfo* printer_info) override;
+  mojom::ResultCode GetPrinterSemanticCapsAndDefaults(
       const std::string& printer_name,
       PrinterSemanticCapsAndDefaults* printer_info) override;
-  bool GetPrinterCapsAndDefaults(const std::string& printer_name,
-                                 PrinterCapsAndDefaults* printer_info) override;
+  mojom::ResultCode GetPrinterCapsAndDefaults(
+      const std::string& printer_name,
+      PrinterCapsAndDefaults* printer_info) override;
   std::string GetPrinterDriverInfo(const std::string& printer_name) override;
   bool IsValidPrinter(const std::string& printer_name) override;
 
@@ -49,13 +64,13 @@ class PrintBackendCUPS : public PrintBackend {
   int GetDests(cups_dest_t** dests);
   base::FilePath GetPPD(const char* name);
 
-  // Wrapper around cupsGetNamedDest(). Returned result should be freed with
-  // cupsFreeDests().
-  cups_dest_t* GetNamedDest(const std::string& printer_name);
+  // Wrapper around cupsGetNamedDest().
+  ScopedDestination GetNamedDest(const std::string& printer_name);
 
-  GURL print_server_url_;
+  const std::string locale_;
+  const GURL print_server_url_;
   http_encryption_t cups_encryption_;
-  bool blocking_;
+  const bool blocking_;
 };
 
 }  // namespace printing

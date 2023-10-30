@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,34 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "base/process/process_handle.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
-#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "base/strings/string_util.h"
+#include "build/build_config.h"
+#include "mojo/public/cpp/bindings/message.h"
 #include "services/tracing/perfetto/consumer_host.h"
 #include "services/tracing/perfetto/producer_host.h"
 #include "services/tracing/public/cpp/perfetto/shared_memory.h"
 #include "third_party/perfetto/include/perfetto/ext/tracing/core/tracing_service.h"
 
 namespace tracing {
-
 namespace {
 
-bool StringToProcessId(const std::string& input, base::ProcessId* output) {
-  // Pid is encoded as uint in the string.
-  return base::StringToUint(input, reinterpret_cast<uint32_t*>(output));
+// Parses the PID from |pid_as_string| and stores the result in |pid|.
+// Returns true if the PID was parsed successfully.
+bool ParseProcessId(const std::string& pid_as_string, base::ProcessId* pid) {
+#if BUILDFLAG(IS_FUCHSIA)
+  // Fuchsia zx_koid_t is a 64-bit int.
+  static_assert(sizeof(base::ProcessId) == 8);
+  return base::StringToUint64(pid_as_string, pid);
+#else
+  // All other platforms use 32-bit ints for their PIDs.
+  static_assert(sizeof(base::ProcessId) == 4);
+  return base::StringToUint(pid_as_string, reinterpret_cast<uint32_t*>(pid));
+#endif
 }
 
 }  // namespace
@@ -39,7 +50,7 @@ bool PerfettoService::ParsePidFromProducerName(const std::string& producer_name,
 
   static const size_t kPrefixLength =
       strlen(mojom::kPerfettoProducerNamePrefix);
-  if (!StringToProcessId(producer_name.substr(kPrefixLength), pid)) {
+  if (!ParseProcessId(producer_name.substr(kPrefixLength), pid)) {
     LOG(DFATAL) << "Unexpected producer name: " << producer_name;
     return false;
   }
@@ -58,11 +69,16 @@ PerfettoService::PerfettoService(
                                 ? std::move(task_runner_for_testing)
                                 : base::SequencedTaskRunnerHandle::Get()) {
   service_ = perfetto::TracingService::CreateInstance(
-      std::make_unique<MojoSharedMemory::Factory>(), &perfetto_task_runner_);
+      std::make_unique<ChromeBaseSharedMemory::Factory>(),
+      &perfetto_task_runner_);
   // Chromium uses scraping of the shared memory chunks to ensure that data
   // from threads without a MessageLoop doesn't get lost.
   service_->SetSMBScrapingEnabled(true);
-  DCHECK(service_);
+
+  receivers_.set_disconnect_handler(base::BindRepeating(
+      &PerfettoService::OnServiceDisconnect, base::Unretained(this)));
+  producer_receivers_.set_disconnect_handler(base::BindRepeating(
+      &PerfettoService::OnProducerHostDisconnect, base::Unretained(this)));
 }
 
 PerfettoService::~PerfettoService() = default;
@@ -71,21 +87,53 @@ perfetto::TracingService* PerfettoService::GetService() const {
   return service_.get();
 }
 
-void PerfettoService::BindRequest(mojom::PerfettoServiceRequest request,
-                                  uint32_t pid) {
-  bindings_.AddBinding(this, std::move(request), pid);
+void PerfettoService::BindReceiver(
+    mojo::PendingReceiver<mojom::PerfettoService> receiver,
+    uint32_t pid) {
+  ++num_active_connections_[pid];
+  receivers_.Add(this, std::move(receiver), pid);
 }
 
 void PerfettoService::ConnectToProducerHost(
-    mojom::ProducerClientPtr producer_client,
-    mojom::ProducerHostRequest producer_host_request) {
-  auto new_producer = std::make_unique<ProducerHost>();
-  uint32_t producer_pid = bindings_.dispatch_context();
-  new_producer->Initialize(std::move(producer_client), service_.get(),
-                           base::StrCat({mojom::kPerfettoProducerNamePrefix,
-                                         base::NumberToString(producer_pid)}));
-  producer_bindings_.AddBinding(std::move(new_producer),
-                                std::move(producer_host_request));
+    mojo::PendingRemote<mojom::ProducerClient> producer_client,
+    mojo::PendingReceiver<mojom::ProducerHost> producer_host_receiver,
+    base::UnsafeSharedMemoryRegion shared_memory,
+    uint64_t shared_memory_buffer_page_size_bytes) {
+  // `shared_memory` is not marked nullable in the Mojom IDL so the region
+  // should always be valid.
+  DCHECK(shared_memory.IsValid());
+
+  auto new_producer = std::make_unique<ProducerHost>(&perfetto_task_runner_);
+  uint32_t producer_pid = receivers_.current_context();
+  ProducerHost::InitializationResult result = new_producer->Initialize(
+      std::move(producer_client), service_.get(),
+      base::StrCat({mojom::kPerfettoProducerNamePrefix,
+                    base::NumberToString(producer_pid)}),
+      std::move(shared_memory), shared_memory_buffer_page_size_bytes);
+
+  base::UmaHistogramEnumeration("Tracing.ProducerHostInitializationResult",
+                                result);
+
+  if (result == ProducerHost::InitializationResult::kSmbNotAdopted) {
+    // When everything else succeeds, but the SMB was not accepted, the producer
+    // must be misbehaving. SMBs are not accepted only if they are incorrectly
+    // sized, but SMB/page sizes are constants in Chromium.
+    mojo::ReportBadMessage("Producer connection request with invalid SMB");
+    return;
+  }
+
+  if (result != ProducerHost::InitializationResult::kSuccess) {
+    // In other failure scenarios, the tracing service may have encountered an
+    // internal error not caused by a misbehaving producer, e.g. we have too
+    // many producers registered or mapping the SMB failed (crbug/1154344). In
+    // these cases, we have no choice but to ignore the failure and cancel the
+    // producer connection by dropping |new_producer|.
+    return;
+  }
+
+  ++num_active_connections_[producer_pid];
+  producer_receivers_.Add(std::move(new_producer),
+                          std::move(producer_host_receiver), producer_pid);
 }
 
 void PerfettoService::AddActiveServicePid(base::ProcessId pid) {
@@ -97,8 +145,18 @@ void PerfettoService::AddActiveServicePid(base::ProcessId pid) {
 
 void PerfettoService::RemoveActiveServicePid(base::ProcessId pid) {
   active_service_pids_.erase(pid);
+  num_active_connections_.erase(pid);
   for (auto* tracing_session : tracing_sessions_) {
     tracing_session->OnActiveServicePidRemoved(pid);
+  }
+}
+
+void PerfettoService::RemoveActiveServicePidIfNoActiveConnections(
+    base::ProcessId pid) {
+  const auto num_connections_it = num_active_connections_.find(pid);
+  if (num_connections_it == num_active_connections_.end() ||
+      num_connections_it->second == 0) {
+    RemoveActiveServicePid(pid);
   }
 }
 
@@ -147,6 +205,22 @@ void PerfettoService::RequestTracingSession(
   }
 
   std::move(callback).Run();
+}
+
+void PerfettoService::OnServiceDisconnect() {
+  OnDisconnectFromProcess(receivers_.current_context());
+}
+
+void PerfettoService::OnProducerHostDisconnect() {
+  OnDisconnectFromProcess(producer_receivers_.current_context());
+}
+
+void PerfettoService::OnDisconnectFromProcess(base::ProcessId pid) {
+  int& num_connections = num_active_connections_[pid];
+  DCHECK_GT(num_connections, 0);
+  --num_connections;
+  if (!num_connections)
+    RemoveActiveServicePid(pid);
 }
 
 }  // namespace tracing

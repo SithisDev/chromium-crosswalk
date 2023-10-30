@@ -1,22 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/geolocation/geolocation_provider_impl.h"
 
 #include <memory>
+#include <string>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/strings/string16.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "services/device/geolocation/fake_location_provider.h"
@@ -61,6 +61,9 @@ class GeopositionEqMatcher
   explicit GeopositionEqMatcher(const mojom::Geoposition& expected)
       : expected_(expected) {}
 
+  GeopositionEqMatcher(const GeopositionEqMatcher&) = delete;
+  GeopositionEqMatcher& operator=(const GeopositionEqMatcher&) = delete;
+
   bool MatchAndExplain(const mojom::Geoposition& actual,
                        MatchResultListener* listener) const override {
     return actual.latitude == expected_.latitude &&
@@ -85,8 +88,6 @@ class GeopositionEqMatcher
 
  private:
   mojom::Geoposition expected_;
-
-  DISALLOW_COPY_AND_ASSIGN(GeopositionEqMatcher);
 };
 
 Matcher<const mojom::Geoposition&> GeopositionEq(
@@ -102,11 +103,14 @@ void DummyFunction(const LocationProvider* provider,
 class GeolocationProviderTest : public testing::Test {
  protected:
   GeolocationProviderTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI),
         arbitrator_(new FakeLocationProvider) {
-    provider()->SetArbitratorForTesting(base::WrapUnique(arbitrator_));
+    provider()->SetArbitratorForTesting(base::WrapUnique(arbitrator_.get()));
   }
+
+  GeolocationProviderTest(const GeolocationProviderTest&) = delete;
+  GeolocationProviderTest& operator=(const GeolocationProviderTest&) = delete;
 
   ~GeolocationProviderTest() override = default;
 
@@ -129,17 +133,15 @@ class GeolocationProviderTest : public testing::Test {
   // test completes.
   base::ShadowingAtExitManager at_exit_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   base::ThreadChecker thread_checker_;
 
   // Owned by the GeolocationProviderImpl class.
-  FakeLocationProvider* arbitrator_;
+  raw_ptr<FakeLocationProvider> arbitrator_;
 
   // True if |arbitrator_| is started.
   bool is_started_;
-
-  DISALLOW_COPY_AND_ASSIGN(GeolocationProviderTest);
 };
 
 bool GeolocationProviderTest::ProvidersStarted() {
@@ -183,13 +185,13 @@ TEST_F(GeolocationProviderTest, OnPermissionGrantedWithoutObservers) {
 
 TEST_F(GeolocationProviderTest, StartStop) {
   EXPECT_FALSE(provider()->IsRunning());
-  std::unique_ptr<GeolocationProvider::Subscription> subscription =
+  base::CallbackListSubscription subscription =
       provider()->AddLocationUpdateCallback(
-          base::Bind(&DummyFunction, arbitrator()), false);
+          base::BindRepeating(&DummyFunction, arbitrator()), false);
   EXPECT_TRUE(provider()->IsRunning());
   EXPECT_TRUE(ProvidersStarted());
 
-  subscription.reset();
+  subscription = {};
 
   EXPECT_FALSE(ProvidersStarted());
   EXPECT_TRUE(provider()->IsRunning());
@@ -204,15 +206,15 @@ TEST_F(GeolocationProviderTest, StalePositionNotSent) {
 
   AsyncMockGeolocationObserver first_observer;
   GeolocationProviderImpl::LocationUpdateCallback first_callback =
-      base::Bind(&MockGeolocationObserver::OnLocationUpdate,
-                 base::Unretained(&first_observer));
+      base::BindRepeating(&MockGeolocationObserver::OnLocationUpdate,
+                          base::Unretained(&first_observer));
   EXPECT_CALL(first_observer, OnLocationUpdate(GeopositionEq(first_position)));
-  std::unique_ptr<GeolocationProvider::Subscription> subscription =
+  base::CallbackListSubscription subscription =
       provider()->AddLocationUpdateCallback(first_callback, false);
   SendMockLocation(first_position);
   base::RunLoop().Run();
 
-  subscription.reset();
+  subscription = {};
 
   mojom::Geoposition second_position;
   second_position.latitude = 13;
@@ -226,9 +228,9 @@ TEST_F(GeolocationProviderTest, StalePositionNotSent) {
   // is sent.
   EXPECT_CALL(second_observer, OnLocationUpdate(testing::_)).Times(0);
   GeolocationProviderImpl::LocationUpdateCallback second_callback =
-      base::Bind(&MockGeolocationObserver::OnLocationUpdate,
-                 base::Unretained(&second_observer));
-  std::unique_ptr<GeolocationProvider::Subscription> subscription2 =
+      base::BindRepeating(&MockGeolocationObserver::OnLocationUpdate,
+                          base::Unretained(&second_observer));
+  base::CallbackListSubscription subscription2 =
       provider()->AddLocationUpdateCallback(second_callback, false);
   base::RunLoop().RunUntilIdle();
 
@@ -238,7 +240,7 @@ TEST_F(GeolocationProviderTest, StalePositionNotSent) {
   SendMockLocation(second_position);
   base::RunLoop().Run();
 
-  subscription2.reset();
+  subscription2 = {};
   EXPECT_FALSE(ProvidersStarted());
 }
 
@@ -251,11 +253,11 @@ TEST_F(GeolocationProviderTest, OverrideLocationForTesting) {
   MockGeolocationObserver mock_observer;
   EXPECT_CALL(mock_observer, OnLocationUpdate(GeopositionEq(position)));
   GeolocationProviderImpl::LocationUpdateCallback callback =
-      base::Bind(&MockGeolocationObserver::OnLocationUpdate,
-                 base::Unretained(&mock_observer));
-  std::unique_ptr<GeolocationProvider::Subscription> subscription =
+      base::BindRepeating(&MockGeolocationObserver::OnLocationUpdate,
+                          base::Unretained(&mock_observer));
+  base::CallbackListSubscription subscription =
       provider()->AddLocationUpdateCallback(callback, false);
-  subscription.reset();
+  subscription = {};
   // Wait for the providers to be stopped now that all clients are gone.
   EXPECT_FALSE(ProvidersStarted());
 }

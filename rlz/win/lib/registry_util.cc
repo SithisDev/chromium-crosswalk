@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -40,7 +40,7 @@ bool RegKeyReadValue(const base::win::RegKey& key, const wchar_t* name,
 
 bool RegKeyWriteValue(base::win::RegKey* key, const wchar_t* name,
                       const char* value) {
-  base::string16 value_string(base::ASCIIToUTF16(value));
+  std::wstring value_string(base::ASCIIToWide(value));
   return key->WriteValue(name, value_string.c_str()) == ERROR_SUCCESS;
 }
 

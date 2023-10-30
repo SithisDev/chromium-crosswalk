@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
@@ -31,6 +29,10 @@ class It2MeCliHost final : public extensions::NativeMessageHost::Client {
   static void PrintHelp();
 
   It2MeCliHost();
+
+  It2MeCliHost(const It2MeCliHost&) = delete;
+  It2MeCliHost& operator=(const It2MeCliHost&) = delete;
+
   ~It2MeCliHost() override;
 
   void Start();
@@ -80,8 +82,7 @@ class It2MeCliHost final : public extensions::NativeMessageHost::Client {
   // True if remote session was established.
   bool remote_connected_;
 
-  base::WeakPtrFactory<It2MeCliHost> weak_factory_;
-  DISALLOW_COPY_AND_ASSIGN(It2MeCliHost);
+  base::WeakPtrFactory<It2MeCliHost> weak_factory_{this};
 };
 
 }  // namespace remoting

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,7 @@ namespace webrtc {
 class DesktopCapturer;
 }  // namespace webrtc
 
-namespace remoting {
-
-namespace protocol {
+namespace remoting::protocol {
 
 class AudioSource;
 class AudioStream;
@@ -27,8 +25,10 @@ class ClientStub;
 class ClipboardStub;
 class HostStub;
 class InputStub;
+class PeerConnectionControls;
 class Session;
 class VideoStream;
+class WebrtcEventLogData;
 
 // This interface represents a remote viewer connection to the chromoting host.
 // It sets up all protocol channels and connects them to the stubs.
@@ -52,6 +52,10 @@ class ConnectionToClient {
 
     // Called when the network connection is closed or failed.
     virtual void OnConnectionClosed(ErrorCode error) = 0;
+
+    // Called when the transport protocol (TCP/UDP) changes and all channels are
+    // connected.
+    virtual void OnTransportProtocolChange(const std::string& protocol) = 0;
 
     // Called on notification of a route change event, which happens when a
     // channel is connected.
@@ -83,6 +87,7 @@ class ConnectionToClient {
   // Start video stream that sends screen content from |desktop_capturer| to the
   // client.
   virtual std::unique_ptr<VideoStream> StartVideoStream(
+      const std::string& stream_name,
       std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) = 0;
 
   // Starts an audio stream. Returns nullptr if audio is not supported by the
@@ -105,9 +110,17 @@ class ConnectionToClient {
   // experimental behaviors, implementations can ignore this function if no
   // control logic can be applied.
   virtual void ApplySessionOptions(const SessionOptions& options) {}
+
+  // Returns an interface for changing connection parameters after the
+  // connection is established. nullptr will be returned if the connection does
+  // not support changing parameters on the fly.
+  virtual PeerConnectionControls* peer_connection_controls() = 0;
+
+  // Returns an object holding the RTC event logs if supported by this
+  // connection type, or nullptr otherwise.
+  virtual WebrtcEventLogData* rtc_event_log() = 0;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_CONNECTION_TO_CLIENT_H_

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <list>
 #include <map>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "remoting/protocol/datagram_channel_factory.h"
@@ -16,8 +16,7 @@
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/transport.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class ChannelMultiplexer;
 class PseudoTcpChannelFactory;
@@ -41,6 +40,10 @@ class IceTransport : public Transport,
   // |transport_context| must outlive the session.
   IceTransport(scoped_refptr<TransportContext> transport_context,
                EventHandler* event_handler);
+
+  IceTransport(const IceTransport&) = delete;
+  IceTransport& operator=(const IceTransport&) = delete;
+
   ~IceTransport() override;
 
   MessageChannelFactory* GetChannelFactory();
@@ -56,7 +59,7 @@ class IceTransport : public Transport,
 
   // DatagramChannelFactory interface.
   void CreateChannel(const std::string& name,
-                     const ChannelCreatedCallback& callback) override;
+                     ChannelCreatedCallback callback) override;
   void CancelChannelCreation(const std::string& name) override;
 
   // Passes transport info to a new |channel| in case it was received before the
@@ -86,7 +89,7 @@ class IceTransport : public Transport,
   void OnChannelError(int error);
 
   scoped_refptr<TransportContext> transport_context_;
-  EventHandler* event_handler_;
+  raw_ptr<EventHandler> event_handler_;
 
   SendTransportInfoCallback send_transport_info_callback_;
 
@@ -106,13 +109,9 @@ class IceTransport : public Transport,
   std::unique_ptr<IceTransportInfo> pending_transport_info_message_;
   base::OneShotTimer transport_info_timer_;
 
-  base::WeakPtrFactory<IceTransport> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(IceTransport);
+  base::WeakPtrFactory<IceTransport> weak_factory_{this};
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_ICE_TRANSPORT_H_
-

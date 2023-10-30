@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/network_change_manager.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/network_change_notifier.h"
 #include "services/network/public/mojom/network_change_manager.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -36,18 +37,19 @@ class TestNetworkChangeManagerClient
       : num_network_changed_(0),
         run_loop_(std::make_unique<base::RunLoop>()),
         notification_type_to_wait_(NONE),
-        connection_type_(mojom::ConnectionType::CONNECTION_UNKNOWN),
-        binding_(this) {
-    mojom::NetworkChangeManagerPtr manager_ptr;
-    mojom::NetworkChangeManagerRequest request(mojo::MakeRequest(&manager_ptr));
-    network_change_manager->AddRequest(std::move(request));
+        connection_type_(mojom::ConnectionType::CONNECTION_UNKNOWN) {
+    mojo::Remote<mojom::NetworkChangeManager> manager;
+    network_change_manager->AddReceiver(manager.BindNewPipeAndPassReceiver());
 
-    mojom::NetworkChangeManagerClientPtr client_ptr;
-    mojom::NetworkChangeManagerClientRequest client_request(
-        mojo::MakeRequest(&client_ptr));
-    binding_.Bind(std::move(client_request));
-    manager_ptr->RequestNotifications(std::move(client_ptr));
+    mojo::PendingRemote<mojom::NetworkChangeManagerClient> client_remote;
+    receiver_.Bind(client_remote.InitWithNewPipeAndPassReceiver());
+    manager->RequestNotifications(std::move(client_remote));
   }
+
+  TestNetworkChangeManagerClient(const TestNetworkChangeManagerClient&) =
+      delete;
+  TestNetworkChangeManagerClient& operator=(
+      const TestNetworkChangeManagerClient&) = delete;
 
   ~TestNetworkChangeManagerClient() override {}
 
@@ -71,7 +73,7 @@ class TestNetworkChangeManagerClient
   void WaitForNotification(NotificationType notification_type) {
     notification_type_to_wait_ = notification_type;
     run_loop_->Run();
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
   }
 
   mojom::ConnectionType connection_type() const { return connection_type_; }
@@ -81,9 +83,7 @@ class TestNetworkChangeManagerClient
   std::unique_ptr<base::RunLoop> run_loop_;
   NotificationType notification_type_to_wait_;
   mojom::ConnectionType connection_type_;
-  mojo::Binding<mojom::NetworkChangeManagerClient> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestNetworkChangeManagerClient);
+  mojo::Receiver<mojom::NetworkChangeManagerClient> receiver_{this};
 };
 
 }  // namespace
@@ -92,11 +92,14 @@ class NetworkChangeManagerTest : public testing::Test {
  public:
   NetworkChangeManagerTest()
       : network_change_manager_(new NetworkChangeManager(
-            net::NetworkChangeNotifier::CreateMock())) {
+            net::NetworkChangeNotifier::CreateMockIfNeeded())) {
     network_change_manager_client_ =
         std::make_unique<TestNetworkChangeManagerClient>(
             network_change_manager_.get());
   }
+
+  NetworkChangeManagerTest(const NetworkChangeManagerTest&) = delete;
+  NetworkChangeManagerTest& operator=(const NetworkChangeManagerTest&) = delete;
 
   ~NetworkChangeManagerTest() override {}
 
@@ -113,12 +116,10 @@ class NetworkChangeManagerTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<NetworkChangeManager> network_change_manager_;
   std::unique_ptr<TestNetworkChangeManagerClient>
       network_change_manager_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkChangeManagerTest);
 };
 
 TEST_F(NetworkChangeManagerTest, ClientNotified) {
@@ -210,6 +211,9 @@ TEST(NetworkChangeConnectionTypeTest, ConnectionTypeEnumMatch) {
         break;
       case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
         EXPECT_EQ(mojom::ConnectionType::CONNECTION_BLUETOOTH, mojoType);
+        break;
+      case net::NetworkChangeNotifier::CONNECTION_5G:
+        EXPECT_EQ(mojom::ConnectionType::CONNECTION_5G, mojoType);
         EXPECT_EQ(mojom::ConnectionType::CONNECTION_LAST, mojoType);
         break;
     }

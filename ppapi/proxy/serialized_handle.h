@@ -1,9 +1,9 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PPAPI_PROXY_SERIALIZED_HANDLES_H_
-#define PPAPI_PROXY_SERIALIZED_HANDLES_H_
+#ifndef PPAPI_PROXY_SERIALIZED_HANDLE_H_
+#define PPAPI_PROXY_SERIALIZED_HANDLE_H_
 
 #include <stdint.h>
 
@@ -11,11 +11,10 @@
 #include <vector>
 
 #include "base/atomicops.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "build/build_config.h"
 #include "ipc/ipc_platform_file.h"
@@ -35,19 +34,15 @@ namespace proxy {
 // NaClIPCAdapter for use in NaCl.
 class PPAPI_PROXY_EXPORT SerializedHandle {
  public:
-  // TODO(https://crbug.com/845985): Remove SHARED_MEMORY type after all clients
-  // will be converted to the SHARED_MEMORY_REGION.
-  enum Type { INVALID, SHARED_MEMORY, SHARED_MEMORY_REGION, SOCKET, FILE };
+  enum Type { INVALID, SHARED_MEMORY_REGION, SOCKET, FILE };
   // Header contains the fields that we send in IPC messages, apart from the
   // actual handle. See comments on the SerializedHandle fields below.
   struct Header {
     Header() : type(INVALID), size(0), open_flags(0) {}
     Header(Type type_arg,
-           uint32_t size_arg,
            int32_t open_flags_arg,
            PP_Resource file_io_arg)
         : type(type_arg),
-          size(size_arg),
           open_flags(open_flags_arg),
           file_io(file_io_arg) {}
 
@@ -64,8 +59,8 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   // Create an invalid handle of the given type.
   explicit SerializedHandle(Type type);
 
-  // Create a shared memory handle.
-  SerializedHandle(const base::SharedMemoryHandle& handle, uint32_t size);
+  SerializedHandle(const SerializedHandle&) = delete;
+  SerializedHandle& operator=(const SerializedHandle&) = delete;
 
   // Create a shared memory region handle.
   explicit SerializedHandle(base::ReadOnlySharedMemoryRegion region);
@@ -77,18 +72,9 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
                    const IPC::PlatformFileForTransit& descriptor);
 
   Type type() const { return type_; }
-  bool is_shmem() const { return type_ == SHARED_MEMORY; }
   bool is_shmem_region() const { return type_ == SHARED_MEMORY_REGION; }
   bool is_socket() const { return type_ == SOCKET; }
   bool is_file() const { return type_ == FILE; }
-  const base::SharedMemoryHandle& shmem() const {
-    DCHECK(is_shmem());
-    return shm_handle_;
-  }
-  uint32_t size() const {
-    DCHECK(is_shmem());
-    return size_;
-  }
   const base::subtle::PlatformSharedMemoryRegion& shmem_region() const {
     DCHECK(is_shmem_region());
     return shm_region_;
@@ -105,14 +91,6 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   PP_Resource file_io() const {
     return file_io_;
   }
-  void set_shmem(const base::SharedMemoryHandle& handle, uint32_t size) {
-    type_ = SHARED_MEMORY;
-    shm_handle_ = handle;
-    size_ = size;
-
-    descriptor_ = IPC::InvalidPlatformFileForTransit();
-    shm_region_ = base::subtle::PlatformSharedMemoryRegion();
-  }
   void set_shmem_region(base::subtle::PlatformSharedMemoryRegion region) {
     type_ = SHARED_MEMORY_REGION;
     shm_region_ = std::move(region);
@@ -121,16 +99,16 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
               base::subtle::PlatformSharedMemoryRegion::Mode::kWritable);
 
     descriptor_ = IPC::InvalidPlatformFileForTransit();
-    shm_handle_ = base::SharedMemoryHandle();
-    size_ = 0;
+  }
+  void set_unsafe_shmem_region(base::UnsafeSharedMemoryRegion region) {
+    set_shmem_region(base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
+        std::move(region)));
   }
   void set_socket(const IPC::PlatformFileForTransit& socket) {
     type_ = SOCKET;
     descriptor_ = socket;
 
     shm_region_ = base::subtle::PlatformSharedMemoryRegion();
-    shm_handle_ = base::SharedMemoryHandle();
-    size_ = 0;
   }
   void set_file_handle(const IPC::PlatformFileForTransit& descriptor,
                        int32_t open_flags,
@@ -139,20 +117,15 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
 
     descriptor_ = descriptor;
     shm_region_ = base::subtle::PlatformSharedMemoryRegion();
-    shm_handle_ = base::SharedMemoryHandle();
-    size_ = 0;
     open_flags_ = open_flags;
     file_io_ = file_io;
   }
   void set_null() {
     type_ = INVALID;
 
-    shm_handle_ = base::SharedMemoryHandle();
     shm_region_ = base::subtle::PlatformSharedMemoryRegion();
-    size_ = 0;
     descriptor_ = IPC::InvalidPlatformFileForTransit();
   }
-  void set_null_shmem() { set_shmem(base::SharedMemoryHandle(), 0); }
   void set_null_shmem_region() {
     set_shmem_region(base::subtle::PlatformSharedMemoryRegion());
   }
@@ -164,9 +137,7 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   }
   bool IsHandleValid() const;
 
-  Header header() const {
-    return Header(type_, size_, open_flags_, file_io_);
-  }
+  Header header() const { return Header(type_, open_flags_, file_io_); }
 
   // Closes the handle and sets it to invalid.
   void Close();
@@ -185,9 +156,6 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   // because we hold non-POD types. But these types are pretty light-weight. If
   // we add more complex things later, we should come up with a more memory-
   // efficient strategy.
-  // These are valid if type == SHARED_MEMORY.
-  base::SharedMemoryHandle shm_handle_;
-  uint32_t size_;
 
   // This is valid if type == SHARED_MEMORY_REGION.
   base::subtle::PlatformSharedMemoryRegion shm_region_;
@@ -199,11 +167,9 @@ class PPAPI_PROXY_EXPORT SerializedHandle {
   int32_t open_flags_;
   // This is non-zero if file writes require quota checking.
   PP_Resource file_io_;
-
-  DISALLOW_COPY_AND_ASSIGN(SerializedHandle);
 };
 
 }  // namespace proxy
 }  // namespace ppapi
 
-#endif  // PPAPI_PROXY_SERIALIZED_HANDLES_H_
+#endif  // PPAPI_PROXY_SERIALIZED_HANDLE_H_

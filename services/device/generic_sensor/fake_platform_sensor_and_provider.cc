@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <utility>
 
+using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Return;
-using ::testing::_;
 
 namespace device {
 
@@ -21,12 +21,20 @@ FakePlatformSensor::FakePlatformSensor(
       .WillByDefault(
           Invoke([this](const PlatformSensorConfiguration& configuration) {
             SensorReading reading;
-            // Only mocking the shared memory update for AMBIENT_LIGHT type is
-            // enough.
-            if (GetType() == mojom::SensorType::AMBIENT_LIGHT) {
-              // Set the shared buffer value as frequency for testing purpose.
-              reading.als.value = configuration.frequency();
-              UpdateSharedBufferAndNotifyClients(reading);
+            // Only mocking the shared memory update for AMBIENT_LIGHT and
+            // PRESSURE type is enough.
+            // Set the shared buffer value as frequency for testing purpose.
+            switch (GetType()) {
+              case mojom::SensorType::AMBIENT_LIGHT:
+                reading.als.value = configuration.frequency();
+                AddNewReading(reading);
+                break;
+              case mojom::SensorType::PRESSURE:
+                reading.pressure.value = configuration.frequency();
+                AddNewReading(reading);
+                break;
+              default:
+                break;
             }
             return true;
           }));
@@ -58,12 +66,16 @@ double FakePlatformSensor::GetMinimumSupportedFrequency() {
   return 1.0;
 }
 
+void FakePlatformSensor::AddNewReading(const SensorReading& reading) {
+  UpdateSharedBufferAndNotifyClients(reading);
+}
+
 FakePlatformSensorProvider::FakePlatformSensorProvider() {
   ON_CALL(*this, DoCreateSensorInternal(_, _, _))
-      .WillByDefault(Invoke(
-          [](mojom::SensorType, scoped_refptr<PlatformSensor> sensor,
-             const PlatformSensorProvider::CreateSensorCallback& callback) {
-            callback.Run(std::move(sensor));
+      .WillByDefault(
+          Invoke([](mojom::SensorType, scoped_refptr<PlatformSensor> sensor,
+                    PlatformSensorProvider::CreateSensorCallback callback) {
+            std::move(callback).Run(std::move(sensor));
           }));
 }
 
@@ -79,12 +91,12 @@ SensorReadingSharedBuffer* FakePlatformSensorProvider::GetSensorReadingBuffer(
 void FakePlatformSensorProvider::CreateSensorInternal(
     mojom::SensorType type,
     SensorReadingSharedBuffer* reading_buffer,
-    const CreateSensorCallback& callback) {
+    CreateSensorCallback callback) {
   DCHECK(type >= mojom::SensorType::kMinValue &&
          type <= mojom::SensorType::kMaxValue);
   auto sensor =
       base::MakeRefCounted<FakePlatformSensor>(type, reading_buffer, this);
-  DoCreateSensorInternal(type, std::move(sensor), callback);
+  DoCreateSensorInternal(type, std::move(sensor), std::move(callback));
 }
 
 MockPlatformSensorClient::MockPlatformSensorClient() {

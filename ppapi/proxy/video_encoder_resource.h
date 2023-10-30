@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,13 @@
 #include <vector>
 
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "ppapi/proxy/connection.h"
 #include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/shared_impl/media_stream_buffer_manager.h"
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_video_encoder_api.h"
-
-namespace base {
-class SharedMemory;
-}
 
 namespace ppapi {
 
@@ -37,19 +33,23 @@ class PPAPI_PROXY_EXPORT VideoEncoderResource
       public ppapi::MediaStreamBufferManager::Delegate {
  public:
   VideoEncoderResource(Connection connection, PP_Instance instance);
+
+  VideoEncoderResource(const VideoEncoderResource&) = delete;
+  VideoEncoderResource& operator=(const VideoEncoderResource&) = delete;
+
   ~VideoEncoderResource() override;
 
   thunk::PPB_VideoEncoder_API* AsPPB_VideoEncoder_API() override;
 
  private:
   struct ShmBuffer {
-    ShmBuffer(uint32_t id, std::unique_ptr<base::SharedMemory> shm);
+    ShmBuffer(uint32_t id, base::WritableSharedMemoryMapping mapping);
     ~ShmBuffer();
 
     // Index of the buffer in the vector. Buffers have the same id in
     // the plugin and the host.
     uint32_t id;
-    std::unique_ptr<base::SharedMemory> shm;
+    base::WritableSharedMemoryMapping mapping;
   };
 
   struct BitstreamBuffer {
@@ -157,8 +157,6 @@ class PPAPI_PROXY_EXPORT VideoEncoderResource
 
   scoped_refptr<TrackedCallback> get_bitstream_buffer_callback_;
   PP_BitstreamBuffer* get_bitstream_buffer_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoEncoderResource);
 };
 
 }  // namespace proxy

@@ -1,13 +1,14 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromoting;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -113,7 +114,7 @@ public class TapGestureDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testOneFingerDownUp() throws Exception {
+    public void testOneFingerDownUp() {
         injectDownEvent(0, 0, 0);
         injectUpEvent(0);
         mListener.assertTapDetected(1, 0, 0);
@@ -123,7 +124,7 @@ public class TapGestureDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testMultipleFingerDownUp() throws Exception {
+    public void testMultipleFingerDownUp() {
         injectDownEvent(0, 0, 0);
         injectDownEvent(1, 100, 100);
         injectDownEvent(2, 200, 200);
@@ -137,7 +138,7 @@ public class TapGestureDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testMultipleFingerDownUpReversed() throws Exception {
+    public void testMultipleFingerDownUpReversed() {
         injectDownEvent(0, 0, 0);
         injectDownEvent(1, 100, 100);
         injectDownEvent(2, 200, 200);
@@ -151,7 +152,7 @@ public class TapGestureDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testMultipleFingerSmallMovements() throws Exception {
+    public void testMultipleFingerSmallMovements() {
         injectDownEvent(0, 0, 0);
         injectDownEvent(1, 100, 100);
         injectDownEvent(2, 200, 200);
@@ -168,7 +169,7 @@ public class TapGestureDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testLargeMotion() throws Exception {
+    public void testLargeMotion() {
         injectDownEvent(0, 0, 0);
         injectDownEvent(1, 100, 100);
         injectDownEvent(2, 200, 200);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,8 @@
 
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -33,6 +31,11 @@ namespace network {
 class TestSocketDataPumpDelegate : public SocketDataPump::Delegate {
  public:
   TestSocketDataPumpDelegate() {}
+
+  TestSocketDataPumpDelegate(const TestSocketDataPumpDelegate&) = delete;
+  TestSocketDataPumpDelegate& operator=(const TestSocketDataPumpDelegate&) =
+      delete;
+
   ~TestSocketDataPumpDelegate() {}
 
   // Waits for read error. Returns the error observed.
@@ -70,16 +73,17 @@ class TestSocketDataPumpDelegate : public SocketDataPump::Delegate {
   base::RunLoop read_loop_;
   base::RunLoop write_loop_;
   base::RunLoop shutdown_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSocketDataPumpDelegate);
 };
 
 class SocketDataPumpTest : public testing::Test,
                            public ::testing::WithParamInterface<net::IoMode> {
  public:
   SocketDataPumpTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {}
+
+  SocketDataPumpTest(const SocketDataPumpTest&) = delete;
+  SocketDataPumpTest& operator=(const SocketDataPumpTest&) = delete;
+
   ~SocketDataPumpTest() override {}
 
   // Initializes the test case with a socket data provider, which will be used
@@ -87,21 +91,28 @@ class SocketDataPumpTest : public testing::Test,
   void Init(net::StaticSocketDataProvider* data_provider) {
     mock_client_socket_factory_.AddSocketDataProvider(data_provider);
     mock_client_socket_factory_.set_enable_read_if_ready(true);
-    mojo::DataPipe send_pipe;
-    mojo::DataPipe receive_pipe;
-    receive_handle_ = std::move(receive_pipe.consumer_handle);
-    send_handle_ = std::move(send_pipe.producer_handle);
+
+    mojo::ScopedDataPipeConsumerHandle send_consumer_handle;
+    ASSERT_EQ(mojo::CreateDataPipe(nullptr, send_handle_, send_consumer_handle),
+              MOJO_RESULT_OK);
+
+    mojo::ScopedDataPipeProducerHandle receive_producer_handle;
+    ASSERT_EQ(
+        mojo::CreateDataPipe(nullptr, receive_producer_handle, receive_handle_),
+        MOJO_RESULT_OK);
+
     socket_ = mock_client_socket_factory_.CreateTransportClientSocket(
         net::AddressList(), nullptr /*socket_performance_watcher*/,
-        nullptr /*netlog*/, net::NetLogSource());
+        nullptr /*network_quality_estimator*/, nullptr /*netlog*/,
+        net::NetLogSource());
     net::TestCompletionCallback callback;
     int result = socket_->Connect(callback.callback());
     if (result == net::ERR_IO_PENDING)
       result = callback.WaitForResult();
     EXPECT_EQ(net::OK, result);
     data_pump_ = std::make_unique<SocketDataPump>(
-        socket_.get(), delegate(), std::move(receive_pipe.producer_handle),
-        std::move(send_pipe.consumer_handle), TRAFFIC_ANNOTATION_FOR_TESTS);
+        socket_.get(), delegate(), std::move(receive_producer_handle),
+        std::move(send_consumer_handle), TRAFFIC_ANNOTATION_FOR_TESTS);
   }
 
   // Reads |num_bytes| from |handle| or reads until an error occurs. Returns the
@@ -130,16 +141,14 @@ class SocketDataPumpTest : public testing::Test,
   mojo::ScopedDataPipeProducerHandle send_handle_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   net::MockClientSocketFactory mock_client_socket_factory_;
   TestSocketDataPumpDelegate test_delegate_;
   std::unique_ptr<net::StreamSocket> socket_;
   std::unique_ptr<SocketDataPump> data_pump_;
-
-  DISALLOW_COPY_AND_ASSIGN(SocketDataPumpTest);
 };
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
+INSTANTIATE_TEST_SUITE_P(All,
                          SocketDataPumpTest,
                          testing::Values(net::SYNCHRONOUS, net::ASYNC));
 

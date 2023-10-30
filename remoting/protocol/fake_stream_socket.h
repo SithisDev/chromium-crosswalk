@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,17 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "remoting/protocol/p2p_stream_socket.h"
 #include "remoting/protocol/stream_channel_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // FakeStreamSocket implement P2PStreamSocket interface. All data written to
 // FakeStreamSocket is stored in a buffer returned by written_data(). Read()
@@ -36,6 +34,10 @@ namespace protocol {
 class FakeStreamSocket : public P2PStreamSocket {
  public:
   FakeStreamSocket();
+
+  FakeStreamSocket(const FakeStreamSocket&) = delete;
+  FakeStreamSocket& operator=(const FakeStreamSocket&) = delete;
+
   ~FakeStreamSocket() override;
 
   // Returns all data written to the socket.
@@ -91,7 +93,7 @@ class FakeStreamSocket : public P2PStreamSocket {
   int write_limit_ = 0;
   int next_write_error_ = 0;
 
-  base::Optional<int> next_read_error_;
+  absl::optional<int> next_read_error_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_ = 0;
   net::CompletionOnceCallback read_callback_;
@@ -102,15 +104,17 @@ class FakeStreamSocket : public P2PStreamSocket {
   int input_pos_ = 0;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  base::WeakPtrFactory<FakeStreamSocket> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeStreamSocket);
+  base::WeakPtrFactory<FakeStreamSocket> weak_factory_{this};
 };
 
 // StreamChannelFactory that creates FakeStreamSocket.
 class FakeStreamChannelFactory : public StreamChannelFactory {
  public:
   FakeStreamChannelFactory();
+
+  FakeStreamChannelFactory(const FakeStreamChannelFactory&) = delete;
+  FakeStreamChannelFactory& operator=(const FakeStreamChannelFactory&) = delete;
+
   ~FakeStreamChannelFactory() override;
 
   void set_asynchronous_create(bool asynchronous_create) {
@@ -130,13 +134,13 @@ class FakeStreamChannelFactory : public StreamChannelFactory {
 
   // ChannelFactory interface.
   void CreateChannel(const std::string& name,
-                     const ChannelCreatedCallback& callback) override;
+                     ChannelCreatedCallback callback) override;
   void CancelChannelCreation(const std::string& name) override;
 
  private:
   void NotifyChannelCreated(std::unique_ptr<FakeStreamSocket> owned_channel,
                             const std::string& name,
-                            const ChannelCreatedCallback& callback);
+                            ChannelCreatedCallback callback);
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   bool asynchronous_create_ = false;
@@ -147,12 +151,9 @@ class FakeStreamChannelFactory : public StreamChannelFactory {
   bool async_write_ = false;
 
   base::WeakPtr<FakeStreamChannelFactory> peer_factory_;
-  base::WeakPtrFactory<FakeStreamChannelFactory> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeStreamChannelFactory);
+  base::WeakPtrFactory<FakeStreamChannelFactory> weak_factory_{this};
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_FAKE_STREAM_SOCKET_H_

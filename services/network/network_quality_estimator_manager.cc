@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include <string>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "net/base/features.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/nqe/network_quality_estimator_params.h"
@@ -84,7 +85,7 @@ NetworkQualityEstimatorManager::NetworkQualityEstimatorManager(
           network_quality_estimator_params),
       net_log);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Get network id asynchronously to workaround https://crbug.com/821607 where
   // AddressTrackerLinux stucks with a recv() call and blocks IO thread.
   // TODO(https://crbug.com/821607): Remove after the bug is resolved.
@@ -110,19 +111,21 @@ NetworkQualityEstimatorManager::~NetworkQualityEstimatorManager() {
   network_quality_estimator_->RemoveRTTAndThroughputEstimatesObserver(this);
 }
 
-void NetworkQualityEstimatorManager::AddRequest(
-    mojom::NetworkQualityEstimatorManagerRequest request) {
+void NetworkQualityEstimatorManager::AddReceiver(
+    mojo::PendingReceiver<mojom::NetworkQualityEstimatorManager> receiver) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  bindings_.AddBinding(this, std::move(request));
+  receivers_.Add(this, std::move(receiver));
 }
 
 void NetworkQualityEstimatorManager::RequestNotifications(
-    mojom::NetworkQualityEstimatorManagerClientPtr client_ptr) {
+    mojo::PendingRemote<mojom::NetworkQualityEstimatorManagerClient>
+        pending_client) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  client_ptr->OnNetworkQualityChanged(effective_connection_type_, http_rtt_,
-                                      transport_rtt_,
-                                      downstream_throughput_kbps_);
-  clients_.AddPtr(std::move(client_ptr));
+  mojo::Remote<mojom::NetworkQualityEstimatorManagerClient> client(
+      std::move(pending_client));
+  client->OnNetworkQualityChanged(effective_connection_type_, http_rtt_,
+                                  transport_rtt_, downstream_throughput_kbps_);
+  clients_.Add(std::move(client));
 }
 
 void NetworkQualityEstimatorManager::OnEffectiveConnectionTypeChanged(
@@ -136,12 +139,10 @@ void NetworkQualityEstimatorManager::OnEffectiveConnectionTypeChanged(
     return;
 
   effective_connection_type_ = effective_connection_type;
-  clients_.ForAllPtrs([effective_connection_type, http_rtt, transport_rtt,
-                       downstream_throughput_kbps](
-                          mojom::NetworkQualityEstimatorManagerClient* client) {
+  for (auto& client : clients_) {
     client->OnNetworkQualityChanged(effective_connection_type, http_rtt,
                                     transport_rtt, downstream_throughput_kbps);
-  });
+  }
 }
 
 void NetworkQualityEstimatorManager::OnRTTOrThroughputEstimatesComputed(
@@ -168,12 +169,10 @@ void NetworkQualityEstimatorManager::OnRTTOrThroughputEstimatesComputed(
   transport_rtt_ = transport_rtt;
   downstream_throughput_kbps_ = downstream_throughput_kbps;
 
-  clients_.ForAllPtrs([effective_connection_type, http_rtt, transport_rtt,
-                       downstream_throughput_kbps](
-                          mojom::NetworkQualityEstimatorManagerClient* client) {
+  for (auto& client : clients_) {
     client->OnNetworkQualityChanged(effective_connection_type, http_rtt,
                                     transport_rtt, downstream_throughput_kbps);
-  });
+  }
 }
 
 net::NetworkQualityEstimator*

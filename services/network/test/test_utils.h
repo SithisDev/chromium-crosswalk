@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,27 +9,31 @@
 #include <vector>
 
 #include "net/http/http_status_code.h"
+#include "services/network/public/mojom/network_context.mojom-forward.h"
+#include "services/network/public/mojom/url_response_head.mojom-forward.h"
 
 namespace network {
 struct ResourceRequest;
-struct ResourceResponseHead;
 
 // Helper method to read the upload bytes from a ResourceRequest with a body.
 std::string GetUploadData(const network::ResourceRequest& request);
 
-// Helper methods used to create a ResourceResponseHead with the given status.
+// Helper methods used to create a mojom::URLResponseHead with the given status.
 // If |report_raw_headers| is true, the |raw_request_response_info| field of the
-// returned ResourceResponseHead is also set to contain the raw headers as
+// returned mojom::URLResponseHead is also set to contain the raw headers as
 // reported by the network stack (it's useful to report cookies, for example,
 // as they are filtered out of the net::HttpResponseHeaders when serialized).
-ResourceResponseHead CreateResourceResponseHead(
-    net::HttpStatusCode http_status,
-    bool report_raw_headers = false);
+mojom::URLResponseHeadPtr CreateURLResponseHead(
+    net::HttpStatusCode http_status);
 
-// Adds cookies to the passed in ResourceResponseHead. If it was created with
+// Adds cookies to the passed in mojom::URLResponseHead. If it was created with
 // |report_raw_headers| true, the cookies are also added to the raw headers.
-void AddCookiesToResourceResponseHead(const std::vector<std::string>& cookies,
-                                      ResourceResponseHead* response_header);
+void AddCookiesToURLResponseHead(const std::vector<std::string>& cookies,
+                                 mojom::URLResponseHead* response_header);
+
+// Creates a new NetworkContextParamsPtr for testing that uses a fixed proxy
+// config and is safe to use without setting file permissions on Windows.
+mojom::NetworkContextParamsPtr CreateNetworkContextParamsForTesting();
 
 }  // namespace network
 

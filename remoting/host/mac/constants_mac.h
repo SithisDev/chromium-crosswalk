@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_HOST_CONSTANTS_MAC_H_
-#define REMOTING_HOST_CONSTANTS_MAC_H_
+#ifndef REMOTING_HOST_MAC_CONSTANTS_MAC_H_
+#define REMOTING_HOST_MAC_CONSTANTS_MAC_H_
 
 namespace remoting {
 
@@ -17,14 +17,25 @@ extern const char kServiceName[];
 extern const char kHostConfigFileName[];
 extern const char kHostConfigFilePath[];
 
+// File that stores lightweight host settings as key-value pairs. See
+// HostSettings for more info.
+extern const char kHostSettingsFilePath[];
+
 // This helper script is executed as root to enable/disable/configure the host
 // service.
 // It is also used (as non-root) to provide version information for the
 // installed host components.
-extern const char kHostHelperScriptPath[];
+extern const char kHostServiceBinaryPath[];
+
+// Path to the old host helper script, which is still used after user updates
+// their host on macOS 10.14.*.
+extern const char kOldHostHelperScriptPath[];
 
 // Path to the service binary (.app).
 extern const char kHostBinaryPath[];
+
+// Path to the legacy service binary (.bundle).
+extern const char kHostLegacyBinaryPath[];
 
 // If this file exists, it means that the host is enabled for sharing.
 extern const char kHostEnabledPath[];
@@ -49,4 +60,4 @@ extern const char kUnbrandedUninstallerPath[];
 
 }  // namespace remoting
 
-#endif  // REMOTING_HOST_CONSTANTS_MAC_H_
+#endif  // REMOTING_HOST_MAC_CONSTANTS_MAC_H_

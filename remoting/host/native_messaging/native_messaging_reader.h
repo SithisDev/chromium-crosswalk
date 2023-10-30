@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "base/callback.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 
@@ -24,9 +23,14 @@ namespace remoting {
 // webapp.
 class NativeMessagingReader {
  public:
-  typedef base::Callback<void(std::unique_ptr<base::Value>)> MessageCallback;
+  typedef base::RepeatingCallback<void(std::unique_ptr<base::Value>)>
+      MessageCallback;
 
   explicit NativeMessagingReader(base::File file);
+
+  NativeMessagingReader(const NativeMessagingReader&) = delete;
+  NativeMessagingReader& operator=(const NativeMessagingReader&) = delete;
+
   ~NativeMessagingReader();
 
   // Begin reading messages from the Native Messaging client webapp, calling
@@ -34,7 +38,8 @@ class NativeMessagingReader {
   // EOF or error is encountered. This method is asynchronous - the callbacks
   // will be run on the same thread via PostTask. The caller should be prepared
   // for these callbacks to be invoked right up until this object is destroyed.
-  void Start(MessageCallback message_callback, base::Closure eof_callback);
+  void Start(const MessageCallback& message_callback,
+             base::OnceClosure eof_callback);
 
  private:
   class Core;
@@ -53,7 +58,7 @@ class NativeMessagingReader {
 
   // Caller-supplied message and end-of-file callbacks.
   MessageCallback message_callback_;
-  base::Closure eof_callback_;
+  base::OnceClosure eof_callback_;
 
   // Separate thread used to read from the stream without blocking the main
   // thread. net::FileStream's async API cannot be used here because, on
@@ -63,9 +68,7 @@ class NativeMessagingReader {
 
   // Allows the reader to be deleted safely even when tasks may be pending on
   // it.
-  base::WeakPtrFactory<NativeMessagingReader> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeMessagingReader);
+  base::WeakPtrFactory<NativeMessagingReader> weak_factory_{this};
 };
 
 }  // namespace remoting

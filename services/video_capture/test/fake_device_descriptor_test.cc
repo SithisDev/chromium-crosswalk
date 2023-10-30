@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,12 @@ using testing::Invoke;
 namespace video_capture {
 
 FakeDeviceDescriptorTest::FakeDeviceDescriptorTest()
-    : video_capture::DeviceFactoryProviderTest() {}
+    : VideoCaptureServiceTest() {}
 
 FakeDeviceDescriptorTest::~FakeDeviceDescriptorTest() = default;
 
 void FakeDeviceDescriptorTest::SetUp() {
-  video_capture::DeviceFactoryProviderTest::SetUp();
+  VideoCaptureServiceTest::SetUp();
 
   base::RunLoop wait_loop;
   EXPECT_CALL(device_info_receiver_, Run(_))

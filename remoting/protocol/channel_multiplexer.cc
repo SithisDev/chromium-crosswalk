@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,15 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "remoting/protocol/message_serialization.h"
 #include "remoting/protocol/p2p_stream_socket.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 const int kChannelIdUnknown = -1;
@@ -32,6 +31,10 @@ class PendingPacket {
  public:
   PendingPacket(std::unique_ptr<MultiplexPacket> packet)
       : packet(std::move(packet)) {}
+
+  PendingPacket(const PendingPacket&) = delete;
+  PendingPacket& operator=(const PendingPacket&) = delete;
+
   ~PendingPacket() = default;
 
   bool is_empty() { return pos >= packet->data().size(); }
@@ -46,8 +49,6 @@ class PendingPacket {
  private:
   std::unique_ptr<MultiplexPacket> packet;
   size_t pos = 0U;
-
-  DISALLOW_COPY_AND_ASSIGN(PendingPacket);
 };
 
 }  // namespace
@@ -55,10 +56,8 @@ class PendingPacket {
 const char ChannelMultiplexer::kMuxChannelName[] = "mux";
 
 struct ChannelMultiplexer::PendingChannel {
-  PendingChannel(const std::string& name,
-                 const ChannelCreatedCallback& callback)
-      : name(name), callback(callback) {
-  }
+  PendingChannel(const std::string& name, ChannelCreatedCallback callback)
+      : name(name), callback(std::move(callback)) {}
   std::string name;
   ChannelCreatedCallback callback;
 };
@@ -67,6 +66,10 @@ class ChannelMultiplexer::MuxChannel {
  public:
   MuxChannel(ChannelMultiplexer* multiplexer, const std::string& name,
              int send_id);
+
+  MuxChannel(const MuxChannel&) = delete;
+  MuxChannel& operator=(const MuxChannel&) = delete;
+
   ~MuxChannel();
 
   const std::string& name() { return name_; }
@@ -86,20 +89,22 @@ class ChannelMultiplexer::MuxChannel {
   int DoRead(const scoped_refptr<net::IOBuffer>& buffer, int buffer_len);
 
  private:
-  ChannelMultiplexer* multiplexer_;
+  raw_ptr<ChannelMultiplexer> multiplexer_;
   std::string name_;
   int send_id_;
   bool id_sent_;
   int receive_id_;
-  MuxSocket* socket_;
+  raw_ptr<MuxSocket> socket_;
   std::list<std::unique_ptr<PendingPacket>> pending_packets_;
-
-  DISALLOW_COPY_AND_ASSIGN(MuxChannel);
 };
 
 class ChannelMultiplexer::MuxSocket : public P2PStreamSocket {
  public:
   MuxSocket(MuxChannel* channel);
+
+  MuxSocket(const MuxSocket&) = delete;
+  MuxSocket& operator=(const MuxSocket&) = delete;
+
   ~MuxSocket() override;
 
   void OnWriteComplete();
@@ -117,7 +122,7 @@ class ChannelMultiplexer::MuxSocket : public P2PStreamSocket {
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override;
 
  private:
-  MuxChannel* channel_;
+  raw_ptr<MuxChannel> channel_;
 
   int base_channel_error_ = net::OK;
 
@@ -131,9 +136,7 @@ class ChannelMultiplexer::MuxSocket : public P2PStreamSocket {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<MuxSocket> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MuxSocket);
+  base::WeakPtrFactory<MuxSocket> weak_factory_{this};
 };
 
 ChannelMultiplexer::MuxChannel::MuxChannel(ChannelMultiplexer* multiplexer,
@@ -216,8 +219,7 @@ ChannelMultiplexer::MuxSocket::MuxSocket(MuxChannel* channel)
     : channel_(channel),
       read_buffer_size_(0),
       write_pending_(false),
-      write_result_(0),
-      weak_factory_(this) {}
+      write_result_(0) {}
 
 ChannelMultiplexer::MuxSocket::~MuxSocket() {
   channel_->OnSocketDestroyed();
@@ -314,8 +316,7 @@ ChannelMultiplexer::ChannelMultiplexer(StreamChannelFactory* factory,
                                        const std::string& base_channel_name)
     : base_channel_factory_(factory),
       base_channel_name_(base_channel_name),
-      next_channel_id_(0),
-      weak_factory_(this) {}
+      next_channel_id_(0) {}
 
 ChannelMultiplexer::~ChannelMultiplexer() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -327,24 +328,24 @@ ChannelMultiplexer::~ChannelMultiplexer() {
 }
 
 void ChannelMultiplexer::CreateChannel(const std::string& name,
-                                       const ChannelCreatedCallback& callback) {
+                                       ChannelCreatedCallback callback) {
   if (base_channel_.get()) {
     // Already have |base_channel_|. Create new multiplexed channel
     // synchronously.
-    callback.Run(GetOrCreateChannel(name)->CreateSocket());
+    std::move(callback).Run(GetOrCreateChannel(name)->CreateSocket());
   } else if (!base_channel_.get() && !base_channel_factory_) {
     // Fail synchronously if we failed to create |base_channel_|.
-    callback.Run(nullptr);
+    std::move(callback).Run(nullptr);
   } else {
     // Still waiting for the |base_channel_|.
-    pending_channels_.push_back(PendingChannel(name, callback));
+    pending_channels_.emplace_back(name, std::move(callback));
 
     // If this is the first multiplexed channel then create the base channel.
     if (pending_channels_.size() == 1U) {
       base_channel_factory_->CreateChannel(
           base_channel_name_,
-          base::Bind(&ChannelMultiplexer::OnBaseChannelReady,
-                     base::Unretained(this)));
+          base::BindOnce(&ChannelMultiplexer::OnBaseChannelReady,
+                         base::Unretained(this)));
     }
   }
 }
@@ -366,15 +367,16 @@ void ChannelMultiplexer::OnBaseChannelReady(
 
   if (base_channel_.get()) {
     // Initialize reader and writer.
-    reader_.StartReading(base_channel_.get(),
-                         base::Bind(&ChannelMultiplexer::OnIncomingPacket,
-                                    base::Unretained(this)),
-                         base::Bind(&ChannelMultiplexer::OnBaseChannelError,
-                                    base::Unretained(this)));
-    writer_.Start(base::Bind(&P2PStreamSocket::Write,
-                             base::Unretained(base_channel_.get())),
-                  base::Bind(&ChannelMultiplexer::OnBaseChannelError,
-                             base::Unretained(this)));
+    reader_.StartReading(
+        base_channel_.get(),
+        base::BindRepeating(&ChannelMultiplexer::OnIncomingPacket,
+                            base::Unretained(this)),
+        base::BindOnce(&ChannelMultiplexer::OnBaseChannelError,
+                       base::Unretained(this)));
+    writer_.Start(base::BindRepeating(&P2PStreamSocket::Write,
+                                      base::Unretained(base_channel_.get())),
+                  base::BindOnce(&ChannelMultiplexer::OnBaseChannelError,
+                                 base::Unretained(this)));
   }
 
   DoCreatePendingChannels();
@@ -392,12 +394,12 @@ void ChannelMultiplexer::DoCreatePendingChannels() {
       FROM_HERE, base::BindOnce(&ChannelMultiplexer::DoCreatePendingChannels,
                                 weak_factory_.GetWeakPtr()));
 
-  PendingChannel c = pending_channels_.front();
+  PendingChannel c = std::move(pending_channels_.front());
   pending_channels_.erase(pending_channels_.begin());
   std::unique_ptr<P2PStreamSocket> socket;
   if (base_channel_.get())
     socket = GetOrCreateChannel(c.name)->CreateSocket();
-  c.callback.Run(std::move(socket));
+  std::move(c.callback).Run(std::move(socket));
 }
 
 ChannelMultiplexer::MuxChannel* ChannelMultiplexer::GetOrCreateChannel(
@@ -470,5 +472,4 @@ void ChannelMultiplexer::DoWrite(
                 traffic_annotation);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

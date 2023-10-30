@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@ package org.chromium.chromoting;
 import android.content.Context;
 import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -69,7 +70,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testSwipeRecognition() throws Exception {
+    public void testSwipeRecognition() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         Assert.assertFalse(mDetector.isSwiping());
         Assert.assertFalse(mDetector.isPinching());
@@ -86,7 +87,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testPinchRecognition() throws Exception {
+    public void testPinchRecognition() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         Assert.assertFalse(mDetector.isSwiping());
         Assert.assertFalse(mDetector.isPinching());
@@ -103,7 +104,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testNoMotion() throws Exception {
+    public void testNoMotion() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         mCurrentPositions[0].x += mTouchSlop / 2;
         mCurrentPositions[0].y += mTouchSlop / 2;
@@ -118,7 +119,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testOneFingerStationary() throws Exception {
+    public void testOneFingerStationary() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
 
         // The triggering threshold in this case (one finger stationary) is mTouchSlop * 2;
@@ -142,7 +143,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testUnevenPinch() throws Exception {
+    public void testUnevenPinch() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         for (int i = 0; i < 50; i++) {
             mCurrentPositions[0].x -= 2;
@@ -158,7 +159,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testUnevenPinch2() throws Exception {
+    public void testUnevenPinch2() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         for (int i = 0; i < 50; i++) {
             mCurrentPositions[0].x -= 3;
@@ -174,7 +175,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testUnevenSwipe() throws Exception {
+    public void testUnevenSwipe() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         for (int i = 0; i < 50; i++) {
             // The fingers need to move similarly enough so that one finger moves a distance of
@@ -193,7 +194,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testUnevenSwipe2() throws Exception {
+    public void testUnevenSwipe2() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         for (int i = 0; i < 50; i++) {
             // The fingers need to move similarly enough so that one finger moves a distance of
@@ -212,7 +213,7 @@ public class SwipePinchDetectorTest {
     @Test
     @SmallTest
     @Feature({"Chromoting"})
-    public void testDetectorReset() throws Exception {
+    public void testDetectorReset() {
         injectEvent(MotionEvent.ACTION_POINTER_DOWN);
         mCurrentPositions[0].x += mTouchSlop * 3;
         injectEvent(MotionEvent.ACTION_MOVE);

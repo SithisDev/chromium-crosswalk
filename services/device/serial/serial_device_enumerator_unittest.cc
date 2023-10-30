@@ -1,23 +1,38 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/serial/serial_device_enumerator.h"
 
-#include <memory>
 #include <vector>
 
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace device {
 
-TEST(SerialDeviceEnumeratorTest, GetDevices) {
+namespace {
+
+class SerialDeviceEnumeratorTest : public testing::Test {
+ public:
+  SerialDeviceEnumeratorTest()
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {}
+  ~SerialDeviceEnumeratorTest() override = default;
+
+ protected:
+  base::test::TaskEnvironment task_environment_;
+};
+
+TEST_F(SerialDeviceEnumeratorTest, GetDevices) {
   // There is no guarantee that a test machine will have a serial device
   // available. The purpose of this test is to ensure that the process of
   // attempting to enumerate devices does not cause a crash.
-  auto enumerator = SerialDeviceEnumerator::Create();
+  auto enumerator = SerialDeviceEnumerator::Create(
+      task_environment_.GetMainThreadTaskRunner());
   ASSERT_TRUE(enumerator);
   std::vector<mojom::SerialPortInfoPtr> devices = enumerator->GetDevices();
 }
+
+}  // namespace
 
 }  // namespace device

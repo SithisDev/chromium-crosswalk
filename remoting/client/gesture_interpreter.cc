@@ -1,8 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/client/gesture_interpreter.h"
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/time/time.h"
@@ -21,14 +23,14 @@ const float kScrollFlingTimeConstant = 250.f;
 namespace remoting {
 GestureInterpreter::GestureInterpreter()
     // TODO(yuweih): These animations are better to take GetWeakPtr().
-    : pan_animation_(kOneFingerFlingTimeConstant,
-                     base::Bind(&GestureInterpreter::PanWithoutAbortAnimations,
-                                base::Unretained(this))),
+    : pan_animation_(
+          kOneFingerFlingTimeConstant,
+          base::BindRepeating(&GestureInterpreter::PanWithoutAbortAnimations,
+                              base::Unretained(this))),
       scroll_animation_(
           kScrollFlingTimeConstant,
-          base::Bind(&GestureInterpreter::ScrollWithoutAbortAnimations,
-                     base::Unretained(this))),
-      weak_factory_(this) {}
+          base::BindRepeating(&GestureInterpreter::ScrollWithoutAbortAnimations,
+                              base::Unretained(this))) {}
 
 GestureInterpreter::~GestureInterpreter() = default;
 
@@ -47,10 +49,10 @@ void GestureInterpreter::SetContext(RendererProxy* renderer,
 void GestureInterpreter::SetInputMode(InputMode mode) {
   switch (mode) {
     case DIRECT_INPUT_MODE:
-      input_strategy_.reset(new DirectTouchInputStrategy());
+      input_strategy_ = std::make_unique<DirectTouchInputStrategy>();
       break;
     case TRACKPAD_INPUT_MODE:
-      input_strategy_.reset(new TrackpadInputStrategy(viewport_));
+      input_strategy_ = std::make_unique<TrackpadInputStrategy>(viewport_);
       break;
     default:
       NOTREACHED();

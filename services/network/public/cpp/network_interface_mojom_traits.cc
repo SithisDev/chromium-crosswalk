@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,20 @@ bool StructTraits<
     return false;
   if (!data.ReadType(&out->type))
     return false;
+
+  mojo::ArrayDataView<uint8_t> view;
+  data.GetMacAddressDataView(&view);
+  out->mac_address.emplace();
+  if (!view.is_null()) {
+    if (view.size() != out->mac_address->size()) {
+      return false;
+    }
+    std::copy_n(view.data(), out->mac_address->size(),
+                out->mac_address->begin());
+  } else {
+    out->mac_address.reset();
+  }
+
   out->interface_index = data.interface_index();
   out->prefix_length = data.prefix_length();
   out->ip_address_attributes = data.ip_address_attributes();
@@ -43,6 +57,8 @@ EnumTraits<network::mojom::ConnectionType,
       return network::mojom::ConnectionType::CONNECTION_3G;
     case net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G:
       return network::mojom::ConnectionType::CONNECTION_4G;
+    case net::NetworkChangeNotifier::ConnectionType::CONNECTION_5G:
+      return network::mojom::ConnectionType::CONNECTION_5G;
     case net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE:
       return network::mojom::ConnectionType::CONNECTION_NONE;
     case net::NetworkChangeNotifier::ConnectionType::CONNECTION_BLUETOOTH:
@@ -74,6 +90,9 @@ bool EnumTraits<network::mojom::ConnectionType,
       return true;
     case network::mojom::ConnectionType::CONNECTION_4G:
       *output = net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G;
+      return true;
+    case network::mojom::ConnectionType::CONNECTION_5G:
+      *output = net::NetworkChangeNotifier::ConnectionType::CONNECTION_5G;
       return true;
     case network::mojom::ConnectionType::CONNECTION_NONE:
       *output = net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE;

@@ -1,55 +1,61 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/test/test_shared_url_loader_factory.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "services/network/network_context.h"
-#include "services/network/public/cpp/cross_thread_shared_url_loader_factory_info.h"
+#include "services/network/public/cpp/cross_thread_pending_shared_url_loader_factory.h"
 
 namespace network {
 
 TestSharedURLLoaderFactory::TestSharedURLLoaderFactory(
-    NetworkService* network_service) {
-  url_request_context_ = std::make_unique<net::TestURLRequestContext>();
-  mojom::NetworkContextPtr network_context;
+    NetworkService* network_service,
+    bool is_trusted) {
+  auto context_builder = net::CreateTestURLRequestContextBuilder();
+  url_request_context_ = context_builder->Build();
+  mojo::Remote<mojom::NetworkContext> network_context;
   network_context_ = std::make_unique<NetworkContext>(
-      network_service, mojo::MakeRequest(&network_context),
+      network_service, network_context.BindNewPipeAndPassReceiver(),
       url_request_context_.get(),
       /*cors_exempt_header_list=*/std::vector<std::string>());
   mojom::URLLoaderFactoryParamsPtr params =
       mojom::URLLoaderFactoryParams::New();
   params->process_id = mojom::kBrowserProcessId;
   params->is_corb_enabled = false;
+  params->is_trusted = is_trusted;
   network_context_->CreateURLLoaderFactory(
-      mojo::MakeRequest(&url_loader_factory_), std::move(params));
+      url_loader_factory_.BindNewPipeAndPassReceiver(), std::move(params));
 }
 
 TestSharedURLLoaderFactory::~TestSharedURLLoaderFactory() {}
 
 void TestSharedURLLoaderFactory::CreateLoaderAndStart(
-    mojom::URLLoaderRequest loader,
-    int32_t routing_id,
+    mojo::PendingReceiver<mojom::URLLoader> loader,
     int32_t request_id,
     uint32_t options,
     const ResourceRequest& request,
-    mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
+  num_created_loaders_++;
   url_loader_factory_->CreateLoaderAndStart(
-      std::move(loader), routing_id, request_id, options, std::move(request),
+      std::move(loader), request_id, options, std::move(request),
       std::move(client), traffic_annotation);
 }
 
-void TestSharedURLLoaderFactory::Clone(mojom::URLLoaderFactoryRequest request) {
+void TestSharedURLLoaderFactory::Clone(
+    mojo::PendingReceiver<mojom::URLLoaderFactory> receiver) {
   NOTIMPLEMENTED();
 }
 
-// SharedURLLoaderFactoryInfo implementation
-std::unique_ptr<SharedURLLoaderFactoryInfo>
+// PendingSharedURLLoaderFactory implementation
+std::unique_ptr<PendingSharedURLLoaderFactory>
 TestSharedURLLoaderFactory::Clone() {
-  return std::make_unique<CrossThreadSharedURLLoaderFactoryInfo>(this);
+  return std::make_unique<CrossThreadPendingSharedURLLoaderFactory>(this);
 }
 
 }  // namespace network

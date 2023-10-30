@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,23 +11,22 @@
 
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
 #include "base/process/process.h"
 #include "base/token.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
+#include "sandbox/policy/sandbox_type.h"
 #include "services/service_manager/catalog.h"
 #include "services/service_manager/public/cpp/identity.h"
 #include "services/service_manager/public/cpp/manifest.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
+#include "services/service_manager/public/cpp/service_receiver.h"
 #include "services/service_manager/public/mojom/connector.mojom.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
 #include "services/service_manager/public/mojom/service_manager.mojom.h"
-#include "services/service_manager/sandbox/sandbox_type.h"
 #include "services/service_manager/service_instance_registry.h"
 #include "services/service_manager/service_process_host.h"
 
@@ -109,12 +108,10 @@ class ServiceManager : public Service {
   ServiceManager(const std::vector<Manifest>& manifests,
                  ServiceExecutablePolicy service_executable_policy);
 
-  ~ServiceManager() override;
+  ServiceManager(const ServiceManager&) = delete;
+  ServiceManager& operator=(const ServiceManager&) = delete;
 
-  // Provide a callback to be notified whenever an instance is destroyed.
-  // Typically the creator of the Service Manager will use this to determine
-  // when some set of services it created are destroyed, so it can shut down.
-  void SetInstanceQuitCallback(base::Callback<void(const Identity&)> callback);
+  ~ServiceManager() override;
 
   // Directly requests that the Service Manager start a new instance for
   // |service_name| if one is not already running.
@@ -183,7 +180,7 @@ class ServiceManager : public Service {
                                          const Manifest& manifest);
 
   // Called from the instance implementing mojom::ServiceManager.
-  void AddListener(mojom::ServiceManagerListenerPtr listener);
+  void AddListener(mojo::PendingRemote<mojom::ServiceManagerListener> listener);
 
   // Service:
   void OnBindInterface(const BindSourceInfo& source_info,
@@ -192,7 +189,7 @@ class ServiceManager : public Service {
 
   const std::unique_ptr<Delegate> delegate_;
 
-  ServiceBinding service_binding_{this};
+  ServiceReceiver service_receiver_{this};
 
   // Ownership of all ServiceInstances.
   using InstanceMap =
@@ -207,12 +204,9 @@ class ServiceManager : public Service {
 
   // Always points to the ServiceManager's own Instance. Note that this
   // ServiceInstance still has an entry in |instances_|.
-  ServiceInstance* service_manager_instance_;
+  raw_ptr<ServiceInstance> service_manager_instance_;
 
-  mojo::InterfacePtrSet<mojom::ServiceManagerListener> listeners_;
-  base::Callback<void(const Identity&)> instance_quit_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceManager);
+  mojo::RemoteSet<mojom::ServiceManagerListener> listeners_;
 };
 
 }  // namespace service_manager

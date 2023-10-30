@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,11 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/token.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
+#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/mojom/connector.mojom.h"
 #include "services/service_manager/public/mojom/service_control.mojom.h"
@@ -26,7 +28,7 @@ class Service;
 // Service Manager machinery. Typical usage should look something like:
 //
 //     TEST(MyTest, Foo) {
-//       base::test::ScopedTaskEnvironment task_environment;
+//       base::test::TaskEnvironment task_environment;
 //       TestConnectorFactory connector_factory;
 //       my_service::MyServiceImpl service(connector_factory.RegisterInstance(
 //           my_service::mojom::kServiceName));
@@ -42,10 +44,15 @@ class TestConnectorFactory : public mojom::ServiceControl {
   // Creates a simple TestConnectorFactory which can be used register Service
   // instances and vend Connectors which can connect to them.
   TestConnectorFactory();
+
+  TestConnectorFactory(const TestConnectorFactory&) = delete;
+  TestConnectorFactory& operator=(const TestConnectorFactory&) = delete;
+
   ~TestConnectorFactory() override;
 
   // A mapping from service names to Service proxies for registered instances.
-  using NameToServiceProxyMap = std::map<std::string, mojom::ServicePtr>;
+  using NameToServiceProxyMap =
+      std::map<std::string, mojo::Remote<mojom::Service>>;
 
   // A Connector which can be used to connect to any service instances
   // registered with this object. This Connector identifies its source as a
@@ -59,7 +66,8 @@ class TestConnectorFactory : public mojom::ServiceControl {
   // Registers a Service instance not owned by this TestConnectorFactory.
   // Returns a ServiceRequest which the instance must bind in order to receive
   // simulated events from this object.
-  mojom::ServiceRequest RegisterInstance(const std::string& service_name);
+  mojo::PendingReceiver<mojom::Service> RegisterInstance(
+      const std::string& service_name);
 
   const base::Token& test_instance_group() const {
     return test_instance_group_;
@@ -88,8 +96,8 @@ class TestConnectorFactory : public mojom::ServiceControl {
  private:
   void OnStartResponseHandler(
       const std::string& service_name,
-      mojom::ConnectorRequest connector_request,
-      mojom::ServiceControlAssociatedRequest control_request);
+      mojo::PendingReceiver<mojom::Connector> connector_receiver,
+      mojo::PendingAssociatedReceiver<mojom::ServiceControl> control_receiver);
 
   // mojom::ServiceControl:
   void RequestQuit() override;
@@ -106,13 +114,11 @@ class TestConnectorFactory : public mojom::ServiceControl {
   // ServiceControl bindings which receive and process RequestQuit requests from
   // connected service instances. The associated service name is used as
   // context.
-  mojo::AssociatedBindingSet<mojom::ServiceControl, std::string>
-      service_control_bindings_;
+  mojo::AssociatedReceiverSet<mojom::ServiceControl, std::string>
+      service_control_receivers_;
 
   bool ignore_unknown_service_requests_ = false;
   bool ignore_quit_requests_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestConnectorFactory);
 };
 
 }  // namespace service_manager

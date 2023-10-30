@@ -1,23 +1,20 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_FILESYSTEM_POLICY_H__
-#define SANDBOX_SRC_FILESYSTEM_POLICY_H__
+#ifndef SANDBOX_WIN_SRC_FILESYSTEM_POLICY_H_
+#define SANDBOX_WIN_SRC_FILESYSTEM_POLICY_H_
 
 #include <stdint.h>
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "sandbox/win/src/crosscall_server.h"
 #include "sandbox/win/src/nt_internals.h"
 #include "sandbox/win/src/policy_low_level.h"
 #include "sandbox/win/src/sandbox_policy.h"
 
 namespace sandbox {
-
-enum IsBroker { BROKER_FALSE, BROKER_TRUE };
 
 // This class centralizes most of the knowledge related to file system policy
 class FileSystemPolicy {
@@ -28,11 +25,8 @@ class FileSystemPolicy {
   // 'semantics' is the desired semantics for the open or create.
   // 'policy' is the policy generator to which the rules are going to be added.
   static bool GenerateRules(const wchar_t* name,
-                            TargetPolicy::Semantics semantics,
+                            Semantics semantics,
                             LowLevelPolicy* policy);
-
-  // Add basic file system rules.
-  static bool SetInitialRules(LowLevelPolicy* policy);
 
   // Performs the desired policy action on a create request with an
   // API that is compatible with the IPC-received parameters.
@@ -41,7 +35,7 @@ class FileSystemPolicy {
   // 'file' : The target file or directory.
   static bool CreateFileAction(EvalResult eval_result,
                                const ClientInfo& client_info,
-                               const base::string16& file,
+                               const std::wstring& file,
                                uint32_t attributes,
                                uint32_t desired_access,
                                uint32_t file_attributes,
@@ -59,7 +53,7 @@ class FileSystemPolicy {
   // 'file' : The target file or directory.
   static bool OpenFileAction(EvalResult eval_result,
                              const ClientInfo& client_info,
-                             const base::string16& file,
+                             const std::wstring& file,
                              uint32_t attributes,
                              uint32_t desired_access,
                              uint32_t share_access,
@@ -72,7 +66,7 @@ class FileSystemPolicy {
   // API that is compatible with the IPC-received parameters.
   static bool QueryAttributesFileAction(EvalResult eval_result,
                                         const ClientInfo& client_info,
-                                        const base::string16& file,
+                                        const std::wstring& file,
                                         uint32_t attributes,
                                         FILE_BASIC_INFORMATION* file_info,
                                         NTSTATUS* nt_status);
@@ -82,7 +76,7 @@ class FileSystemPolicy {
   static bool QueryFullAttributesFileAction(
       EvalResult eval_result,
       const ClientInfo& client_info,
-      const base::string16& file,
+      const std::wstring& file,
       uint32_t attributes,
       FILE_NETWORK_OPEN_INFORMATION* file_info,
       NTSTATUS* nt_status);
@@ -101,13 +95,13 @@ class FileSystemPolicy {
 
 // Expands the path and check if it's a reparse point. Returns false if the path
 // cannot be trusted.
-bool PreProcessName(base::string16* path);
+bool PreProcessName(std::wstring* path);
 
 // Corrects global paths to have a correctly escaped NT prefix at the
 // beginning. If the name has no NT prefix (either normal or escaped)
 // add the escaped form to the string
-base::string16 FixNTPrefixForMatch(const base::string16& name);
+std::wstring FixNTPrefixForMatch(const std::wstring& name);
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_FILESYSTEM_POLICY_H__
+#endif  // SANDBOX_WIN_SRC_FILESYSTEM_POLICY_H_

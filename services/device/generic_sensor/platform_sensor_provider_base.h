@@ -1,13 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_DEVICE_GENERIC_SENSOR_PLATFORM_SENSOR_PROVIDER_BASE_H_
 #define SERVICES_DEVICE_GENERIC_SENSOR_PLATFORM_SENSOR_PROVIDER_BASE_H_
 
-#include "base/macros.h"
-
-#include "base/single_thread_task_runner.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "services/device/generic_sensor/platform_sensor.h"
 
@@ -18,17 +17,20 @@ namespace device {
 class PlatformSensorProviderBase {
  public:
   using CreateSensorCallback =
-      base::Callback<void(scoped_refptr<PlatformSensor>)>;
+      base::OnceCallback<void(scoped_refptr<PlatformSensor>)>;
+
+  PlatformSensorProviderBase(const PlatformSensorProviderBase&) = delete;
+  PlatformSensorProviderBase& operator=(const PlatformSensorProviderBase&) =
+      delete;
 
   // Creates new instance of PlatformSensor.
-  void CreateSensor(mojom::SensorType type,
-                    const CreateSensorCallback& callback);
+  void CreateSensor(mojom::SensorType type, CreateSensorCallback callback);
 
   // Gets previously created instance of PlatformSensor by sensor type |type|.
   scoped_refptr<PlatformSensor> GetSensor(mojom::SensorType type);
 
-  // Shared buffer getters.
-  mojo::ScopedSharedBufferHandle CloneSharedBufferHandle();
+  // Shared memory region getters.
+  base::ReadOnlySharedMemoryRegion CloneSharedMemoryRegion();
 
   // Returns 'true' if some of sensor instances produced by this provider are
   // alive; 'false' otherwise.
@@ -41,7 +43,7 @@ class PlatformSensorProviderBase {
   // Method that must be implemented by platform specific classes.
   virtual void CreateSensorInternal(mojom::SensorType type,
                                     SensorReadingSharedBuffer* reading_buffer,
-                                    const CreateSensorCallback& callback) = 0;
+                                    CreateSensorCallback callback) = 0;
 
   // Implementations might override this method to free resources when there
   // are no sensors left.
@@ -56,6 +58,7 @@ class PlatformSensorProviderBase {
 
   SensorReadingSharedBuffer* GetSensorReadingSharedBufferForType(
       mojom::SensorType type);
+  void RemoveSensor(mojom::SensorType type, PlatformSensor* sensor);
 
   THREAD_CHECKER(thread_checker_);
 
@@ -63,17 +66,13 @@ class PlatformSensorProviderBase {
   friend class PlatformSensor;  // To call RemoveSensor();
 
   void FreeResourcesIfNeeded();
-  void RemoveSensor(mojom::SensorType type, PlatformSensor* sensor);
 
  private:
   using CallbackQueue = std::vector<CreateSensorCallback>;
 
   std::map<mojom::SensorType, PlatformSensor*> sensor_map_;
   std::map<mojom::SensorType, CallbackQueue> requests_map_;
-  mojo::ScopedSharedBufferHandle shared_buffer_handle_;
-  mojo::ScopedSharedBufferMapping shared_buffer_mapping_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformSensorProviderBase);
+  base::MappedReadOnlyRegion mapped_region_;
 };
 
 }  // namespace device

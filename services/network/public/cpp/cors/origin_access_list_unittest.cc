@@ -1,8 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/public/cpp/cors/origin_access_list.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/cors.mojom.h"
 #include "services/network/public/mojom/cors_origin_pattern.mojom.h"
 
@@ -41,6 +42,9 @@ class OriginAccessListTest : public testing::Test {
         https_google_origin_(url::Origin::Create(GURL("https://google.com"))),
         source_origin_(url::Origin::Create(GURL("https://chromium.org"))) {}
 
+  OriginAccessListTest(const OriginAccessListTest&) = delete;
+  OriginAccessListTest& operator=(const OriginAccessListTest&) = delete;
+
   ~OriginAccessListTest() override = default;
 
  protected:
@@ -58,6 +62,17 @@ class OriginAccessListTest : public testing::Test {
   }
   const url::Origin& https_google_origin() const {
     return https_google_origin_;
+  }
+  const url::Origin& source_origin() const { return source_origin_; }
+  OriginAccessList::AccessState CheckAccess(
+      const url::Origin& request_initiator,
+      const absl::optional<url::Origin>& isolated_world_origin,
+      const GURL& url) {
+    ResourceRequest request;
+    request.url = url;
+    request.request_initiator = request_initiator;
+    request.isolated_world_origin = isolated_world_origin;
+    return list_.CheckAccessState(request);
   }
   bool IsAllowed(const url::Origin& destination_origin) const {
     return list_.CheckAccessState(source_origin_,
@@ -118,8 +133,6 @@ class OriginAccessListTest : public testing::Test {
   url::Origin source_origin_;
 
   OriginAccessList list_;
-
-  DISALLOW_COPY_AND_ASSIGN(OriginAccessListTest);
 };
 
 TEST_F(OriginAccessListTest, IsAccessAllowedWithPort) {
@@ -138,6 +151,38 @@ TEST_F(OriginAccessListTest, IsAccessAllowedWithPort) {
                     kAllowAnyPort);
   EXPECT_TRUE(IsAllowed(https_example_origin()));
   EXPECT_TRUE(IsAllowed(https_another_port_example_origin()));
+}
+
+TEST_F(OriginAccessListTest, IsAccessAllowedForIsolatedWorldOrigin) {
+  // By default, no access should be allowed.
+  EXPECT_FALSE(IsAllowed(https_example_origin()));
+
+  // Adding access for https://example.com should work, but should not grant
+  // access to different ports for the same scheme:host pair.
+  GURL target("https://example.com");
+  SetAllowListEntry(target.scheme(), target.host(), kHttpsPort,
+                    kDisallowSubdomains, kAllowOnlySpecifiedPort);
+
+  // When request is made by a Chrome Extension background page,
+  // request_initiator is the origin that should be used as a key for
+  // OriginAccessList.
+  EXPECT_EQ(OriginAccessList::AccessState::kAllowed,
+            CheckAccess(source_origin(), absl::nullopt, target));
+
+  // When request is made by a Chrome Extension content script,
+  // isolated_world_origin is the origin that should be used as a key for
+  // OriginAccessList.
+  EXPECT_EQ(OriginAccessList::AccessState::kAllowed,
+            CheckAccess(https_another_port_example_origin(), source_origin(),
+                        target));
+
+  // Impossible situation with Chrome Extensions - the isolated_world_origin is
+  // non-empty, but request_intiator is the key in the OriginAccessList.  In
+  // this impossible situation it is okay to indicate that no entry is listed
+  // in the OriginAccessList.
+  EXPECT_EQ(OriginAccessList::AccessState::kNotListed,
+            CheckAccess(source_origin(), https_another_port_example_origin(),
+                        target));
 }
 
 TEST_F(OriginAccessListTest, IsAccessAllowed) {
@@ -220,6 +265,20 @@ TEST_F(OriginAccessListTest, IsPriorityRespected) {
   EXPECT_FALSE(IsAllowed(https_sub_example_origin()));
 }
 
+TEST_F(OriginAccessListTest, BlockWhenAllowAndBlockHaveSamePriority) {
+  AddAllowListEntry("https", "example.com", kAnyPort, kAllowSubdomains,
+                    kAllowAnyPort,
+                    mojom::CorsOriginAccessMatchPriority::kLowPriority);
+  EXPECT_TRUE(IsAllowed(https_example_origin()));
+
+  // Add a blocklist rule with the same priority. We should default to blocking
+  // access.
+  AddBlockListEntry("https", "example.com", kAnyPort, kAllowSubdomains,
+                    kAllowAnyPort,
+                    mojom::CorsOriginAccessMatchPriority::kLowPriority);
+  EXPECT_FALSE(IsAllowed(https_example_origin()));
+}
+
 TEST_F(OriginAccessListTest, IsPriorityRespectedReverse) {
   AddAllowListEntry("https", "example.com", kAnyPort, kDisallowSubdomains,
                     kAllowAnyPort,
@@ -265,7 +324,7 @@ TEST_F(OriginAccessListTest, CreateCorsOriginAccessPatternsList) {
   bool found_origin1 = false;
   bool found_origin2 = false;
   for (const auto& pattern : patterns) {
-    if (pattern->source_origin == kOrigin1.Serialize()) {
+    if (pattern->source_origin == kOrigin1) {
       EXPECT_FALSE(found_origin1);
       found_origin1 = true;
 
@@ -279,7 +338,7 @@ TEST_F(OriginAccessListTest, CreateCorsOriginAccessPatternsList) {
       EXPECT_EQ(kAllowAnyPort, pattern->allow_patterns[0]->port_match_mode);
       EXPECT_EQ(mojom::CorsOriginAccessMatchPriority::kMediumPriority,
                 pattern->allow_patterns[0]->priority);
-    } else if (pattern->source_origin == kOrigin2.Serialize()) {
+    } else if (pattern->source_origin == kOrigin2) {
       EXPECT_FALSE(found_origin2);
       found_origin2 = true;
 

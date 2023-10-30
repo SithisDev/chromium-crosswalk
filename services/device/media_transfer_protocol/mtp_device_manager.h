@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,18 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/queue.h"
-#include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_checker.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "build/chromeos_buildflags.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/device/media_transfer_protocol/media_transfer_protocol_daemon_client.h"
 #include "services/device/public/mojom/mtp_manager.mojom.h"
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 #error "Only used on ChromeOS"
 #endif
 
@@ -37,13 +39,17 @@ namespace device {
 class MtpDeviceManager : public mojom::MtpManager {
  public:
   MtpDeviceManager();
+
+  MtpDeviceManager(const MtpDeviceManager&) = delete;
+  MtpDeviceManager& operator=(const MtpDeviceManager&) = delete;
+
   ~MtpDeviceManager() override;
 
-  void AddBinding(mojom::MtpManagerRequest request);
+  void AddReceiver(mojo::PendingReceiver<mojom::MtpManager> receiver);
 
   // Implements mojom::MtpManager.
   void EnumerateStoragesAndSetClient(
-      mojom::MtpManagerClientAssociatedPtrInfo client,
+      mojo::PendingAssociatedRemote<mojom::MtpManagerClient> client,
       EnumerateStoragesAndSetClientCallback callback) override;
   void GetStorageInfo(const std::string& storage_name,
                       GetStorageInfoCallback callback) override;
@@ -167,11 +173,11 @@ class MtpDeviceManager : public mojom::MtpManager {
   // DBusThreadManager to provide a bus in unit tests.
   scoped_refptr<dbus::Bus> const bus_;
 
-  mojo::BindingSet<mojom::MtpManager> bindings_;
+  mojo::ReceiverSet<mojom::MtpManager> receivers_;
   // MtpManager client who keeps tuned on attachment / detachment events.
   // Currently, storage_monitor::StorageMonitorCros is supposed to be the
   // only client.
-  mojom::MtpManagerClientAssociatedPtr client_;
+  mojo::AssociatedRemote<mojom::MtpManagerClient> client_;
 
   // Map to keep track of attached storages by name.
   base::flat_map<std::string, mojom::MtpStorageInfo> storage_info_map_;
@@ -201,9 +207,7 @@ class MtpDeviceManager : public mojom::MtpManager {
 
   base::ThreadChecker thread_checker_;
 
-  base::WeakPtrFactory<MtpDeviceManager> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MtpDeviceManager);
+  base::WeakPtrFactory<MtpDeviceManager> weak_ptr_factory_{this};
 };
 
 }  // namespace device

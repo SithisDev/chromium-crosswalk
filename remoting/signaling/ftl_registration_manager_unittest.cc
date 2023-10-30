@@ -1,14 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/signaling/ftl_registration_manager.h"
 
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "remoting/base/fake_oauth_token_getter.h"
+#include "remoting/base/protobuf_http_status.h"
 #include "remoting/proto/ftl/v1/ftl_messages.pb.h"
 #include "remoting/signaling/ftl_client_uuid_device_id_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -21,13 +23,13 @@ namespace {
 using testing::_;
 
 using SignInGaiaResponseCallback =
-    base::OnceCallback<void(const grpc::Status&,
-                            const ftl::SignInGaiaResponse&)>;
+    base::OnceCallback<void(const ProtobufHttpStatus&,
+                            std::unique_ptr<ftl::SignInGaiaResponse>)>;
 
 constexpr char kAuthToken[] = "auth_token";
 constexpr int64_t kAuthTokenExpiresInMicroseconds = 86400000000;  // = 1 day
 constexpr base::TimeDelta kAuthTokenExpiration =
-    base::TimeDelta::FromMicroseconds(kAuthTokenExpiresInMicroseconds);
+    base::Microseconds(kAuthTokenExpiresInMicroseconds);
 
 MATCHER_P(HasErrorCode, error_code, "") {
   return arg.error_code() == error_code;
@@ -47,27 +49,18 @@ decltype(auto) RespondOkToSignInGaia(const std::string& registration_id) {
   return [registration_id](const ftl::SignInGaiaRequest& request,
                            SignInGaiaResponseCallback on_done) {
     VerifySignInGaiaRequest(request);
-    ftl::SignInGaiaResponse response;
-    response.set_registration_id(registration_id);
-    response.mutable_auth_token()->set_payload(kAuthToken);
-    response.mutable_auth_token()->set_expires_in(
+    auto response = std::make_unique<ftl::SignInGaiaResponse>();
+    response->set_registration_id(registration_id);
+    response->mutable_auth_token()->set_payload(kAuthToken);
+    response->mutable_auth_token()->set_expires_in(
         kAuthTokenExpiresInMicroseconds);
-    std::move(on_done).Run(grpc::Status::OK, response);
+    std::move(on_done).Run(ProtobufHttpStatus::OK(), std::move(response));
   };
 }
 
 }  // namespace
 
 class FtlRegistrationManagerTest : public testing::Test {
- public:
-  FtlRegistrationManagerTest() {
-    auto registration_client = std::make_unique<MockRegistrationClient>();
-    registration_client_ = registration_client.get();
-    registration_manager_.registration_client_ = std::move(registration_client);
-  }
-
-  ~FtlRegistrationManagerTest() override = default;
-
  protected:
   class MockRegistrationClient
       : public FtlRegistrationManager::RegistrationClient {
@@ -82,14 +75,15 @@ class FtlRegistrationManagerTest : public testing::Test {
     return registration_manager_.sign_in_backoff_;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW};
-  FakeOAuthTokenGetter token_getter{OAuthTokenGetter::SUCCESS, "fake_email",
-                                    "access_token"};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   FtlRegistrationManager registration_manager_{
-      &token_getter, std::make_unique<FtlClientUuidDeviceIdProvider>()};
-  MockRegistrationClient* registration_client_ = nullptr;
-  base::MockCallback<base::RepeatingCallback<void(const grpc::Status& status)>>
+      std::make_unique<MockRegistrationClient>(),
+      std::make_unique<FtlClientUuidDeviceIdProvider>()};
+  raw_ptr<MockRegistrationClient> registration_client_ =
+      static_cast<MockRegistrationClient*>(
+          registration_manager_.registration_client_.get());
+  base::MockCallback<base::RepeatingCallback<void(const ProtobufHttpStatus&)>>
       done_callback_;
 };
 
@@ -104,14 +98,14 @@ TEST_F(FtlRegistrationManagerTest, SignInGaiaAndAutorefresh) {
 
   EXPECT_CALL(done_callback_, Run(IsStatusOk())).Times(1);
   registration_manager_.SignInGaia(done_callback_.Get());
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
 
   ASSERT_TRUE(registration_manager_.IsSignedIn());
   ASSERT_EQ("registration_id_1", registration_manager_.GetRegistrationId());
   ASSERT_EQ(kAuthToken, registration_manager_.GetFtlAuthToken());
 
-  scoped_task_environment_.FastForwardBy(kAuthTokenExpiration);
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(kAuthTokenExpiration);
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
   ASSERT_EQ("registration_id_2", registration_manager_.GetRegistrationId());
 }
 
@@ -126,35 +120,39 @@ TEST_F(FtlRegistrationManagerTest, FailedToSignIn_Backoff) {
                    SignInGaiaResponseCallback on_done) {
         VerifySignInGaiaRequest(request);
         std::move(on_done).Run(
-            grpc::Status(grpc::StatusCode::UNAVAILABLE, "unavailable"), {});
+            ProtobufHttpStatus(ProtobufHttpStatus::Code::UNAVAILABLE,
+                               "unavailable"),
+            {});
       })
       .WillOnce([](const ftl::SignInGaiaRequest& request,
                    SignInGaiaResponseCallback on_done) {
         VerifySignInGaiaRequest(request);
         std::move(on_done).Run(
-            grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "unauthenticated"),
+            ProtobufHttpStatus(ProtobufHttpStatus::Code::UNAUTHENTICATED,
+                               "unauthenticated"),
             {});
       })
       .WillOnce(RespondOkToSignInGaia("registration_id"));
 
-  EXPECT_CALL(done_callback_, Run(HasErrorCode(grpc::StatusCode::UNAVAILABLE)))
+  EXPECT_CALL(done_callback_,
+              Run(HasErrorCode(ProtobufHttpStatus::Code::UNAVAILABLE)))
       .Times(1);
   registration_manager_.SignInGaia(done_callback_.Get());
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
   ASSERT_FALSE(registration_manager_.IsSignedIn());
   ASSERT_EQ(1, GetBackoff().failure_count());
 
   EXPECT_CALL(done_callback_,
-              Run(HasErrorCode(grpc::StatusCode::UNAUTHENTICATED)))
+              Run(HasErrorCode(ProtobufHttpStatus::Code::UNAUTHENTICATED)))
       .Times(1);
   registration_manager_.SignInGaia(done_callback_.Get());
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
   ASSERT_FALSE(registration_manager_.IsSignedIn());
   ASSERT_EQ(2, GetBackoff().failure_count());
 
   EXPECT_CALL(done_callback_, Run(IsStatusOk())).Times(1);
   registration_manager_.SignInGaia(done_callback_.Get());
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
   ASSERT_TRUE(registration_manager_.IsSignedIn());
   ASSERT_EQ("registration_id", registration_manager_.GetRegistrationId());
   ASSERT_EQ(0, GetBackoff().failure_count());
@@ -170,7 +168,7 @@ TEST_F(FtlRegistrationManagerTest, SignOut) {
 
   EXPECT_CALL(done_callback_, Run(IsStatusOk())).Times(1);
   registration_manager_.SignInGaia(done_callback_.Get());
-  scoped_task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
+  task_environment_.FastForwardBy(GetBackoff().GetTimeUntilRelease());
 
   ASSERT_TRUE(registration_manager_.IsSignedIn());
   ASSERT_EQ("registration_id", registration_manager_.GetRegistrationId());
@@ -183,7 +181,7 @@ TEST_F(FtlRegistrationManagerTest, SignOut) {
   ASSERT_TRUE(registration_manager_.GetRegistrationId().empty());
   ASSERT_TRUE(registration_manager_.GetFtlAuthToken().empty());
 
-  scoped_task_environment_.FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardUntilNoTasksRemain();
   ASSERT_FALSE(registration_manager_.IsSignedIn());
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <string>
 
 #include "mojo/public/c/system/data_pipe.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/network/public/mojom/data_pipe_getter.mojom.h"
 
 namespace network {
@@ -21,7 +21,11 @@ namespace network {
 class TestDataPipeGetter : public mojom::DataPipeGetter {
  public:
   TestDataPipeGetter(const std::string& string_to_write,
-                     mojom::DataPipeGetterRequest request);
+                     mojo::PendingReceiver<mojom::DataPipeGetter> receiver);
+
+  TestDataPipeGetter(const TestDataPipeGetter&) = delete;
+  TestDataPipeGetter& operator=(const TestDataPipeGetter&) = delete;
+
   ~TestDataPipeGetter() override;
 
   // If set to anything other than net::OK, won't bother to write the data.
@@ -35,7 +39,7 @@ class TestDataPipeGetter : public mojom::DataPipeGetter {
   // mojom::DataPipeGetter implementation:
   void Read(mojo::ScopedDataPipeProducerHandle pipe,
             ReadCallback callback) override;
-  void Clone(mojom::DataPipeGetterRequest request) override;
+  void Clone(mojo::PendingReceiver<mojom::DataPipeGetter> receiver) override;
 
  private:
   void MojoReadyCallback(MojoResult result,
@@ -46,14 +50,12 @@ class TestDataPipeGetter : public mojom::DataPipeGetter {
   int32_t start_error_ = 0;  // net::OK
   bool pipe_closed_early_ = false;
 
-  mojo::BindingSet<mojom::DataPipeGetter> bindings_;
+  mojo::ReceiverSet<mojom::DataPipeGetter> receivers_;
 
   mojo::ScopedDataPipeProducerHandle pipe_;
   // Must be below |pipe_|, so it's deleted first.
   std::unique_ptr<mojo::SimpleWatcher> handle_watcher_;
   size_t write_position_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(TestDataPipeGetter);
 };
 
 }  // namespace network

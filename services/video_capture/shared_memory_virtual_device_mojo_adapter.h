@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 #include "base/sequence_checker.h"
 #include "media/capture/video/video_capture_buffer_pool.h"
 #include "media/capture/video_capture_types.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/video_capture/public/cpp/video_frame_access_handler.h"
 #include "services/video_capture/public/mojom/device.mojom.h"
 #include "services/video_capture/public/mojom/producer.mojom.h"
-#include "services/video_capture/public/mojom/receiver.mojom.h"
+#include "services/video_capture/public/mojom/video_frame_handler.mojom.h"
 #include "services/video_capture/public/mojom/virtual_device.mojom.h"
 
 namespace video_capture {
@@ -21,9 +23,14 @@ class SharedMemoryVirtualDeviceMojoAdapter
       public mojom::Device {
  public:
   SharedMemoryVirtualDeviceMojoAdapter(
-      std::unique_ptr<service_manager::ServiceContextRef> service_ref,
-      mojom::ProducerPtr producer,
+      mojo::Remote<mojom::Producer> producer,
       bool send_buffer_handles_to_producer_as_raw_file_descriptors = false);
+
+  SharedMemoryVirtualDeviceMojoAdapter(
+      const SharedMemoryVirtualDeviceMojoAdapter&) = delete;
+  SharedMemoryVirtualDeviceMojoAdapter& operator=(
+      const SharedMemoryVirtualDeviceMojoAdapter&) = delete;
+
   ~SharedMemoryVirtualDeviceMojoAdapter() override;
 
   // mojom::SharedMemoryVirtualDevice implementation.
@@ -37,13 +44,15 @@ class SharedMemoryVirtualDeviceMojoAdapter
 
   // mojom::Device implementation.
   void Start(const media::VideoCaptureParams& requested_settings,
-             mojom::ReceiverPtr receiver) override;
+             mojo::PendingRemote<mojom::VideoFrameHandler> receiver) override;
   void MaybeSuspend() override;
   void Resume() override;
   void GetPhotoState(GetPhotoStateCallback callback) override;
   void SetPhotoOptions(media::mojom::PhotoSettingsPtr settings,
                        SetPhotoOptionsCallback callback) override;
   void TakePhoto(TakePhotoCallback callback) override;
+  void ProcessFeedback(const media::VideoCaptureFeedback& feedback) override;
+  void RequestRefreshFrame() override;
 
   void Stop();
 
@@ -54,15 +63,13 @@ class SharedMemoryVirtualDeviceMojoAdapter
  private:
   void OnReceiverConnectionErrorOrClose();
 
-  const std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
-  mojom::ReceiverPtr receiver_;
-  mojom::ProducerPtr producer_;
+  mojo::Remote<mojom::VideoFrameHandler> video_frame_handler_;
+  mojo::Remote<mojom::Producer> producer_;
   const bool send_buffer_handles_to_producer_as_raw_file_descriptors_;
   scoped_refptr<media::VideoCaptureBufferPool> buffer_pool_;
   std::vector<int> known_buffer_ids_;
+  scoped_refptr<ScopedAccessPermissionMap> scoped_access_permission_map_;
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(SharedMemoryVirtualDeviceMojoAdapter);
 };
 
 }  // namespace video_capture

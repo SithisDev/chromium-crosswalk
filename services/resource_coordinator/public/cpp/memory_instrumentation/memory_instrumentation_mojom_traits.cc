@@ -1,8 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation_mojom_traits.h"
+
+#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 
 namespace mojo {
 
@@ -89,6 +91,42 @@ bool EnumTraits<memory_instrumentation::mojom::LevelOfDetail,
 }
 
 // static
+memory_instrumentation::mojom::Determinism
+EnumTraits<memory_instrumentation::mojom::Determinism,
+           base::trace_event::MemoryDumpDeterminism>::
+    ToMojom(base::trace_event::MemoryDumpDeterminism determinism) {
+  switch (determinism) {
+    case base::trace_event::MemoryDumpDeterminism::NONE:
+      return memory_instrumentation::mojom::Determinism::NONE;
+    case base::trace_event::MemoryDumpDeterminism::FORCE_GC:
+      return memory_instrumentation::mojom::Determinism::FORCE_GC;
+    default:
+      CHECK(false) << "Invalid type: " << static_cast<uint8_t>(determinism);
+      // This should not be reached. Just return a random value.
+      return memory_instrumentation::mojom::Determinism::NONE;
+  }
+}
+
+// static
+bool EnumTraits<memory_instrumentation::mojom::Determinism,
+                base::trace_event::MemoryDumpDeterminism>::
+    FromMojom(memory_instrumentation::mojom::Determinism input,
+              base::trace_event::MemoryDumpDeterminism* out) {
+  switch (input) {
+    case memory_instrumentation::mojom::Determinism::NONE:
+      *out = base::trace_event::MemoryDumpDeterminism::NONE;
+      break;
+    case memory_instrumentation::mojom::Determinism::FORCE_GC:
+      *out = base::trace_event::MemoryDumpDeterminism::FORCE_GC;
+      break;
+    default:
+      NOTREACHED() << "Invalid type: " << static_cast<uint8_t>(input);
+      return false;
+  }
+  return true;
+}
+
+// static
 bool StructTraits<memory_instrumentation::mojom::RequestArgsDataView,
                   base::trace_event::MemoryDumpRequestArgs>::
     Read(memory_instrumentation::mojom::RequestArgsDataView input,
@@ -97,6 +135,8 @@ bool StructTraits<memory_instrumentation::mojom::RequestArgsDataView,
   if (!input.ReadDumpType(&out->dump_type))
     return false;
   if (!input.ReadLevelOfDetail(&out->level_of_detail))
+    return false;
+  if (!input.ReadDeterminism(&out->determinism))
     return false;
   return true;
 }
@@ -123,7 +163,7 @@ bool UnionTraits<
         base::trace_event::MemoryAllocatorDump::Entry* out) {
   using memory_instrumentation::mojom::RawAllocatorDumpEntryValue;
   switch (input.tag()) {
-    case RawAllocatorDumpEntryValue::Tag::VALUE_STRING: {
+    case RawAllocatorDumpEntryValue::Tag::kValueString: {
       std::string value_string;
       if (!input.ReadValueString(&value_string))
         return false;
@@ -131,7 +171,7 @@ bool UnionTraits<
       out->entry_type = base::trace_event::MemoryAllocatorDump::Entry::kString;
       break;
     }
-    case RawAllocatorDumpEntryValue::Tag::VALUE_UINT64: {
+    case RawAllocatorDumpEntryValue::Tag::kValueUint64: {
       out->value_uint64 = input.value_uint64();
       out->entry_type = base::trace_event::MemoryAllocatorDump::Entry::kUint64;
       break;

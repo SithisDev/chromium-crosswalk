@@ -1,15 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_PROCESS_THREAD_DISPATCHER_H_
-#define SANDBOX_SRC_PROCESS_THREAD_DISPATCHER_H_
+#ifndef SANDBOX_WIN_SRC_PROCESS_THREAD_DISPATCHER_H_
+#define SANDBOX_WIN_SRC_PROCESS_THREAD_DISPATCHER_H_
 
 #include <stdint.h>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
 #include "sandbox/win/src/crosscall_server.h"
+#include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/sandbox_policy_base.h"
 
 namespace sandbox {
@@ -17,11 +16,15 @@ namespace sandbox {
 // This class handles process and thread-related IPC calls.
 class ThreadProcessDispatcher : public Dispatcher {
  public:
-  explicit ThreadProcessDispatcher(PolicyBase* policy_base);
+  explicit ThreadProcessDispatcher();
+
+  ThreadProcessDispatcher(const ThreadProcessDispatcher&) = delete;
+  ThreadProcessDispatcher& operator=(const ThreadProcessDispatcher&) = delete;
+
   ~ThreadProcessDispatcher() override {}
 
   // Dispatcher interface.
-  bool SetupService(InterceptionManager* manager, int service) override;
+  bool SetupService(InterceptionManager* manager, IpcTag service) override;
 
  private:
   // Processes IPC requests coming from calls to NtOpenThread() in the target.
@@ -43,25 +46,14 @@ class ThreadProcessDispatcher : public Dispatcher {
                             uint32_t desired_access,
                             uint32_t attributes);
 
-  // Processes IPC requests coming from calls to CreateProcessW() in the target.
-  bool CreateProcessW(IPCInfo* ipc,
-                      base::string16* name,
-                      base::string16* cmd_line,
-                      base::string16* cur_dir,
-                      base::string16* target_cur_dir,
-                      CountedBuffer* info);
-
   // Processes IPC requests coming from calls to CreateThread() in the target.
   bool CreateThread(IPCInfo* ipc,
                     SIZE_T stack_size,
                     LPTHREAD_START_ROUTINE start_address,
                     LPVOID parameter,
                     DWORD creation_flags);
-
-  PolicyBase* policy_base_;
-  DISALLOW_COPY_AND_ASSIGN(ThreadProcessDispatcher);
 };
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_PROCESS_THREAD_DISPATCHER_H_
+#endif  // SANDBOX_WIN_SRC_PROCESS_THREAD_DISPATCHER_H_

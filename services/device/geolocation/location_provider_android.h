@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ class LocationProviderAndroid : public LocationProvider {
   mojom::Geoposition last_position_;
   LocationProviderUpdateCallback callback_;
 
-  base::WeakPtrFactory<LocationProviderAndroid> weak_ptr_factory_;
+  base::WeakPtrFactory<LocationProviderAndroid> weak_ptr_factory_{this};
 };
 
 }  // namespace device

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/signaling/signal_strategy.h"
 
@@ -34,10 +34,15 @@ class IqSender : public SignalStrategy::Listener {
  public:
   // Callback that is called when an Iq response is received. Called
   // with the |response| set to nullptr in case of a timeout.
-  typedef base::Callback<void(IqRequest* request,
-                              const jingle_xmpp::XmlElement* response)> ReplyCallback;
+  using ReplyCallback =
+      base::OnceCallback<void(IqRequest* request,
+                              const jingle_xmpp::XmlElement* response)>;
 
   explicit IqSender(SignalStrategy* signal_strategy);
+
+  IqSender(const IqSender&) = delete;
+  IqSender& operator=(const IqSender&) = delete;
+
   ~IqSender() override;
 
   // Send an iq stanza. Returns an IqRequest object that represends
@@ -45,14 +50,16 @@ class IqSender : public SignalStrategy::Listener {
   // received. Destroy the returned IqRequest to cancel the callback.
   // Caller must take ownership of the result. Result must be
   // destroyed before sender is destroyed.
-  std::unique_ptr<IqRequest> SendIq(std::unique_ptr<jingle_xmpp::XmlElement> stanza,
-                                    const ReplyCallback& callback);
+  std::unique_ptr<IqRequest> SendIq(
+      std::unique_ptr<jingle_xmpp::XmlElement> stanza,
+      ReplyCallback callback);
 
   // Same as above, but also formats the message.
-  std::unique_ptr<IqRequest> SendIq(const std::string& type,
-                                    const std::string& addressee,
-                                    std::unique_ptr<jingle_xmpp::XmlElement> iq_body,
-                                    const ReplyCallback& callback);
+  std::unique_ptr<IqRequest> SendIq(
+      const std::string& type,
+      const std::string& addressee,
+      std::unique_ptr<jingle_xmpp::XmlElement> iq_body,
+      ReplyCallback callback);
 
   // SignalStrategy::Listener implementation.
   void OnSignalStrategyStateChange(SignalStrategy::State state) override;
@@ -71,17 +78,20 @@ class IqSender : public SignalStrategy::Listener {
   // Removes |request| from the list of pending requests. Called by IqRequest.
   void RemoveRequest(IqRequest* request);
 
-  SignalStrategy* signal_strategy_;
+  raw_ptr<SignalStrategy> signal_strategy_;
   IqRequestMap requests_;
-
-  DISALLOW_COPY_AND_ASSIGN(IqSender);
 };
 
 // This call must only be used on the thread it was created on.
 class IqRequest {
  public:
-  IqRequest(IqSender* sender, const IqSender::ReplyCallback& callback,
+  IqRequest(IqSender* sender,
+            IqSender::ReplyCallback callback,
             const std::string& addressee);
+
+  IqRequest(const IqRequest&) = delete;
+  IqRequest& operator=(const IqRequest&) = delete;
+
   ~IqRequest();
 
   // Sets timeout for the request. When the timeout expires the
@@ -99,13 +109,11 @@ class IqRequest {
 
   void DeliverResponse(std::unique_ptr<jingle_xmpp::XmlElement> stanza);
 
-  IqSender* sender_;
+  raw_ptr<IqSender> sender_;
   IqSender::ReplyCallback callback_;
   std::string addressee_;
 
-  base::WeakPtrFactory<IqRequest> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(IqRequest);
+  base::WeakPtrFactory<IqRequest> weak_factory_{this};
 };
 
 }  // namespace remoting

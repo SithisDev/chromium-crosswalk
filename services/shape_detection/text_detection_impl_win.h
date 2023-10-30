@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,8 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/shape_detection/public/mojom/textdetection.mojom.h"
 
 class SkBitmap;
@@ -28,14 +27,18 @@ class TextDetectionImplWin : public mojom::TextDetection {
       Microsoft::WRL::ComPtr<
           ABI::Windows::Graphics::Imaging::ISoftwareBitmapStatics>
           bitmap_factory);
+
+  TextDetectionImplWin(const TextDetectionImplWin&) = delete;
+  TextDetectionImplWin& operator=(const TextDetectionImplWin&) = delete;
+
   ~TextDetectionImplWin() override;
 
   // mojom::TextDetection implementation.
   void Detect(const SkBitmap& bitmap,
               mojom::TextDetection::DetectCallback callback) override;
 
-  void SetBinding(mojo::StrongBindingPtr<mojom::TextDetection> binding) {
-    binding_ = std::move(binding);
+  void SetReceiver(mojo::SelfOwnedReceiverRef<mojom::TextDetection> receiver) {
+    receiver_ = std::move(receiver);
   }
 
  private:
@@ -44,7 +47,7 @@ class TextDetectionImplWin : public mojom::TextDetection {
       ABI::Windows::Graphics::Imaging::ISoftwareBitmapStatics>
       bitmap_factory_;
   DetectCallback recognize_text_callback_;
-  mojo::StrongBindingPtr<mojom::TextDetection> binding_;
+  mojo::SelfOwnedReceiverRef<mojom::TextDetection> receiver_;
 
   HRESULT BeginDetect(const SkBitmap& bitmap);
   std::vector<mojom::TextDetectionResultPtr> BuildTextDetectionResult(
@@ -54,9 +57,7 @@ class TextDetectionImplWin : public mojom::TextDetection {
           win_bitmap,
       Microsoft::WRL::ComPtr<ABI::Windows::Media::Ocr::IOcrResult> ocr_result);
 
-  base::WeakPtrFactory<TextDetectionImplWin> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextDetectionImplWin);
+  base::WeakPtrFactory<TextDetectionImplWin> weak_factory_{this};
 };
 
 }  // namespace shape_detection

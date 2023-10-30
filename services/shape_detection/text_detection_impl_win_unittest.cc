@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/windows_version.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/shape_detection/public/mojom/textdetection.mojom.h"
 #include "services/shape_detection/text_detection_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,16 +24,20 @@ namespace shape_detection {
 
 namespace {
 
-void DetectTextCallback(base::Closure quit_closure,
+void DetectTextCallback(base::OnceClosure quit_closure,
                         std::vector<mojom::TextDetectionResultPtr>* results_out,
                         std::vector<mojom::TextDetectionResultPtr> results_in) {
   *results_out = std::move(results_in);
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 }  // namespace
 
 class TextDetectionImplWinTest : public testing::Test {
+ public:
+  TextDetectionImplWinTest(const TextDetectionImplWinTest&) = delete;
+  TextDetectionImplWinTest& operator=(const TextDetectionImplWinTest&) = delete;
+
  protected:
   TextDetectionImplWinTest() = default;
   ~TextDetectionImplWinTest() override = default;
@@ -48,9 +51,7 @@ class TextDetectionImplWinTest : public testing::Test {
  private:
   std::unique_ptr<base::win::ScopedCOMInitializer> scoped_com_initializer_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextDetectionImplWinTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(TextDetectionImplWinTest, ScanOnce) {
@@ -58,9 +59,8 @@ TEST_F(TextDetectionImplWinTest, ScanOnce) {
   if (base::win::GetVersion() < base::win::Version::WIN10)
     return;
 
-  mojom::TextDetectionPtr text_service;
-  auto request = mojo::MakeRequest(&text_service);
-  TextDetectionImpl::Create(std::move(request));
+  mojo::Remote<mojom::TextDetection> text_service;
+  TextDetectionImpl::Create(text_service.BindNewPipeAndPassReceiver());
 
   // Load image data from test directory.
   base::FilePath image_path;

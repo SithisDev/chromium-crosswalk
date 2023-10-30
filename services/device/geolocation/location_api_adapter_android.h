@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,8 @@ namespace device {
 // one call to Start().
 class LocationApiAdapterAndroid {
  public:
-  using OnGeopositionCB = base::Callback<void(const mojom::Geoposition&)>;
+  using OnGeopositionCB =
+      base::RepeatingCallback<void(const mojom::Geoposition&)>;
 
   // Starts the underlying location provider.
   // Called on |task_runner_|.

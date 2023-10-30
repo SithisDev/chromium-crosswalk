@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/trace_event/trace_event.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
 
 namespace audio {
 
@@ -20,10 +19,9 @@ SystemInfo::~SystemInfo() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(binding_sequence_checker_);
 }
 
-void SystemInfo::Bind(mojo::PendingReceiver<mojom::SystemInfo> receiver,
-                      TracedServiceRef context_ref) {
+void SystemInfo::Bind(mojo::PendingReceiver<mojom::SystemInfo> receiver) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(binding_sequence_checker_);
-  receivers_.Add(this, std::move(receiver), std::move(context_ref));
+  receivers_.Add(this, std::move(receiver));
 }
 
 void SystemInfo::GetInputStreamParameters(

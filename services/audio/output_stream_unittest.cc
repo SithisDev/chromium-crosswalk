@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/unguessable_token.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/mock_audio_manager.h"
 #include "media/audio/test_audio_thread.h"
-#include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/system/functions.h"
 #include "services/audio/stream_factory.h"
 #include "services/audio/test/mock_log.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -43,6 +44,9 @@ class MockStream : public media::AudioOutputStream {
  public:
   MockStream() {}
 
+  MockStream(const MockStream&) = delete;
+  MockStream& operator=(const MockStream&) = delete;
+
   MOCK_METHOD0(Open, bool());
   MOCK_METHOD1(Start, void(AudioSourceCallback* callback));
   MOCK_METHOD0(Stop, void());
@@ -50,9 +54,6 @@ class MockStream : public media::AudioOutputStream {
   MOCK_METHOD1(GetVolume, void(double* volume));
   MOCK_METHOD0(Close, void());
   MOCK_METHOD0(Flush, void());
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockStream);
 };
 
 const uint32_t kPlatformErrorDisconnectReason = static_cast<uint32_t>(
@@ -64,6 +65,9 @@ const uint32_t kTerminatedByClientDisconnectReason =
 class MockObserver : public media::mojom::AudioOutputStreamObserver {
  public:
   MockObserver() = default;
+
+  MockObserver(const MockObserver&) = delete;
+  MockObserver& operator=(const MockObserver&) = delete;
 
   mojo::PendingAssociatedRemote<media::mojom::AudioOutputStreamObserver>
   MakeRemote() {
@@ -88,13 +92,14 @@ class MockObserver : public media::mojom::AudioOutputStreamObserver {
  private:
   mojo::AssociatedReceiver<media::mojom::AudioOutputStreamObserver> receiver_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(MockObserver);
 };
 
 class MockCreatedCallback {
  public:
   MockCreatedCallback() {}
+
+  MockCreatedCallback(const MockCreatedCallback&) = delete;
+  MockCreatedCallback& operator=(const MockCreatedCallback&) = delete;
 
   MOCK_METHOD1(Created, void(bool /*valid*/));
 
@@ -106,9 +111,6 @@ class MockCreatedCallback {
     return base::BindOnce(&MockCreatedCallback::OnCreated,
                           base::Unretained(this));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockCreatedCallback);
 };
 
 }  // namespace
@@ -118,17 +120,19 @@ class TestEnvironment {
  public:
   TestEnvironment()
       : audio_manager_(std::make_unique<media::TestAudioThread>(false)),
-        stream_factory_(&audio_manager_),
+        stream_factory_(&audio_manager_, /*aecdump_recording_manager=*/nullptr),
         stream_factory_receiver_(
             &stream_factory_,
             remote_stream_factory_.BindNewPipeAndPassReceiver()) {
-    mojo::core::SetDefaultProcessErrorCallback(bad_message_callback_.Get());
+    mojo::SetDefaultProcessErrorHandler(bad_message_callback_.Get());
   }
+
+  TestEnvironment(const TestEnvironment&) = delete;
+  TestEnvironment& operator=(const TestEnvironment&) = delete;
 
   ~TestEnvironment() {
     audio_manager_.Shutdown();
-    mojo::core::SetDefaultProcessErrorCallback(
-        mojo::core::ProcessErrorCallback());
+    mojo::SetDefaultProcessErrorHandler(base::NullCallback());
   }
 
   using MockDeleteCallback = base::MockCallback<OutputStream::DeleteCallback>;
@@ -141,8 +145,7 @@ class TestEnvironment {
         remote_stream.InitWithNewPipeAndPassReceiver(), observer_.MakeRemote(),
         log_.MakeRemote(), "",
         media::AudioParameters::UnavailableDeviceParams(),
-        base::UnguessableToken::Create(), base::nullopt,
-        created_callback_.Get());
+        base::UnguessableToken::Create(), created_callback_.Get());
     return remote_stream;
   }
 
@@ -153,8 +156,7 @@ class TestEnvironment {
         remote_stream.InitWithNewPipeAndPassReceiver(),
         mojo::NullAssociatedRemote(), log_.MakeRemote(), "",
         media::AudioParameters::UnavailableDeviceParams(),
-        base::UnguessableToken::Create(), base::nullopt,
-        created_callback_.Get());
+        base::UnguessableToken::Create(), created_callback_.Get());
     return remote_stream;
   }
 
@@ -165,8 +167,7 @@ class TestEnvironment {
         remote_stream.InitWithNewPipeAndPassReceiver(), observer_.MakeRemote(),
         mojo::NullRemote(), "",
         media::AudioParameters::UnavailableDeviceParams(),
-        base::UnguessableToken::Create(), base::nullopt,
-        created_callback_.Get());
+        base::UnguessableToken::Create(), created_callback_.Get());
     return remote_stream;
   }
 
@@ -182,18 +183,20 @@ class TestEnvironment {
     return bad_message_callback_;
   }
 
+  media::mojom::AudioStreamFactory* remote_stream_factory() {
+    return remote_stream_factory_.get();
+  }
+
  private:
-  base::test::ScopedTaskEnvironment tasks_;
+  base::test::TaskEnvironment tasks_;
   media::MockAudioManager audio_manager_;
   StreamFactory stream_factory_;
-  mojo::Remote<mojom::StreamFactory> remote_stream_factory_;
-  mojo::Receiver<mojom::StreamFactory> stream_factory_receiver_;
+  mojo::Remote<media::mojom::AudioStreamFactory> remote_stream_factory_;
+  mojo::Receiver<media::mojom::AudioStreamFactory> stream_factory_receiver_;
   StrictMock<MockObserver> observer_;
   NiceMock<MockLog> log_;
   StrictMock<MockCreatedCallback> created_callback_;
   StrictMock<MockBadMessageCallback> bad_message_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestEnvironment);
 };
 
 TEST(AudioServiceOutputStreamTest, ConstructDestruct) {
@@ -521,6 +524,48 @@ TEST(AudioServiceOutputStreamTest,
 
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClear(&env.observer());
+}
+
+TEST(AudioServiceOutputStreamTest, BindMuters) {
+  // Set up the test environment.
+  TestEnvironment env;
+  MockStream mock_stream;
+  EXPECT_CALL(env.created_callback(), Created(successfully_));
+  env.audio_manager().SetMakeOutputStreamCB(base::BindRepeating(
+      [](media::AudioOutputStream* stream, const media::AudioParameters& params,
+         const std::string& device_id) { return stream; },
+      &mock_stream));
+
+  EXPECT_CALL(mock_stream, Open()).WillOnce(Return(true));
+  EXPECT_CALL(mock_stream, SetVolume(1));
+  EXPECT_CALL(env.log(), OnCreated(_, _));
+
+  mojo::Remote<media::mojom::AudioOutputStream> stream(env.CreateStream());
+  base::RunLoop().RunUntilIdle();
+  Mock::VerifyAndClear(&mock_stream);
+  Mock::VerifyAndClear(&env.created_callback());
+
+  // Bind the first muter.
+  mojo::AssociatedRemote<media::mojom::LocalMuter> muter1;
+  base::UnguessableToken group_id = base::UnguessableToken::Create();
+  env.remote_stream_factory()->BindMuter(
+      muter1.BindNewEndpointAndPassReceiver(), group_id);
+  base::RunLoop().RunUntilIdle();
+
+  // Unbind the first muter and immediately bind the second muter. The muter
+  // should not be destroyed in this case.
+  muter1.reset();
+  mojo::AssociatedRemote<media::mojom::LocalMuter> muter2;
+  env.remote_stream_factory()->BindMuter(
+      muter2.BindNewEndpointAndPassReceiver(), group_id);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_CALL(env.log(), OnClosed());
+  EXPECT_CALL(mock_stream, Close());
+  EXPECT_CALL(env.observer(),
+              BindingConnectionError(kTerminatedByClientDisconnectReason, _));
+  stream.reset();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace audio

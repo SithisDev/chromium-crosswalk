@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/plugin_var_tracker.h"
 
 #include <stddef.h>
+
+#include <limits>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
@@ -79,6 +81,7 @@ PP_Var PluginVarTracker::ReceiveObjectPassRef(const PP_Var& host_var,
     SendReleaseObjectMsg(*object.get());
   }
   info.ref_count++;
+  CHECK(info.ref_count != std::numeric_limits<decltype(info.ref_count)>::max());
   return ret;
 }
 
@@ -514,5 +517,5 @@ bool PluginVarTracker::StopTrackingSharedMemoryRegion(
   return false;
 }
 
-}  // namesace proxy
+}  // namespace proxy
 }  // namespace ppapi

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -125,7 +125,7 @@ bool LaunchProcessWithToken(
     SECURITY_ATTRIBUTES* thread_attributes,
     const base::HandlesToInheritVector& handles_to_inherit,
     DWORD creation_flags,
-    const base::char16* desktop_name,
+    const wchar_t* desktop_name,
     ScopedHandle* process_out,
     ScopedHandle* thread_out) {
   base::FilePath::StringType application_name = binary.value();
@@ -133,7 +133,7 @@ bool LaunchProcessWithToken(
   base::win::StartupInformation startup_info_wrapper;
   STARTUPINFO* startup_info = startup_info_wrapper.startup_info();
   if (desktop_name)
-    startup_info->lpDesktop = const_cast<base::char16*>(desktop_name);
+    startup_info->lpDesktop = const_cast<wchar_t*>(desktop_name);
 
   bool inherit_handles = false;
   if (!handles_to_inherit.empty()) {

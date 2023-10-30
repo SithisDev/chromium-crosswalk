@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <ostream>
+
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
 #include "sandbox/linux/services/syscall_wrappers.h"
@@ -33,7 +36,7 @@ void WaitForever() {
 
 }  // namespace
 
-ScopedProcess::ScopedProcess(const base::Closure& child_callback)
+ScopedProcess::ScopedProcess(base::OnceClosure child_callback)
     : child_process_id_(-1), process_id_(getpid()) {
   PCHECK(0 == pipe(pipe_fds_));
 #if !defined(THREAD_SANITIZER)
@@ -46,7 +49,7 @@ ScopedProcess::ScopedProcess(const base::Closure& child_callback)
   if (0 == child_process_id_) {
     PCHECK(0 == IGNORE_EINTR(close(pipe_fds_[0])));
     pipe_fds_[0] = -1;
-    child_callback.Run();
+    std::move(child_callback).Run();
     // Notify the parent that the closure has run.
     CHECK_EQ(1, HANDLE_EINTR(write(pipe_fds_[1], kSynchronisationChar, 1)));
     WaitForever();

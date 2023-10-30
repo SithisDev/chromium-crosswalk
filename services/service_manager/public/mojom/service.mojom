@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,8 +48,9 @@ interface Service {
   //  control_request
   //    An optional associated ServiceControl request.
   //
-  OnStart(Identity identity) => (Connector&? connector_request,
-                                 associated ServiceControl&? control_request);
+  OnStart(Identity identity) =>
+      (pending_receiver<Connector> connector_receiver,
+       pending_associated_receiver<ServiceControl> control_receiver);
 
   // Called when a request to bind an interface is received from another
   // ("source") service. This is the result of that service calling

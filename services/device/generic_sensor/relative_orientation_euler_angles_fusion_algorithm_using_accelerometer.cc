@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <cmath>
 
-#include "base/logging.h"
-#include "services/device/generic_sensor/generic_sensor_consts.h"
+#include "base/check_op.h"
+#include "base/numerics/math_constants.h"
 #include "services/device/generic_sensor/platform_sensor_fusion.h"
 #include "ui/gfx/geometry/angle_conversions.h"
 
@@ -42,7 +42,8 @@ void ComputeRelativeOrientationFromAccelerometer(double acceleration_x,
   // the equations.
   *alpha_in_degrees = NAN;
   *beta_in_degrees = gfx::RadToDeg(std::atan2(-acceleration_y, acceleration_z));
-  *gamma_in_degrees = gfx::RadToDeg(std::asin(acceleration_x / kMeanGravity));
+  *gamma_in_degrees =
+      gfx::RadToDeg(std::asin(acceleration_x / base::kMeanGravityDouble));
 
   // Convert beta and gamma to fit the intervals in the specification. Beta is
   // [-180, 180) and gamma is [-90, 90).

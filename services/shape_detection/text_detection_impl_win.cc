@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,8 @@
 #include "base/win/post_async_results.h"
 #include "base/win/scoped_hstring.h"
 #include "base/win/windows_version.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/shape_detection/detection_utils_win.h"
 #include "services/shape_detection/text_detection_impl.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -40,7 +41,8 @@ using base::win::ScopedHString;
 using Microsoft::WRL::ComPtr;
 
 // static
-void TextDetectionImpl::Create(mojom::TextDetectionRequest request) {
+void TextDetectionImpl::Create(
+    mojo::PendingReceiver<mojom::TextDetection> receiver) {
   // OcrEngine class is only available in Win 10 onwards (v10.0.10240.0) that
   // documents in
   // https://docs.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine.
@@ -48,7 +50,7 @@ void TextDetectionImpl::Create(mojom::TextDetectionRequest request) {
     DVLOG(1) << "Optical character recognition not supported before Windows 10";
     return;
   }
-  DCHECK_GE(base::win::OSInfo::GetInstance()->version_number().build, 10240);
+  DCHECK_GE(base::win::OSInfo::GetInstance()->version_number().build, 10240u);
 
   // Loads functions dynamically at runtime to prevent library dependencies.
   if (!(base::win::ResolveCoreWinRTDelayload() &&
@@ -120,16 +122,15 @@ void TextDetectionImpl::Create(mojom::TextDetectionRequest request) {
   auto impl = std::make_unique<TextDetectionImplWin>(std::move(ocr_engine),
                                                      std::move(bitmap_factory));
   auto* impl_ptr = impl.get();
-  impl_ptr->SetBinding(
-      mojo::MakeStrongBinding(std::move(impl), std::move(request)));
+  impl_ptr->SetReceiver(
+      mojo::MakeSelfOwnedReceiver(std::move(impl), std::move(receiver)));
 }
 
 TextDetectionImplWin::TextDetectionImplWin(
     ComPtr<IOcrEngine> ocr_engine,
     ComPtr<ISoftwareBitmapStatics> bitmap_factory)
     : ocr_engine_(std::move(ocr_engine)),
-      bitmap_factory_(std::move(bitmap_factory)),
-      weak_factory_(this) {
+      bitmap_factory_(std::move(bitmap_factory)) {
   DCHECK(ocr_engine_);
   DCHECK(bitmap_factory_);
 }
@@ -147,7 +148,7 @@ void TextDetectionImplWin::Detect(const SkBitmap& bitmap,
   recognize_text_callback_ = std::move(callback);
   // This prevents the Detect function from being called before the
   // AsyncOperation completes.
-  binding_->PauseIncomingMethodCallProcessing();
+  receiver_->PauseIncomingMethodCallProcessing();
 }
 
 HRESULT TextDetectionImplWin::BeginDetect(const SkBitmap& bitmap) {
@@ -218,9 +219,9 @@ TextDetectionImplWin::BuildTextDetectionResult(ComPtr<IOcrResult> ocr_result) {
       break;
 
     auto result = shape_detection::mojom::TextDetectionResult::New();
-    for (uint32_t i = 0; i < words_count; ++i) {
+    for (uint32_t word_num = 0; word_num < words_count; ++word_num) {
       ComPtr<IOcrWord> word;
-      hr = ocr_words->GetAt(i, &word);
+      hr = ocr_words->GetAt(word_num, &word);
       if (FAILED(hr))
         break;
 
@@ -247,7 +248,7 @@ void TextDetectionImplWin::OnTextDetected(
     ComPtr<IOcrResult> ocr_result) {
   std::move(recognize_text_callback_)
       .Run(BuildTextDetectionResult(std::move(ocr_result)));
-  binding_->ResumeIncomingMethodCallProcessing();
+  receiver_->ResumeIncomingMethodCallProcessing();
 }
 
 }  // namespace shape_detection

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,15 +23,18 @@ DWORD SboxTestEventTimeout() {
 int wmain(int argc, wchar_t **argv) {
   if (argc >= 2) {
     if (0 == _wcsicmp(argv[1], L"-child") ||
-        0 == _wcsicmp(argv[1], L"-child-no-sandbox"))
+        0 == _wcsicmp(argv[1], L"-child-no-sandbox")) {
+      // This inits the current commandline from GetCommandLineW().
+      base::CommandLine::Init(0, nullptr);
+      // This sets default timeouts.
+      TestTimeouts::Initialize();
       // This instance is a child, not the test.
       return sandbox::DispatchCall(argc, argv);
+    }
   }
 
   base::TestSuite test_suite(argc, argv);
   return base::LaunchUnitTests(
-      argc,
-      argv,
-      false,
-      base::Bind(&base::TestSuite::Run, base::Unretained(&test_suite)));
+      argc, argv, false,
+      base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
 }

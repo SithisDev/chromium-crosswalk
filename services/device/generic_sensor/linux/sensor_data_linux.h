@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_DEVICE_GENERIC_SENSOR_LINUX_SENSOR_DATA_LINUX_H_
 #define SERVICES_DEVICE_GENERIC_SENSOR_LINUX_SENSOR_DATA_LINUX_H_
 
+#include "base/files/file_path.h"
 #include "services/device/public/mojom/sensor.mojom.h"
 
 namespace device {
@@ -18,7 +19,7 @@ union SensorReading;
 // identify what type of sensor that is and creates a SensorInfoLinux structure
 // that holds all the necessary information to create a PlatformSensorLinux.
 struct SensorPathsLinux {
-  using ReaderFunctor = base::Callback<
+  using ReaderFunctor = base::RepeatingCallback<
       void(double scaling, double offset, SensorReading& reading)>;
 
   SensorPathsLinux();

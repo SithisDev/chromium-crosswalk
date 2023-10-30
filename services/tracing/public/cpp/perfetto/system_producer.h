@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,18 @@ namespace tracing {
 class COMPONENT_EXPORT(TRACING_CPP) SystemProducer : public PerfettoProducer,
                                                      public perfetto::Producer {
  public:
-  SystemProducer(PerfettoTaskRunner* task_runner);
+  explicit SystemProducer(base::tracing::PerfettoTaskRunner*);
+  ~SystemProducer() override;
+
+  // Initiate connection to the system service. Should only be called once on
+  // the producer's task runner (while disconnected) and after the thread pool
+  // was initialized.
+  virtual void ConnectToSystemService() = 0;
+
+  // Send the given trigger names to the system service. Should only be called
+  // on the producer's task runner.
+  virtual void ActivateTriggers(const std::vector<std::string>& triggers) = 0;
+
   // Since Chrome does not support concurrent tracing sessions, and system
   // tracing is always lower priority than human or DevTools initiated tracing,
   // all system producers must be able to disconnect and stop tracing.

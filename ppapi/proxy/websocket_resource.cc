@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,17 +59,16 @@ WebSocketResource::WebSocketResource(Connection connection,
     : PluginResource(connection, instance),
       state_(PP_WEBSOCKETREADYSTATE_INVALID),
       error_was_received_(false),
-      receive_callback_var_(NULL),
+      receive_callback_var_(nullptr),
       empty_string_(new StringVar(std::string())),
       close_code_(0),
-      close_reason_(NULL),
+      close_reason_(nullptr),
       close_was_clean_(PP_FALSE),
-      extensions_(NULL),
-      protocol_(NULL),
-      url_(NULL),
+      extensions_(nullptr),
+      protocol_(nullptr),
+      url_(nullptr),
       buffered_amount_(0),
-      buffered_amount_after_close_(0) {
-}
+      buffered_amount_after_close_(0) {}
 
 WebSocketResource::~WebSocketResource() {
 }
@@ -123,8 +122,9 @@ int32_t WebSocketResource::Connect(
   state_ = PP_WEBSOCKETREADYSTATE_CONNECTING;
   SendCreate(RENDERER, PpapiHostMsg_WebSocket_Create());
   PpapiHostMsg_WebSocket_Connect msg(url_->value(), protocol_strings);
-  Call<PpapiPluginMsg_WebSocket_ConnectReply>(RENDERER, msg,
-      base::Bind(&WebSocketResource::OnPluginMsgConnectReply, this));
+  Call<PpapiPluginMsg_WebSocket_ConnectReply>(
+      RENDERER, msg,
+      base::BindOnce(&WebSocketResource::OnPluginMsgConnectReply, this));
 
   return PP_OK_COMPLETIONPENDING;
 }
@@ -175,7 +175,7 @@ int32_t WebSocketResource::Close(uint16_t code,
     state_ = PP_WEBSOCKETREADYSTATE_CLOSING;
     // Need to do a "Post" to avoid reentering the plugin.
     connect_callback_->PostAbort();
-    connect_callback_ = NULL;
+    connect_callback_ = nullptr;
     Post(RENDERER, PpapiHostMsg_WebSocket_Fail(
         "WebSocket was closed before the connection was established."));
     return PP_OK_COMPLETIONPENDING;
@@ -183,18 +183,19 @@ int32_t WebSocketResource::Close(uint16_t code,
 
   // Abort ongoing receive.
   if (TrackedCallback::IsPending(receive_callback_)) {
-    receive_callback_var_ = NULL;
+    receive_callback_var_ = nullptr;
     // Need to do a "Post" to avoid reentering the plugin.
     receive_callback_->PostAbort();
-    receive_callback_ = NULL;
+    receive_callback_ = nullptr;
   }
 
   // Close connection.
   state_ = PP_WEBSOCKETREADYSTATE_CLOSING;
   PpapiHostMsg_WebSocket_Close msg(static_cast<int32_t>(code),
                                    reason_string);
-  Call<PpapiPluginMsg_WebSocket_CloseReply>(RENDERER, msg,
-      base::Bind(&WebSocketResource::OnPluginMsgCloseReply, this));
+  Call<PpapiPluginMsg_WebSocket_CloseReply>(
+      RENDERER, msg,
+      base::BindOnce(&WebSocketResource::OnPluginMsgCloseReply, this));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -387,16 +388,16 @@ void WebSocketResource::OnPluginMsgCloseReply(
   close_reason_ = new StringVar(reason);
 
   if (TrackedCallback::IsPending(receive_callback_)) {
-    receive_callback_var_ = NULL;
+    receive_callback_var_ = nullptr;
     if (!TrackedCallback::IsScheduledToRun(receive_callback_))
       receive_callback_->PostRun(PP_ERROR_FAILED);
-    receive_callback_ = NULL;
+    receive_callback_ = nullptr;
   }
 
   if (TrackedCallback::IsPending(close_callback_)) {
     if (!TrackedCallback::IsScheduledToRun(close_callback_))
       close_callback_->PostRun(params.result());
-    close_callback_ = NULL;
+    close_callback_ = nullptr;
   }
 }
 
@@ -451,7 +452,7 @@ void WebSocketResource::OnPluginMsgErrorReply(
 
   // No more text or binary messages will be received. If there is ongoing
   // ReceiveMessage(), we must invoke the callback with error code here.
-  receive_callback_var_ = NULL;
+  receive_callback_var_ = nullptr;
   receive_callback_->Run(PP_ERROR_FAILED);
 }
 
@@ -482,7 +483,7 @@ int32_t WebSocketResource::DoReceive() {
 
   *receive_callback_var_ = received_messages_.front()->GetPPVar();
   received_messages_.pop();
-  receive_callback_var_ = NULL;
+  receive_callback_var_ = nullptr;
   return PP_OK;
 }
 

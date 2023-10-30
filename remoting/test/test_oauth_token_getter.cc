@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/command_line.h"
+#include "base/strings/escape.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "google_apis/google_api_keys.h"
-#include "net/base/escape.h"
 #include "remoting/base/fake_oauth_token_getter.h"
 #include "remoting/base/oauth_token_getter_impl.h"
 #include "remoting/base/url_request_context_getter.h"
@@ -26,9 +27,8 @@ namespace test {
 namespace {
 
 constexpr char kChromotingAuthScopeValues[] =
-    "https://www.googleapis.com/auth/chromoting "
+    "https://www.googleapis.com/auth/chromoting.me2me.host "
     "https://www.googleapis.com/auth/chromoting.remote.support "
-    "https://www.googleapis.com/auth/googletalk "
     "https://www.googleapis.com/auth/userinfo.email "
     "https://www.googleapis.com/auth/tachyon";
 
@@ -45,8 +45,8 @@ std::string GetAuthorizationCodeUri(bool show_consent_page) {
       "&response_type=code"
       "&client_id=%s"
       "&access_type=offline",
-      net::EscapeUrlEncodedData(kChromotingAuthScopeValues, use_plus).c_str(),
-      net::EscapeUrlEncodedData(
+      base::EscapeUrlEncodedData(kChromotingAuthScopeValues, use_plus).c_str(),
+      base::EscapeUrlEncodedData(
           google_apis::GetOAuth2ClientID(google_apis::CLIENT_REMOTING),
           use_plus)
           .c_str());
@@ -65,8 +65,7 @@ bool TestOAuthTokenGetter::IsServiceAccount(const std::string& email) {
   return email.find("@chromoting.gserviceaccount.com") != std::string::npos;
 }
 
-TestOAuthTokenGetter::TestOAuthTokenGetter(TestTokenStorage* token_storage)
-    : weak_factory_(this) {
+TestOAuthTokenGetter::TestOAuthTokenGetter(TestTokenStorage* token_storage) {
   DCHECK(token_storage);
   token_storage_ = token_storage;
   auto url_request_context_getter =
@@ -117,7 +116,7 @@ void TestOAuthTokenGetter::InvalidateCache() {
   is_authenticating_ = true;
 
   printf(
-      "Is your account whitelisted to use 1P scope in consent page? [Y/n]: ");
+      "Is your account allowlisted to use 1P scope in consent page? [Y/n]: ");
   bool show_consent_page = test::ReadYNBool(true);
 
   static const std::string read_auth_code_prompt = base::StringPrintf(
@@ -167,7 +166,7 @@ std::unique_ptr<OAuthTokenGetter> TestOAuthTokenGetter::CreateWithRefreshToken(
           email, refresh_token, is_service_account);
 
   return std::make_unique<OAuthTokenGetterImpl>(
-      std::move(oauth_credentials), base::DoNothing(),
+      std::move(oauth_credentials),
       url_loader_factory_owner_->GetURLLoaderFactory(),
       /*auto_refresh=*/true);
 }

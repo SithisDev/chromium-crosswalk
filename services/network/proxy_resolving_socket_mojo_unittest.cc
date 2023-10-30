@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,24 @@
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
-#include "jingle/glue/fake_ssl_client_socket.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "base/strings/stringprintf.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
+#include "components/webrtc/fake_ssl_client_socket.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/proxy_resolution/proxy_resolution_service.h"
+#include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/socket/socket_test_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "services/network/mojo_socket_test_util.h"
 #include "services/network/proxy_resolving_socket_factory_mojo.h"
@@ -30,60 +34,44 @@
 
 namespace network {
 
-namespace {
-
-// A net::TestURLRequestContext implementation that configures the proxy to be
-// a PAC string.
-class TestURLRequestContextWithProxy : public net::TestURLRequestContext {
- public:
-  explicit TestURLRequestContextWithProxy(const std::string& pac_result)
-      : TestURLRequestContext(true) {
-    context_storage_.set_proxy_resolution_service(
-        net::ProxyResolutionService::CreateFixedFromPacResult(
-            pac_result, TRAFFIC_ANNOTATION_FOR_TESTS));
-    // net::MockHostResolver maps all hosts to localhost.
-    auto host_resolver = std::make_unique<net::MockHostResolver>();
-    context_storage_.set_host_resolver(std::move(host_resolver));
-  }
-
-  ~TestURLRequestContextWithProxy() override {}
-};
-
-}  // namespace
-
 class ProxyResolvingSocketTestBase {
  public:
   ProxyResolvingSocketTestBase(bool use_tls)
       : use_tls_(use_tls),
         fake_tls_handshake_(false),
-        scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+        task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {}
+
+  ProxyResolvingSocketTestBase(const ProxyResolvingSocketTestBase&) = delete;
+  ProxyResolvingSocketTestBase& operator=(const ProxyResolvingSocketTestBase&) =
+      delete;
 
   ~ProxyResolvingSocketTestBase() {}
 
   void Init(const std::string& pac_result) {
     // Init() can be called multiple times in a test. Reset the members for each
-    // invocation. |context_with_proxy_| must outlive |factory_impl_|, which
-    // uses the URLRequestContet.
-    factory_binding_ = nullptr;
+    // invocation. `context_` must outlive `factory_impl_`, which uses the
+    // URLRequestContext.
+    factory_receiver_ = nullptr;
     factory_impl_ = nullptr;
-    factory_ptr_.reset();
-    context_with_proxy_ = nullptr;
+    factory_remote_.reset();
+    context_ = nullptr;
 
     mock_client_socket_factory_ =
         std::make_unique<net::MockClientSocketFactory>();
     mock_client_socket_factory_->set_enable_read_if_ready(true);
-    context_with_proxy_ =
-        std::make_unique<TestURLRequestContextWithProxy>(pac_result);
-    context_with_proxy_->set_client_socket_factory(
+    auto context_builder = net::CreateTestURLRequestContextBuilder();
+    context_builder->set_proxy_resolution_service(
+        net::ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
+            pac_result, TRAFFIC_ANNOTATION_FOR_TESTS));
+    context_builder->set_client_socket_factory_for_testing(
         mock_client_socket_factory_.get());
-    context_with_proxy_->Init();
+    context_ = context_builder->Build();
 
-    factory_impl_ = std::make_unique<ProxyResolvingSocketFactoryMojo>(
-        context_with_proxy_.get());
-    factory_binding_ =
-        std::make_unique<mojo::Binding<mojom::ProxyResolvingSocketFactory>>(
-            factory_impl_.get(), mojo::MakeRequest(&factory_ptr_));
+    factory_impl_ =
+        std::make_unique<ProxyResolvingSocketFactoryMojo>(context_.get());
+    factory_receiver_ =
+        std::make_unique<mojo::Receiver<mojom::ProxyResolvingSocketFactory>>(
+            factory_impl_.get(), factory_remote_.BindNewPipeAndPassReceiver());
   }
 
   // Reads |num_bytes| from |handle| or reads until an error occurs. Returns the
@@ -108,8 +96,8 @@ class ProxyResolvingSocketTestBase {
   }
 
   int CreateSocketSync(
-      mojom::ProxyResolvingSocketRequest request,
-      mojom::SocketObserverPtr socket_observer,
+      mojo::PendingReceiver<mojom::ProxyResolvingSocket> receiver,
+      mojo::PendingRemote<mojom::SocketObserver> socket_observer,
       net::IPEndPoint* peer_addr_out,
       const GURL& url,
       mojo::ScopedDataPipeConsumerHandle* receive_pipe_handle_out,
@@ -120,13 +108,13 @@ class ProxyResolvingSocketTestBase {
         network::mojom::ProxyResolvingSocketOptions::New();
     options->use_tls = use_tls_;
     options->fake_tls_handshake = fake_tls_handshake_;
-    factory_ptr_->CreateProxyResolvingSocket(
-        url, std::move(options),
+    factory_remote_->CreateProxyResolvingSocket(
+        url, net::NetworkAnonymizationKey(), std::move(options),
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS),
-        std::move(request), std::move(socket_observer),
+        std::move(receiver), std::move(socket_observer),
         base::BindLambdaForTesting(
-            [&](int result, const base::Optional<net::IPEndPoint>& local_addr,
-                const base::Optional<net::IPEndPoint>& peer_addr,
+            [&](int result, const absl::optional<net::IPEndPoint>& local_addr,
+                const absl::optional<net::IPEndPoint>& peer_addr,
                 mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
                 mojo::ScopedDataPipeProducerHandle send_pipe_handle) {
               net_error = result;
@@ -149,20 +137,20 @@ class ProxyResolvingSocketTestBase {
   bool use_tls() const { return use_tls_; }
   void set_fake_tls_handshake(bool val) { fake_tls_handshake_ = val; }
 
-  mojom::ProxyResolvingSocketFactory* factory() { return factory_ptr_.get(); }
+  mojom::ProxyResolvingSocketFactory* factory() {
+    return factory_remote_.get();
+  }
 
  private:
   const bool use_tls_;
   bool fake_tls_handshake_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<net::MockClientSocketFactory> mock_client_socket_factory_;
-  std::unique_ptr<TestURLRequestContextWithProxy> context_with_proxy_;
-  mojom::ProxyResolvingSocketFactoryPtr factory_ptr_;
-  std::unique_ptr<mojo::Binding<mojom::ProxyResolvingSocketFactory>>
-      factory_binding_;
+  std::unique_ptr<net::URLRequestContext> context_;
+  mojo::Remote<mojom::ProxyResolvingSocketFactory> factory_remote_;
+  std::unique_ptr<mojo::Receiver<mojom::ProxyResolvingSocketFactory>>
+      factory_receiver_;
   std::unique_ptr<ProxyResolvingSocketFactoryMojo> factory_impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyResolvingSocketTestBase);
 };
 
 class ProxyResolvingSocketTest : public ProxyResolvingSocketTestBase,
@@ -170,13 +158,13 @@ class ProxyResolvingSocketTest : public ProxyResolvingSocketTestBase,
  public:
   ProxyResolvingSocketTest() : ProxyResolvingSocketTestBase(GetParam()) {}
 
-  ~ProxyResolvingSocketTest() override {}
+  ProxyResolvingSocketTest(const ProxyResolvingSocketTest&) = delete;
+  ProxyResolvingSocketTest& operator=(const ProxyResolvingSocketTest&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ProxyResolvingSocketTest);
+  ~ProxyResolvingSocketTest() override {}
 };
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
+INSTANTIATE_TEST_SUITE_P(All,
                          ProxyResolvingSocketTest,
                          ::testing::Bool());
 
@@ -210,12 +198,12 @@ TEST_P(ProxyResolvingSocketTest, ConnectToProxy) {
     socket_data.set_connect_data(
         net::MockConnect(net::ASYNC, net::OK, remote_addr));
     mock_client_socket_factory()->AddSocketDataProvider(&socket_data);
-    mojom::ProxyResolvingSocketPtr socket;
+    mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
     mojo::ScopedDataPipeConsumerHandle client_socket_receive_handle;
     mojo::ScopedDataPipeProducerHandle client_socket_send_handle;
     net::IPEndPoint actual_remote_addr;
-    EXPECT_EQ(net::OK, CreateSocketSync(mojo::MakeRequest(&socket),
-                                        nullptr /* socket_observer*/,
+    EXPECT_EQ(net::OK, CreateSocketSync(socket.InitWithNewPipeAndPassReceiver(),
+                                        mojo::NullRemote() /* socket_observer*/,
                                         &actual_remote_addr, kDestination,
                                         &client_socket_receive_handle,
                                         &client_socket_send_handle));
@@ -257,13 +245,14 @@ TEST_P(ProxyResolvingSocketTest, ConnectError) {
         test.is_error_sync ? net::SYNCHRONOUS : net::ASYNC, net::ERR_FAILED));
     mock_client_socket_factory()->AddSocketDataProvider(&socket_data);
 
-    mojom::ProxyResolvingSocketPtr socket;
+    mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
     mojo::ScopedDataPipeConsumerHandle client_socket_receive_handle;
     mojo::ScopedDataPipeProducerHandle client_socket_send_handle;
-    int status = CreateSocketSync(
-        mojo::MakeRequest(&socket), nullptr /* socket_observer*/,
-        nullptr /* peer_addr_out */, kDestination,
-        &client_socket_receive_handle, &client_socket_send_handle);
+    int status = CreateSocketSync(socket.InitWithNewPipeAndPassReceiver(),
+                                  mojo::NullRemote() /* socket_observer*/,
+                                  nullptr /* peer_addr_out */, kDestination,
+                                  &client_socket_receive_handle,
+                                  &client_socket_send_handle);
     if (test.is_direct) {
       EXPECT_EQ(net::ERR_FAILED, status);
     } else {
@@ -277,7 +266,7 @@ TEST_P(ProxyResolvingSocketTest, ConnectError) {
 // Tests writing to and reading from a mojom::ProxyResolvingSocket.
 TEST_P(ProxyResolvingSocketTest, BasicReadWrite) {
   Init("DIRECT");
-  mojom::ProxyResolvingSocketPtr socket;
+  mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
   const char kTestMsg[] = "abcdefghij";
   const size_t kMsgSize = strlen(kTestMsg);
   const int kNumIterations = 3;
@@ -305,8 +294,8 @@ TEST_P(ProxyResolvingSocketTest, BasicReadWrite) {
   mojo::ScopedDataPipeConsumerHandle client_socket_receive_handle;
   mojo::ScopedDataPipeProducerHandle client_socket_send_handle;
   const GURL kDestination("http://example.com");
-  EXPECT_EQ(net::OK, CreateSocketSync(mojo::MakeRequest(&socket),
-                                      nullptr /* socket_observer */,
+  EXPECT_EQ(net::OK, CreateSocketSync(socket.InitWithNewPipeAndPassReceiver(),
+                                      mojo::NullRemote() /* socket_observer */,
                                       nullptr /* peer_addr_out */, kDestination,
                                       &client_socket_receive_handle,
                                       &client_socket_send_handle));
@@ -336,10 +325,11 @@ class ProxyResolvingSocketMojoTest : public ProxyResolvingSocketTestBase,
  public:
   ProxyResolvingSocketMojoTest() : ProxyResolvingSocketTestBase(false) {}
 
-  ~ProxyResolvingSocketMojoTest() override {}
+  ProxyResolvingSocketMojoTest(const ProxyResolvingSocketMojoTest&) = delete;
+  ProxyResolvingSocketMojoTest& operator=(const ProxyResolvingSocketMojoTest&) =
+      delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ProxyResolvingSocketMojoTest);
+  ~ProxyResolvingSocketMojoTest() override {}
 };
 
 TEST_F(ProxyResolvingSocketMojoTest, ConnectWithFakeTLSHandshake) {
@@ -351,9 +341,9 @@ TEST_F(ProxyResolvingSocketMojoTest, ConnectWithFakeTLSHandshake) {
   set_fake_tls_handshake(true);
 
   base::StringPiece client_hello =
-      jingle_glue::FakeSSLClientSocket::GetSslClientHello();
+      webrtc::FakeSSLClientSocket::GetSslClientHello();
   base::StringPiece server_hello =
-      jingle_glue::FakeSSLClientSocket::GetSslServerHello();
+      webrtc::FakeSSLClientSocket::GetSslServerHello();
   std::vector<net::MockRead> reads = {
       net::MockRead(net::ASYNC, server_hello.data(), server_hello.length(), 1),
       net::MockRead(net::ASYNC, 2, kTestMsg),
@@ -366,22 +356,22 @@ TEST_F(ProxyResolvingSocketMojoTest, ConnectWithFakeTLSHandshake) {
   data_provider.set_connect_data(net::MockConnect(net::ASYNC, net::OK));
   mock_client_socket_factory()->AddSocketDataProvider(&data_provider);
 
-  mojom::ProxyResolvingSocketPtr socket;
+  mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
   mojo::ScopedDataPipeConsumerHandle client_socket_receive_handle;
   mojo::ScopedDataPipeProducerHandle client_socket_send_handle;
   net::IPEndPoint actual_remote_addr;
-  EXPECT_EQ(net::OK,
-            CreateSocketSync(mojo::MakeRequest(&socket),
-                             nullptr /* socket_observer*/, &actual_remote_addr,
-                             kDestination, &client_socket_receive_handle,
-                             &client_socket_send_handle));
+  EXPECT_EQ(net::OK, CreateSocketSync(socket.InitWithNewPipeAndPassReceiver(),
+                                      mojo::NullRemote() /* socket_observer*/,
+                                      &actual_remote_addr, kDestination,
+                                      &client_socket_receive_handle,
+                                      &client_socket_send_handle));
 
   EXPECT_EQ(kTestMsg, Read(&client_socket_receive_handle, kMsgSize));
   EXPECT_TRUE(data_provider.AllReadDataConsumed());
   EXPECT_TRUE(data_provider.AllWriteDataConsumed());
 }
 
-// Tests that when ProxyResolvingSocketPtr is destroyed but not the
+// Tests that when ProxyResolvingSocket remote is destroyed but not the
 // ProxyResolvingSocketFactory, the connect callback is not dropped.
 // Regression test for https://crbug.com/862608.
 TEST_F(ProxyResolvingSocketMojoTest, SocketDestroyedBeforeConnectCompletes) {
@@ -393,16 +383,17 @@ TEST_F(ProxyResolvingSocketMojoTest, SocketDestroyedBeforeConnectCompletes) {
   data_provider.set_connect_data(net::MockConnect(net::ASYNC, net::OK));
   mock_client_socket_factory()->AddSocketDataProvider(&data_provider);
   const GURL kDestination("http://example.com");
-  mojom::ProxyResolvingSocketPtr socket;
+  mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
   base::RunLoop run_loop;
   int net_error = net::OK;
   factory()->CreateProxyResolvingSocket(
-      kDestination, nullptr,
+      kDestination, net::NetworkAnonymizationKey(), nullptr,
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS),
-      mojo::MakeRequest(&socket), nullptr /* observer */,
+      socket.InitWithNewPipeAndPassReceiver(),
+      mojo::NullRemote() /* observer */,
       base::BindLambdaForTesting(
-          [&](int result, const base::Optional<net::IPEndPoint>& local_addr,
-              const base::Optional<net::IPEndPoint>& peer_addr,
+          [&](int result, const absl::optional<net::IPEndPoint>& local_addr,
+              const absl::optional<net::IPEndPoint>& peer_addr,
               mojo::ScopedDataPipeConsumerHandle receive_pipe_handle,
               mojo::ScopedDataPipeProducerHandle send_pipe_handle) {
             net_error = result;
@@ -430,15 +421,15 @@ TEST_F(ProxyResolvingSocketMojoTest, SocketObserver) {
 
   const GURL kDestination("http://example.com");
 
-  mojom::ProxyResolvingSocketPtr socket;
+  mojo::PendingRemote<mojom::ProxyResolvingSocket> socket;
   mojo::ScopedDataPipeConsumerHandle client_socket_receive_handle;
   mojo::ScopedDataPipeProducerHandle client_socket_send_handle;
   TestSocketObserver test_observer;
 
   int status = CreateSocketSync(
-      mojo::MakeRequest(&socket), test_observer.GetObserverPtr(),
-      nullptr /* peer_addr_out */, kDestination, &client_socket_receive_handle,
-      &client_socket_send_handle);
+      socket.InitWithNewPipeAndPassReceiver(),
+      test_observer.GetObserverRemote(), nullptr /* peer_addr_out */,
+      kDestination, &client_socket_receive_handle, &client_socket_send_handle);
   EXPECT_EQ(net::OK, status);
 
   EXPECT_EQ(kMsg, Read(&client_socket_receive_handle, kMsgLen));

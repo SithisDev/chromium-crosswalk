@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include <comdef.h>
 
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
+#include "base/task/thread_pool.h"
+#include "services/device/generic_sensor/gravity_fusion_algorithm_using_accelerometer.h"
 #include "services/device/generic_sensor/linear_acceleration_fusion_algorithm_using_accelerometer.h"
 #include "services/device/generic_sensor/orientation_euler_angles_fusion_algorithm_using_quaternion.h"
 #include "services/device/generic_sensor/platform_sensor_fusion.h"
@@ -22,8 +23,8 @@ SensorReaderFactory::CreateSensorReader(mojom::SensorType type) {
 }
 
 PlatformSensorProviderWinrt::PlatformSensorProviderWinrt()
-    : com_sta_task_runner_(base::CreateCOMSTATaskRunnerWithTraits(
-          base::TaskPriority::USER_VISIBLE)),
+    : com_sta_task_runner_(base::ThreadPool::CreateCOMSTATaskRunner(
+          {base::TaskPriority::USER_VISIBLE})),
       sensor_reader_factory_(std::make_unique<SensorReaderFactory>()) {}
 
 PlatformSensorProviderWinrt::~PlatformSensorProviderWinrt() = default;
@@ -36,7 +37,7 @@ void PlatformSensorProviderWinrt::SetSensorReaderFactoryForTesting(
 void PlatformSensorProviderWinrt::CreateSensorInternal(
     mojom::SensorType type,
     SensorReadingSharedBuffer* reading_buffer,
-    const CreateSensorCallback& callback) {
+    CreateSensorCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   switch (type) {
@@ -48,7 +49,17 @@ void PlatformSensorProviderWinrt::CreateSensorInternal(
       // |callback| will be run with a reference to this object.
       PlatformSensorFusion::Create(
           reading_buffer, this, std::move(linear_acceleration_fusion_algorithm),
-          callback);
+          std::move(callback));
+      break;
+    }
+    case mojom::SensorType::GRAVITY: {
+      auto gravity_fusion_algorithm =
+          std::make_unique<GravityFusionAlgorithmUsingAccelerometer>();
+      // If this PlatformSensorFusion object is successfully initialized,
+      // |callback| will be run with a reference to this object.
+      PlatformSensorFusion::Create(reading_buffer, this,
+                                   std::move(gravity_fusion_algorithm),
+                                   std::move(callback));
       break;
     }
 
@@ -56,10 +67,11 @@ void PlatformSensorProviderWinrt::CreateSensorInternal(
     default: {
       base::PostTaskAndReplyWithResult(
           com_sta_task_runner_.get(), FROM_HERE,
-          base::Bind(&PlatformSensorProviderWinrt::CreateSensorReader,
-                     base::Unretained(this), type),
-          base::Bind(&PlatformSensorProviderWinrt::SensorReaderCreated,
-                     base::Unretained(this), type, reading_buffer, callback));
+          base::BindOnce(&PlatformSensorProviderWinrt::CreateSensorReader,
+                         base::Unretained(this), type),
+          base::BindOnce(&PlatformSensorProviderWinrt::SensorReaderCreated,
+                         base::Unretained(this), type, reading_buffer,
+                         std::move(callback)));
       break;
     }
   }
@@ -68,7 +80,7 @@ void PlatformSensorProviderWinrt::CreateSensorInternal(
 void PlatformSensorProviderWinrt::SensorReaderCreated(
     mojom::SensorType type,
     SensorReadingSharedBuffer* reading_buffer,
-    const CreateSensorCallback& callback,
+    CreateSensorCallback callback,
     std::unique_ptr<PlatformSensorReaderWinBase> sensor_reader) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (!sensor_reader) {
@@ -85,7 +97,7 @@ void PlatformSensorProviderWinrt::SensorReaderCreated(
         return;
       }
       default:
-        callback.Run(nullptr);
+        std::move(callback).Run(nullptr);
         return;
     }
   }
@@ -93,7 +105,7 @@ void PlatformSensorProviderWinrt::SensorReaderCreated(
       base::MakeRefCounted<PlatformSensorWin>(type, reading_buffer, this,
                                               com_sta_task_runner_,
                                               std::move(sensor_reader));
-  callback.Run(std::move(sensor));
+  std::move(callback).Run(std::move(sensor));
 }
 
 std::unique_ptr<PlatformSensorReaderWinBase>

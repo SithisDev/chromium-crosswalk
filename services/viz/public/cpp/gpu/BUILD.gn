@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,12 +24,13 @@ source_set("gpu") {
     "//gpu/command_buffer/common",
     "//gpu/ipc/client",
     "//gpu/ipc/common",
-    "//services/viz/public/interfaces",
+    "//services/viz/public/mojom",
     "//url",
   ]
 
   deps = [
     "//base",
+    "//build:chromeos_buildflags",
     "//gpu",
     "//gpu/command_buffer/client",
     "//gpu/command_buffer/client:gles2_cmd_helper",
@@ -38,31 +39,25 @@ source_set("gpu") {
     "//gpu/command_buffer/client:raster_interface",
     "//gpu/command_buffer/client:webgpu",
     "//gpu/command_buffer/common:raster",
+    "//gpu/config",
     "//gpu/skia_bindings",
     "//mojo/public/cpp/system",
     "//services/service_manager/public/cpp",
-    "//services/viz/public/interfaces",
-    "//ui/base:features",
+    "//services/viz/public/mojom",
+    "//skia:buildflags",
     "//ui/gl",
   ]
-
-  if (use_aura || is_mac) {
-    public += [ "shared_worker_context_provider_factory.h" ]
-
-    sources += [ "shared_worker_context_provider_factory.cc" ]
-  }
 }
 
 source_set("tests") {
   testonly = true
 
-  sources = [
-    "gpu_unittest.cc",
-  ]
+  sources = [ "gpu_unittest.cc" ]
 
   deps = [
     "//base",
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
     "//mojo/core/embedder",
     "//mojo/public/cpp/system",
     "//services/service_manager/public/cpp",
@@ -70,10 +65,6 @@ source_set("tests") {
     "//testing/gtest",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
-    "//ui/gfx/geometry/mojo",
+    "//ui/gfx/geometry/mojom",
   ]
-
-  if (use_x11) {
-    deps += [ "//ui/gfx/x" ]
-  }
 }

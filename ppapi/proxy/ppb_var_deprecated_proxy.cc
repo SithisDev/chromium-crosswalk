@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <stdlib.h>  // For malloc
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_core.h"
@@ -280,11 +280,8 @@ PP_Var CreateObject(PP_Instance instance,
 
 }  // namespace
 
-PPB_Var_Deprecated_Proxy::PPB_Var_Deprecated_Proxy(
-    Dispatcher* dispatcher)
-    : InterfaceProxy(dispatcher),
-      ppb_var_impl_(NULL),
-      task_factory_(this) {
+PPB_Var_Deprecated_Proxy::PPB_Var_Deprecated_Proxy(Dispatcher* dispatcher)
+    : InterfaceProxy(dispatcher), ppb_var_impl_(nullptr) {
   if (!dispatcher->IsPlugin()) {
     ppb_var_impl_ = static_cast<const PPB_Var_Deprecated*>(
         dispatcher->local_get_interface()(PPB_VAR_DEPRECATED_INTERFACE));
@@ -383,9 +380,8 @@ void PPB_Var_Deprecated_Proxy::OnMsgReleaseObject(int64_t object_id) {
   // then remove this.
   PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostNonNestableTask(
       FROM_HERE,
-      RunWhileLocked(base::Bind(&PPB_Var_Deprecated_Proxy::DoReleaseObject,
-                                task_factory_.GetWeakPtr(),
-                                object_id)));
+      RunWhileLocked(base::BindOnce(&PPB_Var_Deprecated_Proxy::DoReleaseObject,
+                                    task_factory_.GetWeakPtr(), object_id)));
 }
 
 void PPB_Var_Deprecated_Proxy::OnMsgHasProperty(

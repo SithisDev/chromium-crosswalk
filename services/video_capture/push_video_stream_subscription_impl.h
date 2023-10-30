@@ -1,13 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_VIDEO_CAPTURE_PUSH_VIDEO_STREAM_SUBSCRIPTION_IMPL_H_
 #define SERVICES_VIDEO_CAPTURE_PUSH_VIDEO_STREAM_SUBSCRIPTION_IMPL_H_
 
-#include "mojo/public/cpp/bindings/binding.h"
+#include "base/memory/raw_ptr.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/video_capture/public/mojom/device.mojom.h"
-#include "services/video_capture/public/mojom/receiver.mojom.h"
+#include "services/video_capture/public/mojom/video_frame_handler.mojom.h"
 #include "services/video_capture/public/mojom/video_source.mojom.h"
 
 namespace video_capture {
@@ -18,12 +21,19 @@ class PushVideoStreamSubscriptionImpl
     : public mojom::PushVideoStreamSubscription {
  public:
   PushVideoStreamSubscriptionImpl(
-      mojom::PushVideoStreamSubscriptionRequest subscription_request,
-      mojom::ReceiverPtr subscriber,
+      mojo::PendingReceiver<mojom::PushVideoStreamSubscription>
+          subscription_receiver,
+      mojo::PendingRemote<mojom::VideoFrameHandler> subscriber,
       const media::VideoCaptureParams& requested_settings,
       mojom::VideoSource::CreatePushSubscriptionCallback creation_callback,
       BroadcastingReceiver* broadcaster,
-      mojom::DevicePtr* device);
+      mojo::Remote<mojom::Device>* device);
+
+  PushVideoStreamSubscriptionImpl(const PushVideoStreamSubscriptionImpl&) =
+      delete;
+  PushVideoStreamSubscriptionImpl& operator=(
+      const PushVideoStreamSubscriptionImpl&) = delete;
+
   ~PushVideoStreamSubscriptionImpl() override;
 
   void SetOnClosedHandler(
@@ -31,7 +41,7 @@ class PushVideoStreamSubscriptionImpl
 
   void OnDeviceStartSucceededWithSettings(
       const media::VideoCaptureParams& settings);
-  void OnDeviceStartFailed();
+  void OnDeviceStartFailed(media::VideoCaptureError error);
 
   // mojom::PushVideoStreamSubscription implementation.
   void Activate() override;
@@ -42,6 +52,7 @@ class PushVideoStreamSubscriptionImpl
                        SetPhotoOptionsCallback callback) override;
   void TakePhoto(TakePhotoCallback callback) override;
   void Close(CloseCallback callback) override;
+  void ProcessFeedback(const media::VideoCaptureFeedback& feedback) override;
 
  private:
   enum class Status {
@@ -54,12 +65,12 @@ class PushVideoStreamSubscriptionImpl
 
   void OnConnectionLost();
 
-  mojo::Binding<mojom::PushVideoStreamSubscription> binding_;
-  mojom::ReceiverPtr subscriber_;
+  mojo::Receiver<mojom::PushVideoStreamSubscription> receiver_;
+  mojo::PendingRemote<mojom::VideoFrameHandler> subscriber_;
   const media::VideoCaptureParams requested_settings_;
   mojom::VideoSource::CreatePushSubscriptionCallback creation_callback_;
-  BroadcastingReceiver* const broadcaster_;
-  mojom::DevicePtr* const device_;
+  const raw_ptr<BroadcastingReceiver> broadcaster_;
+  const raw_ptr<mojo::Remote<mojom::Device>> device_;
   Status status_;
 
   // Client id handed out by |broadcaster_| when registering |this| as its
@@ -70,9 +81,7 @@ class PushVideoStreamSubscriptionImpl
   // kClosed via a call to Close().
   base::OnceCallback<void(base::OnceClosure done_cb)> on_closed_handler_;
 
-  base::WeakPtrFactory<PushVideoStreamSubscriptionImpl> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PushVideoStreamSubscriptionImpl);
+  base::WeakPtrFactory<PushVideoStreamSubscriptionImpl> weak_factory_{this};
 };
 
 }  // namespace video_capture

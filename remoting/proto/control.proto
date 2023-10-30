@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,8 +10,13 @@ option optimize_for = LITE_RUNTIME;
 
 package remoting.protocol;
 
-// Set the host resolution to match the client. If none of the fields are
-// present, restore the host resolution instead.
+import "layout_key_function.proto";
+
+// Set the host resolution to match the client. If screen_id is omitted, then
+// the message will be ignored unless there is only one host display.
+//
+// If none of the fields (apart from screen_id) are present, restore the host
+// resolution instead.
 message ClientResolution {
   // Width and height of the client in Density-Independent Pixels.
   optional int32 dips_width = 1;
@@ -25,6 +30,9 @@ message ClientResolution {
   // unset, the corresponding DPI should be assumed to be 96 (Windows' default)
   optional int32 x_dpi = 5;
   optional int32 y_dpi = 6;
+
+  // The screen_id from the most recent VideoTrackLayout message.
+  optional int64 screen_id = 7;
 }
 
 message VideoControl {
@@ -85,11 +93,15 @@ message ExtensionMessage {
 }
 
 message VideoTrackLayout {
-  // Unique display identifier.
-  optional int32 id = 8;
+  // Unique display identifier, from ScreenId in desktop_capture_types.h.
+  // In client-to-host messages, an unset screen_id indicates that the client is
+  // requesting a new display to be added to the display layout.
+  optional int64 screen_id = 8;
 
-  // Name of the video track.
-  optional string track_name = 1;
+  // Name of the video stream, from the WebRTC MediaStream.id property.
+  // Absent in client-to-host messages if the client is requesting a new
+  // display.
+  optional string media_stream_id = 1;
 
   // Position of the top left corner of the rectangle covered by the video
   // track in DIPs (device independent pixels).
@@ -103,11 +115,17 @@ message VideoTrackLayout {
   // DPI of the screen.
   optional int32 x_dpi = 6;
   optional int32 y_dpi = 7;
+
+  // TODO(yuweih): Add bpp and is_default to the message.
 }
 
 message VideoLayout {
   // Layout for each video track.
   repeated VideoTrackLayout video_track = 1;
+
+  // True if this display configuration supports capturing the entire desktop.
+  // Absent in client-to-host messages.
+  optional bool supports_full_desktop_capture = 2;
 }
 
 message SelectDesktopDisplayRequest {
@@ -116,24 +134,54 @@ message SelectDesktopDisplayRequest {
   optional string id = 1;
 }
 
-message DesktopDisplayInfo {
-  // Unique display identifier.
-  optional int32 id = 1;
+// Next ID: 2
+message KeyboardLayout {
+  // Next ID: 3
+  message KeyAction {
+    oneof action {
+      LayoutKeyFunction function = 1;
+      string character = 2;
+    }
+  }
 
-  // Position of the top left corner of this display (in pixels).
-  optional int32 x = 2;
-  optional int32 y = 3;
+  // Next ID: 2
+  message KeyBehavior {
+    // Maps 0-based shift level to key action. (Note: because this is zero-
+    // based, it will be one less than the corresponding ISO shift level.)
+    map<uint32, KeyAction> actions = 1;
+  }
 
-  // Size of the display (in pixels).
-  optional int32 width = 4;
-  optional int32 height = 5;
+  // Map USB code to key behavior.
+  map<uint32, KeyBehavior> keys = 1;
+}
 
-  // DPI of the screen.
-  optional int32 dpi = 6;
+// Next ID: 2
+message TransportInfo {
+  // Transport layer protocol the message sender uses to connect to the relay
+  // server or the peer (if connection not relayed).
+  // Possible values are those defined in the protocol and relayProtocol fields
+  // in the RTCIceCandidateStats dictionary.
+  // If the host failed to get protocol using WebRTC API, this field will be set
+  // to "api-error".
+  optional string protocol = 1;
+}
 
-  // Bits per pixel.
-  optional int32 bpp = 7;
+// Next ID: 5
+message PeerConnectionParameters {
+  // Sets preferred minimum and maximum bitrates. Unset fields means no
+  // preference on the bitrate. Clients might need to keep track of existing
+  // parameters if they need to do incremental changes.
+  optional int32 preferred_min_bitrate_bps = 1;
+  optional int32 preferred_max_bitrate_bps = 2;
 
-  // True if this is the default display.
-  optional bool is_default = 8;
+  // Requests an ICE restart. This causes the host to initiate a new SDP
+  // offer/answer exchange, and restarts the ICE gathering/connection sequence.
+  // This can be used to re-establish a connection, without needing to
+  // re-authenticate the user.
+  optional bool request_ice_restart = 3;
+
+  // Requests the host to initiate a new SDP offer/answer exchange, without
+  // restarting ICE. This can be used to change SDP configuration (for example,
+  // switching to a different codec), without needing a full reconnection.
+  optional bool request_sdp_restart = 4;
 }

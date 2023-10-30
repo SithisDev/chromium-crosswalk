@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 
 #include <memory>
 
+#include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "dbus/message.h"
 #include "dbus/mock_bus.h"
 #include "dbus/mock_object_proxy.h"
@@ -97,12 +97,12 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
 
  protected:
   GeolocationWifiDataProviderLinuxTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI) {}
 
   // WifiDataProvider requires a task runner to be present. The |message_loop_|
   // is defined here, as it should outlive |wifi_provider_linux_|.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   scoped_refptr<dbus::MockBus> mock_bus_;
   scoped_refptr<dbus::MockObjectProxy> mock_network_manager_proxy_;
   scoped_refptr<dbus::MockObjectProxy> mock_access_point_proxy_;
@@ -189,7 +189,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
           const uint8_t kSsid[] = {0x74, 0x65, 0x73, 0x74};  // "test"
           dbus::MessageWriter variant_writer(response.get());
           writer.OpenVariant("ay", &variant_writer);
-          variant_writer.AppendArrayOfBytes(kSsid, base::size(kSsid));
+          variant_writer.AppendArrayOfBytes(kSsid, std::size(kSsid));
           writer.CloseContainer(&variant_writer);
         } else if (property_name == "HwAddress") {
           // This will be converted to "00-11-22-33-44-55".

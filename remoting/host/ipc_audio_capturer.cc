@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,7 @@ namespace remoting {
 
 IpcAudioCapturer::IpcAudioCapturer(
     scoped_refptr<DesktopSessionProxy> desktop_session_proxy)
-    : desktop_session_proxy_(desktop_session_proxy),
-      weak_factory_(this) {
-}
+    : desktop_session_proxy_(desktop_session_proxy) {}
 
 IpcAudioCapturer::~IpcAudioCapturer() = default;
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -17,13 +18,12 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/device_event_log/device_event_log.h"
 #include "device/udev_linux/udev_watcher.h"
 #include "services/device/usb/usb_device_handle.h"
@@ -38,6 +38,27 @@ namespace {
 const uint16_t kUsbVersion2_1 = 0x0210;
 
 const uint8_t kDeviceClassHub = 0x09;
+constexpr int kUsbClassMassStorage = 0x08;
+
+bool ShouldReadDescriptors(const UsbDeviceLinux& device) {
+  if (device.usb_version() < kUsbVersion2_1)
+    return false;
+
+  // Avoid detaching the usb-storage driver.
+  // TODO(crbug.com/1176107): We should read descriptors for composite mass
+  // storage devices.
+  auto* configuration = device.GetActiveConfiguration();
+  if (configuration) {
+    for (const auto& interface : configuration->interfaces) {
+      for (const auto& alternate : interface->alternates) {
+        if (alternate->class_code == kUsbClassMassStorage)
+          return false;
+      }
+    }
+  }
+
+  return true;
+}
 
 void OnReadDescriptors(base::OnceCallback<void(bool)> callback,
                        scoped_refptr<UsbDeviceHandle> device_handle,
@@ -68,10 +89,14 @@ void OnDeviceOpenedToReadDescriptors(
 
 class UsbServiceLinux::BlockingTaskRunnerHelper : public UdevWatcher::Observer {
  public:
-  explicit BlockingTaskRunnerHelper(base::WeakPtr<UsbServiceLinux> service);
-  ~BlockingTaskRunnerHelper() override;
+  explicit BlockingTaskRunnerHelper(
+      base::WeakPtr<UsbServiceLinux> service,
+      scoped_refptr<base::SequencedTaskRunner> task_runner);
 
-  void Start();
+  BlockingTaskRunnerHelper(const BlockingTaskRunnerHelper&) = delete;
+  BlockingTaskRunnerHelper& operator=(const BlockingTaskRunnerHelper&) = delete;
+
+  ~BlockingTaskRunnerHelper() override;
 
  private:
   // UdevWatcher::Observer
@@ -85,25 +110,14 @@ class UsbServiceLinux::BlockingTaskRunnerHelper : public UdevWatcher::Observer {
   base::WeakPtr<UsbServiceLinux> service_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
-  base::SequenceChecker sequence_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(BlockingTaskRunnerHelper);
+  SEQUENCE_CHECKER(sequence_checker_);
 };
 
 UsbServiceLinux::BlockingTaskRunnerHelper::BlockingTaskRunnerHelper(
-    base::WeakPtr<UsbServiceLinux> service)
-    : service_(service), task_runner_(base::SequencedTaskRunnerHandle::Get()) {
-  // Detaches from the sequence on which this object was created. It will be
-  // bound to its owning sequence when Start() is called.
-  sequence_checker_.DetachFromSequence();
-}
-
-UsbServiceLinux::BlockingTaskRunnerHelper::~BlockingTaskRunnerHelper() {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
-}
-
-void UsbServiceLinux::BlockingTaskRunnerHelper::Start() {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+    base::WeakPtr<UsbServiceLinux> service,
+    scoped_refptr<base::SequencedTaskRunner> task_runner)
+    : service_(std::move(service)), task_runner_(std::move(task_runner)) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
@@ -117,9 +131,13 @@ void UsbServiceLinux::BlockingTaskRunnerHelper::Start() {
       FROM_HERE, base::BindOnce(&UsbServiceLinux::HelperStarted, service_));
 }
 
+UsbServiceLinux::BlockingTaskRunnerHelper::~BlockingTaskRunnerHelper() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
+
 void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceAdded(
     ScopedUdevDevicePtr device) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
@@ -143,8 +161,9 @@ void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceAdded(
     return;
 
   std::unique_ptr<UsbDeviceDescriptor> descriptor(new UsbDeviceDescriptor());
-  if (!descriptor->Parse(std::vector<uint8_t>(descriptors_str.begin(),
-                                              descriptors_str.end()))) {
+  if (!descriptor->Parse(base::make_span(
+          reinterpret_cast<const uint8_t*>(descriptors_str.data()),
+          descriptors_str.size()))) {
     return;
   }
 
@@ -190,7 +209,7 @@ void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceAdded(
 
 void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceRemoved(
     ScopedUdevDevicePtr device) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
@@ -205,26 +224,23 @@ void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceRemoved(
 void UsbServiceLinux::BlockingTaskRunnerHelper::OnDeviceChanged(
     ScopedUdevDevicePtr) {}
 
-UsbServiceLinux::UsbServiceLinux()
-    : UsbService(),
-      blocking_task_runner_(CreateBlockingTaskRunner()),
-      helper_(nullptr, base::OnTaskRunnerDeleter(blocking_task_runner_)) {
-  helper_.reset(new BlockingTaskRunnerHelper(weak_factory_.GetWeakPtr()));
-  blocking_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&BlockingTaskRunnerHelper::Start,
-                                base::Unretained(helper_.get())));
+UsbServiceLinux::UsbServiceLinux() {
+  helper_ = base::SequenceBound<BlockingTaskRunnerHelper>(
+      CreateBlockingTaskRunner(), weak_factory_.GetWeakPtr(),
+      base::SequencedTaskRunnerHandle::Get());
 }
 
 UsbServiceLinux::~UsbServiceLinux() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   NotifyWillDestroyUsbService();
 }
 
-void UsbServiceLinux::GetDevices(const GetDevicesCallback& callback) {
+void UsbServiceLinux::GetDevices(GetDevicesCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (enumeration_ready())
-    UsbService::GetDevices(callback);
+    UsbService::GetDevices(std::move(callback));
   else
-    enumeration_callbacks_.push_back(callback);
+    enumeration_callbacks_.push_back(std::move(callback));
 }
 
 void UsbServiceLinux::OnDeviceAdded(
@@ -246,13 +262,14 @@ void UsbServiceLinux::OnDeviceAdded(
   scoped_refptr<UsbDeviceLinux> device(
       new UsbDeviceLinux(device_path, std::move(descriptor)));
   devices_by_path_[device->device_path()] = device;
-  if (device->usb_version() >= kUsbVersion2_1) {
+
+  if (ShouldReadDescriptors(*device)) {
     device->Open(
         base::BindOnce(&OnDeviceOpenedToReadDescriptors,
                        base::BindOnce(&UsbServiceLinux::DeviceReady,
                                       weak_factory_.GetWeakPtr(), device)));
   } else {
-    DeviceReady(device, true /* success */);
+    DeviceReady(device, /*success=*/true);
   }
 }
 
@@ -292,8 +309,8 @@ void UsbServiceLinux::DeviceReady(scoped_refptr<UsbDeviceLinux> device,
     result.reserve(devices().size());
     for (const auto& map_entry : devices())
       result.push_back(map_entry.second);
-    for (const auto& callback : enumeration_callbacks_)
-      callback.Run(result);
+    for (auto& callback : enumeration_callbacks_)
+      std::move(callback).Run(result);
     enumeration_callbacks_.clear();
   } else if (success && enumeration_ready()) {
     NotifyDeviceAdded(device);
@@ -328,8 +345,8 @@ void UsbServiceLinux::HelperStarted() {
     result.reserve(devices().size());
     for (const auto& map_entry : devices())
       result.push_back(map_entry.second);
-    for (const auto& callback : enumeration_callbacks_)
-      callback.Run(result);
+    for (auto& callback : enumeration_callbacks_)
+      std::move(callback).Run(result);
     enumeration_callbacks_.clear();
   }
 }

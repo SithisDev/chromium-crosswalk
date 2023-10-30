@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 #include <math.h>
 
 #include <array>
+#include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "remoting/client/display/canvas.h"
 #include "remoting/client/display/gl_cursor_feedback_texture.h"
 #include "remoting/client/display/gl_math.h"
@@ -43,7 +44,7 @@ float GetExpansionCoefficient(float progress) {
 
 namespace remoting {
 
-GlCursorFeedback::GlCursorFeedback() : weak_factory_(this) {}
+GlCursorFeedback::GlCursorFeedback() {}
 
 GlCursorFeedback::~GlCursorFeedback() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -54,7 +55,7 @@ void GlCursorFeedback::SetCanvas(base::WeakPtr<Canvas> canvas) {
     layer_.reset();
     return;
   }
-  layer_.reset(new GlRenderLayer(kGlCursorFeedbackTextureId, canvas));
+  layer_ = std::make_unique<GlRenderLayer>(kGlCursorFeedbackTextureId, canvas);
   GlCursorFeedbackTexture* texture = GlCursorFeedbackTexture::GetInstance();
   layer_->SetTexture(texture->GetTexture().data(),
                      GlCursorFeedbackTexture::kTextureWidth,

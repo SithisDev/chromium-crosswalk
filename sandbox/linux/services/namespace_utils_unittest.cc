@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/launch.h"
 #include "sandbox/linux/services/credentials.h"

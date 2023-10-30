@@ -1,9 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_CROSSCALL_CLIENT_H_
-#define SANDBOX_SRC_CROSSCALL_CLIENT_H_
+#ifndef SANDBOX_WIN_SRC_CROSSCALL_CLIENT_H_
+#define SANDBOX_WIN_SRC_CROSSCALL_CLIENT_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -42,6 +42,8 @@
 // return codes indicate that the IPC transport failed to deliver it.
 namespace sandbox {
 
+enum class IpcTag;
+
 // this is the assumed channel size. This can be overridden in a given
 // IPC implementation.
 const uint32_t kIPCChannelSize = 1024;
@@ -56,7 +58,7 @@ const uint32_t kIPCChannelSize = 1024;
 template <typename T>
 class CopyHelper {
  public:
-  CopyHelper(const T& t) : t_(t) {}
+  explicit CopyHelper(const T& t) : t_(t) {}
 
   // Returns the pointer to the start of the input.
   const void* GetStart() const { return &t_; }
@@ -89,7 +91,7 @@ class CopyHelper {
 template <>
 class CopyHelper<void*> {
  public:
-  CopyHelper(void* t) : t_(t) {}
+  explicit CopyHelper(void* t) : t_(t) {}
 
   // Returns the pointer to the start of the input.
   const void* GetStart() const { return &t_; }
@@ -119,7 +121,7 @@ class CopyHelper<void*> {
 template <>
 class CopyHelper<const wchar_t*> {
  public:
-  CopyHelper(const wchar_t* t) : t_(t) {}
+  explicit CopyHelper(const wchar_t* t) : t_(t) {}
 
   // Returns the pointer to the start of the string.
   const void* GetStart() const { return t_; }
@@ -167,7 +169,7 @@ template <>
 class CopyHelper<wchar_t*> : public CopyHelper<const wchar_t*> {
  public:
   typedef CopyHelper<const wchar_t*> Base;
-  CopyHelper(wchar_t* t) : Base(t) {}
+  explicit CopyHelper(wchar_t* t) : Base(t) {}
 
   const void* GetStart() const { return Base::GetStart(); }
 
@@ -187,7 +189,7 @@ class CopyHelper<const wchar_t[n]> : public CopyHelper<const wchar_t*> {
  public:
   typedef const wchar_t array[n];
   typedef CopyHelper<const wchar_t*> Base;
-  CopyHelper(array t) : Base(t) {}
+  explicit CopyHelper(array t) : Base(t) {}
 
   const void* GetStart() const { return Base::GetStart(); }
 
@@ -214,7 +216,7 @@ class InOutCountedBuffer : public CountedBuffer {
 template <>
 class CopyHelper<InOutCountedBuffer> {
  public:
-  CopyHelper(const InOutCountedBuffer t) : t_(t) {}
+  explicit CopyHelper(const InOutCountedBuffer t) : t_(t) {}
 
   // Returns the pointer to the start of the string.
   const void* GetStart() const { return t_.Buffer(); }
@@ -272,7 +274,7 @@ class CopyHelper<InOutCountedBuffer> {
 // CrossCall template with one input parameter
 template <typename IPCProvider, typename Par1>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      CrossCallReturn* answer) {
   XCALL_GEN_PARAMS_OBJ(1, call_params);
@@ -291,7 +293,7 @@ ResultCode CrossCall(IPCProvider& ipc_provider,
 // CrossCall template with two input parameters.
 template <typename IPCProvider, typename Par1, typename Par2>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      CrossCallReturn* answer) {
@@ -312,7 +314,7 @@ ResultCode CrossCall(IPCProvider& ipc_provider,
 // CrossCall template with three input parameters.
 template <typename IPCProvider, typename Par1, typename Par2, typename Par3>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      const Par3& p3,
@@ -340,7 +342,7 @@ template <typename IPCProvider,
           typename Par3,
           typename Par4>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      const Par3& p3,
@@ -372,7 +374,7 @@ template <typename IPCProvider,
           typename Par4,
           typename Par5>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      const Par3& p3,
@@ -408,7 +410,7 @@ template <typename IPCProvider,
           typename Par5,
           typename Par6>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      const Par3& p3,
@@ -448,7 +450,7 @@ template <typename IPCProvider,
           typename Par6,
           typename Par7>
 ResultCode CrossCall(IPCProvider& ipc_provider,
-                     uint32_t tag,
+                     IpcTag tag,
                      const Par1& p1,
                      const Par2& p2,
                      const Par3& p3,
@@ -482,4 +484,4 @@ ResultCode CrossCall(IPCProvider& ipc_provider,
 }
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_CROSSCALL_CLIENT_H__
+#endif  // SANDBOX_WIN_SRC_CROSSCALL_CLIENT_H_

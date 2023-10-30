@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,17 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 FakeDatagramSocket::FakeDatagramSocket()
-    : input_pos_(0),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      weak_factory_(this) {
-}
+    : input_pos_(0), task_runner_(base::ThreadTaskRunnerHandle::Get()) {}
 
 FakeDatagramSocket::~FakeDatagramSocket() {
   EXPECT_TRUE(task_runner_->BelongsToCurrentThread());
@@ -130,9 +126,7 @@ int FakeDatagramSocket::CopyReadData(const scoped_refptr<net::IOBuffer>& buf,
 FakeDatagramChannelFactory::FakeDatagramChannelFactory()
     : task_runner_(base::ThreadTaskRunnerHandle::Get()),
       asynchronous_create_(false),
-      fail_create_(false),
-      weak_factory_(this) {
-}
+      fail_create_(false) {}
 
 FakeDatagramChannelFactory::~FakeDatagramChannelFactory() {
   for (auto it = channels_.begin(); it != channels_.end(); ++it) {
@@ -153,7 +147,7 @@ FakeDatagramSocket* FakeDatagramChannelFactory::GetFakeChannel(
 
 void FakeDatagramChannelFactory::CreateChannel(
     const std::string& name,
-    const ChannelCreatedCallback& callback) {
+    ChannelCreatedCallback callback) {
   EXPECT_FALSE(channels_[name]);
 
   std::unique_ptr<FakeDatagramSocket> channel(new FakeDatagramSocket());
@@ -173,18 +167,18 @@ void FakeDatagramChannelFactory::CreateChannel(
         FROM_HERE,
         base::BindOnce(&FakeDatagramChannelFactory::NotifyChannelCreated,
                        weak_factory_.GetWeakPtr(), std::move(channel), name,
-                       callback));
+                       std::move(callback)));
   } else {
-    NotifyChannelCreated(std::move(channel), name, callback);
+    NotifyChannelCreated(std::move(channel), name, std::move(callback));
   }
 }
 
 void FakeDatagramChannelFactory::NotifyChannelCreated(
     std::unique_ptr<FakeDatagramSocket> owned_socket,
     const std::string& name,
-    const ChannelCreatedCallback& callback) {
+    ChannelCreatedCallback callback) {
   if (channels_.find(name) != channels_.end())
-    callback.Run(std::move(owned_socket));
+    std::move(callback).Run(std::move(owned_socket));
 }
 
 void FakeDatagramChannelFactory::CancelChannelCreation(
@@ -192,5 +186,4 @@ void FakeDatagramChannelFactory::CancelChannelCreation(
   channels_.erase(name);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

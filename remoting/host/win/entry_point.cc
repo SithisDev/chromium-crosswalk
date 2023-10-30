@@ -1,9 +1,10 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <windows.h>
 
+#include "base/clang_profiling_buildflags.h"
 #include "remoting/host/host_main.h"
 
 // The common entry point for remoting_host.exe and remoting_desktop.exe. In
@@ -15,7 +16,7 @@ void HostEntryPoint() {
   ExitProcess(exit_code);
 }
 
-#if defined(ADDRESS_SANITIZER)
+#if defined(ADDRESS_SANITIZER) || BUILDFLAG(CLANG_PROFILING)
 // Executables instrumented with ASAN need CRT functions. We do not use
 // the /ENTRY switch for ASAN instrumented executable and a "main" function
 // is required.

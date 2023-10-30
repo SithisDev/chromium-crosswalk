@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
@@ -17,8 +17,7 @@
 #include "remoting/protocol/session_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 
@@ -27,7 +26,11 @@ const uint8_t kDummyAudioData = 0x8B;
 
 class FakeAudioConsumer : public AudioStub {
  public:
-  FakeAudioConsumer(): weak_factory_(this) {}
+  FakeAudioConsumer() {}
+
+  FakeAudioConsumer(const FakeAudioConsumer&) = delete;
+  FakeAudioConsumer& operator=(const FakeAudioConsumer&) = delete;
+
   ~FakeAudioConsumer() override = default;
 
   base::WeakPtr<FakeAudioConsumer> GetWeakPtr(){
@@ -42,9 +45,7 @@ class FakeAudioConsumer : public AudioStub {
   }
 
  private:
-  base::WeakPtrFactory<FakeAudioConsumer> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeAudioConsumer);
+  base::WeakPtrFactory<FakeAudioConsumer> weak_factory_{this};
 };
 
 }  // namespace
@@ -57,7 +58,7 @@ class AudioDecodeSchedulerTest : public ::testing::Test {
   void TearDown() override;
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   scoped_refptr<AutoThreadTaskRunner> audio_decode_task_runner_;
   scoped_refptr<AutoThreadTaskRunner> main_task_runner_;
@@ -66,8 +67,7 @@ class AudioDecodeSchedulerTest : public ::testing::Test {
 
 void AudioDecodeSchedulerTest::SetUp() {
   main_task_runner_ = new AutoThreadTaskRunner(
-      scoped_task_environment_.GetMainThreadTaskRunner(),
-      run_loop_.QuitClosure());
+      task_environment_.GetMainThreadTaskRunner(), run_loop_.QuitClosure());
   audio_decode_task_runner_ = AutoThread::Create("decode", main_task_runner_);
   session_config_ = SessionConfig::ForTestWithAudio();
 }
@@ -123,9 +123,8 @@ TEST_F(AudioDecodeSchedulerTest, Shutdown) {
 
   audio_scheduler.reset();
   audio_consumer.reset();
-  // TODO(nicholss): This test does not really test anything. Add a way to get
-  // a count of the calls to AddAudioPacket.
+  // TODO(nicholss): This test does not really test anything. Add a way to get a
+  // count of the calls to AddAudioPacket.
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

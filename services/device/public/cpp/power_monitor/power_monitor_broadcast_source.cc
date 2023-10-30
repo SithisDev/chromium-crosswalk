@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/sequenced_task_runner.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "base/task/sequenced_task_runner.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace device {
 
@@ -28,63 +25,41 @@ PowerMonitorBroadcastSource::~PowerMonitorBroadcastSource() {
   task_runner_->DeleteSoon(FROM_HERE, client_.release());
 }
 
-void PowerMonitorBroadcastSource::Init(service_manager::Connector* connector) {
-  if (connector) {
+void PowerMonitorBroadcastSource::Init(
+    mojo::PendingRemote<mojom::PowerMonitor> remote_monitor) {
+  if (remote_monitor) {
     task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&PowerMonitorBroadcastSource::Client::Init,
                                   base::Unretained(client_.get()),
-                                  base::Passed(connector->Clone())));
+                                  std::move(remote_monitor)));
   }
 }
 
-bool PowerMonitorBroadcastSource::IsOnBatteryPowerImpl() {
+bool PowerMonitorBroadcastSource::IsOnBatteryPower() {
   return client_->last_reported_on_battery_power_state();
 }
 
-PowerMonitorBroadcastSource::Client::Client() : binding_(this) {}
+PowerMonitorBroadcastSource::Client::Client() = default;
 
 PowerMonitorBroadcastSource::Client::~Client() {}
 
 void PowerMonitorBroadcastSource::Client::Init(
-    std::unique_ptr<service_manager::Connector> connector) {
-  base::AutoLock auto_lock(is_shutdown_lock_);
-  if (is_shutdown_)
-    return;
-  connector_ = std::move(connector);
-  device::mojom::PowerMonitorPtr power_monitor;
-  connector_->BindInterface(device::mojom::kServiceName,
-                            mojo::MakeRequest(&power_monitor));
-  device::mojom::PowerMonitorClientPtr client;
-  binding_.Bind(mojo::MakeRequest(&client));
-  power_monitor->AddClient(std::move(client));
-}
-
-void PowerMonitorBroadcastSource::Client::Shutdown() {
-  base::AutoLock auto_lock(is_shutdown_lock_);
-  DCHECK(!is_shutdown_);
-  is_shutdown_ = true;
+    mojo::PendingRemote<mojom::PowerMonitor> remote_monitor) {
+  mojo::Remote<mojom::PowerMonitor> power_monitor(std::move(remote_monitor));
+  power_monitor->AddClient(receiver_.BindNewPipeAndPassRemote());
 }
 
 void PowerMonitorBroadcastSource::Client::PowerStateChange(
     bool on_battery_power) {
-  base::AutoLock auto_lock(is_shutdown_lock_);
-  if (is_shutdown_)
-    return;
   last_reported_on_battery_power_state_ = on_battery_power;
   ProcessPowerEvent(PowerMonitorSource::POWER_STATE_EVENT);
 }
 
 void PowerMonitorBroadcastSource::Client::Suspend() {
-  base::AutoLock auto_lock(is_shutdown_lock_);
-  if (is_shutdown_)
-    return;
   ProcessPowerEvent(PowerMonitorSource::SUSPEND_EVENT);
 }
 
 void PowerMonitorBroadcastSource::Client::Resume() {
-  base::AutoLock auto_lock(is_shutdown_lock_);
-  if (is_shutdown_)
-    return;
   ProcessPowerEvent(PowerMonitorSource::RESUME_EVENT);
 }
 

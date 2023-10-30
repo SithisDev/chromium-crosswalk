@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_logging.h"
@@ -72,12 +72,6 @@ IPC::PlatformFileForTransit PpapiDispatcher::ShareHandleWithRemote(
   return IPC::InvalidPlatformFileForTransit();
 }
 
-base::SharedMemoryHandle PpapiDispatcher::ShareSharedMemoryHandleWithRemote(
-    const base::SharedMemoryHandle& handle,
-    base::ProcessId remote_pid) {
-  return base::SharedMemoryHandle();
-}
-
 base::UnsafeSharedMemoryRegion
 PpapiDispatcher::ShareUnsafeSharedMemoryRegionWithRemote(
     const base::UnsafeSharedMemoryRegion& region,
@@ -124,10 +118,6 @@ IPC::Sender* PpapiDispatcher::GetBrowserSender() {
 std::string PpapiDispatcher::GetUILanguage() {
   NOTIMPLEMENTED();
   return std::string();
-}
-
-void PpapiDispatcher::PreCacheFontForFlash(const void* logfontw) {
-  NOTIMPLEMENTED();
 }
 
 void PpapiDispatcher::SetActiveURL(const std::string& url) {

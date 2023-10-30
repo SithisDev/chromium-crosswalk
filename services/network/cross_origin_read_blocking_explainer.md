@@ -52,11 +52,11 @@ CORB mitigates the following attack vectors:
   * CORB prevents this class of attacks, because a CORB-protected resource will
     be blocked from ever being delivered to a cross-site `<script>` element.
   * CORB is particularly valuable in absence of other XSSI defenses like
-    [XSRF tokens](https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)_Prevention_Cheat_Sheet#Synchronizer_.28CSRF.29_Tokens)
+    [XSRF tokens](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#synchronizer-token-pattern)
     and/or
-    [JSON security prefixes](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers).
+    [JSON security prefixes](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection).
     Additionally, the presence of XSSI defenses like
-    [JSON security prefixes](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+    [JSON security prefixes](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
     can also be used as a signal to the CORB algorithm that a resource should be
     CORB-protected.
 
@@ -196,7 +196,7 @@ CORB handles the following cases for JSON:
       certain number of bytes. This would avoid buffering and parsing
       in an unbounded amount of memory.
  * JSON served with
-   [an XSSI-defeating prefix](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers):
+   [an XSSI-defeating prefix](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection):
    As a mitigation for past browser
    vulnerabilities, many actual websites and frameworks employ a convention of
    prefixing their fetchable resources with a string designed to force a
@@ -217,17 +217,17 @@ CORB handles the following cases for JSON:
    strong signal to the CORB algorithm that a resource should be CORB-protected.
    As such, these prefixes should trigger CORB protection in almost every case,
    no matter what follows them. This is argued to be safe because:
-     * [A JSON security prefix](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+     * [A JSON security prefix](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
        would cause a syntax error (or a hang) if present in a document served
        with a JavaScript MIME type such as `text/javascript`.
-     * [JSON security prefixes](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+     * [JSON security prefixes](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
        are not known to collide with binary
        resources like images, videos or fonts (which typically require
        the first few bytes to be hardcoded to a specific sequence - for example
        `FF D8 FF` for image/jpeg).
      * Collisions with `text/css` stylesheets are theoretically possible, because
        it is possible to construct a file that begins with
-       [a JSON security prefix](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers),
+       [a JSON security prefix](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection),
        but at the same parses fine as a stylesheet.
        `text/css` is therefore established as an exception, even though the
        practical likelihood of such a scenario seems low.
@@ -328,7 +328,7 @@ HTML or XML resource) based on the following:
     that sniffs as JSON is CORB-protected
   * `text/plain` that sniffs as JSON, HTML or XML is CORB-protected
   * Any response (except `text/css`) that begins with
-    [a JSON security prefix](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+    [a JSON security prefix](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
     is CORB-protected
 
 The sniffing is necessary to avoid blocking existing web pages that depend on
@@ -527,7 +527,7 @@ Examples:
     (scroll down to CVE-2010-0051) and
     [Opera](http://www.opera.com/support/kb/view/943/)).
     This behavior is covered by
-    [the HTML spec](https://html.spec.whatwg.org/#link-type-stylesheet)
+    [the HTML spec](https://html.spec.whatwg.org/C/#link-type-stylesheet)
     which 1) asks to only assume `text/css` Content-Type
     if the document embedding the stylesheet has been set to quirks mode and has
     the same origin and 2) only asks to run the steps for creating a CSS style
@@ -553,12 +553,12 @@ Examples:
 * **Correctly-labeled stylesheet with a JSON security prefix**
   * Resource used in a `<link rel="stylesheet" href="...">` tag:
     * Body: a stylesheet that begins with
-      [a JSON security prefix](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+      [a JSON security prefix](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
     * `Content-Type: text/css`
     * No `X-Content-Type-Options` header
   * Expected behavior: **no difference**,
     because CORB sniffing for
-    [JSON security prefixes](https://www.owasp.org/index.php/AJAX_Security_Cheat_Sheet#Protect_against_JSON_Hijacking_for_Older_Browsers)
+    [JSON security prefixes](https://docs.angularjs.org/api/ng/service/$http#json-vulnerability-protection)
     is not performed for responses labeled as `Content-Type: text/css`.
   * WPT test: `fetch/corb/style-css-with-json-parser-breaker.sub.html`
 
@@ -574,7 +574,7 @@ CORB has no impact on the following scenarios:
     same-origin policy to the responses (e.g. CORB should only block responses
     that would result in cross-origin XHR errors because of lack of CORS).
 
-* **[Prefetch](https://html.spec.whatwg.org/#link-type-prefetch)**
+* **[Prefetch](https://html.spec.whatwg.org/C/#link-type-prefetch)**
   * CORB blocks response body from reaching a cross-origin renderer, but
     CORB doesn't prevent the response body from being cached by the browser
     process (and subsequently delivered into another, same-origin renderer
@@ -680,11 +680,11 @@ which are distributed via JSON (which is CORB-protected).
 In the future CORB may be extended to protect additional resources as follows:
 
 * **Covering more MIME types**.
-  Instead of blacklisting HTML, XML, and JSON, CORB protection can be extended to
-  all MIME types, except MIME types that are whitelisted as usable in `<img>`,
+  Instead of blocklisting HTML, XML, and JSON, CORB protection can be extended to
+  all MIME types, except MIME types that are allowlisted as usable in `<img>`,
   `<audio>`, `<video>`, `<script>` and other similar elements that can be
   embedded cross-origin:
-    * [JavaScript MIME type](https://html.spec.whatwg.org/#javascript-mime-type)
+    * [JavaScript MIME type](https://html.spec.whatwg.org/C/#javascript-mime-type)
       like `text/javascript`, `application/javascript`, or `text/jscript`
     * `text/css`
     * [image types](https://mimesniff.spec.whatwg.org/#image-type) like types

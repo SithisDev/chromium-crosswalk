@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/shape_detection/barcode_detection_impl_mac.h"
 #include "services/shape_detection/barcode_detection_impl_mac_vision.h"
 
@@ -23,31 +24,28 @@ BarcodeDetectionProviderMac::~BarcodeDetectionProviderMac() = default;
 
 // static
 void BarcodeDetectionProviderMac::Create(
-    mojom::BarcodeDetectionProviderRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<BarcodeDetectionProviderMac>(),
-                          std::move(request));
+    mojo::PendingReceiver<mojom::BarcodeDetectionProvider> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<BarcodeDetectionProviderMac>(),
+                              std::move(receiver));
 }
 
 void BarcodeDetectionProviderMac::CreateBarcodeDetection(
-    mojom::BarcodeDetectionRequest request,
+    mojo::PendingReceiver<mojom::BarcodeDetection> receiver,
     mojom::BarcodeDetectorOptionsPtr options) {
   if (!vision_api_)
     vision_api_ = VisionAPIInterface::Create();
 
-  // Vision Framework needs at least MAC OS X 10.13.
-  if (@available(macOS 10.13, *)) {
-    if (!BarcodeDetectionImplMacVision::IsBlockedMacOSVersion()) {
-      auto impl =
-          std::make_unique<BarcodeDetectionImplMacVision>(std::move(options));
-      auto* impl_ptr = impl.get();
-      impl_ptr->SetBinding(
-          mojo::MakeStrongBinding(std::move(impl), std::move(request)));
-      return;
-    }
+  if (!BarcodeDetectionImplMacVision::IsBlockedMacOSVersion()) {
+    auto impl =
+        std::make_unique<BarcodeDetectionImplMacVision>(std::move(options));
+    auto* impl_ptr = impl.get();
+    impl_ptr->SetReceiver(
+        mojo::MakeSelfOwnedReceiver(std::move(impl), std::move(receiver)));
+    return;
   }
 
-  mojo::MakeStrongBinding(std::make_unique<BarcodeDetectionImplMac>(),
-                          std::move(request));
+  mojo::MakeSelfOwnedReceiver(std::make_unique<BarcodeDetectionImplMac>(),
+                              std::move(receiver));
 }
 
 void BarcodeDetectionProviderMac::EnumerateSupportedFormats(
@@ -65,9 +63,7 @@ void BarcodeDetectionProviderMac::EnumerateSupportedFormats(
   if (!vision_api_)
     vision_api_ = VisionAPIInterface::Create();
 
-  // Vision Framework needs at least MAC OS X 10.13.
-  if (@available(macOS 10.13, *)) {
-    // Vision recognizes more barcode symbologies than Core Image Framework.
+  if (!BarcodeDetectionImplMacVision::IsBlockedMacOSVersion()) {
     supported_formats_ = BarcodeDetectionImplMacVision::GetSupportedSymbologies(
         vision_api_.get());
     std::move(callback).Run(supported_formats_.value());

@@ -1,4 +1,4 @@
-; // Copyright 2013 The Chromium Authors. All rights reserved.
+; // Copyright 2013 The Chromium Authors
 ; // Use of this source code is governed by a BSD-style license that can be
 ; // found in the LICENSE file.
 
@@ -82,6 +82,17 @@ SymbolicName=MSG_HOST_STARTED
   {%- do SelectLanguage(lang) %}
 Language={{ lang | replace("-", "_") }}
 {% trans %}HOST_STARTED{% endtrans %}
+.
+{%- endfor %}
+
+MessageId=6
+Severity=Informational
+Facility=Host
+SymbolicName=MSG_HOST_LOG_EVENT
+{%- for lang in languages %}
+  {%- do SelectLanguage(lang) %}
+Language={{ lang | replace("-", "_") }}
+{% trans %}HOST_LOG_EVENT{% endtrans %}
 .
 {%- endfor %}
 

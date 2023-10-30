@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/callback.h"
 #include "base/files/file.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -35,7 +35,21 @@ class PipeMessagingChannel : public extensions::NativeMessagingChannel {
   // Constructs an object taking the ownership of |input| and |output|. Closes
   // |input| and |output| to prevent the caller from using them.
   PipeMessagingChannel(base::File input, base::File output);
+
+  PipeMessagingChannel(const PipeMessagingChannel&) = delete;
+  PipeMessagingChannel& operator=(const PipeMessagingChannel&) = delete;
+
   ~PipeMessagingChannel() override;
+
+  // If the ctor is called with |input| and |output| set to stdin/stdout,
+  // it will close those file-descriptors. In that case, this helper function
+  // should be used to recreate stdin/stdout as open files. This is needed on
+  // POSIX because a later call to open() will return the lowest available
+  // descriptors, and stdin or stdout could end up pointing at some random file,
+  // which could cause an issue when, say, launching a child process.
+  // This is POSIX-only (a no-op on other platforms) and is thread-unsafe, as it
+  // calls open() twice, expecting it to return 0 then 1.
+  static void ReopenStdinStdout();
 
   // extensions::NativeMessagingChannel implementation.
   void Start(EventHandler* event_handler) override;
@@ -51,14 +65,12 @@ class PipeMessagingChannel : public extensions::NativeMessagingChannel {
   NativeMessagingReader native_messaging_reader_;
   std::unique_ptr<NativeMessagingWriter> native_messaging_writer_;
 
-  EventHandler* event_handler_;
+  raw_ptr<EventHandler> event_handler_;
   base::WeakPtr<PipeMessagingChannel> weak_ptr_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<PipeMessagingChannel> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PipeMessagingChannel);
+  base::WeakPtrFactory<PipeMessagingChannel> weak_factory_{this};
 };
 
 }  // namespace remoting

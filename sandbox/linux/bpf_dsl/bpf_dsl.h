@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl_forward.h"
 #include "sandbox/linux/bpf_dsl/cons.h"
 #include "sandbox/linux/bpf_dsl/trap_registry.h"
@@ -27,34 +26,32 @@
 // An idiomatic and demonstrative (albeit silly) example of this API
 // would be:
 //
-//      #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+//   #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 //
-//      using namespace sandbox::bpf_dsl;
+//   namespace dsl = sandbox::bpf_dsl;
 //
-//      class SillyPolicy : public Policy {
-//       public:
-//        SillyPolicy() {}
-//        ~SillyPolicy() override {}
-//        ResultExpr EvaluateSyscall(int sysno) const override {
-//          if (sysno == __NR_fcntl) {
-//            Arg<int> fd(0), cmd(1);
-//            Arg<unsigned long> flags(2);
-//            const uint64_t kGoodFlags = O_ACCMODE | O_NONBLOCK;
-//            return If(AllOf(fd == 0,
-//                            cmd == F_SETFL,
-//                            (flags & ~kGoodFlags) == 0),
-//                      Allow())
-//                .ElseIf(AnyOf(cmd == F_DUPFD, cmd == F_DUPFD_CLOEXEC),
-//                        Error(EMFILE))
-//                .Else(Trap(SetFlagHandler, NULL));
-//          } else {
-//            return Allow();
-//          }
-//        }
+//   class SillyPolicy : public dsl::Policy {
+//    public:
+//     SillyPolicy() = default;
+//     SillyPolicy(const SillyPolicy&) = delete;
+//     SillyPolicy& operator=(const SillyPolicy&) = delete;
+//     ~SillyPolicy() override = default;
 //
-//       private:
-//        DISALLOW_COPY_AND_ASSIGN(SillyPolicy);
-//      };
+//     dsl::ResultExpr EvaluateSyscall(int sysno) const override {
+//       if (sysno != __NR_fcntl)
+//         return dsl::Allow();
+//       dsl::Arg<int> fd(0), cmd(1);
+//       dsl::Arg<unsigned long> flags(2);
+//       constexpr uint64_t kGoodFlags = O_ACCMODE | O_NONBLOCK;
+//       return dsl::If(dsl::AllOf(fd == 0,
+//                                 cmd == F_SETFL,
+//                                 (flags & ~kGoodFlags) == 0),
+//                      dsl::Allow())
+//           .dsl::ElseIf(dsl::AnyOf(cmd == F_DUPFD, cmd == F_DUPFD_CLOEXEC),
+//                        dsl::Error(EMFILE))
+//           .dsl::Else(dsl::Trap(SetFlagHandler, nullptr));
+//     }
+//   };
 //
 // More generally, the DSL currently supports the following grammar:
 //
@@ -122,6 +119,12 @@ SANDBOX_EXPORT ResultExpr
 SANDBOX_EXPORT ResultExpr
     UnsafeTrap(TrapRegistry::TrapFnc trap_func, const void* aux);
 
+// UserNotify specifies that the kernel shall notify a listening process that a
+// syscall occurred. The listening process may perform the system call on
+// behalf of the sandboxed process, or may instruct the sandboxed process to
+// continue the system call.
+SANDBOX_EXPORT ResultExpr UserNotify();
+
 // BoolConst converts a bool value into a BoolExpr.
 SANDBOX_EXPORT BoolExpr BoolConst(bool value);
 
@@ -151,6 +154,8 @@ class SANDBOX_EXPORT Arg {
 
   Arg(const Arg& arg) : num_(arg.num_), mask_(arg.mask_) {}
 
+  Arg& operator=(const Arg&) = delete;
+
   // Returns an Arg representing the current argument, but after
   // bitwise-and'ing it with |rhs|.
   friend Arg operator&(const Arg& lhs, uint64_t rhs) {
@@ -172,8 +177,6 @@ class SANDBOX_EXPORT Arg {
 
   int num_;
   uint64_t mask_;
-
-  DISALLOW_ASSIGN(Arg);
 };
 
 // If begins a conditional result expression predicated on the
@@ -183,6 +186,9 @@ SANDBOX_EXPORT Elser If(BoolExpr cond, ResultExpr then_result);
 class SANDBOX_EXPORT Elser {
  public:
   Elser(const Elser& elser);
+
+  Elser& operator=(const Elser&) = delete;
+
   ~Elser();
 
   // ElseIf extends the conditional result expression with another
@@ -203,7 +209,6 @@ class SANDBOX_EXPORT Elser {
   friend Elser If(BoolExpr, ResultExpr);
   template <typename T>
   friend Caser<T> Switch(const Arg<T>&);
-  DISALLOW_ASSIGN(Elser);
 };
 
 // Switch begins a switch expression dispatched according to the
@@ -215,6 +220,9 @@ template <typename T>
 class SANDBOX_EXPORT Caser {
  public:
   Caser(const Caser<T>& caser) : arg_(caser.arg_), elser_(caser.elser_) {}
+
+  Caser& operator=(const Caser&) = delete;
+
   ~Caser() {}
 
   // Case adds a single-value "case" clause to the switch.
@@ -237,7 +245,6 @@ class SANDBOX_EXPORT Caser {
 
   template <typename U>
   friend Caser<U> Switch(const Arg<U>&);
-  DISALLOW_ASSIGN(Caser);
 };
 
 // Recommended usage is to put

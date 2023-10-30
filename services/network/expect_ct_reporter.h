@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 #include <memory>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/http/transport_security_state.h"
 #include "net/url_request/url_request.h"
 
@@ -25,7 +27,7 @@ namespace network {
 // the URLRequestContext that is passed to the constructor, so that it
 // can cancel its requests.
 //
-// Since reports are sent with a non-CORS-whitelisted Content-Type, this class
+// Since reports are sent with a non-CORS-allowlisted Content-Type, this class
 // sends CORS preflight requests before sending reports. Expect-CT is not
 // evaluated with a particular frame or request as context, so the preflight
 // request contains an `Origin: null` header instead of a particular origin.
@@ -37,18 +39,24 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ExpectCTReporter
   // |request_context|. |success_callback| is called whenever a report sends
   // successfully, and |failure_callback| whenever a report fails to send.
   ExpectCTReporter(net::URLRequestContext* request_context,
-                   const base::Closure& success_callback,
-                   const base::Closure& failure_callback);
+                   const base::RepeatingClosure& success_callback,
+                   const base::RepeatingClosure& failure_callback);
+
+  ExpectCTReporter(const ExpectCTReporter&) = delete;
+  ExpectCTReporter& operator=(const ExpectCTReporter&) = delete;
+
   ~ExpectCTReporter() override;
 
   // net::TransportSecurityState::ExpectCTReporter:
-  void OnExpectCTFailed(const net::HostPortPair& host_port_pair,
-                        const GURL& report_uri,
-                        base::Time expiration,
-                        const net::X509Certificate* validated_certificate_chain,
-                        const net::X509Certificate* served_certificate_chain,
-                        const net::SignedCertificateTimestampAndStatusList&
-                            signed_certificate_timestamps) override;
+  void OnExpectCTFailed(
+      const net::HostPortPair& host_port_pair,
+      const GURL& report_uri,
+      base::Time expiration,
+      const net::X509Certificate* validated_certificate_chain,
+      const net::X509Certificate* served_certificate_chain,
+      const net::SignedCertificateTimestampAndStatusList&
+          signed_certificate_timestamps,
+      const net::NetworkAnonymizationKey& network_anonymization_key) override;
 
   // net::URLRequest::Delegate:
   void OnResponseStarted(net::URLRequest* request, int net_error) override;
@@ -59,24 +67,36 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ExpectCTReporter
   // completes successfully and the CORS check passes, |serialized_report| will
   // be sent to |report_uri| using |report_sender_|.
   struct PreflightInProgress {
-    PreflightInProgress(std::unique_ptr<net::URLRequest> request,
-                        const std::string& serialized_report,
-                        const GURL& report_uri);
+    PreflightInProgress(
+        std::unique_ptr<net::URLRequest> request,
+        const std::string& serialized_report,
+        const GURL& report_uri,
+        const net::NetworkAnonymizationKey& network_anonymization_key);
     ~PreflightInProgress();
+
     // The preflight request.
     const std::unique_ptr<net::URLRequest> request;
     // |serialized_report| should be sent to |report_uri| if the preflight
     // succeeds.
     const std::string serialized_report;
     const GURL report_uri;
+    const net::NetworkAnonymizationKey network_anonymization_key;
   };
 
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest, FeatureDisabled);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest, EmptyReportURI);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest, SendReport);
+  FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
+                           PreflightUsesNetworkIsolationKey);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest, PreflightContainsWhitespace);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
+                           PreflightMethodsContainsWildcard);
+  FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
+                           PreflightHeadersContainsWildcard);
+  FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
                            BadCorsPreflightResponseOrigin);
+  FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
+                           CorsPreflightWithNoAllowMethods);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
                            BadCorsPreflightResponseMethods);
   FRIEND_TEST_ALL_PREFIXES(ExpectCTReporterTest,
@@ -86,8 +106,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ExpectCTReporter
   // send a report with Content-Type: application/expect-ct-report+json. The
   // preflight result is checked in OnResponseStarted(), and an actual report is
   // sent with |report_sender_| if the preflight succeeds.
-  void SendPreflight(const GURL& report_uri,
-                     const std::string& serialized_report);
+  void SendPreflight(
+      const GURL& report_uri,
+      const std::string& serialized_report,
+      const net::NetworkAnonymizationKey& network_anonymization_key);
 
   // When a report fails to send, this method records an UMA histogram and calls
   // |failure_callback_|.
@@ -97,18 +119,16 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ExpectCTReporter
 
   std::unique_ptr<net::ReportSender> report_sender_;
 
-  net::URLRequestContext* request_context_;
+  raw_ptr<net::URLRequestContext> request_context_;
 
-  base::Closure success_callback_;
-  base::Closure failure_callback_;
+  base::RepeatingClosure success_callback_;
+  base::RepeatingClosure failure_callback_;
 
   // The CORS preflight requests, with corresponding report information, that
   // are currently in-flight. Entries in this map are deleted when the
   // preflight's OnResponseStarted() is called.
   std::map<net::URLRequest*, std::unique_ptr<PreflightInProgress>>
       inflight_preflights_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExpectCTReporter);
 };
 
 }  // namespace network

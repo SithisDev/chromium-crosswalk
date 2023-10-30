@@ -1,13 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_NETWORK_MOJO_SOCKET_TEST_UTIL_H_
 #define SERVICES_NETWORK_MOJO_SOCKET_TEST_UTIL_H_
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/mojom/tcp_socket.mojom.h"
 
@@ -17,10 +17,14 @@ namespace network {
 class TestSocketObserver : public mojom::SocketObserver {
  public:
   TestSocketObserver();
+
+  TestSocketObserver(const TestSocketObserver&) = delete;
+  TestSocketObserver& operator=(const TestSocketObserver&) = delete;
+
   ~TestSocketObserver() override;
 
-  // Returns a mojo pointer. This can only be called once.
-  mojom::SocketObserverPtr GetObserverPtr();
+  // Returns a mojo pending remote. This can only be called once.
+  mojo::PendingRemote<mojom::SocketObserver> GetObserverRemote();
 
   // Waits for Read and Write error. Returns the error observed.
   int WaitForReadError();
@@ -35,9 +39,7 @@ class TestSocketObserver : public mojom::SocketObserver {
   int write_error_ = net::OK;
   base::RunLoop read_loop_;
   base::RunLoop write_loop_;
-  mojo::Binding<mojom::SocketObserver> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSocketObserver);
+  mojo::Receiver<mojom::SocketObserver> receiver_{this};
 };
 
 }  // namespace network

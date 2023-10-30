@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,17 @@
 
 #include <stdint.h>
 
+#include <list>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
 
-#include "mojo/public/cpp/bindings/binding.h"
+#include "base/memory/raw_ptr.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/stream_socket.h"
@@ -83,10 +89,6 @@ class FakeSocket : public net::StreamSocket {
   bool WasAlpnNegotiated() const override;
   net::NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(net::SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(net::ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const net::ConnectionAttempts& attempts) override {
-  }
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const net::SocketTag& tag) override {}
 
@@ -103,7 +105,7 @@ class FakeSocket : public net::StreamSocket {
   std::string input_data_;
   int input_pos_;
 
-  std::string* written_data_;
+  raw_ptr<std::string> written_data_;
   bool async_write_;
   bool write_pending_;
 
@@ -115,35 +117,26 @@ class FakeSocket : public net::StreamSocket {
 
 class FakeSocketClient : public mojom::P2PSocketClient {
  public:
-  FakeSocketClient(mojom::P2PSocketPtr socket,
-                   mojom::P2PSocketClientRequest client_request);
+  FakeSocketClient(
+      mojo::PendingRemote<mojom::P2PSocket> socket,
+      mojo::PendingReceiver<mojom::P2PSocketClient> client_receiver);
   ~FakeSocketClient() override;
 
   // mojom::P2PSocketClient interface.
   MOCK_METHOD2(SocketCreated,
                void(const net::IPEndPoint&, const net::IPEndPoint&));
   MOCK_METHOD1(SendComplete, void(const P2PSendPacketMetrics&));
-  void IncomingTcpConnection(
-      const net::IPEndPoint& endpoint,
-      network::mojom::P2PSocketPtr socket,
-      network::mojom::P2PSocketClientRequest client_request);
   MOCK_METHOD3(DataReceived,
                void(const net::IPEndPoint&,
                     const std::vector<int8_t>&,
                     base::TimeTicks));
 
-  bool connection_error() { return connection_error_; }
-  size_t num_accepted() { return accepted_.size(); }
-  void CloseAccepted();
+  bool connection_error() { return disconnect_error_; }
 
  private:
-  mojom::P2PSocketPtr socket_;
-  mojo::Binding<mojom::P2PSocketClient> binding_;
-  bool connection_error_ = false;
-
-  std::list<std::pair<network::mojom::P2PSocketPtr,
-                      network::mojom::P2PSocketClientRequest>>
-      accepted_;
+  mojo::Remote<mojom::P2PSocket> socket_;
+  mojo::Receiver<mojom::P2PSocketClient> receiver_;
+  bool disconnect_error_ = false;
 };
 
 void CreateRandomPacket(std::vector<int8_t>* packet);

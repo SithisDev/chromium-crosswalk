@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/check.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 
@@ -84,24 +85,13 @@ std::unique_ptr<SessionConfig> SessionConfig::SelectCommon(
 
   std::unique_ptr<SessionConfig> result(new SessionConfig(Protocol::ICE));
 
-  // If neither host nor the client have VP9 experiment enabled then remove it
-  // from the list of host video configs.
   std::list<ChannelConfig> host_video_configs = host_config->video_configs();
-  if (!client_config->vp9_experiment_enabled() &&
-      !host_config->vp9_experiment_enabled()) {
-    host_video_configs.remove_if([](const ChannelConfig& config) {
-      return config.codec == ChannelConfig::CODEC_VP9;
-    });
-  }
-
-  // If neither host nor the client have H264 experiment enabled then remove it
-  // from the list of host video configs.
-  if (!client_config->h264_experiment_enabled() &&
-      !host_config->h264_experiment_enabled()) {
-    host_video_configs.remove_if([](const ChannelConfig& config) {
-      return config.codec == ChannelConfig::CODEC_H264;
-    });
-  }
+  host_video_configs.remove_if([](const ChannelConfig& config) {
+    // Older ICE-based clients do not support VP9, H.264, or AV1 so remove them.
+    return config.codec == ChannelConfig::CODEC_H264 ||
+           config.codec == ChannelConfig::CODEC_VP9 ||
+           config.codec == ChannelConfig::CODEC_AV1;
+  });
 
   if (!SelectCommonChannelConfig(host_config->control_configs(),
                                  client_config->control_configs(),
@@ -316,5 +306,4 @@ void CandidateSessionConfig::PreferTransport(
   UpdateConfigListToPreferTransport(&audio_configs_, transport);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_AUDIO_SERVICE_METRICS_H_
 #define SERVICES_AUDIO_SERVICE_METRICS_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -16,6 +17,10 @@ namespace audio {
 class ServiceMetrics {
  public:
   explicit ServiceMetrics(const base::TickClock* clock);
+
+  ServiceMetrics(const ServiceMetrics&) = delete;
+  ServiceMetrics& operator=(const ServiceMetrics&) = delete;
+
   ~ServiceMetrics();
 
   void HasConnections();
@@ -24,12 +29,9 @@ class ServiceMetrics {
  private:
   void LogHasNoConnectionsDuration();
 
-  const base::TickClock* clock_;
-  const base::TimeTicks service_start_;
+  raw_ptr<const base::TickClock> clock_;
   base::TimeTicks has_connections_start_;
   base::TimeTicks has_no_connections_start_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceMetrics);
 };
 
 }  // namespace audio

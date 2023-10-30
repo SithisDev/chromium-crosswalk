@@ -1,52 +1,50 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/service_manager/public/cpp/interface_provider.h"
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-
 namespace service_manager {
 
-InterfaceProvider::InterfaceProvider() : weak_factory_(this) {
-  pending_request_ = MakeRequest(&interface_provider_);
+InterfaceProvider::InterfaceProvider(
+    scoped_refptr<base::SequencedTaskRunner> task_runner)
+    : pending_receiver_(
+          interface_provider_.BindNewPipeAndPassReceiver(task_runner)),
+      task_runner_(std::move(task_runner)) {
+  DCHECK(task_runner_);
 }
 
 InterfaceProvider::InterfaceProvider(
-    mojom::InterfaceProviderPtr interface_provider)
-    : interface_provider_(std::move(interface_provider)), weak_factory_(this) {}
+    mojo::PendingRemote<mojom::InterfaceProvider> interface_provider,
+    scoped_refptr<base::SequencedTaskRunner> task_runner)
+    : interface_provider_(std::move(interface_provider), task_runner),
+      task_runner_(std::move(task_runner)) {
+  DCHECK(task_runner_);
+}
 
-InterfaceProvider::~InterfaceProvider() {}
+InterfaceProvider::~InterfaceProvider() = default;
 
 void InterfaceProvider::Close() {
-  if (pending_request_.is_pending())
-    pending_request_.PassMessagePipe().reset();
+  if (pending_receiver_)
+    pending_receiver_.PassPipe().reset();
   interface_provider_.reset();
 }
 
-void InterfaceProvider::Bind(mojom::InterfaceProviderPtr interface_provider) {
-  DCHECK(pending_request_.is_pending() || !interface_provider_);
-  DCHECK(forward_callback_.is_null());
-  if (pending_request_.is_pending()) {
-    mojo::FuseInterface(std::move(pending_request_),
-                        interface_provider.PassInterface());
+void InterfaceProvider::Bind(
+    mojo::PendingRemote<mojom::InterfaceProvider> interface_provider) {
+  DCHECK(pending_receiver_ || !interface_provider_);
+  if (pending_receiver_) {
+    mojo::FusePipes(std::move(pending_receiver_),
+                    std::move(interface_provider));
   } else {
-    interface_provider_ = std::move(interface_provider);
+    interface_provider_.Bind(std::move(interface_provider), task_runner_);
   }
 }
 
-void InterfaceProvider::Forward(const ForwardCallback& callback) {
-  DCHECK(pending_request_.is_pending());
-  DCHECK(forward_callback_.is_null());
-  interface_provider_.reset();
-  pending_request_.PassMessagePipe().reset();
-  forward_callback_ = callback;
-}
-
 void InterfaceProvider::SetConnectionLostClosure(
-    const base::Closure& connection_lost_closure) {
-  interface_provider_.set_connection_error_handler(connection_lost_closure);
+    base::OnceClosure connection_lost_closure) {
+  interface_provider_.set_disconnect_handler(
+      std::move(connection_lost_closure));
 }
 
 base::WeakPtr<InterfaceProvider> InterfaceProvider::GetWeakPtr() {
@@ -63,13 +61,8 @@ void InterfaceProvider::GetInterfaceByName(
     return;
   }
 
-  if (!forward_callback_.is_null()) {
-    DCHECK(!interface_provider_.is_bound());
-    forward_callback_.Run(name, std::move(request_handle));
-  } else {
-    DCHECK(interface_provider_.is_bound());
-    interface_provider_->GetInterface(name, std::move(request_handle));
-  }
+  DCHECK(interface_provider_.is_bound());
+  interface_provider_->GetInterface(name, std::move(request_handle));
 }
 
 bool InterfaceProvider::HasBinderForName(const std::string& name) const {

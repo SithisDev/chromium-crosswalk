@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -131,6 +131,59 @@ TEST(RemoteInputFilterTest, LocalEchosAndLocalActivity) {
       input_filter.LocalPointerMoved(webrtc::DesktopVector(1, 1),
                                      ui::ET_MOUSE_MOVED);
   }
+}
+
+// Verify that local keyboard input blocks activity.
+TEST(RemoteInputFilterTest, LocalKeyPressEventBlocksInput) {
+  MockInputStub mock_stub;
+  InputEventTracker input_tracker(&mock_stub);
+  RemoteInputFilter input_filter(&input_tracker);
+  input_filter.LocalKeyPressed(0);
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, true));
+}
+
+// Verify that local echoes of remote keyboard activity does not block input
+TEST(RemoteInputFilterTest, LocalEchoOfKeyPressEventDoesNotBlockInput) {
+  MockInputStub mock_stub;
+  InputEventTracker input_tracker(&mock_stub);
+  RemoteInputFilter input_filter(&input_tracker);
+  EXPECT_CALL(mock_stub, InjectKeyEvent(_)).Times(4);
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, false));
+  input_filter.LocalKeyPressed(1);
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, false));
+}
+
+// Verify that local input matching remote keyboard activity that has already
+// been discarded as an echo blocks input.
+TEST(RemoteInputFilterTest, LocalKeyPressEventMatchingPreviousEchoBlocksInput) {
+  MockInputStub mock_stub;
+  InputEventTracker input_tracker(&mock_stub);
+  RemoteInputFilter input_filter(&input_tracker);
+  EXPECT_CALL(mock_stub, InjectKeyEvent(_)).Times(2);
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, false));
+  input_filter.LocalKeyPressed(1);
+  input_filter.LocalKeyPressed(1);
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, false));
+}
+
+// Verify that local input matching remote keyboard activity blocks input if
+// local echo is not expected
+TEST(RemoteInputFilterTest,
+     LocalDuplicateKeyPressEventBlocksInputIfEchoDisabled) {
+  MockInputStub mock_stub;
+  InputEventTracker input_tracker(&mock_stub);
+  RemoteInputFilter input_filter(&input_tracker);
+  input_filter.SetExpectLocalEcho(false);
+  EXPECT_CALL(mock_stub, InjectKeyEvent(_)).Times(2);
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(1, false));
+  input_filter.LocalKeyPressed(1);
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, true));
+  input_filter.InjectKeyEvent(UsbKeyEvent(2, false));
 }
 
 // Verify that local activity also causes buttons, keys, and touches to be

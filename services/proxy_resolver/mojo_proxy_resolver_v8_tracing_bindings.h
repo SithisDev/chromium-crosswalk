@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,18 @@
 #include <string>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/address_family.h"
 #include "net/base/host_port_pair.h"
-#include "net/dns/host_resolver.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/log/net_log_with_source.h"
-#include "net/proxy_resolution/proxy_host_resolver.h"
 #include "net/proxy_resolution/proxy_resolve_dns_operation.h"
-#include "net/proxy_resolution/proxy_resolver_v8_tracing.h"
 #include "services/proxy_resolver/host_resolver_mojo.h"
+#include "services/proxy_resolver/proxy_host_resolver.h"
+#include "services/proxy_resolver/proxy_resolver_v8_tracing.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
 
 namespace proxy_resolver {
@@ -31,7 +32,7 @@ namespace proxy_resolver {
 // be called from the origin task runner.
 template <typename Client>
 class MojoProxyResolverV8TracingBindings
-    : public net::ProxyResolverV8Tracing::Bindings,
+    : public ProxyResolverV8Tracing::Bindings,
       public HostResolverMojo::Impl {
  public:
   explicit MojoProxyResolverV8TracingBindings(Client* client)
@@ -40,17 +41,17 @@ class MojoProxyResolverV8TracingBindings
   }
 
   // ProxyResolverV8Tracing::Bindings overrides.
-  void Alert(const base::string16& message) override {
+  void Alert(const std::u16string& message) override {
     DCHECK(thread_checker_.CalledOnValidThread());
     client_->Alert(base::UTF16ToUTF8(message));
   }
 
-  void OnError(int line_number, const base::string16& message) override {
+  void OnError(int line_number, const std::u16string& message) override {
     DCHECK(thread_checker_.CalledOnValidThread());
     client_->OnError(line_number, base::UTF16ToUTF8(message));
   }
 
-  net::ProxyHostResolver* GetHostResolver() override {
+  ProxyHostResolver* GetHostResolver() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     return &host_resolver_;
   }
@@ -65,13 +66,15 @@ class MojoProxyResolverV8TracingBindings
   void ResolveDns(
       const std::string& hostname,
       net::ProxyResolveDnsOperation operation,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       mojo::PendingRemote<mojom::HostResolverRequestClient> client) override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    client_->ResolveDns(hostname, operation, std::move(client));
+    client_->ResolveDns(hostname, operation, network_anonymization_key,
+                        std::move(client));
   }
 
   base::ThreadChecker thread_checker_;
-  Client* const client_;
+  const raw_ptr<Client> client_;
   HostResolverMojo host_resolver_;
 };
 

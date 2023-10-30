@@ -1,16 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/mouse_cursor_monitor_proxy.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "remoting/host/mouse_cursor_monitor_proxy.h"
 #include "remoting/protocol/protocol_mock_objects.h"
@@ -41,6 +42,11 @@ class ThreadCheckMouseCursorMonitor : public webrtc::MouseCursorMonitor  {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : task_runner_(task_runner), callback_(nullptr) {
   }
+
+  ThreadCheckMouseCursorMonitor(const ThreadCheckMouseCursorMonitor&) = delete;
+  ThreadCheckMouseCursorMonitor& operator=(
+      const ThreadCheckMouseCursorMonitor&) = delete;
+
   ~ThreadCheckMouseCursorMonitor() override {
     EXPECT_TRUE(task_runner_->BelongsToCurrentThread());
   }
@@ -68,9 +74,7 @@ class ThreadCheckMouseCursorMonitor : public webrtc::MouseCursorMonitor  {
  private:
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  Callback* callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadCheckMouseCursorMonitor);
+  raw_ptr<Callback> callback_;
 };
 
 class MouseCursorMonitorProxyTest
@@ -88,11 +92,9 @@ class MouseCursorMonitorProxyTest
 
   // webrtc::MouseCursorMonitor::Callback implementation.
   void OnMouseCursor(webrtc::MouseCursor* mouse_cursor) override;
-  void OnMouseCursorPosition(webrtc::MouseCursorMonitor::CursorState state,
-                             const webrtc::DesktopVector& position) override;
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   base::Thread capture_thread_;
   std::unique_ptr<MouseCursorMonitorProxy> proxy_;
@@ -102,8 +104,7 @@ class MouseCursorMonitorProxyTest
 
 void MouseCursorMonitorProxyTest::OnMouseCursor(
     webrtc::MouseCursor* mouse_cursor) {
-  DCHECK(scoped_task_environment_.GetMainThreadTaskRunner()
-             ->BelongsToCurrentThread());
+  DCHECK(task_environment_.GetMainThreadTaskRunner()->BelongsToCurrentThread());
 
   EXPECT_EQ(kCursorWidth, mouse_cursor->image()->size().width());
   EXPECT_EQ(kCursorHeight, mouse_cursor->image()->size().height());
@@ -114,17 +115,11 @@ void MouseCursorMonitorProxyTest::OnMouseCursor(
   run_loop_.Quit();
 }
 
-void MouseCursorMonitorProxyTest::OnMouseCursorPosition(
-    webrtc::MouseCursorMonitor::CursorState state,
-    const webrtc::DesktopVector& position) {
-  NOTREACHED();
-}
-
 TEST_F(MouseCursorMonitorProxyTest, CursorShape) {
   // Initialize the proxy.
-  proxy_.reset(new MouseCursorMonitorProxy(
+  proxy_ = std::make_unique<MouseCursorMonitorProxy>(
       capture_thread_.task_runner(),
-      webrtc::DesktopCaptureOptions::CreateDefault()));
+      webrtc::DesktopCaptureOptions::CreateDefault());
   proxy_->SetMouseCursorMonitorForTests(
       std::make_unique<ThreadCheckMouseCursorMonitor>(
           capture_thread_.task_runner()));

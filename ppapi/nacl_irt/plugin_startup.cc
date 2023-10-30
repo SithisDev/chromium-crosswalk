@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/nacl_irt/plugin_startup.h"
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/file_descriptor_posix.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ppapi/nacl_irt/manifest_service.h"
@@ -28,15 +28,9 @@ base::Thread* g_io_thread = NULL;
 ManifestService* g_manifest_service = NULL;
 
 bool IsValidChannelHandle(IPC::ChannelHandle* handle) {
-  // In SFI mode the underlying handle is wrapped by a NaClIPCAdapter, which is
-  // exposed as an FD. Otherwise, the handle is the underlying mojo message
-  // pipe.
-  return handle &&
-#if defined(OS_NACL_SFI)
-         handle->socket.fd != -1;
-#else
-         handle->is_mojo_channel_handle();
-#endif
+  // The underlying handle is wrapped by a NaClIPCAdapter, which is exposed as
+  // an FD.
+  return handle && handle->socket.fd != -1;
 }
 
 // Creates the manifest service on IO thread so that its Listener's thread and
@@ -82,7 +76,7 @@ void StartUpPlugin() {
                               base::WaitableEvent::InitialState::NOT_SIGNALED);
   g_io_thread = new base::Thread("Chrome_NaClIOThread");
   g_io_thread->StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
 
   if (IsValidChannelHandle(g_manifest_service_handle)) {
     // Manifest service must be created on IOThread so that the main message

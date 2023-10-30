@@ -1,12 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/generic_sensor/platform_sensor_provider_winrt.h"
 
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "services/device/generic_sensor/platform_sensor_reader_win_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,7 +43,7 @@ class MockSensorReaderFactory : public SensorReaderFactory {
 // Tests that PlatformSensorProviderWinrt can successfully be instantiated
 // and passes the correct result to the CreateSensor callback.
 TEST(PlatformSensorProviderTestWinrt, SensorCreationReturnCheck) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   auto mock_sensor_reader_factory =
       std::make_unique<testing::NiceMock<MockSensorReaderFactory>>();
@@ -71,10 +71,10 @@ TEST(PlatformSensorProviderTestWinrt, SensorCreationReturnCheck) {
       std::move(mock_sensor_reader_factory));
 
   // CreateSensor is async so use a RunLoop to wait for completion.
-  base::Optional<base::RunLoop> run_loop;
+  absl::optional<base::RunLoop> run_loop;
   bool expect_sensor_valid = false;
 
-  base::Callback<void(scoped_refptr<PlatformSensor> sensor)>
+  base::RepeatingCallback<void(scoped_refptr<PlatformSensor> sensor)>
       create_sensor_callback =
           base::BindLambdaForTesting([&](scoped_refptr<PlatformSensor> sensor) {
             if (expect_sensor_valid)
@@ -86,12 +86,13 @@ TEST(PlatformSensorProviderTestWinrt, SensorCreationReturnCheck) {
 
   run_loop.emplace();
   provider->CreateSensor(mojom::SensorType::AMBIENT_LIGHT,
-                         create_sensor_callback);
+                         base::BindOnce(create_sensor_callback));
   run_loop->Run();
 
   expect_sensor_valid = true;
   run_loop.emplace();
-  provider->CreateSensor(mojom::SensorType::GYROSCOPE, create_sensor_callback);
+  provider->CreateSensor(mojom::SensorType::GYROSCOPE,
+                         base::BindOnce(create_sensor_callback));
   run_loop->Run();
 
   // Linear acceleration is a fusion sensor built on top of accelerometer,
@@ -99,7 +100,7 @@ TEST(PlatformSensorProviderTestWinrt, SensorCreationReturnCheck) {
   expect_sensor_valid = true;
   run_loop.emplace();
   provider->CreateSensor(mojom::SensorType::LINEAR_ACCELERATION,
-                         create_sensor_callback);
+                         base::BindOnce(create_sensor_callback));
   run_loop->Run();
 }
 

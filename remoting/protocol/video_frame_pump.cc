@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task_runner_util.h"
+#include "base/check.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/time/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/proto/control.pb.h"
@@ -20,8 +20,7 @@
 #include "remoting/protocol/video_stub.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // Interval between empty keep-alive frames. These frames are sent only when the
 // stream is paused or inactive for some other reason (e.g. when blocked on
@@ -50,12 +49,11 @@ VideoFramePump::VideoFramePump(
       video_stub_(video_stub),
       keep_alive_timer_(
           FROM_HERE,
-          base::TimeDelta::FromMilliseconds(kKeepAlivePacketIntervalMs),
-          base::Bind(&VideoFramePump::SendKeepAlivePacket,
-                     base::Unretained(this))),
-      capture_scheduler_(base::Bind(&VideoFramePump::CaptureNextFrame,
-                                    base::Unretained(this))),
-      weak_factory_(this) {
+          base::Milliseconds(kKeepAlivePacketIntervalMs),
+          base::BindRepeating(&VideoFramePump::SendKeepAlivePacket,
+                              base::Unretained(this))),
+      capture_scheduler_(base::BindRepeating(&VideoFramePump::CaptureNextFrame,
+                                             base::Unretained(this))) {
   DCHECK(encoder_);
   DCHECK(video_stub_);
 
@@ -64,25 +62,25 @@ VideoFramePump::VideoFramePump(
 }
 
 VideoFramePump::~VideoFramePump() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   encode_task_runner_->DeleteSoon(FROM_HERE, encoder_.release());
 }
 
 void VideoFramePump::SetEventTimestampsSource(
     scoped_refptr<InputEventTimestampsSource> event_timestamps_source) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   event_timestamps_source_ = event_timestamps_source;
 }
 
 void VideoFramePump::Pause(bool pause) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   capture_scheduler_.Pause(pause);
 }
 
 void VideoFramePump::SetLosslessEncode(bool want_lossless) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   encode_task_runner_->PostTask(
       FROM_HERE,
@@ -91,7 +89,7 @@ void VideoFramePump::SetLosslessEncode(bool want_lossless) {
 }
 
 void VideoFramePump::SetLosslessColor(bool want_lossless) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   encode_task_runner_->PostTask(
       FROM_HERE,
@@ -100,16 +98,16 @@ void VideoFramePump::SetLosslessColor(bool want_lossless) {
 }
 
 void VideoFramePump::SetObserver(Observer* observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   observer_ = observer;
 }
 
-void VideoFramePump::SelectSource(int id) {}
+void VideoFramePump::SelectSource(webrtc::ScreenId id) {}
 
 void VideoFramePump::OnCaptureResult(
     webrtc::DesktopCapturer::Result result,
     std::unique_ptr<webrtc::DesktopFrame> frame) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   capture_scheduler_.OnCaptureCompleted();
 
@@ -132,16 +130,16 @@ void VideoFramePump::OnCaptureResult(
   // that we don't start capturing frame n+2 before frame n is freed.
   base::PostTaskAndReplyWithResult(
       encode_task_runner_.get(), FROM_HERE,
-      base::Bind(&VideoFramePump::EncodeFrame, encoder_.get(),
-                 base::Passed(&frame),
-                 base::Passed(&captured_frame_timestamps_)),
-      base::Bind(&VideoFramePump::OnFrameEncoded, weak_factory_.GetWeakPtr()));
+      base::BindOnce(&VideoFramePump::EncodeFrame, encoder_.get(),
+                     std::move(frame), std::move(captured_frame_timestamps_)),
+      base::BindOnce(&VideoFramePump::OnFrameEncoded,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void VideoFramePump::CaptureNextFrame() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  captured_frame_timestamps_.reset(new FrameTimestamps());
+  captured_frame_timestamps_ = std::make_unique<FrameTimestamps>();
   captured_frame_timestamps_->capture_started_time = base::TimeTicks::Now();
 
   if (event_timestamps_source_) {
@@ -167,7 +165,7 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
   // If |frame| is NULL, or the encoder returned nothing, return an empty
   // packet.
   if (!packet)
-    packet.reset(new VideoPacket());
+    packet = std::make_unique<VideoPacket>();
 
   if (frame)
     packet->set_capture_time_ms(frame->capture_time_ms());
@@ -183,7 +181,7 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
 
 void VideoFramePump::OnFrameEncoded(
     std::unique_ptr<PacketWithTimestamps> packet) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   capture_scheduler_.OnFrameEncoded(packet->packet.get());
 
@@ -195,7 +193,7 @@ void VideoFramePump::OnFrameEncoded(
 }
 
 void VideoFramePump::SendPacket(std::unique_ptr<PacketWithTimestamps> packet) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!send_pending_);
 
   packet->timestamps->can_send_time = base::TimeTicks::Now();
@@ -234,7 +232,7 @@ void VideoFramePump::UpdateFrameTimers(VideoPacket* packet,
 }
 
 void VideoFramePump::OnVideoPacketSent() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   send_pending_ = false;
   capture_scheduler_.OnFrameSent();
@@ -250,7 +248,7 @@ void VideoFramePump::OnVideoPacketSent() {
 }
 
 void VideoFramePump::SendKeepAlivePacket() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   video_stub_->ProcessVideoPacket(
       std::make_unique<VideoPacket>(),
@@ -259,10 +257,9 @@ void VideoFramePump::SendKeepAlivePacket() {
 }
 
 void VideoFramePump::OnKeepAlivePacketSent() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   keep_alive_timer_.Reset();
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

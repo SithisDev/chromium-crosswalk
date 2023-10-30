@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include "base/containers/span.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "net/base/ip_address.h"
-#include "services/network/public/mojom/ip_address.mojom.h"
+#include "services/network/public/mojom/ip_address.mojom-shared.h"
 
 namespace mojo {
 template <>
-struct StructTraits<network::mojom::IPAddressDataView, net::IPAddress> {
+struct COMPONENT_EXPORT(NETWORK_CPP_IP_ADDRESS)
+    StructTraits<network::mojom::IPAddressDataView, net::IPAddress> {
   static base::span<const uint8_t> address_bytes(
       const net::IPAddress& ip_address) {
     return ip_address.bytes();

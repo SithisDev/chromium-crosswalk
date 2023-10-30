@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/tcp_socket_resource.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/ppb_tcp_socket_shared.h"
 #include "ppapi/thunk/enter.h"

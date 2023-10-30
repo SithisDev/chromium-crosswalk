@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.chromoting.jni;
 import com.google.protobuf.InvalidProtocolBufferException;
 
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JCaller;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chromoting.HostInfo;
@@ -42,7 +41,7 @@ public class DirectoryService {
      * with an error-code describing the failure.
      */
     public void retrieveHostList(final HostListCallback callback) {
-        DirectoryServiceJni.get().retrieveHostList(this, mNativeJniDirectoryService, callback);
+        DirectoryServiceJni.get().retrieveHostList(mNativeJniDirectoryService, callback);
     }
 
     /**
@@ -50,12 +49,12 @@ public class DirectoryService {
      * otherwise callback.onError() will be called with an error-code describing the failure.
      */
     public void deleteHost(final String hostId, final DeleteCallback callback) {
-        DirectoryServiceJni.get().deleteHost(this, mNativeJniDirectoryService, hostId, callback);
+        DirectoryServiceJni.get().deleteHost(mNativeJniDirectoryService, hostId, callback);
     }
 
     @Override
     public void finalize() {
-        DirectoryServiceJni.get().destroy(this, mNativeJniDirectoryService);
+        DirectoryServiceJni.get().destroy(mNativeJniDirectoryService);
     }
 
     private final long mNativeJniDirectoryService;
@@ -63,11 +62,9 @@ public class DirectoryService {
     @NativeMethods
     interface Natives {
         long init();
-        void retrieveHostList(@JCaller DirectoryService self, long nativeJniDirectoryService,
-                HostListCallback callback);
-        void deleteHost(@JCaller DirectoryService self, long nativeJniDirectoryService,
-                String hostId, DeleteCallback callback);
-        void destroy(@JCaller DirectoryService self, long nativeJniDirectoryService);
+        void retrieveHostList(long nativeJniDirectoryService, HostListCallback callback);
+        void deleteHost(long nativeJniDirectoryService, String hostId, DeleteCallback callback);
+        void destroy(long nativeJniDirectoryService);
     }
 
     /**

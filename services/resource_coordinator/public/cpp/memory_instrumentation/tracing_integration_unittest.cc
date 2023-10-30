@@ -1,28 +1,30 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/client_process_impl.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_io_thread.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_manager_test_utils.h"
 #include "base/trace_event/memory_dump_scheduler.h"
-#include "base/trace_event/memory_infra_background_whitelist.h"
+#include "base/trace_event/memory_infra_background_allowlist.h"
 #include "base/trace_event/trace_buffer.h"
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_config_memory_test_util.h"
 #include "base/trace_event/trace_log.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/resource_coordinator/public/cpp/memory_instrumentation/coordinator.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,6 +36,7 @@ using testing::Return;
 
 using base::trace_event::MemoryAllocatorDump;
 using base::trace_event::MemoryDumpArgs;
+using base::trace_event::MemoryDumpDeterminism;
 using base::trace_event::MemoryDumpLevelOfDetail;
 using base::trace_event::MemoryDumpManager;
 using base::trace_event::MemoryDumpProvider;
@@ -97,24 +100,19 @@ class MockMemoryDumpProvider : public MemoryDumpProvider {
 
 class MemoryTracingIntegrationTest;
 
-class MockCoordinator : public Coordinator, public mojom::Coordinator {
+class MockCoordinator : public mojom::Coordinator {
  public:
-  MockCoordinator(MemoryTracingIntegrationTest* client) : client_(client) {}
+  explicit MockCoordinator(MemoryTracingIntegrationTest* client)
+      : client_(client) {}
 
-  void BindCoordinatorRequest(
-      mojom::CoordinatorRequest request,
-      const service_manager::BindSourceInfo& source_info) override {
-    bindings_.AddBinding(this, std::move(request));
+  void BindReceiver(mojo::PendingReceiver<mojom::Coordinator> receiver) {
+    receivers_.Add(this, std::move(receiver));
   }
-
-  void RegisterClientProcess(mojom::ClientProcessPtr,
-                             mojom::ProcessType) override {}
-
-  void RegisterHeapProfiler(mojom::HeapProfilerPtr heap_profiler) override {}
 
   void RequestGlobalMemoryDump(
       MemoryDumpType dump_type,
       MemoryDumpLevelOfDetail level_of_detail,
+      MemoryDumpDeterminism determinism,
       const std::vector<std::string>& allocator_dump_names,
       RequestGlobalMemoryDumpCallback) override;
 
@@ -130,27 +128,34 @@ class MockCoordinator : public Coordinator, public mojom::Coordinator {
   void RequestGlobalMemoryDumpAndAppendToTrace(
       MemoryDumpType dump_type,
       MemoryDumpLevelOfDetail level_of_detail,
+      MemoryDumpDeterminism determinism,
       RequestGlobalMemoryDumpAndAppendToTraceCallback) override;
 
  private:
-  mojo::BindingSet<mojom::Coordinator> bindings_;
-  MemoryTracingIntegrationTest* client_;
+  mojo::ReceiverSet<mojom::Coordinator> receivers_;
+  raw_ptr<MemoryTracingIntegrationTest> client_;
 };
 
 class MemoryTracingIntegrationTest : public testing::Test {
  public:
   void SetUp() override {
-    message_loop_ = std::make_unique<base::MessageLoop>();
+    task_environment_ =
+        std::make_unique<base::test::SingleThreadTaskEnvironment>();
     coordinator_ = std::make_unique<MockCoordinator>(this);
   }
 
   void InitializeClientProcess(mojom::ProcessType process_type) {
     mdm_ = MemoryDumpManager::CreateInstanceForTesting();
     mdm_->set_dumper_registrations_ignored_for_testing(true);
-    const char* kServiceName = "TestServiceName";
-    ClientProcessImpl::Config config(nullptr, kServiceName, process_type);
-    config.coordinator_for_testing = coordinator_.get();
-    client_process_.reset(new ClientProcessImpl(config));
+
+    mojo::PendingRemote<mojom::Coordinator> coordinator;
+    mojo::PendingRemote<mojom::ClientProcess> process;
+    auto process_receiver = process.InitWithNewPipeAndPassReceiver();
+    coordinator_->BindReceiver(coordinator.InitWithNewPipeAndPassReceiver());
+    client_process_.reset(new ClientProcessImpl(
+        std::move(process_receiver), std::move(coordinator),
+        process_type == mojom::ProcessType::BROWSER,
+        /*initialize_memory_instrumentation=*/false));
   }
 
   void TearDown() override {
@@ -158,7 +163,7 @@ class MemoryTracingIntegrationTest : public testing::Test {
     mdm_.reset();
     client_process_.reset();
     coordinator_.reset();
-    message_loop_.reset();
+    task_environment_.reset();
     TraceLog::ResetForTesting();
   }
 
@@ -193,9 +198,11 @@ class MemoryTracingIntegrationTest : public testing::Test {
   }
 
   void RequestChromeDump(MemoryDumpType dump_type,
-                         MemoryDumpLevelOfDetail level_of_detail) {
+                         MemoryDumpLevelOfDetail level_of_detail,
+                         MemoryDumpDeterminism determinism) {
     uint64_t req_guid = ++guid_counter_;
-    MemoryDumpRequestArgs request_args{req_guid, dump_type, level_of_detail};
+    MemoryDumpRequestArgs request_args{req_guid, dump_type, level_of_detail,
+                                       determinism};
     ClientProcessImpl::RequestChromeMemoryDumpCallback callback =
         base::BindOnce(
             [](bool success, uint64_t dump_guid,
@@ -242,7 +249,7 @@ class MemoryTracingIntegrationTest : public testing::Test {
   std::unique_ptr<MemoryDumpManager> mdm_;
 
  private:
-  std::unique_ptr<base::MessageLoop> message_loop_;
+  std::unique_ptr<base::test::SingleThreadTaskEnvironment> task_environment_;
   std::unique_ptr<MockCoordinator> coordinator_;
   std::unique_ptr<ClientProcessImpl> client_process_;
   uint64_t guid_counter_ = 0;
@@ -251,18 +258,20 @@ class MemoryTracingIntegrationTest : public testing::Test {
 void MockCoordinator::RequestGlobalMemoryDump(
     MemoryDumpType dump_type,
     MemoryDumpLevelOfDetail level_of_detail,
+    MemoryDumpDeterminism determinism,
     const std::vector<std::string>& allocator_dump_names,
     RequestGlobalMemoryDumpCallback callback) {
-  client_->RequestChromeDump(dump_type, level_of_detail);
+  client_->RequestChromeDump(dump_type, level_of_detail, determinism);
   std::move(callback).Run(true, mojom::GlobalMemoryDumpPtr());
 }
 
 void MockCoordinator::RequestGlobalMemoryDumpAndAppendToTrace(
     MemoryDumpType dump_type,
     MemoryDumpLevelOfDetail level_of_detail,
+    MemoryDumpDeterminism determinism,
     RequestGlobalMemoryDumpAndAppendToTraceCallback callback) {
-  client_->RequestChromeDump(dump_type, level_of_detail);
-  std::move(callback).Run(1, true);
+  client_->RequestChromeDump(dump_type, level_of_detail, determinism);
+  std::move(callback).Run(true, true);
 }
 
 // Checks that is the ClientProcessImpl is initialized after tracing already
@@ -290,7 +299,7 @@ TEST_F(MemoryTracingIntegrationTest, InitializedAfterStartOfTracing) {
 // DETAILED, even if requested explicitly.
 TEST_F(MemoryTracingIntegrationTest, TestBackgroundTracingSetup) {
   InitializeClientProcess(mojom::ProcessType::BROWSER);
-  base::trace_event::SetDumpProviderWhitelistForTesting(kTestMDPWhitelist);
+  base::trace_event::SetDumpProviderAllowlistForTesting(kTestMDPWhitelist);
   auto mdp = std::make_unique<MockMemoryDumpProvider>();
   RegisterDumpProvider(&*mdp, nullptr, MemoryDumpProvider::Options(),
                        kWhitelistedMDPName);
@@ -436,7 +445,7 @@ TEST_F(MemoryTracingIntegrationTest, PeriodicDumpingWithMultipleModes) {
 
 TEST_F(MemoryTracingIntegrationTest, TestWhitelistingMDP) {
   InitializeClientProcess(mojom::ProcessType::RENDERER);
-  base::trace_event::SetDumpProviderWhitelistForTesting(kTestMDPWhitelist);
+  base::trace_event::SetDumpProviderAllowlistForTesting(kTestMDPWhitelist);
   std::unique_ptr<MockMemoryDumpProvider> mdp1(new MockMemoryDumpProvider);
   RegisterDumpProvider(mdp1.get(), nullptr);
   std::unique_ptr<MockMemoryDumpProvider> mdp2(new MockMemoryDumpProvider);

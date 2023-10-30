@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "services/network/public/mojom/tcp_socket.mojom.h"
@@ -25,10 +25,14 @@ class WebSocket;
 class HttpConnection {
  public:
   HttpConnection(int id,
-                 mojom::TCPConnectedSocketPtr socket,
+                 mojo::PendingRemote<mojom::TCPConnectedSocket> socket,
                  mojo::ScopedDataPipeConsumerHandle socket_receive_handle,
                  mojo::ScopedDataPipeProducerHandle socket_send_handle,
                  const net::IPEndPoint& peer_addr);
+
+  HttpConnection(const HttpConnection&) = delete;
+  HttpConnection& operator=(const HttpConnection&) = delete;
+
   ~HttpConnection();
 
   int id() const { return id_; }
@@ -57,7 +61,7 @@ class HttpConnection {
 
  private:
   const int id_;
-  const mojom::TCPConnectedSocketPtr socket_;
+  const mojo::Remote<mojom::TCPConnectedSocket> socket_;
 
   // Stores data that has been read from the server but not yet parsed into an
   // HTTP request.
@@ -76,8 +80,6 @@ class HttpConnection {
   const net::IPEndPoint peer_addr_;
 
   std::unique_ptr<WebSocket> web_socket_;
-
-  DISALLOW_COPY_AND_ASSIGN(HttpConnection);
 };
 
 }  // namespace server

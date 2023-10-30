@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "remoting/host/branding.h"
@@ -36,8 +37,8 @@ PairingRegistryDelegateLinux::PairingRegistryDelegateLinux() = default;
 
 PairingRegistryDelegateLinux::~PairingRegistryDelegateLinux() = default;
 
-std::unique_ptr<base::ListValue> PairingRegistryDelegateLinux::LoadAll() {
-  std::unique_ptr<base::ListValue> pairings(new base::ListValue());
+base::Value::List PairingRegistryDelegateLinux::LoadAll() {
+  base::Value::List pairings;
 
   // Enumerate all pairing files in the pairing registry.
   base::FilePath registry_path = GetRegistryPath();
@@ -58,7 +59,7 @@ std::unique_ptr<base::ListValue> PairingRegistryDelegateLinux::LoadAll() {
       continue;
     }
 
-    pairings->Append(std::move(pairing_json));
+    pairings.Append(base::Value::FromUniquePtrValue(std::move(pairing_json)));
   }
 
   return pairings;
@@ -74,7 +75,7 @@ bool PairingRegistryDelegateLinux::DeleteAll() {
   bool success = true;
   for (base::FilePath pairing_file = enumerator.Next(); !pairing_file.empty();
        pairing_file = enumerator.Next()) {
-    success = success && base::DeleteFile(pairing_file, false);
+    success = success && base::DeleteFile(pairing_file);
   }
 
   return success;
@@ -97,13 +98,12 @@ PairingRegistry::Pairing PairingRegistryDelegateLinux::Load(
     return PairingRegistry::Pairing();
   }
 
-  base::DictionaryValue* pairing_dictionary;
-  if (!pairing->GetAsDictionary(&pairing_dictionary)) {
+  if (!pairing->is_dict()) {
     LOG(WARNING) << "Failed to parse pairing information: not a dictionary.";
     return PairingRegistry::Pairing();
   }
 
-  return PairingRegistry::Pairing::CreateFromValue(*pairing_dictionary);
+  return PairingRegistry::Pairing::CreateFromValue(pairing->GetDict());
 }
 
 bool PairingRegistryDelegateLinux::Save(
@@ -117,7 +117,7 @@ bool PairingRegistryDelegateLinux::Save(
 
   std::string pairing_json;
   JSONStringValueSerializer serializer(&pairing_json);
-  if (!serializer.Serialize(*pairing.ToValue())) {
+  if (!serializer.Serialize(pairing.ToValue())) {
     LOG(ERROR) << "Failed to serialize pairing data for "
                << pairing.client_id();
     return false;
@@ -139,7 +139,7 @@ bool PairingRegistryDelegateLinux::Delete(const std::string& client_id) {
   base::FilePath pairing_file = registry_path.Append(
       base::StringPrintf(kPairingFilenameFormat, client_id.c_str()));
 
-  return base::DeleteFile(pairing_file, false);
+  return base::DeleteFile(pairing_file);
 }
 
 base::FilePath PairingRegistryDelegateLinux::GetRegistryPath() {

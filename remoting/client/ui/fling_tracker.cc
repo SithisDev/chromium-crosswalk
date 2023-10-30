@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ bool FlingTracker::TrackMovement(base::TimeDelta time_elapsed,
     return false;
   }
 
-  float time_elapsed_ms = time_elapsed.InMilliseconds();
+  float time_elapsed_ms = time_elapsed.InMillisecondsF();
 
   if (time_elapsed_ms > fling_duration_) {
     StopFling();

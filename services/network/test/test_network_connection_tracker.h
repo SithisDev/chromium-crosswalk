@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,10 @@ class TestNetworkConnectionTracker : public NetworkConnectionTracker {
   // Returns the currently active TestNetworkConnectionTracker instance.
   // CreateInstance() must have been called before calling this.
   static TestNetworkConnectionTracker* GetInstance();
+
+  // Returns true if TestNetworkConnectionTracker instance already exists.
+  // It means that CreateInstance() was already called.
+  static bool HasInstance();
 
   // Creates a NetworkConnectionTrackerGetter that will return the active
   // TestNetworkConnectionTracker instance when called.

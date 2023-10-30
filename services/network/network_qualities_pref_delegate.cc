@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,17 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "components/prefs/pref_registry.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "net/http/http_server_properties.h"
 #include "net/nqe/network_quality_estimator.h"
+#include "net/nqe/pref_names.h"
 
 namespace {
-
-// Prefs for persisting network qualities.
-const char kNetworkQualities[] = "net.network_qualities";
 
 // PrefDelegateImpl writes the provided dictionary value to the network quality
 // estimator prefs on the disk.
@@ -28,32 +28,34 @@ class PrefDelegateImpl
  public:
   // |pref_service| is used to read and write prefs from/to the disk.
   explicit PrefDelegateImpl(PrefService* pref_service)
-      : pref_service_(pref_service), path_(kNetworkQualities) {
+      : pref_service_(pref_service), path_(net::nqe::kNetworkQualities) {
     DCHECK(pref_service_);
   }
+
+  PrefDelegateImpl(const PrefDelegateImpl&) = delete;
+  PrefDelegateImpl& operator=(const PrefDelegateImpl&) = delete;
+
   ~PrefDelegateImpl() override {}
 
-  void SetDictionaryValue(const base::DictionaryValue& value) override {
+  void SetDictionaryValue(const base::Value::Dict& dict) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    pref_service_->Set(path_, value);
+    pref_service_->SetDict(path_, dict.Clone());
     UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.WriteCount", 1, 2);
   }
 
-  std::unique_ptr<base::DictionaryValue> GetDictionaryValue() override {
+  base::Value::Dict GetDictionaryValue() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.ReadCount", 1, 2);
-    return pref_service_->GetDictionary(path_)->CreateDeepCopy();
+    return pref_service_->GetDict(path_).Clone();
   }
 
  private:
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
 
   // |path_| is the location of the network quality estimator prefs.
   const std::string path_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(PrefDelegateImpl);
 };
 
 // Returns true if |pref_service| has been initialized.
@@ -101,7 +103,7 @@ void NetworkQualitiesPrefDelegate::ClearPrefs() {
 
 // static
 void NetworkQualitiesPrefDelegate::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(kNetworkQualities);
+  registry->RegisterDictionaryPref(net::nqe::kNetworkQualities);
 }
 
 std::map<net::nqe::internal::NetworkID,

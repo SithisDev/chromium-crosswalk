@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,8 @@
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "device/bluetooth/public/mojom/uuid.mojom.h"
 #include "services/data_decoder/public/mojom/ble_scan_parser.mojom.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
 
 namespace data_decoder {
 
@@ -31,8 +29,11 @@ enum class UuidFormat {
 
 class BleScanParserImpl : public mojom::BleScanParser {
  public:
-  explicit BleScanParserImpl(
-      std::unique_ptr<service_manager::ServiceContextRef> service_ref);
+  BleScanParserImpl();
+
+  BleScanParserImpl(const BleScanParserImpl&) = delete;
+  BleScanParserImpl& operator=(const BleScanParserImpl&) = delete;
+
   ~BleScanParserImpl() override;
 
   // mojom::BleScanParser:
@@ -49,11 +50,6 @@ class BleScanParserImpl : public mojom::BleScanParser {
       base::span<const uint8_t> bytes,
       UuidFormat format,
       std::vector<device::BluetoothUUID>* service_uuids);
-
- private:
-  const std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(BleScanParserImpl);
 };
 
 }  // namespace data_decoder

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,14 @@
 #include <memory>
 #include <string>
 
-#include "base/optional.h"
+#include "base/callback.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "media/audio/audio_system.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/audio/public/mojom/system_info.mojom.h"
-
-namespace service_manager {
-class Connector;
-}
 
 namespace audio {
 
@@ -26,14 +24,22 @@ namespace audio {
 // empty optionals / false booleans.
 class AudioSystemToServiceAdapter : public media::AudioSystem {
  public:
+  // A callback which can be used to acquire a new SystemInfo interface pipe
+  // lazily as needed.
+  using SystemInfoBinder =
+      base::RepeatingCallback<void(mojo::PendingReceiver<mojom::SystemInfo>)>;
+
   // If |disconnect_timeout| is positive, the instance will disconnect from
   // Audio service upon |disconnect_timeout| if not in use, and reconnect on the
   // next attempt to use it.
-  AudioSystemToServiceAdapter(
-      std::unique_ptr<service_manager::Connector> connector,
-      base::TimeDelta disconnect_timeout);
-  explicit AudioSystemToServiceAdapter(
-      std::unique_ptr<service_manager::Connector> connector);
+  AudioSystemToServiceAdapter(SystemInfoBinder system_info_binder,
+                              base::TimeDelta disconnect_timeout);
+  explicit AudioSystemToServiceAdapter(SystemInfoBinder system_info_binder);
+
+  AudioSystemToServiceAdapter(const AudioSystemToServiceAdapter&) = delete;
+  AudioSystemToServiceAdapter& operator=(const AudioSystemToServiceAdapter&) =
+      delete;
+
   ~AudioSystemToServiceAdapter() override;
 
   // AudioSystem implementation.
@@ -57,18 +63,16 @@ class AudioSystemToServiceAdapter : public media::AudioSystem {
 
  private:
   mojom::SystemInfo* GetSystemInfo();
-  void DisconnectOnTimeout();
   void OnConnectionError();
 
   // Will be bound to the thread AudioSystemToServiceAdapter is used on.
-  const std::unique_ptr<service_manager::Connector> connector_;
-  mojom::SystemInfoPtr system_info_;
+  const SystemInfoBinder system_info_binder_;
+  mojo::Remote<mojom::SystemInfo> system_info_;
 
   // To disconnect from the audio service when not in use.
-  base::Optional<base::DelayTimer> disconnect_timer_;
+  const base::TimeDelta disconnect_timeout_;
 
   THREAD_CHECKER(thread_checker_);
-  DISALLOW_COPY_AND_ASSIGN(AudioSystemToServiceAdapter);
 };
 
 }  // namespace audio

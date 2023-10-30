@@ -1,30 +1,28 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/protocol/ice_transport_channel.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "jingle/glue/utils.h"
+#include "components/webrtc/net_address_utils.h"
 #include "net/base/net_errors.h"
 #include "remoting/protocol/channel_socket_adapter.h"
 #include "remoting/protocol/port_allocator_factory.h"
 #include "remoting/protocol/transport_context.h"
 #include "third_party/webrtc/p2p/base/p2p_constants.h"
 #include "third_party/webrtc/p2p/base/p2p_transport_channel.h"
-#include "third_party/webrtc/p2p/base/packet_transport_interface.h"
+#include "third_party/webrtc/p2p/base/packet_transport_internal.h"
 #include "third_party/webrtc/p2p/base/port.h"
-#include "third_party/webrtc/p2p/base/portallocator.h"
-#include "third_party/webrtc/rtc_base/network.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 
@@ -51,17 +49,15 @@ TransportRoute::RouteType CandidateTypeToTransportRouteType(
 IceTransportChannel::IceTransportChannel(
     scoped_refptr<TransportContext> transport_context)
     : transport_context_(transport_context),
-      ice_username_fragment_(
-          rtc::CreateRandomString(kIceUfragLength)),
+      ice_username_fragment_(rtc::CreateRandomString(kIceUfragLength)),
       connect_attempts_left_(
-          transport_context->network_settings().ice_reconnect_attempts),
-      weak_factory_(this) {
+          transport_context->network_settings().ice_reconnect_attempts) {
   DCHECK(!ice_username_fragment_.empty());
 }
 
 IceTransportChannel::~IceTransportChannel() {
   DCHECK(delegate_);
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   delegate_->OnChannelDeleted(this);
 
@@ -74,8 +70,8 @@ IceTransportChannel::~IceTransportChannel() {
 
 void IceTransportChannel::Connect(const std::string& name,
                                   Delegate* delegate,
-                                  const ConnectedCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+                                  ConnectedCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!name.empty());
   DCHECK(delegate);
   DCHECK(!callback.is_null());
@@ -83,18 +79,16 @@ void IceTransportChannel::Connect(const std::string& name,
   DCHECK(name_.empty());
   name_ = name;
   delegate_ = delegate;
-  callback_ = callback;
+  callback_ = std::move(callback);
 
   port_allocator_ =
       transport_context_->port_allocator_factory()->CreatePortAllocator(
-          transport_context_);
-  port_allocator_->set_flags(port_allocator_->flags() |
-                             cricket::PORTALLOCATOR_ENABLE_IPV6_ON_WIFI);
+          transport_context_, nullptr);
 
   // Create P2PTransportChannel, attach signal handlers and connect it.
   // TODO(sergeyu): Specify correct component ID for the channel.
-  channel_.reset(new cricket::P2PTransportChannel(
-      std::string(), 0, port_allocator_.get()));
+  channel_ = std::make_unique<cricket::P2PTransportChannel>(
+      std::string(), 0, port_allocator_.get());
   std::string ice_password = rtc::CreateRandomString(cricket::ICE_PWD_LENGTH);
   channel_->SetIceProtocolType(cricket::ICEPROTO_RFC5245);
   channel_->SetIceRole((transport_context_->role() == TransportRole::CLIENT)
@@ -142,14 +136,14 @@ void IceTransportChannel::NotifyConnected() {
   // Create P2PDatagramSocket adapter for the P2PTransportChannel.
   std::unique_ptr<TransportChannelSocketAdapter> socket(
       new TransportChannelSocketAdapter(channel_.get()));
-  socket->SetOnDestroyedCallback(base::Bind(
+  socket->SetOnDestroyedCallback(base::BindOnce(
       &IceTransportChannel::OnChannelDestroyed, base::Unretained(this)));
   std::move(callback_).Run(std::move(socket));
 }
 
 void IceTransportChannel::SetRemoteCredentials(const std::string& ufrag,
                                                const std::string& password) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   remote_ice_username_fragment_ = ufrag;
   remote_ice_password_ = password;
@@ -160,7 +154,7 @@ void IceTransportChannel::SetRemoteCredentials(const std::string& ufrag,
 
 void IceTransportChannel::AddRemoteCandidate(
     const cricket::Candidate& candidate) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // To enforce the no-relay setting, it's not enough to not produce relay
   // candidates. It's also necessary to discard remote relay candidates.
@@ -177,19 +171,19 @@ void IceTransportChannel::AddRemoteCandidate(
 }
 
 const std::string& IceTransportChannel::name() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return name_;
 }
 
 bool IceTransportChannel::is_connected() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return callback_.is_null();
 }
 
 void IceTransportChannel::OnCandidateGathered(
     cricket::IceTransportInternal* ice_transport,
     const cricket::Candidate& candidate) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   delegate_->OnChannelCandidate(this, candidate);
 }
 
@@ -202,9 +196,9 @@ void IceTransportChannel::OnRouteChange(
 }
 
 void IceTransportChannel::OnWritableState(
-    rtc::PacketTransportInterface* transport) {
+    rtc::PacketTransportInternal* transport) {
   DCHECK_EQ(transport,
-            static_cast<rtc::PacketTransportInterface*>(channel_.get()));
+            static_cast<rtc::PacketTransportInternal*>(channel_.get()));
 
   if (transport->writable()) {
     connect_attempts_left_ =
@@ -244,15 +238,15 @@ void IceTransportChannel::NotifyRouteChanged() {
       CandidateTypeToTransportRouteType(connection->local_candidate().type()),
       CandidateTypeToTransportRouteType(connection->remote_candidate().type()));
 
-  if (!jingle_glue::SocketAddressToIPEndPoint(
+  if (!webrtc::SocketAddressToIPEndPoint(
           connection->remote_candidate().address(), &route.remote_address)) {
     LOG(FATAL) << "Failed to convert peer IP address.";
   }
 
   const cricket::Candidate& local_candidate =
       channel_->best_connection()->local_candidate();
-  if (!jingle_glue::SocketAddressToIPEndPoint(
-          local_candidate.address(), &route.local_address)) {
+  if (!webrtc::SocketAddressToIPEndPoint(local_candidate.address(),
+                                         &route.local_address)) {
     LOG(FATAL) << "Failed to convert local IP address.";
   }
 
@@ -279,5 +273,4 @@ void IceTransportChannel::TryReconnect() {
   channel_->SetIceCredentials(ice_username_fragment_, ice_password);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

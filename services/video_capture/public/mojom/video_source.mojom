@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,16 @@ module video_capture.mojom;
 
 import "media/capture/mojom/image_capture.mojom";
 import "media/capture/mojom/video_capture_types.mojom";
-import "services/video_capture/public/mojom/receiver.mojom";
+import "services/video_capture/public/mojom/video_frame_handler.mojom";
 
-enum CreatePushSubscriptionResultCode {
+enum CreatePushSubscriptionSuccessCode {
   kCreatedWithRequestedSettings,
   kCreatedWithDifferentSettings,
-  kFailed,
+};
+
+union CreatePushSubscriptionResultCode{
+  CreatePushSubscriptionSuccessCode success_code;
+  media.mojom.VideoCaptureError error_code;
 };
 
 // In a PushVideoStreamSubscription, the provider pushes frames to the
@@ -55,6 +59,10 @@ interface PushVideoStreamSubscription {
   // requested for the new subscription will be ignored unless
   // |force_reopen_with_new_settings| is set to true.
   Close() => ();
+
+  // |feedback| contains consumer feedback like resource utilization,
+  // maximum requested frame-rate and resolution.
+  ProcessFeedback(media.mojom.VideoCaptureFeedback feedback);
 };
 
 // Provides shared access to a specific video source to potentially multiple
@@ -80,10 +88,11 @@ interface VideoSource {
   // source will be reopened trying to match |requested_settings|. This will
   // potentially briefly interrupt the video stream received by other
   // subscribers.
-  CreatePushSubscription(Receiver subscriber,
-                         media.mojom.VideoCaptureParams requested_settings,
-                         bool force_reopen_with_new_settings,
-                         PushVideoStreamSubscription& subscription)
+  CreatePushSubscription(
+      pending_remote<VideoFrameHandler> subscriber,
+      media.mojom.VideoCaptureParams requested_settings,
+      bool force_reopen_with_new_settings,
+      pending_receiver<PushVideoStreamSubscription> subscription)
       => (CreatePushSubscriptionResultCode result_code,
           media.mojom.VideoCaptureParams settings_source_was_opened_with);
 };

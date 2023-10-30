@@ -1,14 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_SERVICE_MANAGER_PUBLIC_CPP_TEST_TEST_SERVICE_H_
 #define SERVICES_SERVICE_MANAGER_PUBLIC_CPP_TEST_TEST_SERVICE_H_
 
-#include "base/macros.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
+#include "services/service_manager/public/cpp/service_receiver.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
 
 namespace service_manager {
@@ -31,28 +30,30 @@ namespace service_manager {
 //     }
 //
 //    private:
-//     base::test::ScopedTaskEnvironment task_environment_;
+//     base::test::TaskEnvironment task_environment_;
 //     service_manager::TestServiceManager test_service_manager_;
 //     service_manager::TestService test_service_;
 //   };
 //
 //   TEST_F(MyTest, ConnectToFoo) {
-//     foo::mojom::FooPtr foo;
-//     connector()->BindInterface("foo", mojo::MakeRequest(&foo));
+//     mojo::Remote<foo::mojom::Foo> foo;
+//     connector()->BindInterface("foo", foo.BindNewPipeAndPassReceiver());
 //     foo->DoSomeStuff();
 //     // etc...
 //   }
 class TestService : public Service {
  public:
-  explicit TestService(mojom::ServiceRequest request);
+  explicit TestService(mojo::PendingReceiver<mojom::Service> receiver);
+
+  TestService(const TestService&) = delete;
+  TestService& operator=(const TestService&) = delete;
+
   ~TestService() override;
 
-  Connector* connector() { return binding_.GetConnector(); }
+  Connector* connector() { return receiver_.GetConnector(); }
 
  private:
-  ServiceBinding binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestService);
+  ServiceReceiver receiver_;
 };
 
 }  // namespace service_manager

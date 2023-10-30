@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,8 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/protocol/errors.h"
 
@@ -23,9 +22,18 @@ namespace remoting {
 
 namespace {
 
+// Standard path to CGSession (pre-Big Sur).
+// Note: This binary was removed for the official Big Sur release.
+// See tracking issues crbug://1169841 and rdar://8977508.
 const char* kCGSessionPath =
     "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/"
     "CGSession";
+
+// Alternate path to search for CGSession.
+// Admins can copy the CGSession binary here to get curtain mode to work again
+// on Mac hosts. This is a temporary workaround for CGSession being removed
+// on Big Sur.
+const char* kCGSessionAltPath = "/usr/local/sbin/CGSession";
 
 // Most machines will have < 4 displays but a larger upper bound won't hurt.
 const UInt32 kMaxDisplaysToQuery = 32;
@@ -59,7 +67,7 @@ bool IsRunningHeadless() {
 }
 
 // Used to detach the current session from the local console and disconnect
-// the connnection if it gets re-attached.
+// the connection if it gets re-attached.
 //
 // Because the switch-in handler can only called on the main (UI) thread, this
 // class installs the handler and detaches the current session from the console
@@ -70,6 +78,9 @@ class SessionWatcher : public base::RefCountedThreadSafe<SessionWatcher> {
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       base::WeakPtr<ClientSessionControl> client_session_control);
+
+  SessionWatcher(const SessionWatcher&) = delete;
+  SessionWatcher& operator=(const SessionWatcher&) = delete;
 
   void Start();
   void Stop();
@@ -106,8 +117,6 @@ class SessionWatcher : public base::RefCountedThreadSafe<SessionWatcher> {
   base::WeakPtr<ClientSessionControl> client_session_control_;
 
   EventHandlerRef event_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(SessionWatcher);
 };
 
 SessionWatcher::SessionWatcher(
@@ -126,7 +135,7 @@ void SessionWatcher::Start() {
   // Activate curtain asynchronously since it has to be done on the UI thread.
   // Because the curtain activation is asynchronous, it is possible that
   // the connection will not be curtained for a brief moment. This seems to be
-  // unaviodable as long as the curtain enforcement depends on processing of
+  // unavoidable as long as the curtain enforcement depends on processing of
   // the switch-in notifications.
   ui_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&SessionWatcher::ActivateCurtain, this));
@@ -179,9 +188,24 @@ void SessionWatcher::ActivateCurtain() {
     // could try reconnecting in that case (until we had a real fix deployed).
     // Issue is tracked via: rdar://42733382
     bool is_headless = IsRunningHeadless();
+
+    // Check to see if the CGSession binary is available. If we cannot find it,
+    // then we can't enable curtain mode and need to disconnect the session.
+    const char* cgsession_path = NULL;
+    if (access(kCGSessionPath, X_OK) == 0) {
+      cgsession_path = kCGSessionPath;
+    } else if (access(kCGSessionAltPath, X_OK) == 0) {
+      cgsession_path = kCGSessionAltPath;
+    } else {
+      // Disconnect the session since we are unable to enter curtain mode.
+      LOG(ERROR) << "Can't find CGSession - unable to enter curtain mode.";
+      DisconnectSession(protocol::ErrorCode::HOST_CONFIGURATION_ERROR);
+      return;
+    }
+
     pid_t child = fork();
     if (child == 0) {
-      execl(kCGSessionPath, kCGSessionPath, "-suspend", nullptr);
+      execl(cgsession_path, cgsession_path, "-suspend", nullptr);
       _exit(1);
     } else if (child > 0) {
       int status = 0;
@@ -266,6 +290,10 @@ class CurtainModeMac : public CurtainMode {
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       base::WeakPtr<ClientSessionControl> client_session_control);
+
+  CurtainModeMac(const CurtainModeMac&) = delete;
+  CurtainModeMac& operator=(const CurtainModeMac&) = delete;
+
   ~CurtainModeMac() override;
 
   // Overriden from CurtainMode.
@@ -273,8 +301,6 @@ class CurtainModeMac : public CurtainMode {
 
  private:
   scoped_refptr<SessionWatcher> session_watcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(CurtainModeMac);
 };
 
 CurtainModeMac::CurtainModeMac(

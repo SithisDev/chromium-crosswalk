@@ -1,12 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/generic_sensor/sensor_impl.h"
 
 #include <utility>
-
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 
@@ -21,8 +19,8 @@ SensorImpl::~SensorImpl() {
   sensor_->RemoveClient(this);
 }
 
-mojom::SensorClientRequest SensorImpl::GetClient() {
-  return mojo::MakeRequest(&client_);
+mojo::PendingReceiver<mojom::SensorClient> SensorImpl::GetClient() {
+  return client_.BindNewPipeAndPassReceiver();
 }
 
 void SensorImpl::AddConfiguration(

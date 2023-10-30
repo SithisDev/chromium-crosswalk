@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,12 @@
 #include <memory>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/component_export.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/ip_endpoint.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/p2p/socket.h"
@@ -33,20 +34,26 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcpBase : public P2PSocket {
  public:
   P2PSocketTcpBase(
       Delegate* delegate,
-      mojom::P2PSocketClientPtr client,
-      mojom::P2PSocketRequest socket,
+      mojo::PendingRemote<mojom::P2PSocketClient> client,
+      mojo::PendingReceiver<mojom::P2PSocket> socket,
       P2PSocketType type,
       ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory);
+
+  P2PSocketTcpBase(const P2PSocketTcpBase&) = delete;
+  P2PSocketTcpBase& operator=(const P2PSocketTcpBase&) = delete;
+
   ~P2PSocketTcpBase() override;
 
   void InitAccepted(const net::IPEndPoint& remote_address,
                     std::unique_ptr<net::StreamSocket> socket);
 
   // P2PSocket overrides.
-  void Init(const net::IPEndPoint& local_address,
-            uint16_t min_port,
-            uint16_t max_port,
-            const P2PHostAndIPEndPoint& remote_address) override;
+  void Init(
+      const net::IPEndPoint& local_address,
+      uint16_t min_port,
+      uint16_t max_port,
+      const P2PHostAndIPEndPoint& remote_address,
+      const net::NetworkAnonymizationKey& network_anonymization_key) override;
 
   // mojom::P2PSocket implementation:
   void Send(const std::vector<int8_t>& data,
@@ -80,7 +87,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcpBase : public P2PSocket {
       const net::NetworkTrafficAnnotationTag traffic_annotation) = 0;
 
   void WriteOrQueue(SendBuffer& send_buffer);
-  WARN_UNUSED_RESULT bool OnPacket(std::vector<int8_t> data);
+  [[nodiscard]] bool OnPacket(std::vector<int8_t> data);
 
  private:
   friend class P2PSocketTcpTestBase;
@@ -91,8 +98,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcpBase : public P2PSocket {
 
   // Return |false| in case of an error. The socket is destroyed in that case,
   // so the caller should not use |this|.
-  WARN_UNUSED_RESULT bool HandleReadResult(int result);
-  WARN_UNUSED_RESULT bool HandleWriteResult(int result);
+  [[nodiscard]] bool HandleReadResult(int result);
+  [[nodiscard]] bool HandleWriteResult(int result);
 
   // Callbacks for Connect(), Read() and Write().
   void OnConnected(int result);
@@ -114,19 +121,20 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcpBase : public P2PSocket {
 
   bool connected_ = false;
   const P2PSocketType type_;
-  ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(P2PSocketTcpBase);
+  raw_ptr<ProxyResolvingClientSocketFactory> proxy_resolving_socket_factory_;
 };
 
 class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcp : public P2PSocketTcpBase {
  public:
   P2PSocketTcp(
       Delegate* delegate,
-      mojom::P2PSocketClientPtr client,
-      mojom::P2PSocketRequest socket,
+      mojo::PendingRemote<mojom::P2PSocketClient> client,
+      mojo::PendingReceiver<mojom::P2PSocket> socket,
       P2PSocketType type,
       ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory);
+
+  P2PSocketTcp(const P2PSocketTcp&) = delete;
+  P2PSocketTcp& operator=(const P2PSocketTcp&) = delete;
 
   ~P2PSocketTcp() override;
 
@@ -139,9 +147,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketTcp : public P2PSocketTcpBase {
       const std::vector<int8_t>& data,
       const rtc::PacketOptions& options,
       const net::NetworkTrafficAnnotationTag traffic_annotation) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(P2PSocketTcp);
 };
 
 // P2PSocketStunTcp class provides the framing of STUN messages when used
@@ -153,10 +158,13 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketStunTcp
  public:
   P2PSocketStunTcp(
       Delegate* delegate,
-      mojom::P2PSocketClientPtr client,
-      mojom::P2PSocketRequest socket,
+      mojo::PendingRemote<mojom::P2PSocketClient> client,
+      mojo::PendingReceiver<mojom::P2PSocket> socket,
       P2PSocketType type,
       ProxyResolvingClientSocketFactory* proxy_resolving_socket_factory);
+
+  P2PSocketStunTcp(const P2PSocketStunTcp&) = delete;
+  P2PSocketStunTcp& operator=(const P2PSocketStunTcp&) = delete;
 
   ~P2PSocketStunTcp() override;
 
@@ -172,8 +180,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) P2PSocketStunTcp
 
  private:
   int GetExpectedPacketSize(const uint8_t* data, int len, int* pad_bytes);
-
-  DISALLOW_COPY_AND_ASSIGN(P2PSocketStunTcp);
 };
 
 }  // namespace network

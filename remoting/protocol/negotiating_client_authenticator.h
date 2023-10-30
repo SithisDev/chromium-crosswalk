@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,13 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/client_authentication_config.h"
 #include "remoting/protocol/negotiating_authenticator_base.h"
 #include "remoting/protocol/third_party_client_authenticator.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 // Client-side implementation of NegotiatingAuthenticatorBase.
 // See comments in negotiating_authenticator_base.h for a general explanation.
@@ -27,11 +25,17 @@ class NegotiatingClientAuthenticator : public NegotiatingAuthenticatorBase {
       const std::string& local_id,
       const std::string& remote_id,
       const ClientAuthenticationConfig& config);
+
+  NegotiatingClientAuthenticator(const NegotiatingClientAuthenticator&) =
+      delete;
+  NegotiatingClientAuthenticator& operator=(
+      const NegotiatingClientAuthenticator&) = delete;
+
   ~NegotiatingClientAuthenticator() override;
 
-  // Overriden from Authenticator.
+  // NegotiatingAuthenticatorBase:
   void ProcessMessage(const jingle_xmpp::XmlElement* message,
-                      const base::Closure& resume_callback) override;
+                      base::OnceClosure resume_callback) override;
   std::unique_ptr<jingle_xmpp::XmlElement> GetNextMessage() override;
 
  private:
@@ -41,7 +45,7 @@ class NegotiatingClientAuthenticator : public NegotiatingAuthenticatorBase {
   // |resume_callback| is called after |current_authenticator_| is set.
   void CreateAuthenticatorForCurrentMethod(
       Authenticator::State preferred_initial_state,
-      const base::Closure& resume_callback);
+      base::OnceClosure resume_callback);
 
   // If possible, create a preferred authenticator ready to send an
   // initial message optimistically to the host. The host is free to
@@ -57,7 +61,7 @@ class NegotiatingClientAuthenticator : public NegotiatingAuthenticatorBase {
   // Creates a shared-secret authenticator in state |initial_state| with the
   // given |shared_secret|, then runs |resume_callback|.
   void CreateSharedSecretAuthenticator(Authenticator::State initial_state,
-                                       const base::Closure& resume_callback,
+                                       base::OnceClosure resume_callback,
                                        const std::string& shared_secret);
 
   bool is_paired();
@@ -69,12 +73,9 @@ class NegotiatingClientAuthenticator : public NegotiatingAuthenticatorBase {
 
   // Internal NegotiatingClientAuthenticator data.
   bool method_set_by_host_ = false;
-  base::WeakPtrFactory<NegotiatingClientAuthenticator> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(NegotiatingClientAuthenticator);
+  base::WeakPtrFactory<NegotiatingClientAuthenticator> weak_factory_{this};
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_NEGOTIATING_CLIENT_AUTHENTICATOR_H_

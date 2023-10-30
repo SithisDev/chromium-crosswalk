@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@
 #include "remoting/protocol/video_renderer.h"
 #include "remoting/protocol/video_stub.h"
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class FakeVideoStub : public VideoStub {
  public:
@@ -27,17 +26,17 @@ class FakeVideoStub : public VideoStub {
     return received_packets_;
   }
 
-  void set_on_frame_callback(base::Closure on_frame_callback);
+  void set_on_frame_callback(const base::RepeatingClosure& on_frame_callback);
 
   // VideoStub interface.
   void ProcessVideoPacket(std::unique_ptr<VideoPacket> video_packet,
                           base::OnceClosure done) override;
 
  private:
-  base::ThreadChecker thread_checker_;
-
   std::list<std::unique_ptr<VideoPacket>> received_packets_;
-  base::Closure on_frame_callback_;
+  base::RepeatingClosure on_frame_callback_;
+
+  THREAD_CHECKER(thread_checker_);
 };
 
 class FakeFrameConsumer : public FrameConsumer {
@@ -49,20 +48,20 @@ class FakeFrameConsumer : public FrameConsumer {
     return received_frames_;
   }
 
-  void set_on_frame_callback(base::Closure on_frame_callback);
+  void set_on_frame_callback(const base::RepeatingClosure& on_frame_callback);
 
   // FrameConsumer interface.
   std::unique_ptr<webrtc::DesktopFrame> AllocateFrame(
       const webrtc::DesktopSize& size) override;
   void DrawFrame(std::unique_ptr<webrtc::DesktopFrame> frame,
-                 const base::Closure& done) override;
+                 base::OnceClosure done) override;
   PixelFormat GetPixelFormat() override;
 
  private:
-  base::ThreadChecker thread_checker_;
-
   std::list<std::unique_ptr<webrtc::DesktopFrame>> received_frames_;
-  base::Closure on_frame_callback_;
+  base::RepeatingClosure on_frame_callback_;
+
+  THREAD_CHECKER(thread_checker_);
 };
 
 class FakeFrameStatsConsumer : public FrameStatsConsumer {
@@ -72,16 +71,16 @@ class FakeFrameStatsConsumer : public FrameStatsConsumer {
 
   const std::list<FrameStats>& received_stats() { return received_stats_; }
 
-  void set_on_stats_callback(base::Closure on_stats_callback);
+  void set_on_stats_callback(const base::RepeatingClosure& on_stats_callback);
 
   // FrameStatsConsumer interface.
   void OnVideoFrameStats(const FrameStats& stats) override;
 
  private:
-  base::ThreadChecker thread_checker_;
-
   std::list<FrameStats> received_stats_;
-  base::Closure on_stats_callback_;
+  base::RepeatingClosure on_stats_callback_;
+
+  THREAD_CHECKER(thread_checker_);
 };
 
 class FakeVideoRenderer : public VideoRenderer {
@@ -98,14 +97,13 @@ class FakeVideoRenderer : public VideoRenderer {
   FakeFrameStatsConsumer* GetFrameStatsConsumer() override;
 
  private:
-  base::ThreadChecker thread_checker_;
-
   FakeVideoStub video_stub_;
   FakeFrameConsumer frame_consumer_;
   FakeFrameStatsConsumer frame_stats_consumer_;
+
+  THREAD_CHECKER(thread_checker_);
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_FAKE_VIDEO_RENDERER_H_

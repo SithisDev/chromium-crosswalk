@@ -1,13 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/file_transfer/buffered_file_writer.h"
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "remoting/host/file_transfer/fake_file_operations.h"
+#include "remoting/host/file_transfer/test_byte_vector_utils.h"
 #include "remoting/protocol/file_transfer_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,17 +25,20 @@ class BufferedFileWriterTest : public testing::Test {
 
  protected:
   const base::FilePath kTestFilename{FILE_PATH_LITERAL("test-file.txt")};
-  const std::string kTestDataOne = "this is the first test string";
-  const std::string kTestDataTwo = "this is the second test string";
-  const std::string kTestDataThree = "this is the third test string";
+  const std::vector<std::uint8_t> kTestDataOne =
+      ByteArrayFrom("this is the first test string");
+  const std::vector<std::uint8_t> kTestDataTwo =
+      ByteArrayFrom("this is the second test string");
+  const std::vector<std::uint8_t> kTestDataThree =
+      ByteArrayFrom("this is the third test string");
 
   void OnCompleted();
   void OnError(protocol::FileTransfer_Error error);
 
   bool complete_called_ = false;
-  base::Optional<protocol::FileTransfer_Error> error_ = base::nullopt;
+  absl::optional<protocol::FileTransfer_Error> error_ = absl::nullopt;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 BufferedFileWriterTest::BufferedFileWriterTest() = default;
@@ -69,22 +73,22 @@ TEST_F(BufferedFileWriterTest, WritesThreeChunks) {
                      base::Unretained(this)));
 
   writer.Start(kTestFilename);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   writer.Write(kTestDataOne);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   writer.Write(kTestDataTwo);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   writer.Write(kTestDataThree);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   writer.Close();
   ASSERT_EQ(false, complete_called_);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_EQ(true, complete_called_);
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(false, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo,
-                                              kTestDataThree};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {
+      kTestDataOne, kTestDataTwo, kTestDataThree};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 }
 
@@ -107,13 +111,13 @@ TEST_F(BufferedFileWriterTest, QueuesOperations) {
   writer.Write(kTestDataThree);
   writer.Close();
   ASSERT_EQ(false, complete_called_);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_EQ(true, complete_called_);
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(false, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo,
-                                              kTestDataThree};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {
+      kTestDataOne, kTestDataTwo, kTestDataThree};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 }
 
@@ -135,17 +139,18 @@ TEST_F(BufferedFileWriterTest, HandlesWriteError) {
   writer.Start(kTestFilename);
   writer.Write(kTestDataOne);
   writer.Write(kTestDataTwo);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   test_io.io_error = fake_error;
   writer.Write(kTestDataThree);
   writer.Close();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(error_);
   ASSERT_EQ(fake_error.SerializeAsString(), error_->SerializeAsString());
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(true, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {kTestDataOne,
+                                                            kTestDataTwo};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 }
 
@@ -166,15 +171,16 @@ TEST_F(BufferedFileWriterTest, CancelsWriter) {
     writer.Start(kTestFilename);
     writer.Write(kTestDataOne);
     writer.Write(kTestDataTwo);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     writer.Write(kTestDataThree);
   }
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(!complete_called_ && !error_);
 
   ASSERT_EQ(1ul, test_io.files_written.size());
   ASSERT_EQ(true, test_io.files_written[0].failed);
-  std::vector<std::string> expected_chunks = {kTestDataOne, kTestDataTwo};
+  std::vector<std::vector<std::uint8_t>> expected_chunks = {kTestDataOne,
+                                                            kTestDataTwo};
   ASSERT_EQ(expected_chunks, test_io.files_written[0].chunks);
 }
 

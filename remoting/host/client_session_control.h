@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ class VideoLayout;
 // temporarily if the local mouse movements are detected).
 class ClientSessionControl {
  public:
-  virtual ~ClientSessionControl() {}
+  virtual ~ClientSessionControl() = default;
 
   // Returns the authenticated JID of the client session.
   virtual const std::string& client_jid() const = 0;
@@ -36,10 +36,14 @@ class ClientSessionControl {
   virtual void OnLocalPointerMoved(const webrtc::DesktopVector& position,
                                    ui::EventType type) = 0;
 
+  // Called when a local key press or release is detected.
+  virtual void OnLocalKeyPressed(uint32_t usb_keycode) = 0;
+
   // Disables or enables the remote input in the client session.
   virtual void SetDisableInputs(bool disable_inputs) = 0;
 
   // Called when the host desktop displays are changed.
+  // TODO(yuweih): Move this to ClientSessionEvents.
   virtual void OnDesktopDisplayChanged(
       std::unique_ptr<protocol::VideoLayout> layout) = 0;
 };

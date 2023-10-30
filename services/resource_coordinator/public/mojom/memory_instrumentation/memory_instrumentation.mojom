@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,13 @@ enum LevelOfDetail {
   BACKGROUND,
   LIGHT,
   DETAILED
+};
+
+// Tells the MemoryDumpProvider(s) if they should try to make the result
+// more deterministic by forcing garbage collection.
+enum Determinism {
+  NONE,
+  FORCE_GC
 };
 
 enum ProcessType {
@@ -53,6 +60,7 @@ struct RequestArgs {
   uint64 dump_guid;
   DumpType dump_type;
   LevelOfDetail level_of_detail;
+  Determinism determinism;
 };
 
 struct RawAllocatorDumpEdge {
@@ -111,6 +119,7 @@ struct VmRegion {
   uint64 byte_stats_shared_clean_resident;
 
   uint64 byte_stats_swapped;
+  uint64 byte_locked;
 
   // For multiprocess accounting.
   uint64 byte_stats_proportional_resident;
@@ -185,6 +194,10 @@ struct AllocatorMemDump {
   // The entries for the allocator which are of scalar types (i.e. not strings).
   // Examples include: effective_size, size, object_count.
   map<string, uint64> numeric_entries;
+
+  // If details were requested for this allocator to include descendants then
+  // |children| describes the immediate child nodes.
+  map<string, AllocatorMemDump> children;
 };
 
 // This struct is used for the public-facing API
@@ -193,8 +206,8 @@ struct ProcessMemoryDump {
   ProcessType process_type;
   OSMemDump os_dump;
 
-  // The chrome allocator dumps specified by the input args.
-  // (See GlobalRequestArgs.allocator_dump_names).
+  // Details for each of the Chrome allocators specified by the input args.
+  // See the |RequestGlobalMemoryDump()| argument |allocator_dump_names|.
   map<string, AllocatorMemDump> chrome_allocator_dumps;
 
   // |pid| is necessary to correlate a ProcessMemoryDump with the URLs for the
@@ -204,10 +217,8 @@ struct ProcessMemoryDump {
   // parameter can be removed.
   mojo_base.mojom.ProcessId pid;
 
-  // Shows which services the given process is running, to help separate out
-  // the statistics for a given service.  Clients should look through the entire
-  // list since there may be other entities used internally listed, too.
-  array<string> service_names;
+  // The name of the primary service running in the process, if any.
+  string? service_name;
 };
 
 // Metrics aggregated across all processes.
@@ -279,7 +290,9 @@ interface HeapProfiler {
   // |strip_path_from_mapped_files| should only be true for traces that will be
   // uploaded to the crash servers - this strips potential PII, but prevents
   // symbolization of local builds.
-  DumpProcessesForTracing(bool strip_path_from_mapped_files) =>
+  // |write_proto| will additionally write proto heap profiles to traces.
+  DumpProcessesForTracing(bool strip_path_from_mapped_files,
+                          bool write_proto) =>
       (array<HeapProfileResult> results);
 };
 
@@ -296,16 +309,18 @@ interface HeapProfilerHelper {
 // the whole system. The coordinator maintains a list of registered client
 // processes and polls them whenever a global dump is required.
 interface Coordinator {
-  // Registers a client process.
-  RegisterClientProcess(ClientProcess client_process, ProcessType process_type);
-
   // Broadcasts a dump request to all registered client processes and returns a
-  // global dump which includes allocator dumps specified in |allocator_dump_names|.
-  // For example, given an allocator dump name such as "malloc" or "cc/resource_memory",
-  // this method returns all information corresponding to this name including numeric
-  // entries which contain fields such as "size" and "effective_size".
+  // global dump with details.
+  // If |dump_type| is SUMMARY_ONLY then details will additionally be returned
+  // for allocators listed in |allocator_dump_names|. If an entry has a trailing
+  // "/*" then details will be returned for the named node, and all descendents.
+  // e.g. { "malloc", "v8/*" } will include details for "malloc", and might
+  // also include "v8", "v8/main/heap", etc.
+  // Allocator dumps provide a set of numeric values such as "size",
+  // "effective_size", etc.
   RequestGlobalMemoryDump(DumpType dump_type,
                           LevelOfDetail level_of_detail,
+                          Determinism determinism,
                           array<string> allocator_dump_names) =>
       (bool success, GlobalMemoryDump? global_memory_dump);
 
@@ -324,13 +339,17 @@ interface Coordinator {
   // Broadcasts a dump request to all registered client processes and injects the
   // dump in the trace buffer (if tracing is enabled).
   RequestGlobalMemoryDumpAndAppendToTrace(DumpType dump_type,
-                                          LevelOfDetail level_of_detail) =>
+                                          LevelOfDetail level_of_detail,
+                                          Determinism determinism) =>
       (bool success, uint64 dump_id);
+};
 
-  // When a heap profiler is registered, heap dumps will be added to the trace
-  // any time RequestGlobalMemoryDumpAndAppendToTrace is called.
-  // This is cleaner than having the memory_instrumentation service talk
-  // directly to the HeapProfiler, since that will spawn the HeapProfiler in a
-  // new process if it isn't already running.
-  RegisterHeapProfiler(HeapProfiler heap_profiler);
+// An interface used by client processes to register themselves with a
+// memory_instrumentation::Registry. The implementation must already know the
+// calling process. It adds authoritative information about the calling process'
+// identity when forwarding the registration to a
+// memory_instrumentation::Registry.
+interface CoordinatorConnector {
+  RegisterCoordinatorClient(pending_receiver<Coordinator> receiver,
+                            pending_remote<ClientProcess> client_process);
 };

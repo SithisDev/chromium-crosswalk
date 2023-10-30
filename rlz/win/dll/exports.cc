@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,8 +6,10 @@
 
 #include <stddef.h>
 
+#include "rlz/lib/machine_deal_win.h"
 #include "rlz/lib/net_response_check.h"
 #include "rlz/lib/rlz_lib.h"
+#include "rlz/lib/rlz_lib_clear.h"
 
 #define RLZ_DLL_EXPORT extern "C" __declspec(dllexport)
 

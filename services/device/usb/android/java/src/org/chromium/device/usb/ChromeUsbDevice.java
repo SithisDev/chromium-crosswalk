@@ -1,14 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.device.usb;
 
-import android.annotation.TargetApi;
 import android.hardware.usb.UsbConfiguration;
 import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbInterface;
 import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
@@ -70,7 +70,7 @@ final class ChromeUsbDevice {
         return mDevice.getProductId();
     }
 
-    @TargetApi(Build.VERSION_CODES.M)
+    @RequiresApi(Build.VERSION_CODES.M)
     @CalledByNative
     private int getDeviceVersion() {
         // The Android framework generates this string with:
@@ -83,25 +83,21 @@ final class ChromeUsbDevice {
         return Integer.parseInt(parts[0]) << 8 | Integer.parseInt(parts[1]);
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getManufacturerName() {
         return mDevice.getManufacturerName();
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getProductName() {
         return mDevice.getProductName();
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getSerialNumber() {
         return mDevice.getSerialNumber();
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private UsbConfiguration[] getConfigurations() {
         int count = mDevice.getConfigurationCount();
@@ -110,15 +106,5 @@ final class ChromeUsbDevice {
             configurations[i] = mDevice.getConfiguration(i);
         }
         return configurations;
-    }
-
-    @CalledByNative
-    private UsbInterface[] getInterfaces() {
-        int count = mDevice.getInterfaceCount();
-        UsbInterface[] interfaces = new UsbInterface[count];
-        for (int i = 0; i < count; ++i) {
-            interfaces[i] = mDevice.getInterface(i);
-        }
-        return interfaces;
     }
 }

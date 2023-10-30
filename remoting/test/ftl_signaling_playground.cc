@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/guid.h"
@@ -19,18 +19,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
-#include "jingle/glue/thread_wrapper.h"
-#include "remoting/base/chromium_url_request.h"
-#include "remoting/base/grpc_support/grpc_async_unary_request.h"
+#include "components/webrtc/thread_wrapper.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/oauth_token_getter_impl.h"
 #include "remoting/base/oauth_token_getter_proxy.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/base/service_urls.h"
 #include "remoting/base/url_request_context_getter.h"
-#include "remoting/proto/ftl/v1/ftl_services.grpc.pb.h"
 #include "remoting/protocol/auth_util.h"
 #include "remoting/protocol/chromium_port_allocator_factory.h"
 #include "remoting/protocol/jingle_session_manager.h"
@@ -40,7 +36,6 @@
 #include "remoting/protocol/pairing_registry.h"
 #include "remoting/protocol/transport.h"
 #include "remoting/protocol/transport_context.h"
-#include "remoting/signaling/ftl_grpc_context.h"
 #include "remoting/signaling/ftl_signal_strategy.h"
 #include "remoting/test/cli_util.h"
 #include "remoting/test/test_device_id_provider.h"
@@ -62,7 +57,7 @@ constexpr char kSwitchNameHostId[] = "host-id";
 constexpr char kSwitchNameUseChromotocol[] = "use-chromotocol";
 
 // Delay to allow sending session-terminate before tearing down.
-constexpr base::TimeDelta kTearDownDelay = base::TimeDelta::FromSeconds(2);
+constexpr base::TimeDelta kTearDownDelay = base::Seconds(2);
 
 const char* SignalStrategyErrorToString(SignalStrategy::Error error) {
   switch (error) {
@@ -100,7 +95,7 @@ void FtlSignalingPlayground::PrintHelp() {
 }
 
 void FtlSignalingPlayground::StartLoop() {
-  jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
+  webrtc::ThreadWrapper::EnsureForCurrentMessageLoop();
 
   base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   std::string username = cmd_line->GetSwitchValueASCII(kSwitchNameUsername);
@@ -159,10 +154,8 @@ void FtlSignalingPlayground::AcceptIncoming(base::OnceClosure on_done) {
                                ? cmd->GetSwitchValueASCII(kSwitchNameHostOwner)
                                : user_email;
   HOST_LOG << "Using host owner: " << host_owner;
-  bool is_service_account =
-      test::TestOAuthTokenGetter::IsServiceAccount(user_email);
   auto factory = protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
-      is_service_account, host_owner, cert, key_pair,
+      host_owner, cert, key_pair,
       /* domain_list */ {}, pin_hash, /* pairing_registry */ {});
   session_manager_->set_authenticator_factory(std::move(factory));
   HOST_LOG << "Waiting for incoming session...";
@@ -218,6 +211,7 @@ void FtlSignalingPlayground::FetchSecret(
 void FtlSignalingPlayground::SetUpSignaling() {
   signal_strategy_ = std::make_unique<FtlSignalStrategy>(
       std::make_unique<OAuthTokenGetterProxy>(token_getter_->GetWeakPtr()),
+      url_loader_factory_owner_->GetURLLoaderFactory(),
       std::make_unique<test::TestDeviceIdProvider>(storage_.get()));
   signal_strategy_->AddListener(this);
 
@@ -257,8 +251,8 @@ void FtlSignalingPlayground::InitializeTransport() {
       protocol::NetworkSettings::NAT_TRAVERSAL_FULL);
   auto transport_context = base::MakeRefCounted<protocol::TransportContext>(
       std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
-      std::make_unique<ChromiumUrlRequestFactory>(
-          url_loader_factory_owner_->GetURLLoaderFactory()),
+      webrtc::ThreadWrapper::current()->SocketServer(),
+      url_loader_factory_owner_->GetURLLoaderFactory(), nullptr,
       network_settings, transport_role_);
   auto close_callback =
       base::BindOnce(&FtlSignalingPlayground::AsyncTearDownAndRunCallback,
@@ -284,7 +278,7 @@ void FtlSignalingPlayground::OnSignalStrategyStateChange(
 
   if (state == SignalStrategy::CONNECTED) {
     HOST_LOG << "Signaling connected. New JID: "
-             << signal_strategy_->GetLocalAddress().jid();
+             << signal_strategy_->GetLocalAddress().id();
     if (on_signaling_connected_callback_) {
       std::move(on_signaling_connected_callback_).Run();
     }

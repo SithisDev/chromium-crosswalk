@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,12 +9,13 @@
 
 #include <algorithm>
 
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/syslog_logging.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "net/base/backoff_entry.h"
 #include "rlz/lib/assert.h"
 #include "rlz/lib/financial_ping.h"
@@ -23,6 +24,10 @@
 #include "rlz/lib/rlz_value_store.h"
 #include "rlz/lib/string_utils.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "rlz/lib/machine_deal_win.h"
+#endif
 
 namespace {
 
@@ -437,13 +442,13 @@ bool SendFinancialPing(Product product,
   FinancialPing::UpdateLastPingTime(product);
   std::string response;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   const net::BackoffEntry::Policy policy = {
       0,  // Number of initial errors to ignore.
-      base::TimeDelta::FromSeconds(5).InMilliseconds(),  // Initial delay.
+      static_cast<int>(base::Seconds(5).InMilliseconds()),  // Initial delay.
       2,    // Factor to increase delay.
       0.1,  // Delay fuzzing.
-      base::TimeDelta::FromMinutes(5).InMilliseconds(),  // Maximum delay.
+      static_cast<int>(base::Minutes(5).InMilliseconds()),  // Maximum delay.
       -1,  // Time to keep entries.  -1 == never discard.
   };
   net::BackoffEntry backoff(&policy);
@@ -581,7 +586,7 @@ bool ParsePingResponse(Product product, const char* response) {
     }
   } while (line_end_index >= 0);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Update the DCC in registry if needed.
   SetMachineDealCodeFromPingResponse(response);
 #endif
@@ -619,7 +624,7 @@ bool GetPingParams(Product product, const AccessPoint* access_points,
     bool first_rlz = true;  // comma before every RLZ but the first.
     for (int i = 0; access_points[i] != NO_ACCESS_POINT; i++) {
       char rlz[kMaxRlzLength + 1];
-      if (GetAccessPointRlz(access_points[i], rlz, base::size(rlz))) {
+      if (GetAccessPointRlz(access_points[i], rlz, std::size(rlz))) {
         const char* access_point = GetAccessPointName(access_points[i]);
         if (!access_point)
           continue;
@@ -631,11 +636,11 @@ bool GetPingParams(Product product, const AccessPoint* access_points,
       }
     }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // Report the DCC too if not empty. DCCs are windows-only.
     char dcc[kMaxDccLength + 1];
     dcc[0] = 0;
-    if (GetMachineDealCode(dcc, base::size(dcc)) && dcc[0])
+    if (GetMachineDealCode(dcc, std::size(dcc)) && dcc[0])
       base::StringAppendF(&cgi_string, "&%s=%s", kDccCgiVariable, dcc);
 #endif
   }

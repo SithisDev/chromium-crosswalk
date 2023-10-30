@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/trace_event/traced_value.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/perfetto/include/perfetto/protozero/scattered_heap_buffer.h"
@@ -65,16 +66,14 @@ class ProtoInputStream : public google::protobuf::io::ZeroCopyInputStream {
   }
 
  private:
-  const protozero::ScatteredHeapBuffer* buffer_;
+  raw_ptr<const protozero::ScatteredHeapBuffer> buffer_;
   size_t slices_read_ = 0;
   bool has_backed_up_ = false;
 };
 
 class TracedValueProtoWriterTest : public testing::Test {
  public:
-  void SetUp() override { RegisterTracedValueProtoWriter(true); }
-
-  void TearDown() override { RegisterTracedValueProtoWriter(false); }
+  void SetUp() override { RegisterTracedValueProtoWriter(); }
 };
 
 const NestedValue* FindDictEntry(const NestedValue* dict, const char* name) {
@@ -109,19 +108,12 @@ bool IsValue(const NestedValue* proto_value, const char* value) {
 }
 
 NestedValue GetProtoFromTracedValue(TracedValue* traced_value) {
-  protozero::ScatteredHeapBuffer buffer(100);
-  protozero::ScatteredStreamWriter stream(&buffer);
-  perfetto::protos::pbzero::DebugAnnotation proto;
-  proto.Reset(&stream);
-  buffer.set_writer(&stream);
-
-  PerfettoProtoAppender proto_appender(&proto);
+  protozero::HeapBuffered<perfetto::protos::pbzero::DebugAnnotation> proto;
+  PerfettoProtoAppender proto_appender(proto.get());
   EXPECT_TRUE(traced_value->AppendToProto(&proto_appender));
-  uint32_t size = proto.Finalize();
-  ProtoInputStream proto_stream(&buffer);
 
   DebugAnnotation full_proto;
-  EXPECT_TRUE(full_proto.ParseFromBoundedZeroCopyStream(&proto_stream, size));
+  EXPECT_TRUE(full_proto.ParseFromString(proto.SerializeAsString()));
   EXPECT_TRUE(full_proto.has_nested_value());
 
   return full_proto.nested_value();

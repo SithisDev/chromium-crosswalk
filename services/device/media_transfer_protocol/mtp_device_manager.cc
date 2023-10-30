@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/device/media_transfer_protocol/mtp_device_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
+#include "chromeos/ash/components/dbus/dbus_thread_manager.h"
 #include "dbus/bus.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -21,13 +22,12 @@ MtpDeviceManager* g_mtp_device_manager = nullptr;
 }  // namespace
 
 MtpDeviceManager::MtpDeviceManager()
-    : bus_(chromeos::DBusThreadManager::Get()->GetSystemBus()),
-      weak_ptr_factory_(this) {
+    : bus_(ash::DBusThreadManager::Get()->GetSystemBus()) {
   // Listen for future mtpd service owner changes, in case it is not
   // available right now. There is no guarantee that mtpd is running already.
-  dbus::Bus::GetServiceOwnerCallback mtpd_owner_changed_callback =
-      base::Bind(&MtpDeviceManager::FinishSetupOnOriginThread,
-                 weak_ptr_factory_.GetWeakPtr());
+  dbus::Bus::ServiceOwnerChangeCallback mtpd_owner_changed_callback =
+      base::BindRepeating(&MtpDeviceManager::FinishSetupOnOriginThread,
+                          weak_ptr_factory_.GetWeakPtr());
   if (bus_) {
     bus_->ListenForServiceOwnerChange(mtpd::kMtpdServiceName,
                                       mtpd_owner_changed_callback);
@@ -44,19 +44,20 @@ MtpDeviceManager::~MtpDeviceManager() {
   if (bus_) {
     bus_->UnlistenForServiceOwnerChange(
         mtpd::kMtpdServiceName,
-        base::Bind(&MtpDeviceManager::FinishSetupOnOriginThread,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindRepeating(&MtpDeviceManager::FinishSetupOnOriginThread,
+                            weak_ptr_factory_.GetWeakPtr()));
   }
 
   VLOG(1) << "MtpDeviceManager Shutdown completed";
 }
 
-void MtpDeviceManager::AddBinding(mojom::MtpManagerRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void MtpDeviceManager::AddReceiver(
+    mojo::PendingReceiver<mojom::MtpManager> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void MtpDeviceManager::EnumerateStoragesAndSetClient(
-    mojom::MtpManagerClientAssociatedPtrInfo client,
+    mojo::PendingAssociatedRemote<mojom::MtpManagerClient> client,
     EnumerateStoragesAndSetClientCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -265,7 +266,7 @@ void MtpDeviceManager::OnStorageAttached(const std::string& storage_name) {
       storage_name,
       base::BindOnce(&MtpDeviceManager::OnGetStorageInfo,
                      weak_ptr_factory_.GetWeakPtr()),
-      base::DoNothing::Once());
+      base::DoNothing());
 }
 
 void MtpDeviceManager::OnStorageDetached(const std::string& storage_name) {
@@ -507,12 +508,12 @@ void MtpDeviceManager::FinishSetupOnOriginThread(
   mtp_client_ = MediaTransferProtocolDaemonClient::Create(bus_.get());
 
   // Set up signals and start initializing |storage_info_map_|.
-  mtp_client_->ListenForChanges(base::Bind(&MtpDeviceManager::OnStorageChanged,
-                                           weak_ptr_factory_.GetWeakPtr()));
+  mtp_client_->ListenForChanges(base::BindRepeating(
+      &MtpDeviceManager::OnStorageChanged, weak_ptr_factory_.GetWeakPtr()));
   mtp_client_->EnumerateStorages(
       base::BindOnce(&MtpDeviceManager::OnEnumerateStorages,
                      weak_ptr_factory_.GetWeakPtr()),
-      base::DoNothing::Once());
+      base::DoNothing());
 }
 
 // static

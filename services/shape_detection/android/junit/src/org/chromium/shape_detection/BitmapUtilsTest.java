@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.shape_detection;
 
 import static org.junit.Assert.assertNull;
+
+import android.os.Build;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -16,15 +18,14 @@ import org.robolectric.shadows.ShadowLog;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.mojo_base.BigBufferUtil;
-import org.chromium.skia.mojom.Bitmap;
-import org.chromium.skia.mojom.ColorType;
-import org.chromium.skia.mojom.ImageInfo;
+import org.chromium.skia.mojom.BitmapN32;
+import org.chromium.skia.mojom.BitmapN32ImageInfo;
 
 /**
  * Test suite for conversion-to-Frame utils.
  */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
+@Config(sdk = Build.VERSION_CODES.M, manifest = Config.NONE)
 public class BitmapUtilsTest {
     private static final int VALID_WIDTH = 1;
     private static final int VALID_HEIGHT = 1;
@@ -46,9 +47,9 @@ public class BitmapUtilsTest {
     @Test
     @Feature({"ShapeDetection"})
     public void testConversionFailsWithInvalidBitmap() {
-        Bitmap bitmap = new Bitmap();
+        BitmapN32 bitmap = new BitmapN32();
         bitmap.pixelData = null;
-        bitmap.imageInfo = new ImageInfo();
+        bitmap.imageInfo = new BitmapN32ImageInfo();
 
         assertNull(BitmapUtils.convertToFrame(bitmap));
     }
@@ -59,8 +60,8 @@ public class BitmapUtilsTest {
     @Test
     @Feature({"ShapeDetection"})
     public void testConversionFailsWithInvalidDimensions() {
-        Bitmap bitmap = new Bitmap();
-        bitmap.imageInfo = new ImageInfo();
+        BitmapN32 bitmap = new BitmapN32();
+        bitmap.imageInfo = new BitmapN32ImageInfo();
         bitmap.pixelData = BigBufferUtil.createBigBufferFromBytes(EMPTY_DATA);
         bitmap.imageInfo.width = INVALID_WIDTH;
         bitmap.imageInfo.height = VALID_HEIGHT;
@@ -74,12 +75,11 @@ public class BitmapUtilsTest {
     @Test
     @Feature({"ShapeDetection"})
     public void testConversionFailsWithWronglyWrappedData() {
-        Bitmap bitmap = new Bitmap();
-        bitmap.imageInfo = new ImageInfo();
+        BitmapN32 bitmap = new BitmapN32();
+        bitmap.imageInfo = new BitmapN32ImageInfo();
         bitmap.pixelData = BigBufferUtil.createBigBufferFromBytes(EMPTY_DATA);
         bitmap.imageInfo.width = VALID_WIDTH;
         bitmap.imageInfo.height = VALID_HEIGHT;
-        bitmap.imageInfo.colorType = ColorType.RGBA_8888;
 
         assertNull(BitmapUtils.convertToFrame(bitmap));
     }

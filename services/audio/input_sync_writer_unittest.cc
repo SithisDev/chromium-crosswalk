@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,12 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/sync_socket.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
@@ -48,6 +48,9 @@ class MockCancelableSyncSocket : public base::CancelableSyncSocket {
         receives_(0),
         buffer_size_(buffer_size),
         read_buffer_index_(0) {}
+
+  MockCancelableSyncSocket(const MockCancelableSyncSocket&) = delete;
+  MockCancelableSyncSocket& operator=(const MockCancelableSyncSocket&) = delete;
 
   size_t Send(const void* buffer, size_t length) override {
     EXPECT_EQ(length, sizeof(uint32_t));
@@ -98,8 +101,6 @@ class MockCancelableSyncSocket : public base::CancelableSyncSocket {
   int receives_;
   int buffer_size_;
   uint32_t read_buffer_index_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockCancelableSyncSocket);
 };
 
 class InputSyncWriterTest : public testing::Test {
@@ -108,7 +109,7 @@ class InputSyncWriterTest : public testing::Test {
     const int sampling_frequency_hz = 16000;
     const int frames = sampling_frequency_hz / 100;  // 10 ms
     const media::AudioParameters audio_params(
-        media::AudioParameters::AUDIO_FAKE, media::CHANNEL_LAYOUT_MONO,
+        media::AudioParameters::AUDIO_FAKE, media::ChannelLayoutConfig::Mono(),
         sampling_frequency_hz, frames);
     const uint32_t data_size =
         ComputeAudioInputBufferSize(audio_params, kSegments);
@@ -124,6 +125,9 @@ class InputSyncWriterTest : public testing::Test {
     audio_bus_ = media::AudioBus::Create(audio_params);
   }
 
+  InputSyncWriterTest(const InputSyncWriterTest&) = delete;
+  InputSyncWriterTest& operator=(const InputSyncWriterTest&) = delete;
+
   ~InputSyncWriterTest() override {}
 
   // Get total number of expected log calls. On non-Android we expect one log
@@ -131,7 +135,7 @@ class InputSyncWriterTest : public testing::Test {
   // with a glitch summary from the destructor. Besides that only for errors
   // and fifo info.
   int GetTotalNumberOfExpectedLogCalls(int expected_calls_due_to_error) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     return expected_calls_due_to_error + 1;
 #else
     return expected_calls_due_to_error + 2;
@@ -155,14 +159,11 @@ class InputSyncWriterTest : public testing::Test {
   using MockLogger =
       base::MockCallback<base::RepeatingCallback<void(const std::string&)>>;
 
-  base::test::ScopedTaskEnvironment env_;
+  base::test::TaskEnvironment env_;
   MockLogger mock_logger_;
   std::unique_ptr<InputSyncWriter> writer_;
-  MockCancelableSyncSocket* socket_;
+  raw_ptr<MockCancelableSyncSocket> socket_;
   std::unique_ptr<media::AudioBus> audio_bus_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InputSyncWriterTest);
 };
 
 TEST_F(InputSyncWriterTest, SingleWriteAndRead) {

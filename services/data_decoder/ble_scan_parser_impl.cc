@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,7 @@ const int kDataTypeManufacturerData = 0xFF;
 const char kUuidPrefix[] = "0000";
 const char kUuidSuffix[] = "-0000-1000-8000-00805F9B34FB";
 
-BleScanParserImpl::BleScanParserImpl(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref)
-    : service_ref_(std::move(service_ref)) {}
+BleScanParserImpl::BleScanParserImpl() = default;
 
 BleScanParserImpl::~BleScanParserImpl() = default;
 
@@ -143,7 +141,8 @@ std::string BleScanParserImpl::ParseUuid(base::span<const uint8_t> bytes,
     return std::string();
   }
 
-  std::string uuid = base::HexEncode(bytes.data(), bytes.size());
+  std::vector<uint8_t> reversed(bytes.rbegin(), bytes.rend());
+  std::string uuid = base::HexEncode(reversed.data(), reversed.size());
 
   switch (format) {
     case UuidFormat::kFormat16Bit:

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,33 +11,34 @@
 #include "sandbox/win/src/ipc_tags.h"
 #include "sandbox/win/src/policy_engine_opcodes.h"
 #include "sandbox/win/src/policy_params.h"
+#include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #include "sandbox/win/src/win_utils.h"
 
 namespace sandbox {
 
 bool SignedPolicy::GenerateRules(const wchar_t* name,
-                                 TargetPolicy::Semantics semantics,
+                                 Semantics semantics,
                                  LowLevelPolicy* policy) {
   // Only support one semantic.
-  if (TargetPolicy::SIGNED_ALLOW_LOAD != semantics) {
+  if (Semantics::kSignedAllowLoad != semantics) {
     return false;
   }
 
   base::FilePath file_path(name);
-  base::string16 nt_path_name;
+  std::wstring nt_path_name;
   if (!GetNtPathFromWin32Path(file_path.DirName().value().c_str(),
                               &nt_path_name))
     return false;
   base::FilePath nt_path(nt_path_name);
-  base::string16 nt_filename = nt_path.Append(file_path.BaseName()).value();
+  std::wstring nt_filename = nt_path.Append(file_path.BaseName()).value();
   // Create a rule to ASK_BROKER if name matches.
   PolicyRule signed_policy(ASK_BROKER);
   if (!signed_policy.AddStringMatch(IF, NameBased::NAME, nt_filename.c_str(),
                                     CASE_INSENSITIVE)) {
     return false;
   }
-  if (!policy->AddRule(IPC_NTCREATESECTION_TAG, &signed_policy)) {
+  if (!policy->AddRule(IpcTag::NTCREATESECTION, &signed_policy)) {
     return false;
   }
 
@@ -49,20 +50,17 @@ NTSTATUS SignedPolicy::CreateSectionAction(
     const ClientInfo& client_info,
     const base::win::ScopedHandle& local_file_handle,
     HANDLE* target_section_handle) {
-  NtCreateSectionFunction NtCreateSection = nullptr;
-  ResolveNTFunctionPtr("NtCreateSection", &NtCreateSection);
-
   // The only action supported is ASK_BROKER which means create the requested
   // section as specified.
   if (ASK_BROKER != eval_result)
     return false;
 
   HANDLE local_section_handle = nullptr;
-  NTSTATUS status = NtCreateSection(&local_section_handle,
-                                    SECTION_QUERY | SECTION_MAP_WRITE |
-                                        SECTION_MAP_READ | SECTION_MAP_EXECUTE,
-                                    nullptr, 0, PAGE_EXECUTE, SEC_IMAGE,
-                                    local_file_handle.Get());
+  NTSTATUS status = GetNtExports()->CreateSection(
+      &local_section_handle,
+      SECTION_QUERY | SECTION_MAP_WRITE | SECTION_MAP_READ |
+          SECTION_MAP_EXECUTE,
+      nullptr, 0, PAGE_EXECUTE, SEC_IMAGE, local_file_handle.Get());
   if (!local_section_handle)
     return status;
 

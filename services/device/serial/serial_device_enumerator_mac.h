@@ -1,13 +1,19 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_DEVICE_SERIAL_SERIAL_DEVICE_ENUMERATOR_MAC_H_
 #define SERVICES_DEVICE_SERIAL_SERIAL_DEVICE_ENUMERATOR_MAC_H_
 
-#include <vector>
+#include <IOKit/IOKitLib.h>
 
-#include "base/macros.h"
+#include <map>
+#include <utility>
+
+#include "base/mac/scoped_ionotificationportref.h"
+#include "base/mac/scoped_ioobject.h"
+#include "base/sequence_checker.h"
+#include "base/unguessable_token.h"
 #include "services/device/serial/serial_device_enumerator.h"
 
 namespace device {
@@ -16,16 +22,27 @@ namespace device {
 class SerialDeviceEnumeratorMac : public SerialDeviceEnumerator {
  public:
   SerialDeviceEnumeratorMac();
+
+  SerialDeviceEnumeratorMac(const SerialDeviceEnumeratorMac&) = delete;
+  SerialDeviceEnumeratorMac& operator=(const SerialDeviceEnumeratorMac&) =
+      delete;
+
   ~SerialDeviceEnumeratorMac() override;
 
-  // Implementation for SerialDeviceEnumerator.
-  std::vector<mojom::SerialPortInfoPtr> GetDevices() override;
-
  private:
-  std::vector<mojom::SerialPortInfoPtr> GetDevicesNew();
-  std::vector<mojom::SerialPortInfoPtr> GetDevicesOld();
+  static void FirstMatchCallback(void* context, io_iterator_t iterator);
+  static void TerminatedCallback(void* context, io_iterator_t iterator);
 
-  DISALLOW_COPY_AND_ASSIGN(SerialDeviceEnumeratorMac);
+  void AddDevices();
+  void RemoveDevices();
+
+  // Map from IORegistry entry IDs to the token used to refer to the device
+  // internally.
+  std::map<uint64_t, base::UnguessableToken> entries_;
+
+  base::mac::ScopedIONotificationPortRef notify_port_;
+  base::mac::ScopedIOObject<io_iterator_t> devices_added_iterator_;
+  base::mac::ScopedIOObject<io_iterator_t> devices_removed_iterator_;
 };
 
 }  // namespace device

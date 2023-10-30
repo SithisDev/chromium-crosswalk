@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,6 @@ class ServerLogEntry;
 // Currently this is either connection or disconnection.
 std::unique_ptr<ServerLogEntry> MakeLogEntryForSessionStateChange(
     bool connected);
-
-// Constructs a log entry for a heartbeat.
-std::unique_ptr<ServerLogEntry> MakeLogEntryForHeartbeat();
 
 // Adds fields describing the host to this log entry.
 void AddHostFieldsToLogEntry(ServerLogEntry* entry);

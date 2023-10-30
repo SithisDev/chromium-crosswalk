@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,13 +13,13 @@
 #include "base/atomicops.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -29,10 +29,13 @@
 #include "rlz/lib/rlz_lib.h"
 #include "rlz/lib/rlz_value_store.h"
 #include "rlz/lib/string_utils.h"
+#include "rlz/lib/time_util.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 #include "base/time/time.h"
 #endif
 
@@ -124,7 +127,7 @@ bool FinancialPing::FormRequest(Product product,
   // Add the product events.
   char cgi[kMaxCgiLength + 1];
   cgi[0] = 0;
-  bool has_events = GetProductEventsAsCgi(product, cgi, base::size(cgi));
+  bool has_events = GetProductEventsAsCgi(product, cgi, std::size(cgi));
   if (has_events)
     base::StringAppendF(request, "&%s", cgi);
 
@@ -138,7 +141,7 @@ bool FinancialPing::FormRequest(Product product,
     for (int ap = NO_ACCESS_POINT + 1; ap < LAST_ACCESS_POINT; ap++) {
       rlz[0] = 0;
       AccessPoint point = static_cast<AccessPoint>(ap);
-      if (GetAccessPointRlz(point, rlz, base::size(rlz)) && rlz[0] != '\0')
+      if (GetAccessPointRlz(point, rlz, std::size(rlz)) && rlz[0] != '\0')
         all_points[idx++] = point;
     }
     all_points[idx] = NO_ACCESS_POINT;
@@ -148,7 +151,7 @@ bool FinancialPing::FormRequest(Product product,
   // This will also include the RLZ Exchange Protocol CGI Argument.
   cgi[0] = 0;
   if (GetPingParams(product, has_events ? access_points : all_points, cgi,
-                    base::size(cgi)))
+                    std::size(cgi)))
     base::StringAppendF(request, "&%s", cgi);
 
   if (has_events && !exclude_machine_id) {
@@ -163,21 +166,6 @@ bool FinancialPing::FormRequest(Product product,
 }
 
 #if defined(RLZ_NETWORK_IMPLEMENTATION_CHROME_NET)
-// The pointer to URLRequestContextGetter used by FinancialPing::PingServer().
-// It is atomic pointer because it can be accessed and modified by multiple
-// threads.
-AtomicWord g_URLLoaderFactory;
-
-bool FinancialPing::SetURLLoaderFactory(
-    network::mojom::URLLoaderFactory* factory) {
-  base::subtle::Release_Store(&g_URLLoaderFactory,
-                              reinterpret_cast<AtomicWord>(factory));
-  return true;
-}
-
-// Signal to stop the ShutdownCheck() task.
-AtomicWord g_cancelShutdownCheck;
-
 namespace {
 
 // A waitable event used to detect when either:
@@ -248,22 +236,32 @@ bool send_financial_ping_interrupted_for_test = false;
 }  // namespace
 
 #if defined(RLZ_NETWORK_IMPLEMENTATION_CHROME_NET)
-void ShutdownCheck(scoped_refptr<RefCountedWaitableEvent> event) {
-  if (base::subtle::Acquire_Load(&g_cancelShutdownCheck))
-    return;
 
-  if (!base::subtle::Acquire_Load(&g_URLLoaderFactory)) {
+// The signal for the current ping request. It can be used to cancel the request
+// in case of a shutdown.
+scoped_refptr<RefCountedWaitableEvent>& GetPingResultEvent() {
+  static base::NoDestructor<scoped_refptr<RefCountedWaitableEvent>>
+      g_pingResultEvent;
+  return *g_pingResultEvent;
+}
+
+// The pointer to URLRequestContextGetter used by FinancialPing::PingServer().
+// It is atomic pointer because it can be accessed and modified by multiple
+// threads.
+AtomicWord g_URLLoaderFactory;
+
+bool FinancialPing::SetURLLoaderFactory(
+    network::mojom::URLLoaderFactory* factory) {
+  base::subtle::Release_Store(&g_URLLoaderFactory,
+                              reinterpret_cast<AtomicWord>(factory));
+  scoped_refptr<RefCountedWaitableEvent> event = GetPingResultEvent();
+  if (!factory && event) {
     send_financial_ping_interrupted_for_test = true;
     event->SignalShutdown();
-    return;
   }
-  // How frequently the financial ping thread should check
-  // the shutdown condition?
-  const base::TimeDelta kInterval = base::TimeDelta::FromMilliseconds(500);
-  base::PostDelayedTaskWithTraits(FROM_HERE, {base::TaskPriority::BEST_EFFORT},
-                                  base::BindOnce(&ShutdownCheck, event),
-                                  kInterval);
+  return true;
 }
+
 #endif
 
 void PingRlzServer(std::string url,
@@ -306,7 +304,7 @@ void PingRlzServer(std::string url,
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(url);
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   auto url_loader = network::SimpleURLLoader::Create(
       std::move(resource_request), traffic_annotation);
@@ -387,17 +385,14 @@ FinancialPing::PingResponse FinancialPing::PingServer(const char* request,
   // Use a waitable event to cause this function to block, to match the
   // wininet implementation.
   auto event = base::MakeRefCounted<RefCountedWaitableEvent>();
-
-  base::subtle::Release_Store(&g_cancelShutdownCheck, 0);
-
-  base::PostTaskWithTraits(FROM_HERE, {base::TaskPriority::BEST_EFFORT},
-                           base::BindOnce(&ShutdownCheck, event));
+  scoped_refptr<RefCountedWaitableEvent>& event_ref = GetPingResultEvent();
+  event_ref = event;
 
   // PingRlzServer must be run in a separate sequence so that the TimedWait()
   // call below does not block the URL fetch response from being handled by
   // the URL delegate.
   scoped_refptr<base::SequencedTaskRunner> background_runner(
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
            base::TaskPriority::BEST_EFFORT}));
   background_runner->PostTask(FROM_HERE,
@@ -406,11 +401,10 @@ FinancialPing::PingResponse FinancialPing::PingServer(const char* request,
   bool is_signaled;
   {
     base::ScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
-    is_signaled = event->TimedWait(base::TimeDelta::FromMinutes(5));
+    is_signaled = event->TimedWait(base::Minutes(5));
   }
 
-  base::subtle::Release_Store(&g_cancelShutdownCheck, 1);
-
+  event_ref.reset();
   if (!is_signaled)
     return PING_FAILURE;
 
@@ -445,7 +439,7 @@ bool FinancialPing::IsPingTime(Product product, bool no_delay) {
   // Check if this product has any unreported events.
   char cgi[kMaxCgiLength + 1];
   cgi[0] = 0;
-  bool has_events = GetProductEventsAsCgi(product, cgi, base::size(cgi));
+  bool has_events = GetProductEventsAsCgi(product, cgi, std::size(cgi));
   if (no_delay && has_events)
     return true;
 
@@ -470,23 +464,6 @@ bool FinancialPing::ClearLastPingTime(Product product) {
   if (!store || !store->HasAccess(RlzValueStore::kWriteAccess))
     return false;
   return store->ClearPingTime(product);
-}
-
-int64_t FinancialPing::GetSystemTimeAsInt64() {
-#if defined(OS_WIN)
-  FILETIME now_as_file_time;
-  // Relative to Jan 1, 1601 (UTC).
-  GetSystemTimeAsFileTime(&now_as_file_time);
-
-  LARGE_INTEGER integer;
-  integer.HighPart = now_as_file_time.dwHighDateTime;
-  integer.LowPart = now_as_file_time.dwLowDateTime;
-  return integer.QuadPart;
-#else
-  // Seconds since epoch (Jan 1, 1970).
-  double now_seconds = base::Time::Now().ToDoubleT();
-  return static_cast<int64_t>(now_seconds * 1000 * 1000 * 10);
-#endif
 }
 
 #if defined(RLZ_NETWORK_IMPLEMENTATION_CHROME_NET)

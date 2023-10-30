@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class PlatformSensorProviderWinrt final : public PlatformSensorProvider {
   // PlatformSensorProvider interface implementation.
   void CreateSensorInternal(mojom::SensorType type,
                             SensorReadingSharedBuffer* reading_buffer,
-                            const CreateSensorCallback& callback) override;
+                            CreateSensorCallback callback) override;
 
  private:
   std::unique_ptr<PlatformSensorReaderWinBase> CreateSensorReader(
@@ -46,7 +46,7 @@ class PlatformSensorProviderWinrt final : public PlatformSensorProvider {
   void SensorReaderCreated(
       mojom::SensorType type,
       SensorReadingSharedBuffer* reading_buffer,
-      const CreateSensorCallback& callback,
+      CreateSensorCallback callback,
       std::unique_ptr<PlatformSensorReaderWinBase> sensor_reader);
 
   // The Windows.Devices.Sensors WinRT API supports both STA and MTA

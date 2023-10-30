@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@ namespace ppapi {
 
 // static
 PPP_Instance_Combined* PPP_Instance_Combined::Create(
-    base::Callback<const void*(const char*)> get_interface_func) {
+    base::RepeatingCallback<const void*(const char*)> get_interface_func) {
   // Try 1.1.
   const void* ppp_instance = get_interface_func.Run(PPP_INSTANCE_INTERFACE_1_1);
   if (ppp_instance) {

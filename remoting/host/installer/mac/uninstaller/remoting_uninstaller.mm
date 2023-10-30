@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/installer/mac/uninstaller/remoting_uninstaller.h"
 
 #import <Cocoa/Cocoa.h>
+#include <sys/stat.h>
 
 #include "base/mac/authorization_util.h"
 #include "base/mac/scoped_authorizationref.h"
@@ -26,19 +27,13 @@ NSArray* convertToNSArray(const char** array) {
   int i = 0;
   const char* element = array[i++];
   while (element != nullptr) {
-    [ns_array addObject:[NSString stringWithUTF8String:element]];
+    [ns_array addObject:@(element)];
     element = array[i++];
   }
   return ns_array;
 }
 
 @implementation RemotingUninstaller
-
-// Keystone
-const char kKeystoneAdmin[] = "/Library/Google/GoogleSoftwareUpdate/"
-                              "GoogleSoftwareUpdate.bundle/Contents/MacOS/"
-                              "ksadmin";
-const char kKeystonePID[] = "com.google.chrome_remote_desktop";
 
 - (void)runCommand:(const char*)cmd
      withArguments:(const char**)args {
@@ -51,7 +46,7 @@ const char kKeystonePID[] = "com.google.chrome_remote_desktop";
 
   @try {
     task = [[[NSTask alloc] init] autorelease];
-    [task setLaunchPath:[NSString stringWithUTF8String:cmd]];
+    [task setLaunchPath:@(cmd)];
     [task setArguments:arg_array];
     [task setStandardInput:[NSPipe pipe]];
     [task setStandardOutput:output];
@@ -113,8 +108,8 @@ const char kKeystonePID[] = "com.google.chrome_remote_desktop";
   const char* argsStop[] = { "stop", remoting::kServiceName, nullptr };
   [self runCommand:launchCtl withArguments:argsStop];
 
-  if ([[NSFileManager defaultManager] fileExistsAtPath:
-       [NSString stringWithUTF8String:remoting::kServicePlistPath]]) {
+  if ([[NSFileManager defaultManager]
+          fileExistsAtPath:@(remoting::kServicePlistPath)]) {
     const char* argsUnload[] = { "unload", "-w", "-S", "Aqua",
                                 remoting::kServicePlistPath, nullptr };
     [self runCommand:launchCtl withArguments:argsUnload];
@@ -122,8 +117,29 @@ const char kKeystonePID[] = "com.google.chrome_remote_desktop";
 }
 
 - (void)keystoneUnregisterUsingAuth:(AuthorizationRef)authRef {
-  const char* args[] = {"--delete", "--productid", kKeystonePID, "-S", nullptr};
-  [self sudoCommand:kKeystoneAdmin withArguments:args usingAuth:authRef];
+  // ksadmin moved from MacOS to Helpers in Keystone 1.2.13.112, 2019-11-12. A
+  // symbolic link from the old location was left in place, but may not remain
+  // indefinitely. Try the new location first, falling back to the old if
+  // needed.
+  static const char kKSAdminPath[] =
+      "/Library/Google/GoogleSoftwareUpdate/"
+      "GoogleSoftwareUpdate.bundle/Contents/Helpers/"
+      "ksadmin";
+  static const char kKSAdminOldPath[] =
+      "/Library/Google/GoogleSoftwareUpdate/"
+      "GoogleSoftwareUpdate.bundle/Contents/MacOS/"
+      "ksadmin";
+
+  struct stat statbuf;
+  const char* ksadminPath =
+      (stat(kKSAdminPath, &statbuf) == 0 && (statbuf.st_mode & S_IXUSR))
+          ? kKSAdminPath
+          : kKSAdminOldPath;
+
+  static const char kKSProductID[] = "com.google.chrome_remote_desktop";
+
+  const char* args[] = {"--delete", "--productid", kKSProductID, "-S", nullptr};
+  [self sudoCommand:ksadminPath withArguments:args usingAuth:authRef];
 }
 
 - (void)remotingUninstallUsingAuth:(AuthorizationRef)authRef {
@@ -135,8 +151,10 @@ const char kKeystonePID[] = "com.google.chrome_remote_desktop";
 
   [self sudoDelete:remoting::kServicePlistPath usingAuth:authRef];
   [self sudoDelete:remoting::kHostBinaryPath usingAuth:authRef];
-  [self sudoDelete:remoting::kHostHelperScriptPath usingAuth:authRef];
+  [self sudoDelete:remoting::kHostLegacyBinaryPath usingAuth:authRef];
+  [self sudoDelete:remoting::kOldHostHelperScriptPath usingAuth:authRef];
   [self sudoDelete:remoting::kHostConfigFilePath usingAuth:authRef];
+  [self sudoDelete:remoting::kHostSettingsFilePath usingAuth:authRef];
   [self sudoDelete:remoting::kLogFilePath usingAuth:authRef];
   [self sudoDelete:remoting::kLogFileConfigPath usingAuth:authRef];
   for (const char* path : remoting::kNativeMessagingManifestPaths) {

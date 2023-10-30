@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,7 @@ namespace remoting {
 FtlHostChangeNotificationListener::FtlHostChangeNotificationListener(
     Listener* listener,
     SignalStrategy* signal_strategy)
-    : listener_(listener),
-      signal_strategy_(signal_strategy),
-      weak_factory_(this) {
+    : listener_(listener), signal_strategy_(signal_strategy) {
   DCHECK(signal_strategy_);
 
   signal_strategy_->AddListener(this);

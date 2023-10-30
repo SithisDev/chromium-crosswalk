@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,12 @@ import android.content.res.Resources;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.support.v4.content.ContextCompat;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Menu;
 import android.view.MenuItem;
+
+import androidx.core.content.ContextCompat;
 
 import org.chromium.base.Log;
 
@@ -81,6 +82,7 @@ public abstract class ChromotingUtil {
      * @param intent The (implicit) intent to launch.
      * @return True if the intent was resolved.
      */
+    @SuppressWarnings("QueryPermissionsNeeded")
     public static boolean startActivitySafely(Context context, Intent intent) {
         if (intent.resolveActivity(context.getPackageManager()) == null) {
             Log.w(TAG, "Unable to resolve activity for: %s", intent);

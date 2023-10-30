@@ -1,24 +1,19 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_PROTOCOL_VIDEO_STREAM_H_
 #define REMOTING_PROTOCOL_VIDEO_STREAM_H_
 
-#include <stdint.h>
-
-#include <cstdint>
-
-#include "base/callback_forward.h"
 #include "remoting/protocol/input_event_timestamps.h"
+#include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
 
 namespace webrtc {
 class DesktopSize;
 class DesktopVector;
 }  // namespace webrtc
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class VideoStream {
  public:
@@ -31,8 +26,8 @@ class VideoStream {
                                     const webrtc::DesktopVector& dpi) = 0;
   };
 
-  VideoStream() {}
-  virtual ~VideoStream() {}
+  VideoStream() = default;
+  virtual ~VideoStream() = default;
 
   // Sets event timestamps source to be used for the video stream.
   virtual void SetEventTimestampsSource(
@@ -51,10 +46,9 @@ class VideoStream {
   virtual void SetObserver(Observer* observer) = 0;
 
   // Selects the current desktop display (if multiple displays).
-  virtual void SelectSource(int id) = 0;
+  virtual void SelectSource(webrtc::ScreenId id) = 0;
 };
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol
 
 #endif  // REMOTING_PROTOCOL_VIDEO_STREAM_H_

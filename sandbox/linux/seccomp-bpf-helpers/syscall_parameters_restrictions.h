@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,10 @@ namespace sandbox {
 // Crash if anything else is attempted.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictCloneToThreadsAndEPERMFork();
 
-// Allow PR_SET_NAME, PR_SET_DUMPABLE, PR_GET_DUMPABLE.
+// Allow PR_GET_NAME, PR_SET_NAME, PR_SET_DUMPABLE, PR_GET_DUMPABLE.
+// On Android allows a few other options.
+// Returns EPERM for PR_SET_PTRACER to allow crashpad to try to set itself as
+// ptracer at crash time, if it hasn't yet been able to.
 // Crash if anything else is attempted.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPrctl();
 
@@ -39,6 +42,7 @@ SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictMmapFlags();
 
 // Restrict the prot argument in mprotect(2).
 // Only allow: PROT_READ | PROT_WRITE | PROT_EXEC.
+// PROT_BTI | PROT_MTE is additionally allowed on 64-bit Arm.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictMprotectFlags();
 
 // Restrict fcntl(2) cmd argument to:
@@ -86,12 +90,13 @@ SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPrlimit64(pid_t target_pid);
 // process).
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictGetrusage();
 
-// Restrict |clk_id| for clock_getres(), clock_gettime() and clock_settime().
-// We allow accessing only CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID,
-// CLOCK_REALTIME, and CLOCK_THREAD_CPUTIME_ID.  In particular, this disallows
-// access to arbitrary per-{process,thread} CPU-time clock IDs (such as those
-// returned by {clock,pthread}_getcpuclockid), which can leak information
-// about the state of the host OS.
+// Restrict |clk_id| for clock_getres(), clock_gettime(), clock_settime(), and
+// clock_nanosleep(). We allow accessing only CLOCK_BOOTTIME,
+// CLOCK_MONOTONIC{,_RAW,_COARSE}, CLOCK_PROCESS_CPUTIME_ID,
+// CLOCK_REALTIME{,_COARSE}, and CLOCK_THREAD_CPUTIME_ID.  In particular, on
+// non-Android platforms this disallows access to arbitrary per-{process,thread}
+// CPU-time clock IDs (such as those returned by {clock,pthread}_getcpuclockid),
+// which can leak information about the state of the host OS.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictClockID();
 
 // Restrict the flags argument to getrandom() to allow only no flags, or
@@ -103,9 +108,20 @@ SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictGetRandom();
 // gracefully; see crbug.com/160157.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPrlimit(pid_t target_pid);
 
+// Restrict |pid| to the calling process (or 0) for prlimit64(), and require the
+// |new_limit_ argument to be null.  This allows only getting limits on the
+// current process. Otherwise fail gracefully.
+SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPrlimitToGetrlimit(pid_t target_pid);
+
 // Restrict ptrace() to just read operations that are needed for crash
 // reporting. See https://crbug.com/933418 for details.
 SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPtrace();
+
+// Restrict the flags argument for pkey_alloc. It's specified to always be 0.
+SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictPkeyAllocFlags();
+
+// Restrict the which argument to getitimer() and setitimer().
+SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictGoogle3Threading(int sysno);
 
 }  // namespace sandbox.
 

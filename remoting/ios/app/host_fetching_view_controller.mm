@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 
 #import "remoting/ios/app/host_fetching_view_controller.h"
 
-#import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MDCActivityIndicator.h"
+#import <MaterialComponents/MDCActivityIndicator.h>
+
 #import "remoting/ios/app/remoting_theme.h"
 
 static const CGFloat kActivityIndicatorStrokeWidth = 2.5f;

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <string>
 
 #include "base/containers/queue.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_resource.h"
@@ -44,6 +43,10 @@ class PPAPI_PROXY_EXPORT FileSystemResource : public PluginResource,
                      int pending_renderer_id,
                      int pending_browser_id,
                      PP_FileSystemType type);
+
+  FileSystemResource(const FileSystemResource&) = delete;
+  FileSystemResource& operator=(const FileSystemResource&) = delete;
+
   ~FileSystemResource() override;
 
   // Resource overrides.
@@ -55,21 +58,24 @@ class PPAPI_PROXY_EXPORT FileSystemResource : public PluginResource,
   PP_FileSystemType GetType() override;
   void OpenQuotaFile(PP_Resource file_io) override;
   void CloseQuotaFile(PP_Resource file_io) override;
-  typedef base::Callback<void(int64_t)> RequestQuotaCallback;
-  int64_t RequestQuota(int64_t amount,
-                       const RequestQuotaCallback& callback) override;
+  int64_t RequestQuota(
+      int64_t amount,
+      thunk::PPB_FileSystem_API::RequestQuotaCallback callback) override;
 
   int32_t InitIsolatedFileSystem(const std::string& fsid,
                                  PP_IsolatedFileSystemType_Private type,
-                                 const base::Callback<void(int32_t)>& callback);
+                                 base::OnceCallback<void(int32_t)> callback);
+
  private:
   struct QuotaRequest {
     QuotaRequest(int64_t amount,
-                 const RequestQuotaCallback& callback);
+                 thunk::PPB_FileSystem_API::RequestQuotaCallback callback);
+    QuotaRequest(QuotaRequest&& other);
+    QuotaRequest& operator=(QuotaRequest&& other);
     ~QuotaRequest();
 
     int64_t amount;
-    RequestQuotaCallback callback;
+    thunk::PPB_FileSystem_API::RequestQuotaCallback callback;
   };
 
   // Called when the host has responded to our open request.
@@ -77,9 +83,10 @@ class PPAPI_PROXY_EXPORT FileSystemResource : public PluginResource,
                     const ResourceMessageReplyParams& params);
 
   // Called when the host has responded to our InitIsolatedFileSystem request.
+  void InitIsolatedFileSystemReply(base::OnceClosure callback,
+                                   const ResourceMessageReplyParams& params);
   void InitIsolatedFileSystemComplete(
-      const base::Callback<void(int32_t)>& callback,
-      const ResourceMessageReplyParams& params);
+      base::OnceCallback<void(int32_t)> callback);
 
   void ReserveQuota(int64_t amount);
   typedef std::map<int32_t, int64_t> OffsetMap;
@@ -96,8 +103,6 @@ class PPAPI_PROXY_EXPORT FileSystemResource : public PluginResource,
   base::queue<QuotaRequest> pending_quota_requests_;
   int64_t reserved_quota_;
   bool reserving_quota_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileSystemResource);
 };
 
 }  // namespace proxy

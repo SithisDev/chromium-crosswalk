@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/no_destructor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "services/tracing/public/cpp/base_agent.h"
 #include "services/tracing/public/cpp/perfetto/producer_client.h"
 #include "services/tracing/public/cpp/trace_event_agent.h"
@@ -22,54 +22,84 @@ TracedProcessImpl* TracedProcessImpl::GetInstance() {
   return traced_process.get();
 }
 
-TracedProcessImpl::TracedProcessImpl() : binding_(this) {
+TracedProcessImpl::TracedProcessImpl() {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 TracedProcessImpl::~TracedProcessImpl() = default;
 
-// OnTracedProcessRequest can be called concurrently from
-// multiple threads, as we get one call per service.
+void TracedProcessImpl::ResetTracedProcessReceiver() {
+  if (task_runner_ && !task_runner_->RunsTasksInCurrentSequence()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(&TracedProcessImpl::ResetTracedProcessReceiver,
+                       base::Unretained(this)));
+    return;
+  }
+
+  receiver_.reset();
+}
+
 void TracedProcessImpl::OnTracedProcessRequest(
-    mojom::TracedProcessRequest request) {
+    mojo::PendingReceiver<mojom::TracedProcess> receiver) {
   if (task_runner_ && !task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&TracedProcessImpl::OnTracedProcessRequest,
-                                  base::Unretained(this), std::move(request)));
+                                  base::Unretained(this), std::move(receiver)));
     return;
   }
 
-  // We only need one binding per process.
-  base::AutoLock lock(lock_);
-  if (binding_.is_bound()) {
+  // We only need one binding per process. If a new binding request is made,
+  // ignore it.
+  if (receiver_.is_bound())
+    return;
+
+  receiver_.Bind(std::move(receiver));
+}
+
+mojo::Remote<mojom::SystemTracingService>&
+TracedProcessImpl::system_tracing_service() {
+  // |system_tracing_service_| can only be used on the Perfetto task runner.
+  auto task_runner =
+      PerfettoTracedProcess::GetTaskRunner()->GetOrCreateTaskRunner();
+  DCHECK(task_runner && task_runner->RunsTasksInCurrentSequence());
+  return system_tracing_service_;
+}
+
+void TracedProcessImpl::EnableSystemTracingService(
+    mojo::PendingRemote<mojom::SystemTracingService> remote) {
+  auto task_runner =
+      PerfettoTracedProcess::GetTaskRunner()->GetOrCreateTaskRunner();
+  if (!task_runner->RunsTasksInCurrentSequence()) {
+    // |system_tracing_service_| is bound on the Perfetto task runner.
+    task_runner->PostTask(
+        FROM_HERE,
+        base::BindOnce(&TracedProcessImpl::EnableSystemTracingService,
+                       base::Unretained(this), std::move(remote)));
     return;
   }
 
-  DETACH_FROM_SEQUENCE(sequence_checker_);
-  binding_.Bind(std::move(request));
+  system_tracing_service_.Bind(std::move(remote), nullptr);
 }
 
 // SetTaskRunner must be called before we start receiving
 // any OnTracedProcessRequest calls.
 void TracedProcessImpl::SetTaskRunner(
     scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  DCHECK(!binding_.is_bound());
+  DCHECK(!receiver_.is_bound());
   DCHECK(!task_runner_);
   task_runner_ = task_runner;
 }
 
 void TracedProcessImpl::RegisterAgent(BaseAgent* agent) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  if (agent_registry_) {
-    agent->Connect(agent_registry_.get());
-  }
-
+  base::AutoLock lock(agents_lock_);
   agents_.insert(agent);
 }
 
 void TracedProcessImpl::UnregisterAgent(BaseAgent* agent) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::AutoLock lock(agents_lock_);
   agents_.erase(agent);
 }
 
@@ -91,28 +121,12 @@ void TracedProcessImpl::ConnectToTracingService(
   // Ensure the TraceEventAgent has been created.
   TraceEventAgent::GetInstance();
 
-  agent_registry_ =
-      tracing::mojom::AgentRegistryPtr(std::move(request->agent_registry));
-  agent_registry_.set_connection_error_handler(base::BindRepeating(
-      [](TracedProcessImpl* traced_process) {
-        // If the AgentRegistryPtr connection closes, the tracing service
-        // has gone down and we'll start accepting new connections from it
-        // again.
-        base::AutoLock lock(traced_process->lock_);
-        traced_process->agent_registry_.reset();
-        traced_process->binding_.Close();
-      },
-      base::Unretained(this)));
-
-  for (auto* agent : agents_) {
-    agent->Connect(agent_registry_.get());
-  }
-
-  PerfettoTracedProcess::Get()->producer_client()->Connect(
-      tracing::mojom::PerfettoServicePtr(std::move(request->perfetto_service)));
+  PerfettoTracedProcess::Get()->ConnectProducer(
+      std::move(request->perfetto_service));
 }
 
 void TracedProcessImpl::GetCategories(std::set<std::string>* category_set) {
+  base::AutoLock lock(agents_lock_);
   for (auto* agent : agents_) {
     agent->GetCategories(category_set);
   }

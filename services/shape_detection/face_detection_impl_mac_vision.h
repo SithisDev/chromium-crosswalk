@@ -1,18 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef SERVICES_SHAPE_DETECTION_FACE_DETECTION_IMPL_MAC_VISION_H_
 #define SERVICES_SHAPE_DETECTION_FACE_DETECTION_IMPL_MAC_VISION_H_
 
+#include <os/availability.h>
+
 #include <memory>
 #include <utility>
 
-#include "base/mac/availability.h"
-#include "base/mac/sdk_forward_declarations.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/shape_detection/detection_utils_mac.h"
 #include "services/shape_detection/public/mojom/facedetection.mojom.h"
 
@@ -22,17 +21,21 @@ namespace shape_detection {
 
 // The FaceDetectionImplMacVision class is the implementation of Face Detection
 // based on Mac OS Vision framework.
-class API_AVAILABLE(macos(10.13)) FaceDetectionImplMacVision
-    : public mojom::FaceDetection {
+class FaceDetectionImplMacVision : public mojom::FaceDetection {
  public:
   FaceDetectionImplMacVision();
+
+  FaceDetectionImplMacVision(const FaceDetectionImplMacVision&) = delete;
+  FaceDetectionImplMacVision& operator=(const FaceDetectionImplMacVision&) =
+      delete;
+
   ~FaceDetectionImplMacVision() override;
 
   void Detect(const SkBitmap& bitmap,
               mojom::FaceDetection::DetectCallback callback) override;
 
-  void SetBinding(mojo::StrongBindingPtr<mojom::FaceDetection> binding) {
-    binding_ = std::move(binding);
+  void SetReceiver(mojo::SelfOwnedReceiverRef<mojom::FaceDetection> receiver) {
+    receiver_ = std::move(receiver);
   }
 
  private:
@@ -41,10 +44,8 @@ class API_AVAILABLE(macos(10.13)) FaceDetectionImplMacVision
   CGSize image_size_;
   std::unique_ptr<VisionAPIAsyncRequestMac> landmarks_async_request_;
   DetectCallback detected_callback_;
-  mojo::StrongBindingPtr<mojom::FaceDetection> binding_;
+  mojo::SelfOwnedReceiverRef<mojom::FaceDetection> receiver_;
   base::WeakPtrFactory<FaceDetectionImplMacVision> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FaceDetectionImplMacVision);
 };
 
 }  // namespace shape_detection

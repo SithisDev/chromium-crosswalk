@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/shared_memory_mapping.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/resource.h"
@@ -25,8 +25,11 @@ class SerializedHandle;
 class Buffer : public thunk::PPB_Buffer_API, public Resource {
  public:
   Buffer(const HostResource& resource,
-         const base::SharedMemoryHandle& shm_handle,
-         uint32_t size);
+         base::UnsafeSharedMemoryRegion shm_handle);
+
+  Buffer(const Buffer&) = delete;
+  Buffer& operator=(const Buffer&) = delete;
+
   ~Buffer() override;
 
   // Resource overrides.
@@ -39,14 +42,12 @@ class Buffer : public thunk::PPB_Buffer_API, public Resource {
   void Unmap() override;
 
   // Trusted
-  int32_t GetSharedMemory(base::SharedMemory** shm) override;
+  int32_t GetSharedMemory(base::UnsafeSharedMemoryRegion** shm) override;
 
  private:
-  base::SharedMemory shm_;
-  uint32_t size_;
+  base::UnsafeSharedMemoryRegion shm_;
+  base::WritableSharedMemoryMapping mapping_;
   int map_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(Buffer);
 };
 
 class PPB_Buffer_Proxy : public InterfaceProxy {
@@ -56,9 +57,9 @@ class PPB_Buffer_Proxy : public InterfaceProxy {
 
   static PP_Resource CreateProxyResource(PP_Instance instance,
                                          uint32_t size);
-  static PP_Resource AddProxyResource(const HostResource& resource,
-                                      base::SharedMemoryHandle shm_handle,
-                                      uint32_t size);
+  static PP_Resource AddProxyResource(
+      const HostResource& resource,
+      base::UnsafeSharedMemoryRegion shm_region);
 
   // InterfaceProxy implementation.
   bool OnMessageReceived(const IPC::Message& msg) override;

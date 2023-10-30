@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/client/display/gl_canvas.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "remoting/client/display/gl_helpers.h"
 #include "remoting/client/display/gl_math.h"
 
@@ -65,8 +65,7 @@ const char kDrawTexFrag[] =
 
 namespace remoting {
 
-GlCanvas::GlCanvas(int gl_version)
-    : gl_version_(gl_version), weak_factory_(this) {
+GlCanvas::GlCanvas(int gl_version) : gl_version_(gl_version) {
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size_);
 
   vertex_shader_ = CompileShader(GL_VERTEX_SHADER, kTexCoordToViewVert);
@@ -119,7 +118,7 @@ void GlCanvas::SetTransformationMatrix(const std::array<float, 9>& matrix) {
 
 void GlCanvas::SetViewSize(int width, int height) {
   DCHECK(width > 0 && height > 0);
-  float view_size[2]{width, height};
+  float view_size[2]{static_cast<float>(width), static_cast<float>(height)};
   glUniform2fv(view_size_location_, 1, view_size);
   view_size_set_ = true;
 }

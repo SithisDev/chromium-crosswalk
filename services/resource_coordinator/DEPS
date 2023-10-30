@@ -1,6 +1,7 @@
 include_rules = [
   "+components/ukm/test_ukm_recorder.h",
+  "+third_party/perfetto",
   "+third_party/smhasher",
   "+services/metrics/public",
-  "+services/service_manager/public"
+  "+services/tracing/public/cpp",
 ]

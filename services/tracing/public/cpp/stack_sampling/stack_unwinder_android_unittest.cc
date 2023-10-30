@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #include "base/android/jni_generator/jni_generator_helper.h"
 #include "base/bind.h"
+#include "base/profiler/stack_buffer.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool.h"
+#include "base/test/task_environment.h"
 #include "base/trace_event/cfi_backtrace_android.h"
 #include "services/tracing/jni_headers/UnwindTestHelper_jni.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,6 +22,10 @@ const size_t kMaxStackFrames = 40;
 class StackUnwinderTest : public testing::Test {
  public:
   StackUnwinderTest() : testing::Test() {}
+
+  StackUnwinderTest(const StackUnwinderTest&) = delete;
+  StackUnwinderTest& operator=(const StackUnwinderTest&) = delete;
+
   ~StackUnwinderTest() override {}
 
   void SetUp() override {
@@ -33,9 +38,7 @@ class StackUnwinderTest : public testing::Test {
 
  private:
   StackUnwinderAndroid unwinder_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(StackUnwinderTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 uintptr_t GetCurrentPC() {
@@ -44,23 +47,9 @@ uintptr_t GetCurrentPC() {
 
 }  // namespace
 
-TEST_F(StackUnwinderTest, UnwindCurrentThread) {
-  const void* frames[kMaxStackFrames];
-  size_t result = unwinder()->TraceStack(frames, kMaxStackFrames);
-  EXPECT_GT(result, 0u);
-
-  // Since we are starting from chrome library function (this), all the unwind
-  // frames will be chrome frames.
-  for (size_t i = 0; i < result; ++i) {
-    EXPECT_TRUE(
-        base::trace_event::CFIBacktraceAndroid::GetInitializedInstance()
-            ->is_chrome_address(reinterpret_cast<uintptr_t>(frames[i])));
-  }
-}
-
 TEST_F(StackUnwinderTest, UnwindOtherThread) {
   base::WaitableEvent unwind_finished_event;
-  auto task_runner = base::CreateSingleThreadTaskRunnerWithTraits(
+  auto task_runner = base::ThreadPool::CreateSingleThreadTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   auto callback = [](StackUnwinderAndroid* unwinder, base::PlatformThreadId tid,
@@ -105,7 +94,7 @@ TEST_F(StackUnwinderTest, UnwindOtherThread) {
 }
 
 TEST_F(StackUnwinderTest, UnwindOtherThreadOnJNICall) {
-  auto task_runner = base::CreateSingleThreadTaskRunnerWithTraits(
+  auto task_runner = base::ThreadPool::CreateSingleThreadTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   auto callback = [](StackUnwinderAndroid* unwinder, base::PlatformThreadId tid,
@@ -138,7 +127,7 @@ TEST_F(StackUnwinderTest, UnwindOtherThreadOnJNICall) {
       FROM_HERE,
       base::BindOnce(callback, base::Unretained(unwinder()),
                      base::PlatformThread::CurrentId(), GetCurrentPC()),
-      base::TimeDelta::FromMilliseconds(10));
+      base::Milliseconds(10));
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_UnwindTestHelper_blockCurrentThread(env);
 }

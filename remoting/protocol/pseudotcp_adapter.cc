@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "net/base/address_list.h"
@@ -28,13 +27,15 @@ const int kReadBufferSize = 65536;  // Maximum size of a packet.
 const uint16_t kDefaultMtu = 1280;
 }  // namespace
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 class PseudoTcpAdapter::Core : public cricket::IPseudoTcpNotify,
                                public base::RefCounted<Core> {
  public:
   explicit Core(std::unique_ptr<P2PDatagramSocket> socket);
+
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
 
   // Functions used to implement net::StreamSocket.
   int Read(const scoped_refptr<net::IOBuffer>& buffer,
@@ -44,7 +45,7 @@ class PseudoTcpAdapter::Core : public cricket::IPseudoTcpNotify,
             int buffer_size,
             net::CompletionOnceCallback callback,
             const net::NetworkTrafficAnnotationTag& traffic_annotation);
-  int Connect(net::CompletionOnceCallback callback);
+  net::CompletionOnceCallback Connect(net::CompletionOnceCallback callback);
 
   // cricket::IPseudoTcpNotify interface.
   // These notifications are triggered from NotifyPacket.
@@ -116,8 +117,6 @@ class PseudoTcpAdapter::Core : public cricket::IPseudoTcpNotify,
   scoped_refptr<net::IOBuffer> socket_read_buffer_;
 
   base::OneShotTimer timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 PseudoTcpAdapter::Core::Core(std::unique_ptr<P2PDatagramSocket> socket)
@@ -200,7 +199,8 @@ int PseudoTcpAdapter::Core::Write(
   return result;
 }
 
-int PseudoTcpAdapter::Core::Connect(net::CompletionOnceCallback callback) {
+net::CompletionOnceCallback PseudoTcpAdapter::Core::Connect(
+    net::CompletionOnceCallback callback) {
   DCHECK_EQ(pseudo_tcp_.State(), cricket::PseudoTcp::TCP_LISTEN);
 
   // Reference the Core in case a callback deletes the adapter.
@@ -209,22 +209,21 @@ int PseudoTcpAdapter::Core::Connect(net::CompletionOnceCallback callback) {
   // Start the connection attempt.
   int result = pseudo_tcp_.Connect();
   if (result < 0)
-    return net::ERR_FAILED;
+    return callback;
 
   AdjustClock();
 
   connect_callback_ = std::move(callback);
   DoReadFromSocket();
 
-  return net::ERR_IO_PENDING;
+  return {};
 }
 
 void PseudoTcpAdapter::Core::OnTcpOpen(PseudoTcp* tcp) {
   DCHECK(tcp == &pseudo_tcp_);
 
-  if (!connect_callback_.is_null()) {
+  if (connect_callback_)
     std::move(connect_callback_).Run(net::OK);
-  }
 
   OnTcpReadable(tcp);
   OnTcpWriteable(tcp);
@@ -245,7 +244,7 @@ void PseudoTcpAdapter::Core::OnTcpReadable(PseudoTcp* tcp) {
 
   AdjustClock();
 
-  read_buffer_ = NULL;
+  read_buffer_.reset();
   std::move(read_callback_).Run(result);
 }
 
@@ -276,7 +275,7 @@ void PseudoTcpAdapter::Core::OnTcpWriteable(PseudoTcp* tcp) {
     return;
   }
 
-  write_buffer_ = NULL;
+  write_buffer_.reset();
   std::move(write_callback_).Run(result);
 }
 
@@ -319,9 +318,9 @@ void PseudoTcpAdapter::Core::SetWriteWaitsForSend(bool write_waits_for_send) {
 void PseudoTcpAdapter::Core::DeleteSocket() {
   // Don't dispatch outstanding callbacks when the socket is deleted.
   read_callback_.Reset();
-  read_buffer_ = NULL;
+  read_buffer_.reset();
   write_callback_.Reset();
-  write_buffer_ = NULL;
+  write_buffer_.reset();
   connect_callback_.Reset();
 
   socket_.reset();
@@ -347,9 +346,10 @@ cricket::IPseudoTcpNotify::WriteResult PseudoTcpAdapter::Core::TcpWritePacket(
   // send exactly as many bytes as we requested, or fail.
   int result;
   if (socket_) {
-    result = socket_->Send(
-        write_buffer.get(), len,
-        base::Bind(&PseudoTcpAdapter::Core::OnWritten, base::Unretained(this)));
+    result =
+        socket_->Send(write_buffer.get(), len,
+                      base::BindRepeating(&PseudoTcpAdapter::Core::OnWritten,
+                                          base::Unretained(this)));
   } else {
     result = net::ERR_CONNECTION_CLOSED;
   }
@@ -371,9 +371,9 @@ void PseudoTcpAdapter::Core::DoReadFromSocket() {
 
   int result = 1;
   while (socket_ && result > 0) {
-    result = socket_->Recv(
-        socket_read_buffer_.get(), kReadBufferSize,
-        base::Bind(&PseudoTcpAdapter::Core::OnRead, base::Unretained(this)));
+    result = socket_->Recv(socket_read_buffer_.get(), kReadBufferSize,
+                           base::BindRepeating(&PseudoTcpAdapter::Core::OnRead,
+                                               base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       HandleReadResults(result);
   }
@@ -415,8 +415,7 @@ void PseudoTcpAdapter::Core::AdjustClock() {
   long timeout = 0;
   if (pseudo_tcp_.GetNextClock(PseudoTcp::Now(), timeout)) {
     timer_.Stop();
-    timer_.Start(FROM_HERE,
-                 base::TimeDelta::FromMilliseconds(std::max(timeout, 0L)), this,
+    timer_.Start(FROM_HERE, base::Milliseconds(std::max(timeout, 0L)), this,
                  &PseudoTcpAdapter::Core::HandleTcpClock);
   }
 }
@@ -436,7 +435,7 @@ void PseudoTcpAdapter::Core::CheckWriteComplete() {
     if (pseudo_tcp_.GetBytesBufferedNotSent() == 0) {
       waiting_write_position_ = false;
 
-      write_buffer_ = NULL;
+      write_buffer_.reset();
       std::move(write_callback_).Run(last_write_result_);
     }
   }
@@ -482,7 +481,8 @@ int PseudoTcpAdapter::SetSendBufferSize(int32_t size) {
   return net::OK;
 }
 
-int PseudoTcpAdapter::Connect(net::CompletionOnceCallback callback) {
+net::CompletionOnceCallback PseudoTcpAdapter::Connect(
+    net::CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return core_->Connect(std::move(callback));
 }
@@ -502,5 +502,4 @@ void PseudoTcpAdapter::SetWriteWaitsForSend(bool write_waits_for_send) {
   core_->SetWriteWaitsForSend(write_waits_for_send);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

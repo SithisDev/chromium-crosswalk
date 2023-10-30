@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/cpp/http_request_headers_mojom_traits.h"
 #include "services/network/public/cpp/network_traits_test_service.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -15,13 +17,17 @@ namespace {
 
 class NetworkStructTraitsTest : public testing::Test,
                                 public mojom::TraitsTestService {
+ public:
+  NetworkStructTraitsTest(const NetworkStructTraitsTest&) = delete;
+  NetworkStructTraitsTest& operator=(const NetworkStructTraitsTest&) = delete;
+
  protected:
   NetworkStructTraitsTest() = default;
 
-  mojom::TraitsTestServicePtr GetTraitsTestProxy() {
-    mojom::TraitsTestServicePtr proxy;
-    traits_test_bindings_.AddBinding(this, mojo::MakeRequest(&proxy));
-    return proxy;
+  mojo::PendingRemote<mojom::TraitsTestService> GetTraitsTestRemote() {
+    mojo::PendingRemote<mojom::TraitsTestService> remote;
+    traits_test_receivers_.Add(this, remote.InitWithNewPipeAndPassReceiver());
+    return remote;
   }
 
  private:
@@ -32,9 +38,8 @@ class NetworkStructTraitsTest : public testing::Test,
     std::move(callback).Run(header);
   }
 
-  base::MessageLoop loop_;
-  mojo::BindingSet<TraitsTestService> traits_test_bindings_;
-  DISALLOW_COPY_AND_ASSIGN(NetworkStructTraitsTest);
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  mojo::ReceiverSet<TraitsTestService> traits_test_receivers_;
 };
 
 }  // namespace
@@ -43,8 +48,8 @@ TEST_F(NetworkStructTraitsTest, HttpRequestHeaders_Basic) {
   net::HttpRequestHeaders headers;
   net::HttpRequestHeaders output;
   headers.SetHeader("Foo", "bar");
-  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
-  proxy->EchoHttpRequestHeaders(headers, &output);
+  mojo::Remote<mojom::TraitsTestService> remote(GetTraitsTestRemote());
+  remote->EchoHttpRequestHeaders(headers, &output);
   std::string value;
   EXPECT_TRUE(output.GetHeader("Foo", &value));
   EXPECT_EQ("bar", value);
@@ -62,8 +67,8 @@ TEST_F(NetworkStructTraitsTest, HttpRequestHeaders_InvalidHeaderName) {
     net::HttpRequestHeaders header;
     net::HttpRequestHeaders output;
     header.SetHeaderWithoutCheckForTesting(invalid_name, "foo");
-    mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
-    proxy->EchoHttpRequestHeaders(header, &output);
+    mojo::Remote<mojom::TraitsTestService> remote(GetTraitsTestRemote());
+    remote->EchoHttpRequestHeaders(header, &output);
     std::string value;
     EXPECT_TRUE(output.IsEmpty());
   }
@@ -85,8 +90,8 @@ TEST_F(NetworkStructTraitsTest, HttpRequestHeaders_InvalidHeaderValue) {
     net::HttpRequestHeaders header;
     net::HttpRequestHeaders output;
     header.SetHeaderWithoutCheckForTesting("Foo", replaced);
-    mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
-    proxy->EchoHttpRequestHeaders(header, &output);
+    mojo::Remote<mojom::TraitsTestService> remote(GetTraitsTestRemote());
+    remote->EchoHttpRequestHeaders(header, &output);
     EXPECT_FALSE(output.HasHeader("Foo"));
   }
 
@@ -102,8 +107,8 @@ TEST_F(NetworkStructTraitsTest, HttpRequestHeaders_InvalidHeaderValue) {
   net::HttpRequestHeaders header;
   net::HttpRequestHeaders output;
   header.SetHeaderWithoutCheckForTesting("Foo", allowed);
-  mojom::TraitsTestServicePtr proxy = GetTraitsTestProxy();
-  proxy->EchoHttpRequestHeaders(header, &output);
+  mojo::Remote<mojom::TraitsTestService> remote(GetTraitsTestRemote());
+  remote->EchoHttpRequestHeaders(header, &output);
   EXPECT_TRUE(output.HasHeader("Foo"));
 }
 

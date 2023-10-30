@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/protocol/authenticator_test_base.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
@@ -26,8 +27,7 @@
 using testing::_;
 using testing::SaveArg;
 
-namespace remoting {
-namespace protocol {
+namespace remoting::protocol {
 
 namespace {
 
@@ -111,26 +111,27 @@ void AuthenticatorTestBase::ContinueAuthExchangeWith(Authenticator* sender,
   ASSERT_NE(Authenticator::MESSAGE_READY, sender->state());
 
   ASSERT_EQ(Authenticator::WAITING_MESSAGE, receiver->state());
-  receiver->ProcessMessage(message.get(), base::Bind(
-      &AuthenticatorTestBase::ContinueAuthExchangeWith,
-      base::Unretained(receiver), base::Unretained(sender),
-      receiver->started(), sender->started()));
+  receiver->ProcessMessage(
+      message.get(),
+      base::BindOnce(&AuthenticatorTestBase::ContinueAuthExchangeWith,
+                     base::Unretained(receiver), base::Unretained(sender),
+                     receiver->started(), sender->started()));
 }
 
 void AuthenticatorTestBase::RunChannelAuth(bool expected_fail) {
-  client_fake_socket_.reset(new FakeStreamSocket());
-  host_fake_socket_.reset(new FakeStreamSocket());
+  client_fake_socket_ = std::make_unique<FakeStreamSocket>();
+  host_fake_socket_ = std::make_unique<FakeStreamSocket>();
   client_fake_socket_->PairWith(host_fake_socket_.get());
 
   client_auth_->SecureAndAuthenticate(
       std::move(client_fake_socket_),
-      base::Bind(&AuthenticatorTestBase::OnClientConnected,
-                 base::Unretained(this)));
+      base::BindOnce(&AuthenticatorTestBase::OnClientConnected,
+                     base::Unretained(this)));
 
   host_auth_->SecureAndAuthenticate(
       std::move(host_fake_socket_),
-      base::Bind(&AuthenticatorTestBase::OnHostConnected,
-                 base::Unretained(this)));
+      base::BindOnce(&AuthenticatorTestBase::OnHostConnected,
+                     base::Unretained(this)));
 
   // Expect two callbacks to be called - the client callback and the host
   // callback.
@@ -177,5 +178,4 @@ void AuthenticatorTestBase::OnClientConnected(
   client_socket_ = std::move(socket);
 }
 
-}  // namespace protocol
-}  // namespace remoting
+}  // namespace remoting::protocol

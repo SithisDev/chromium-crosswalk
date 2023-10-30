@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/base/network_change_notifier.h"
 #include "net/nqe/cached_network_quality.h"
@@ -26,15 +25,17 @@ namespace {
 class NetworkQualitiesPrefDelegateTest : public testing::Test {
  public:
   NetworkQualitiesPrefDelegateTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {}
+
+  NetworkQualitiesPrefDelegateTest(const NetworkQualitiesPrefDelegateTest&) =
+      delete;
+  NetworkQualitiesPrefDelegateTest& operator=(
+      const NetworkQualitiesPrefDelegateTest&) = delete;
 
   ~NetworkQualitiesPrefDelegateTest() override = default;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkQualitiesPrefDelegateTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 // Verify that prefs are writen and read correctly.
