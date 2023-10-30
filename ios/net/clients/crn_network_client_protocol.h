@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,12 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/callback_forward.h"
 #include "base/strings/string_util.h"
 
 namespace net {
 class AuthChallengeInfo;
 class URLRequest;
 }  // namespace net
-
-namespace network_client {
-typedef base::Callback<void(bool auth_ok,
-                            const base::string16& username,
-                            const base::string16& password)> AuthCallback;
-}  // namespace network_client
 
 // CRNNetworkClientProtocol provides an interface for delegate classes that
 // receive calls about data loading from the Chromium network stack.
@@ -55,25 +48,6 @@ typedef base::Callback<void(bool auth_ok,
 // Called after |nativeRequest| is created, but before it's started; native
 // clients have the opportunity to modify the request at this time.
 - (void)didCreateNativeRequest:(net::URLRequest*)nativeRequest;
-
-// Called when an authentication challenge represented by |authInfo| is received
-// from |nativeRequest|.
-// Clients that won't handle the challenge should forward this call down the
-// client stack.
-// Clients that will handle the request should do so asynchronously, immediately
-// returning without forwarding down the client stack, and then invoking
-// |callback| on the IO thread when credentials are available.
-// |callback|'s first parameter is a boolean that indicates if authentication
-// was successful.
-// If authentication was successful, |callback|'s second and third parameters
-// are username and password; if unsuccessful they are empty strings.
-- (void)didRecieveAuthChallenge:(const net::AuthChallengeInfo&)authInfo
-                  nativeRequest:(const net::URLRequest&)nativeRequest
-                       callback:(const network_client::AuthCallback&)callback;
-
-// Called when a request is terminated, signalling that any outstanding
-// authentication requests should cancel.
-- (void)cancelAuthRequest;
 @end
 
 #endif  // IOS_NET_CLIENTS_CRN_NETWORK_CLIENT_PROTOCOL_H_

@@ -1,53 +1,45 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_mediator.h"
 
-#include <memory>
+#import <memory>
 
-#include "components/signin/public/identity_manager/identity_manager.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
-#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
-#include "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "base/test/metrics/histogram_tester.h"
+#import "components/signin/public/identity_manager/identity_manager.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/main/test_browser.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
+#import "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
+#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/signin/authentication_service_fake.h"
-#include "ios/chrome/browser/signin/identity_manager_factory.h"
+#import "ios/chrome/browser/signin/chrome_account_manager_service_factory.h"
+#import "ios/chrome/browser/signin/identity_manager_factory.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
-#import "ios/chrome/browser/ui/commands/browser_commands.h"
-#import "ios/chrome/browser/ui/commands/snackbar_commands.h"
-#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_item.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_consumer.h"
-#import "ios/chrome/browser/ui/location_bar/location_bar_notification_names.h"
+#import "ios/chrome/browser/ui/content_suggestions/ntp_home_metrics.h"
+#import "ios/chrome/browser/ui/ntp/logo_vendor.h"
 #import "ios/chrome/browser/ui/toolbar/test/toolbar_test_navigation_manager.h"
-#include "ios/chrome/browser/url_loading/test_url_loading_service.h"
-#include "ios/chrome/browser/url_loading/url_loading_params.h"
-#include "ios/chrome/browser/url_loading/url_loading_service_factory.h"
-#include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
-#include "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
-#import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/public/provider/chrome/browser/ui/logo_vendor.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#import "ios/chrome/browser/url_loading/fake_url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/url_loading_notifier_browser_agent.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
+#import "ios/chrome/browser/voice/fake_voice_search_availability.h"
+#import "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
+#import "ios/web/public/test/web_task_environment.h"
 #import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-@protocol NTPHomeMediatorDispatcher <BrowserCommands, SnackbarCommands>
-@end
-
-namespace {
-static const int kNumberOfWebStates = 3;
-}
 
 class NTPHomeMediatorTest : public PlatformTest {
  public:
@@ -60,100 +52,73 @@ class NTPHomeMediatorTest : public PlatformTest {
         IOSChromeContentSuggestionsServiceFactory::GetInstance(),
         IOSChromeContentSuggestionsServiceFactory::GetDefaultFactory());
     test_cbs_builder.AddTestingFactory(
-        UrlLoadingServiceFactory::GetInstance(),
-        UrlLoadingServiceFactory::GetDefaultFactory());
-    test_cbs_builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
         base::BindRepeating(
             &AuthenticationServiceFake::CreateAuthenticationService));
     chrome_browser_state_ = test_cbs_builder.Build();
+    browser_ = std::make_unique<TestBrowser>(chrome_browser_state_.get());
 
     std::unique_ptr<ToolbarTestNavigationManager> navigation_manager =
         std::make_unique<ToolbarTestNavigationManager>();
     navigation_manager_ = navigation_manager.get();
-    test_web_state_ = std::make_unique<web::TestWebState>();
-    test_web_state_->SetNavigationManager(std::move(navigation_manager));
-    web_state_ = test_web_state_.get();
-    SetUpWebStateList();
+    fake_web_state_ = std::make_unique<web::FakeWebState>();
+    NewTabPageTabHelper::CreateForWebState(fake_web_state_.get());
     logo_vendor_ = OCMProtocolMock(@protocol(LogoVendor));
-    dispatcher_ = OCMProtocolMock(@protocol(NTPHomeMediatorDispatcher));
-    suggestions_view_controller_ =
-        OCMClassMock([ContentSuggestionsViewController class]);
-    url_loader_ =
-        (TestUrlLoadingService*)UrlLoadingServiceFactory::GetForBrowserState(
-            chrome_browser_state_.get());
+    voice_availability_.SetVoiceProviderEnabled(true);
+
+    UrlLoadingNotifierBrowserAgent::CreateForBrowser(browser_.get());
+    FakeUrlLoadingBrowserAgent::InjectForBrowser(browser_.get());
+    url_loader_ = FakeUrlLoadingBrowserAgent::FromUrlLoadingBrowserAgent(
+        UrlLoadingBrowserAgent::FromBrowser(browser_.get()));
+
     auth_service_ = static_cast<AuthenticationServiceFake*>(
         AuthenticationServiceFactory::GetInstance()->GetForBrowserState(
             chrome_browser_state_.get()));
     identity_manager_ =
         IdentityManagerFactory::GetForBrowserState(chrome_browser_state_.get());
-    mediator_ = [[NTPHomeMediator alloc]
-        initWithWebStateList:web_state_list_.get()
-          templateURLService:ios::TemplateURLServiceFactory::GetForBrowserState(
-                                 chrome_browser_state_.get())
-           urlLoadingService:url_loader_
-                 authService:auth_service_
-             identityManager:identity_manager_
-                  logoVendor:logo_vendor_];
-    mediator_.suggestionsService =
-        IOSChromeContentSuggestionsServiceFactory::GetForBrowserState(
+    ChromeAccountManagerService* accountManagerService =
+        ChromeAccountManagerServiceFactory::GetForBrowserState(
             chrome_browser_state_.get());
-    mediator_.dispatcher = dispatcher_;
-    mediator_.suggestionsViewController = suggestions_view_controller_;
+    mediator_ = [[NTPHomeMediator alloc]
+               initWithWebState:fake_web_state_.get()
+             templateURLService:ios::TemplateURLServiceFactory::
+                                    GetForBrowserState(
+                                        chrome_browser_state_.get())
+                      URLLoader:url_loader_
+                    authService:auth_service_
+                identityManager:identity_manager_
+          accountManagerService:accountManagerService
+                     logoVendor:logo_vendor_
+        voiceSearchAvailability:&voice_availability_];
     consumer_ = OCMProtocolMock(@protocol(NTPHomeConsumer));
     mediator_.consumer = consumer_;
+    histogram_tester_.reset(new base::HistogramTester());
   }
 
-  // Explicitly disconnect the mediator so there won't be any WebStateList
-  // observers when web_state_list_ gets dealloc.
+  // Explicitly disconnect the mediator.
   ~NTPHomeMediatorTest() override { [mediator_ shutdown]; }
 
  protected:
-  void SetUpWebStateList() {
-    web_state_list_ = std::make_unique<WebStateList>(&web_state_list_delegate_);
-    web_state_list_->InsertWebState(0, std::move(test_web_state_),
-                                    WebStateList::INSERT_FORCE_INDEX,
-                                    WebStateOpener());
-    web_state_list_->ActivateWebStateAt(0);
-    for (int i = 1; i < kNumberOfWebStates; i++) {
-      auto web_state = std::make_unique<web::TestWebState>();
-      GURL url("http://test/" + std::to_string(i));
-      web_state->SetCurrentURL(url);
-      web_state_list_->InsertWebState(i, std::move(web_state),
-                                      WebStateList::INSERT_FORCE_INDEX,
-                                      WebStateOpener());
-    }
-  }
-
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
+  IOSChromeScopedTestingLocalState scoped_testing_local_state_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
+  std::unique_ptr<Browser> browser_;
+  std::unique_ptr<web::FakeWebState> fake_web_state_;
   id consumer_;
   id logo_vendor_;
-  id dispatcher_;
-  id suggestions_view_controller_;
+  FakeVoiceSearchAvailability voice_availability_;
   NTPHomeMediator* mediator_;
-  web::TestWebState* web_state_;
   ToolbarTestNavigationManager* navigation_manager_;
-  std::unique_ptr<WebStateList> web_state_list_;
-  FakeWebStateListDelegate web_state_list_delegate_;
-  TestUrlLoadingService* url_loader_;
+  FakeUrlLoadingBrowserAgent* url_loader_;
   AuthenticationServiceFake* auth_service_;
   signin::IdentityManager* identity_manager_;
-
- private:
-  std::unique_ptr<web::TestWebState> test_web_state_;
+  std::unique_ptr<base::HistogramTester> histogram_tester_;
 };
 
 // Tests that the consumer has the right value set up.
 TEST_F(NTPHomeMediatorTest, TestConsumerSetup) {
   // Setup.
-  navigation_manager_->set_can_go_forward(true);
-  navigation_manager_->set_can_go_back(false);
-
-  OCMExpect([consumer_ setTabCount:kNumberOfWebStates]);
   OCMExpect([consumer_ setLogoVendor:logo_vendor_]);
-  OCMExpect([consumer_ setCanGoForward:YES]);
-  OCMExpect([consumer_ setCanGoBack:NO]);
   OCMExpect([consumer_ setLogoIsShowing:YES]);
 
   // Action.
@@ -171,9 +136,7 @@ TEST_F(NTPHomeMediatorTest, TestConsumerNotificationFocus) {
   OCMExpect([consumer_ locationBarBecomesFirstResponder]);
 
   // Action.
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kLocationBarBecomesFirstResponderNotification
-                    object:nil];
+  [mediator_ locationBarDidBecomeFirstResponder];
 
   // Test.
   EXPECT_OCMOCK_VERIFY(consumer_);
@@ -187,124 +150,24 @@ TEST_F(NTPHomeMediatorTest, TestConsumerNotificationUnfocus) {
   OCMExpect([consumer_ locationBarResignsFirstResponder]);
 
   // Action.
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kLocationBarResignsFirstResponderNotification
-                    object:nil];
+  [mediator_ locationBarDidResignFirstResponder];
 
   // Test.
   EXPECT_OCMOCK_VERIFY(consumer_);
 }
 
-// Tests that the consumer is notified when the number of tab increases.
-TEST_F(NTPHomeMediatorTest, TestTabCountInsert) {
-  // Setup.
+// Tests that the voice search button is disabled when VoiceOver is turned on
+// and off.
+TEST_F(NTPHomeMediatorTest, DisableVoiceSearch) {
   [mediator_ setUp];
 
-  OCMExpect([consumer_ setTabCount:kNumberOfWebStates + 1]);
+  // Enable VoiceOver and verify that voice search is disabled for the consumer.
+  OCMExpect([consumer_ setVoiceSearchIsEnabled:NO]);
+  voice_availability_.SetVoiceOverEnabled(true);
 
-  // Action.
-  auto web_state = std::make_unique<web::TestWebState>();
-  web_state_list_->InsertWebState(1, std::move(web_state),
-                                  WebStateList::INSERT_FORCE_INDEX,
-                                  WebStateOpener());
+  // Disable VoiceOVer and verify that voice search is enabled again.
+  OCMExpect([consumer_ setVoiceSearchIsEnabled:YES]);
+  voice_availability_.SetVoiceOverEnabled(false);
 
-  // Test.
   EXPECT_OCMOCK_VERIFY(consumer_);
-}
-
-// Tests that the consumer is notified when the number of tab decreases.
-TEST_F(NTPHomeMediatorTest, TestTabCountDetach) {
-  // Setup.
-  [mediator_ setUp];
-
-  OCMExpect([consumer_ setTabCount:kNumberOfWebStates - 1]);
-
-  // Action.
-  web_state_list_->DetachWebStateAt(1);
-
-  // Test.
-  EXPECT_OCMOCK_VERIFY(consumer_);
-}
-
-// Tests that the consumer is notified when the active web state changes.
-TEST_F(NTPHomeMediatorTest, TestChangeActiveWebState) {
-  // Setup.
-  [mediator_ setUp];
-  std::unique_ptr<ToolbarTestNavigationManager> navigation_manager =
-      std::make_unique<ToolbarTestNavigationManager>();
-  ToolbarTestNavigationManager* nav = navigation_manager.get();
-  std::unique_ptr<web::TestWebState> web_state =
-      std::make_unique<web::TestWebState>();
-  web_state->SetNavigationManager(std::move(navigation_manager));
-  nav->set_can_go_back(true);
-  nav->set_can_go_forward(false);
-  web_state_list_->InsertWebState(1, std::move(web_state),
-                                  WebStateList::INSERT_FORCE_INDEX,
-                                  WebStateOpener());
-
-  OCMExpect([consumer_ setCanGoForward:NO]);
-  OCMExpect([consumer_ setCanGoBack:YES]);
-
-  // Action.
-  web_state_list_->ActivateWebStateAt(1);
-
-  // Test.
-  EXPECT_OCMOCK_VERIFY(consumer_);
-}
-
-// Tests that the command is sent to the dispatcher when opening the Reading
-// List.
-TEST_F(NTPHomeMediatorTest, TestOpenReadingList) {
-  // Setup.
-  [mediator_ setUp];
-  OCMExpect([dispatcher_ showReadingList]);
-
-  // Action.
-  [mediator_ openReadingList];
-
-  // Test.
-  EXPECT_OCMOCK_VERIFY(dispatcher_);
-}
-
-// Tests that the command is sent to the loader when opening a suggestion.
-TEST_F(NTPHomeMediatorTest, TestOpenPage) {
-  // Setup.
-  [mediator_ setUp];
-  GURL url = GURL("http://chromium.org");
-  NSIndexPath* indexPath = [NSIndexPath indexPathForItem:0 inSection:0];
-  ContentSuggestionsItem* item =
-      [[ContentSuggestionsItem alloc] initWithType:0
-                                             title:@"test item"
-                                               url:url];
-  id model = OCMClassMock([CollectionViewModel class]);
-  OCMStub([suggestions_view_controller_ collectionViewModel]).andReturn(model);
-  OCMStub([model itemAtIndexPath:indexPath]).andReturn(item);
-
-  // Action.
-  [mediator_ openPageForItemAtIndexPath:indexPath];
-
-  // Test.
-  EXPECT_EQ(url, url_loader_->last_params.web_params.url);
-  EXPECT_TRUE(ui::PageTransitionCoreTypeIs(
-      ui::PAGE_TRANSITION_AUTO_BOOKMARK,
-      url_loader_->last_params.web_params.transition_type));
-}
-
-// Tests that the command is sent to the loader when opening a most visited.
-TEST_F(NTPHomeMediatorTest, TestOpenMostVisited) {
-  // Setup.
-  [mediator_ setUp];
-  GURL url = GURL("http://chromium.org");
-  ContentSuggestionsMostVisitedItem* item =
-      [[ContentSuggestionsMostVisitedItem alloc] initWithType:0];
-  item.URL = url;
-
-  // Action.
-  [mediator_ openMostVisitedItem:item atIndex:0];
-
-  // Test.
-  EXPECT_EQ(url, url_loader_->last_params.web_params.url);
-  EXPECT_TRUE(ui::PageTransitionCoreTypeIs(
-      ui::PAGE_TRANSITION_AUTO_BOOKMARK,
-      url_loader_->last_params.web_params.transition_type));
 }

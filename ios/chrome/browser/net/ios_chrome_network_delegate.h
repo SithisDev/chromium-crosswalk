@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 
 #include <stdint.h>
 
-#include <memory>
-
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "net/base/network_delegate_impl.h"
+#include "net/first_party_sets/same_party_context.h"
 
 class PrefService;
 
@@ -26,9 +24,13 @@ typedef PrefMember<bool> BooleanPrefMember;
 class IOSChromeNetworkDelegate : public net::NetworkDelegateImpl {
  public:
   IOSChromeNetworkDelegate();
+
+  IOSChromeNetworkDelegate(const IOSChromeNetworkDelegate&) = delete;
+  IOSChromeNetworkDelegate& operator=(const IOSChromeNetworkDelegate&) = delete;
+
   ~IOSChromeNetworkDelegate() override;
 
-  // If |cookie_settings| is null or not set, all cookies are enabled,
+  // If `cookie_settings` is null or not set, all cookies are enabled,
   // otherwise the settings are enforced on all observed network requests.
   // Not inlined because we assign a scoped_refptr, which requires us to include
   // the header file. Here we just forward-declare it.
@@ -40,31 +42,29 @@ class IOSChromeNetworkDelegate : public net::NetworkDelegateImpl {
     enable_do_not_track_ = enable_do_not_track;
   }
 
-  // Binds the pref members to |pref_service| and moves them to the IO thread.
+  // Binds the pref members to `pref_service` and moves them to the IO thread.
   // This method should be called on the UI thread.
   static void InitializePrefsOnUIThread(BooleanPrefMember* enable_do_not_track,
                                         PrefService* pref_service);
 
  private:
+  using QueryReason = content_settings::CookieSettings::QueryReason;
   // NetworkDelegate implementation.
   int OnBeforeURLRequest(net::URLRequest* request,
                          net::CompletionOnceCallback callback,
                          GURL* new_url) override;
-  void OnCompleted(net::URLRequest* request,
-                   bool started,
-                   int net_error) override;
-  bool OnCanGetCookies(const net::URLRequest& request,
-                       const net::CookieList& cookie_list,
-                       bool allowed_from_caller) override;
+  bool OnAnnotateAndMoveUserBlockedCookies(
+      const net::URLRequest& request,
+      net::CookieAccessResultList& maybe_included_cookies,
+      net::CookieAccessResultList& excluded_cookies) override;
   bool OnCanSetCookie(const net::URLRequest& request,
                       const net::CanonicalCookie& cookie,
-                      net::CookieOptions* options,
-                      bool allowed_from_caller) override;
-  bool OnCanAccessFile(const net::URLRequest& request,
-                       const base::FilePath& original_path,
-                       const base::FilePath& absolute_path) const override;
-  bool OnForcePrivacyMode(const GURL& url,
-                          const GURL& site_for_cookies) const override;
+                      net::CookieOptions* options) override;
+  net::NetworkDelegate::PrivacySetting OnForcePrivacyMode(
+      const GURL& url,
+      const net::SiteForCookies& site_for_cookies,
+      const absl::optional<url::Origin>& top_frame_origin,
+      net::SamePartyContext::Type same_party_context_type) const override;
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const net::URLRequest& request,
       const GURL& target_url,
@@ -74,8 +74,6 @@ class IOSChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   // Weak, owned by our owner.
   BooleanPrefMember* enable_do_not_track_;
-
-  DISALLOW_COPY_AND_ASSIGN(IOSChromeNetworkDelegate);
 };
 
 #endif  // IOS_CHROME_BROWSER_NET_IOS_CHROME_NETWORK_DELEGATE_H_

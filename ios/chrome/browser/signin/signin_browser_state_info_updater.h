@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,7 @@
 #define IOS_CHROME_BROWSER_SIGNIN_SIGNIN_BROWSER_STATE_INFO_UPDATER_H_
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
@@ -23,6 +22,10 @@ class SigninBrowserStateInfoUpdater : public KeyedService,
                                 SigninErrorController* signin_error_controller,
                                 const base::FilePath& browser_state_path);
 
+  SigninBrowserStateInfoUpdater(const SigninBrowserStateInfoUpdater&) = delete;
+  SigninBrowserStateInfoUpdater& operator=(
+      const SigninBrowserStateInfoUpdater&) = delete;
+
   ~SigninBrowserStateInfoUpdater() override;
 
  private:
@@ -36,20 +39,18 @@ class SigninBrowserStateInfoUpdater : public KeyedService,
   void OnErrorChanged() override;
 
   // IdentityManager::Observer:
-  void OnPrimaryAccountSet(
-      const CoreAccountInfo& primary_account_info) override;
-  void OnPrimaryAccountCleared(
-      const CoreAccountInfo& previous_primary_account_info) override;
+  void OnPrimaryAccountChanged(
+      const signin::PrimaryAccountChangeEvent& event) override;
 
   signin::IdentityManager* identity_manager_ = nullptr;
   SigninErrorController* signin_error_controller_ = nullptr;
   const base::FilePath browser_state_path_;
-  ScopedObserver<signin::IdentityManager, SigninBrowserStateInfoUpdater>
-      identity_manager_observer_;
-  ScopedObserver<SigninErrorController, SigninBrowserStateInfoUpdater>
-      signin_error_controller_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(SigninBrowserStateInfoUpdater);
+  base::ScopedObservation<signin::IdentityManager,
+                          signin::IdentityManager::Observer>
+      identity_manager_observation_{this};
+  base::ScopedObservation<SigninErrorController,
+                          SigninErrorController::Observer>
+      signin_error_controller_observation_{this};
 };
 
 #endif  // IOS_CHROME_BROWSER_SIGNIN_SIGNIN_BROWSER_STATE_INFO_UPDATER_H_

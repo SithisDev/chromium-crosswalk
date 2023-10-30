@@ -1,25 +1,25 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/app/startup/ios_chrome_main.h"
+#import "ios/chrome/app/startup/ios_chrome_main.h"
 
 #import <UIKit/UIKit.h>
 
-#include <vector>
+#import <vector>
 
-#include "base/logging.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/time/time.h"
-#include "ios/web/public/init/web_main_runner.h"
+#import "base/check.h"
+#import "base/strings/string_piece.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/time/time.h"
+#import "ios/web/public/init/web_main_runner.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-base::Time* g_start_time;
+base::TimeTicks* g_start_time;
 }  // namespace
 
 IOSChromeMain::IOSChromeMain() {
@@ -57,11 +57,11 @@ IOSChromeMain::~IOSChromeMain() {
 // static
 void IOSChromeMain::InitStartTime() {
   DCHECK(!g_start_time);
-  g_start_time = new base::Time(base::Time::Now());
+  g_start_time = new base::TimeTicks(base::TimeTicks::Now());
 }
 
 // static
-const base::Time& IOSChromeMain::StartTime() {
+const base::TimeTicks& IOSChromeMain::StartTime() {
   CHECK(g_start_time);
   return *g_start_time;
 }

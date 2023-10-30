@@ -1,9 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_TEST_APP_SIGNIN_TEST_UTIL_H_
 #define IOS_CHROME_TEST_APP_SIGNIN_TEST_UTIL_H_
+
+@class ChromeIdentity;
 
 namespace chrome_test_util {
 
@@ -14,16 +16,12 @@ void SetUpMockAuthentication();
 // Tears down the fake ChromeIdentityService and restores the real one.
 void TearDownMockAuthentication();
 
-// Sets up a mock AccountReconcilor that will always succeed and won't use the
-// network.
-void SetUpMockAccountReconcilor();
+// Signs the user out and starts clearing all identities from the
+// ChromeIdentityService.
+void SignOutAndClearIdentities();
 
-// Tears down the mock AccountReconcilor if it was previously set up.
-void TearDownMockAccountReconcilor();
-
-// Signs the user out and clears the known accounts entirely. Returns whether
-// the accounts were correctly removed from the keychain.
-bool SignOutAndClearAccounts();
+// Returns true when there are no identities in the ChromeIdentityService.
+bool HasIdentities();
 
 // Resets mock authentication.
 void ResetMockAuthentication();
@@ -31,6 +29,16 @@ void ResetMockAuthentication();
 // Resets Sign-in promo impression preferences for bookmarks and settings view,
 // and resets kIosBookmarkPromoAlreadySeen flag for bookmarks.
 void ResetSigninPromoPreferences();
+
+// Resets UserApprovedAccountListManager preferences.
+void ResetUserApprovedAccountListManager();
+
+// Revokes the Sync consent of the primary account. The user will be in the
+// signed-in state.
+void SignInWithoutSync(ChromeIdentity* identity);
+
+// Resets all the selected data types to be turned on in the sync engine.
+void ResetSyncSelectedDataTypes();
 
 }  // namespace chrome_test_util
 

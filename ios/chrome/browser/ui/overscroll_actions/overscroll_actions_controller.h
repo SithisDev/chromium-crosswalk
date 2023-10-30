@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,10 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_view.h"
-#import "ios/chrome/browser/ui/util/relaxed_bounds_constraints_hittest.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
 
 @protocol CRWWebViewProxy;
-namespace ios {
-class ChromeBrowserState;
-}
+class FullscreenController;
 @class OverscrollActionsController;
 
 // Describe the current state of the overscroll action controller.
@@ -43,21 +40,38 @@ extern NSString* const kOverscrollActionsDidEnd;
 // Called when an action has been triggered.
 // The action index holds the current triggered action which are numbered left
 // to right.
+// TODO(crbug.com/1272486) : Separate action handling for overscroll from UI
+// management.
 - (void)overscrollActionsController:(OverscrollActionsController*)controller
                    didTriggerAction:(OverscrollAction)action;
 // Should return true when the delegate wants to enable the overscroll actions.
-- (BOOL)shouldAllowOverscrollActions;
+- (BOOL)shouldAllowOverscrollActionsForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
 // The toolbar snapshot view that will be used to fade in/out the toolbar.
 // This snapshot will be animated when performing the pull down animation
 // revealing the actions.
-- (UIView*)toolbarSnapshotView;
+- (UIView*)toolbarSnapshotViewForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
 // The header view over which the overscroll action view will be added.
-- (UIView<RelaxedBoundsConstraintsHitTestSupport>*)headerView;
+- (UIView*)headerViewForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
 // Called to retrieve the top inset added to the scrollview for the header.
-- (CGFloat)overscrollActionsControllerHeaderInset:
+- (CGFloat)headerInsetForOverscrollActionsController:
     (OverscrollActionsController*)controller;
 // Called to retrieve the current height of the header.
-- (CGFloat)overscrollHeaderHeight;
+- (CGFloat)headerHeightForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
+// Called to retrieve the initial content offset for the scrollview because
+// some scrollviews don't start at offset 0.
+- (CGFloat)initialContentOffsetForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
+// The fullscreen controller, if any, the delegate makes available for
+// overscroll. The deleagate may return nullptr if fullscreen isn't supported.
+// This method will be called each time the overscroll state might need to
+// interact with fullscreen, so it's fine for a delegate to return nullptr as
+// soon as it enters a state where fullscreen is unsupported.
+- (FullscreenController*)fullscreenControllerForOverscrollActionsController:
+    (OverscrollActionsController*)controller;
 @end
 
 // The OverscrollActionsController controls the display of an
@@ -90,6 +104,11 @@ extern NSString* const kOverscrollActionsDidEnd;
 
 - (instancetype)init NS_UNAVAILABLE;
 
+// Investigation into crbug.com/1102494 shows that the most likely issue is
+// that there are many many instances of OverscrollActionsController live at
+// once. This tracks how many live instances there are.
++ (int)instanceCount;
+
 // The scrollview the overscroll controller will control.
 @property(weak, nonatomic, readonly) UIScrollView* scrollView;
 // The current state of the overscroll controller.
@@ -97,16 +116,14 @@ extern NSString* const kOverscrollActionsDidEnd;
 // The delegate must be set for the OverscrollActionsController to work
 // properly.
 @property(nonatomic, weak) id<OverscrollActionsControllerDelegate> delegate;
-// The BrowserState.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
 
 // Used to clear state maintained by the controller and de-register from
 // notifications. After this call the controller ceases to function and will
 // clear its delegate.
 - (void)invalidate;
-// Schedules call to |invalidate| at the end of the current action. This lets
+// Schedules call to `invalidate` at the end of the current action. This lets
 // the animation finish before invalidating the controller.
-// If no action is running, calls |invalidate| immediately.
+// If no action is running, calls `invalidate` immediately.
 - (void)scheduleInvalidate;
 // Force the controller to switch to NO_PULL_STARTED state.
 - (void)clear;

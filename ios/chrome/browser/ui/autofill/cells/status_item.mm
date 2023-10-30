@@ -1,16 +1,15 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/autofill/cells/status_item.h"
 
-#include "base/logging.h"
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import <MaterialComponents/MaterialActivityIndicator.h>
+
+#import "base/check.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_theme_resources.h"
-#import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MaterialActivityIndicator.h"
-#import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_theme_resources.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -66,7 +65,7 @@ const CGFloat kHorizontalPadding = 16;
     [contentView addSubview:verticalCenteringView];
 
     _activityIndicator = [[MDCActivityIndicator alloc] init];
-    _activityIndicator.cycleColors = @[ [[MDCPalette cr_bluePalette] tint500] ];
+    _activityIndicator.cycleColors = @[ [UIColor colorNamed:kBlueColor] ];
     [_activityIndicator setRadius:10];
     _activityIndicator.translatesAutoresizingMaskIntoConstraints = NO;
     [verticalCenteringView addSubview:_activityIndicator];
@@ -88,7 +87,7 @@ const CGFloat kHorizontalPadding = 16;
     [verticalCenteringView addSubview:_errorImageView];
 
     _textLabel = [[UILabel alloc] init];
-    _textLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:16];
+    _textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     _textLabel.numberOfLines = 0;
     _textLabel.lineBreakMode = NSLineBreakByWordWrapping;
     // The label's position will be centered with Auto Layout but this ensures
@@ -169,21 +168,21 @@ const CGFloat kHorizontalPadding = 16;
 - (void)configureForState:(StatusItemState)state {
   switch (state) {
     case StatusItemState::VERIFYING:
-      self.textLabel.textColor = [[MDCPalette cr_bluePalette] tint500];
+      self.textLabel.textColor = [UIColor colorNamed:kBlueColor];
       [self.activityIndicator startAnimating];
       self.activityIndicator.hidden = NO;
       self.verifiedImageView.hidden = YES;
       self.errorImageView.hidden = YES;
       break;
     case StatusItemState::VERIFIED:
-      self.textLabel.textColor = [[MDCPalette cr_bluePalette] tint500];
+      self.textLabel.textColor = [UIColor colorNamed:kBlueColor];
       [self.activityIndicator stopAnimating];
       self.activityIndicator.hidden = YES;
       self.verifiedImageView.hidden = NO;
       self.errorImageView.hidden = YES;
       break;
     case StatusItemState::ERROR:
-      self.textLabel.textColor = [[MDCPalette cr_redPalette] tint500];
+      self.textLabel.textColor = [UIColor colorNamed:kRedColor];
       [self.activityIndicator stopAnimating];
       self.activityIndicator.hidden = YES;
       self.verifiedImageView.hidden = YES;

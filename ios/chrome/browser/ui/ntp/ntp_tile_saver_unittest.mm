@@ -1,22 +1,23 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/ntp/ntp_tile_saver.h"
-#include "base/run_loop.h"
+
+#import "base/run_loop.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#import "base/test/task_environment.h"
 #import "components/ntp_tiles/ntp_tile.h"
 #import "ios/chrome/browser/ui/favicon/favicon_attributes_provider.h"
-#include "ios/chrome/common/app_group/app_group_constants.h"
-#import "ios/chrome/common/favicon/favicon_attributes.h"
+#import "ios/chrome/common/app_group/app_group_constants.h"
 #import "ios/chrome/common/ntp_tile/ntp_tile.h"
+#import "ios/chrome/common/ui/favicon/favicon_attributes.h"
 #import "ios/chrome/test/block_cleanup_test.h"
 #import "net/base/mac/url_conversions.h"
 #import "testing/gtest_mac.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "ui/base/test/ios/ui_image_test_utils.h"
+#import "ui/base/test/ios/ui_image_test_utils.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -88,10 +89,10 @@ class NTPTileSaverControllerTest : public BlockCleanupTest {
         });
   }
 
-  // Checks that |tile| has an image and no fallback data.
-  // Checks that |tile| title and url match |expected_title| and
-  // |expected_url|.
-  // Checks that the file pointed by |tile| match |mock_image_|.
+  // Checks that `tile` has an image and no fallback data.
+  // Checks that `tile` title and url match `expected_title` and
+  // `expected_url`.
+  // Checks that the file pointed by `tile` match `mock_image_`.
   void VerifyWithImage(NTPTile* tile,
                        NSString* expected_title,
                        NSURL* expected_url) {
@@ -113,10 +114,10 @@ class NTPTileSaverControllerTest : public BlockCleanupTest {
                 UIImagePNGRepresentation(mock_image_));
   }
 
-  // Checks that |tile| has fallback data.
-  // Checks that |tile| title and url match |expected_title| and
-  // |expected_url|.
-  // Checks that the file pointed by |tile| does not exist.
+  // Checks that `tile` has fallback data.
+  // Checks that `tile` title and url match `expected_title` and
+  // `expected_url`.
+  // Checks that the file pointed by `tile` does not exist.
   void VerifyWithFallback(NTPTile* tile,
                           NSString* expected_title,
                           NSURL* expected_url) {
@@ -133,10 +134,10 @@ class NTPTileSaverControllerTest : public BlockCleanupTest {
                              path]]);
   }
 
-  // Checks that |tile| has an image and fallback data.
-  // Checks that |tile| title and url match |expected_title| and
-  // |expected_url|.
-  // Checks that the file pointed by |tile| match |mock_image_|.
+  // Checks that `tile` has an image and fallback data.
+  // Checks that `tile` title and url match `expected_title` and
+  // `expected_url`.
+  // Checks that the file pointed by `tile` match `mock_image_`.
   void VerifyWithFallbackAndImage(NTPTile* tile,
                                   NSString* expected_title,
                                   NSURL* expected_url) {
@@ -160,17 +161,17 @@ class NTPTileSaverControllerTest : public BlockCleanupTest {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_evironment_;
+  base::test::TaskEnvironment scoped_task_evironment_;
   UIImage* mock_image_;
 };
 
 TEST_F(NTPTileSaverControllerTest, SaveMostVisitedToDisk) {
   ntp_tiles::NTPTile image_tile = ntp_tiles::NTPTile();
-  image_tile.title = base::ASCIIToUTF16("Title");
+  image_tile.title = u"Title";
   image_tile.url = GURL("http://image.com");
 
   ntp_tiles::NTPTile fallback_tile = ntp_tiles::NTPTile();
-  fallback_tile.title = base::ASCIIToUTF16("Title");
+  fallback_tile.title = u"Title";
   fallback_tile.url = GURL("http://fallback.com");
 
   id mock_favicon_fetcher = OCMClassMock([FaviconAttributesProvider class]);
@@ -207,15 +208,15 @@ TEST_F(NTPTileSaverControllerTest, SaveMostVisitedToDisk) {
 TEST_F(NTPTileSaverControllerTest, UpdateSingleFaviconFallback) {
   // Set up test with 3 saved sites, 2 of which have a favicon.
   ntp_tiles::NTPTile image_tile1 = ntp_tiles::NTPTile();
-  image_tile1.title = base::ASCIIToUTF16("Title1");
+  image_tile1.title = u"Title1";
   image_tile1.url = GURL("http://image1.com");
 
   ntp_tiles::NTPTile image_tile2 = ntp_tiles::NTPTile();
-  image_tile2.title = base::ASCIIToUTF16("Title2");
+  image_tile2.title = u"Title2";
   image_tile2.url = GURL("http://image2.com");
 
   ntp_tiles::NTPTile fallback_tile = ntp_tiles::NTPTile();
-  fallback_tile.title = base::ASCIIToUTF16("Title");
+  fallback_tile.title = u"Title";
   fallback_tile.url = GURL("http://fallback.com");
 
   id mock_favicon_fetcher = OCMClassMock([FaviconAttributesProvider class]);
@@ -279,11 +280,11 @@ TEST_F(NTPTileSaverControllerTest, UpdateSingleFaviconFallback) {
 // Checks that the image saved for an item is deleted when the item is deleted.
 TEST_F(NTPTileSaverControllerTest, DeleteOutdatedImage) {
   ntp_tiles::NTPTile image_tile1 = ntp_tiles::NTPTile();
-  image_tile1.title = base::ASCIIToUTF16("Title");
+  image_tile1.title = u"Title";
   image_tile1.url = GURL("http://image1.com");
 
   ntp_tiles::NTPTile image_tile2 = ntp_tiles::NTPTile();
-  image_tile2.title = base::ASCIIToUTF16("Title");
+  image_tile2.title = u"Title";
   image_tile2.url = GURL("http://image2.com");
 
   id mock_favicon_fetcher = OCMClassMock([FaviconAttributesProvider class]);
@@ -335,7 +336,7 @@ TEST_F(NTPTileSaverControllerTest, UpdateEntry) {
   ntp_tiles::NTPTile tile = ntp_tiles::NTPTile();
 
   // Set up a red favicon.
-  tile.title = base::ASCIIToUTF16("Title");
+  tile.title = u"Title";
   tile.url = GURL("http://url.com");
   NSString* ns_title = base::SysUTF16ToNSString(tile.title);
   NSURL* ns_url = net::NSURLWithGURL(tile.url);

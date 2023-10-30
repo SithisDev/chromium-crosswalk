@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,20 @@
 #import <UIKit/UIKit.h>
 
 #import "base/test/ios/wait_util.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_controller.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_view.h"
-#import "ios/chrome/common/colors/incognito_color_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/test/fakes/fake_overscroll_actions_controller_delegate.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
+#import "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
-#include "testing/platform_test.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,28 +52,32 @@ class OverscrollActionsTabHelperTest : public PlatformTest {
     return overscroll_delegate_.headerView.subviews.firstObject;
   }
 
-  // Simulates scroll on the |scroll_view_proxy_| view, which should trigger
+  // Simulates scroll on the `scroll_view_proxy_` view, which should trigger
   // page refresh action.
   void SimulatePullForRefreshAction() {
-    [scroll_view_proxy_ scrollViewWillBeginDragging:ui_scroll_view_];
+    [ui_scroll_view_.delegate scrollViewWillBeginDragging:ui_scroll_view_];
     // Wait until scroll action is allowed. There is no condition to wait, just
     // a time period.
-    base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(
-        kMinimumPullDurationToTransitionToReadyInSeconds));
-    [scroll_view_proxy_ scrollViewDidScroll:ui_scroll_view_];
+    base::test::ios::SpinRunLoopWithMinDelay(
+        base::Seconds(kMinimumPullDurationToTransitionToReadyInSeconds));
+    [ui_scroll_view_.delegate scrollViewDidScroll:ui_scroll_view_];
+    // Scroll to content offset below action threshold to cancel bounce
+    // animation.
+    scroll_view_proxy_.contentOffset = CGPointMake(0, -56);
+    // Scroll past action threshold to trigger refresh action.
     scroll_view_proxy_.contentOffset = CGPointMake(0, -293);
     CGPoint target_offset = CGPointMake(0, -92);
-    [scroll_view_proxy_ scrollViewWillEndDragging:ui_scroll_view_
-                                     withVelocity:CGPointMake(0, -1.5)
-                              targetContentOffset:&target_offset];
+    [ui_scroll_view_.delegate scrollViewWillEndDragging:ui_scroll_view_
+                                           withVelocity:CGPointMake(0, -1.5)
+                                    targetContentOffset:&target_offset];
     [overscroll_delegate_.headerView layoutIfNeeded];
-    [scroll_view_proxy_ scrollViewDidEndDragging:ui_scroll_view_
-                                  willDecelerate:NO];
+    [ui_scroll_view_.delegate scrollViewDidEndDragging:ui_scroll_view_
+                                        willDecelerate:NO];
   }
 
-  web::TestWebThreadBundle thread_bundle_;
-  std::unique_ptr<ios::ChromeBrowserState> browser_state_;
-  web::TestWebState web_state_;
+  web::WebTaskEnvironment task_environment_;
+  std::unique_ptr<ChromeBrowserState> browser_state_;
+  web::FakeWebState web_state_;
   FakeOverscrollActionsControllerDelegate* overscroll_delegate_;
   CRWWebViewScrollViewProxy* scroll_view_proxy_;
   UIScrollView* ui_scroll_view_;
@@ -82,13 +85,7 @@ class OverscrollActionsTabHelperTest : public PlatformTest {
 
 // Tests that OverscrollActionsControllerDelegate is set correctly and triggered
 // When there is a view pull.
-// TODO(crbug.com/944599): Fails on device.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_TestDelegateTrigger TestDelegateTrigger
-#else
-#define MAYBE_TestDelegateTrigger DISABLED_TestDelegateTrigger
-#endif
-TEST_F(OverscrollActionsTabHelperTest, MAYBE_TestDelegateTrigger) {
+TEST_F(OverscrollActionsTabHelperTest, TestDelegateTrigger) {
   web_state_.SetBrowserState(browser_state_.get());
   overscroll_tab_helper()->SetDelegate(overscroll_delegate_);
   // Start pull for page refresh action.
@@ -104,13 +101,7 @@ TEST_F(OverscrollActionsTabHelperTest, MAYBE_TestDelegateTrigger) {
 
 // Tests that overscrolls actions view style is set correctly, for regular
 // browsing browser state.
-// TODO(crbug.com/944599): Fails on device.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_TestRegularBrowserStateStyle TestRegularBrowserStateStyle
-#else
-#define MAYBE_TestRegularBrowserStateStyle DISABLED_TestRegularBrowserStateStyle
-#endif
-TEST_F(OverscrollActionsTabHelperTest, MAYBE_TestRegularBrowserStateStyle) {
+TEST_F(OverscrollActionsTabHelperTest, TestRegularBrowserStateStyle) {
   web_state_.SetBrowserState(browser_state_.get());
   overscroll_tab_helper()->SetDelegate(overscroll_delegate_);
   SimulatePullForRefreshAction();
@@ -121,25 +112,14 @@ TEST_F(OverscrollActionsTabHelperTest, MAYBE_TestRegularBrowserStateStyle) {
 
 // Tests that overscrolls actions view style is set correctly, for off the
 // record browser state.
-// TODO(crbug.com/944599): Fails on device.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_TestOffTheRecordBrowserStateStyle \
-  TestOffTheRecordBrowserStateStyle
-#else
-#define MAYBE_TestOffTheRecordBrowserStateStyle \
-  DISABLED_TestOffTheRecordBrowserStateStyle
-#endif
-TEST_F(OverscrollActionsTabHelperTest,
-       MAYBE_TestOffTheRecordBrowserStateStyle) {
+TEST_F(OverscrollActionsTabHelperTest, TestOffTheRecordBrowserStateStyle) {
   web_state_.SetBrowserState(
       browser_state_->GetOffTheRecordChromeBrowserState());
   overscroll_tab_helper()->SetDelegate(overscroll_delegate_);
   SimulatePullForRefreshAction();
   // For iOS 13 and dark mode, the incognito overscroll actions view uses a
   // dynamic color.
-  UIColor* expected_color =
-      color::IncognitoDynamicColor(true, [UIColor colorNamed:kBackgroundColor],
-                                   [UIColor colorNamed:kBackgroundDarkColor]);
+  UIColor* expected_color = [UIColor colorNamed:kBackgroundColor];
   EXPECT_TRUE(action_view());
   EXPECT_NSEQ(expected_color, action_view().backgroundColor);
 }

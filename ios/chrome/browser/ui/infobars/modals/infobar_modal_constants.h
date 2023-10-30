@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,5 +11,8 @@
 extern NSString* const kInfobarModalViewIdentifier;
 // Accessibility identifier of the Modal Cancel Button.
 extern NSString* const kInfobarModalCancelButton;
+
+// UserAction keys.
+extern const char kInfobarModalCancelButtonTapped[];
 
 #endif  // IOS_CHROME_BROWSER_UI_INFOBARS_MODALS_INFOBAR_MODAL_CONSTANTS_H_

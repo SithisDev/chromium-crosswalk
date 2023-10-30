@@ -1,13 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ios/chrome/common/x_callback_url.h"
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/strings/escape.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "net/base/escape.h"
 #include "net/base/url_util.h"
 
 namespace {
@@ -27,7 +27,7 @@ bool IsXCallbackURL(const GURL& url) {
     return url.host_piece() == kXCallbackURLHost;
 
   base::StringPiece path_piece = url.path_piece();
-  if (path_piece.starts_with("//"))
+  if (base::StartsWith(path_piece, "//"))
     path_piece = path_piece.substr(2, base::StringPiece::npos);
 
   size_t pos = path_piece.find('/', 0);
@@ -51,8 +51,7 @@ GURL CreateXCallbackURLWithParameters(
     const GURL& cancel_url,
     const std::map<std::string, std::string>& parameters) {
   DCHECK(!scheme.empty());
-  GURL url(base::StringPrintf("%s://%s/%s", scheme.data(), kXCallbackURLHost,
-                              !action.empty() ? action.data() : ""));
+  GURL url(base::StrCat({scheme, "://", kXCallbackURLHost, "/", action}));
 
   if (success_url.is_valid()) {
     url = net::AppendQueryParameter(url, kSuccessURLParameterName,

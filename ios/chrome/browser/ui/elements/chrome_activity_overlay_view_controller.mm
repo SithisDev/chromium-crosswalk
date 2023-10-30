@@ -1,20 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/elements/chrome_activity_overlay_view_controller.h"
 
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Alpha of the presented view's background.
-const CGFloat kViewBackgroundAlpha = 0.5;
-// Background white color of container view.
-const CGFloat kContainerBackgroundWhiteColor = 0.9;
 // Spacing between container view and subviews.
 const CGFloat kContainerViewSpacing = 25;
 // Corner radius of container view.
@@ -27,19 +25,14 @@ const CGFloat kActivityIndicatorViewSize = 55;
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.view.backgroundColor =
-      [UIColor colorWithWhite:0 alpha:kViewBackgroundAlpha];
-
+  self.view.backgroundColor = [UIColor colorNamed:kScrimBackgroundColor];
   UIView* containerView = [[UIView alloc] init];
   containerView.translatesAutoresizingMaskIntoConstraints = NO;
-  containerView.backgroundColor =
-      [UIColor colorWithWhite:kContainerBackgroundWhiteColor alpha:1.0];
+  containerView.backgroundColor = [UIColor colorNamed:kBackgroundColor];
   containerView.layer.cornerRadius = kContainerCornerRadius;
   containerView.layer.masksToBounds = YES;
-
-  UIActivityIndicatorView* activityView = [[UIActivityIndicatorView alloc]
-      initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
-  activityView.color = [UIColor blackColor];
+  UIActivityIndicatorView* activityView = GetLargeUIActivityIndicatorView();
+  activityView.color = [UIColor colorNamed:kTextPrimaryColor];
   activityView.translatesAutoresizingMaskIntoConstraints = NO;
   [activityView startAnimating];
   [containerView addSubview:activityView];
@@ -62,8 +55,7 @@ const CGFloat kActivityIndicatorViewSize = 55;
     [activityView.bottomAnchor
         constraintEqualToAnchor:containerView.bottomAnchor
                        constant:-kContainerViewSpacing],
-    [activityView.centerXAnchor constraintEqualToAnchor:label.centerXAnchor
-                                               constant:0],
+    [activityView.centerXAnchor constraintEqualToAnchor:label.centerXAnchor],
     [activityView.heightAnchor
         constraintEqualToConstant:kActivityIndicatorViewSize],
     [activityView.widthAnchor
@@ -73,6 +65,11 @@ const CGFloat kActivityIndicatorViewSize = 55;
 
   [self.view addSubview:containerView];
   AddSameCenterConstraints(self.view, containerView);
+
+  // To allow message text to be read by screen reader, and to make sure the
+  // speech will finish.
+  UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification,
+                                  self.messageText);
 }
 
 @end

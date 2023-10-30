@@ -1,30 +1,28 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_SETTINGS_AUTOFILL_AUTOFILL_CREDIT_CARD_TABLE_VIEW_CONTROLLER_H_
 #define IOS_CHROME_BROWSER_UI_SETTINGS_AUTOFILL_AUTOFILL_CREDIT_CARD_TABLE_VIEW_CONTROLLER_H_
 
+#import "ios/chrome/browser/ui/settings/settings_controller_protocol.h"
 #import "ios/chrome/browser/ui/settings/settings_root_table_view_controller.h"
 
-extern NSString* const kAutofillCreditCardTableViewId;
-extern NSString* const kAutofillCreditCardSwitchViewId;
-
-namespace ios {
+class Browser;
 class ChromeBrowserState;
-}  // namespace ios
 
 // The table view for the Autofill settings.
 @interface AutofillCreditCardTableViewController
-    : SettingsRootTableViewController
+    : SettingsRootTableViewController <SettingsControllerProtocol>
 
-// The designated initializer. |browserState| must not be nil.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-    NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithTableViewStyle:(UITableViewStyle)style
-                           appBarStyle:
-                               (ChromeTableViewControllerStyle)appBarStyle
+// The designated initializer. `browser` must not be nil.
+- (instancetype)initWithBrowser:(Browser*)browser NS_DESIGNATED_INITIALIZER;
+
+// Use -initWithBrowser:.
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_UNAVAILABLE;
+
+- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
 
 @end
 

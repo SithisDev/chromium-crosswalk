@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,10 @@
 @class FaviconAttributes;
 @class FaviconView;
 class GURL;
-@protocol ManualFillContentDelegate;
+@protocol ManualFillContentInjector;
 @class ManualFillCredential;
+
+extern NSString* const kMaskedPasswordTitle;
 
 // Wrapper to show password cells in a ChromeTableViewController.
 @interface ManualFillCredentialItem : TableViewItem
@@ -31,7 +33,8 @@ class GURL;
 - (instancetype)initWithCredential:(ManualFillCredential*)credential
          isConnectedToPreviousItem:(BOOL)isConnectedToPreviousItem
              isConnectedToNextItem:(BOOL)isConnectedToNextItem
-                          delegate:(id<ManualFillContentDelegate>)delegate
+                   contentInjector:
+                       (id<ManualFillContentInjector>)contentInjector
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithType:(NSInteger)type NS_UNAVAILABLE;
@@ -45,12 +48,12 @@ class GURL;
 // Identifier to match a URLItem with its URLCell.
 @property(nonatomic, readonly) NSString* uniqueIdentifier;
 
-// Updates the cell with the |credential|. If the user iteracts with it, the
-// |delegate| will be notified.
+// Updates the cell with the `credential`. If the user iteracts with it, the
+// `delegate` will be notified.
 - (void)setUpWithCredential:(ManualFillCredential*)credential
     isConnectedToPreviousCell:(BOOL)isConnectedToPreviousCell
         isConnectedToNextCell:(BOOL)isConnectedToNextCell
-                     delegate:(id<ManualFillContentDelegate>)delegate;
+              contentInjector:(id<ManualFillContentInjector>)contentInjector;
 
 // Configures the cell for the passed favicon attributes.
 - (void)configureWithFaviconAttributes:(FaviconAttributes*)attributes;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,8 @@
 #import "ios/chrome/browser/ui/recent_tabs/synced_sessions_bridge.h"
 #import "ios/chrome/browser/ui/table_view/table_view_favicon_data_source.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
+class WebStateList;
 
 @protocol RecentTabsConsumer;
 
@@ -33,7 +32,10 @@ class ChromeBrowserState;
 @property(nonatomic, strong) id<RecentTabsConsumer> consumer;
 
 // The coordinator's BrowserState.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
+@property(nonatomic, assign) ChromeBrowserState* browserState;
+
+// The WebStateList that this mediator listens for.
+@property(nonatomic, assign) WebStateList* webStateList;
 
 // Starts observing the he user's signed-in and chrome-sync states.
 - (void)initObservers;

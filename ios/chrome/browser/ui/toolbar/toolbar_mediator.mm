@@ -1,65 +1,75 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/toolbar/toolbar_mediator.h"
 
-#include "base/memory/ptr_util.h"
-#include "base/scoped_observer.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
-#include "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
+#import "base/memory/ptr_util.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/open_from_clipboard/clipboard_recent_content.h"
+#import "components/search_engines/template_url_service.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter_observer_bridge.h"
+#import "ios/chrome/browser/policy/policy_util.h"
+#import "ios/chrome/browser/search_engines/search_engines_util.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
+#import "ios/chrome/browser/ui/commands/load_query_commands.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/icons/chrome_symbol.h"
+#import "ios/chrome/browser/ui/icons/infobar_icon.h"
+#import "ios/chrome/browser/ui/menu/browser_action_factory.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_consumer.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/url_loading/image_search_param_generator.h"
+#import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#import "ios/public/provider/chrome/browser/images/branded_image_provider.h"
-#import "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/public/provider/chrome/browser/voice_search/voice_search_api.h"
+#import "ios/web/public/favicon/favicon_status.h"
+#import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/gfx/image/image.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface ToolbarMediator ()<BookmarkModelBridgeObserver,
-                              CRWWebStateObserver,
-                              SearchEngineObserving,
-                              WebStateListObserving>
+@interface ToolbarMediator () <CRWWebStateObserver,
+                               OverlayPresenterObserving,
+                               WebStateListObserving>
 
 // The current web state associated with the toolbar.
 @property(nonatomic, assign) web::WebState* webState;
 
-// The icon for the search button.
-@property(nonatomic, strong) UIImage* searchIcon;
+// Whether an overlay is currently presented over the web content area.
+@property(nonatomic, assign, getter=isWebContentAreaShowingOverlay)
+    BOOL webContentAreaShowingOverlay;
 
 @end
 
 @implementation ToolbarMediator {
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
   std::unique_ptr<WebStateListObserverBridge> _webStateListObserver;
-  // Bridge to register for bookmark changes.
-  std::unique_ptr<bookmarks::BookmarkModelBridge> _bookmarkModelBridge;
-  // Listen for default search engine changes.
-  std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
+  std::unique_ptr<OverlayPresenterObserverBridge> _overlayObserver;
 }
-
-@synthesize bookmarkModel = _bookmarkModel;
-@synthesize consumer = _consumer;
-@synthesize webState = _webState;
-@synthesize webStateList = _webStateList;
-@synthesize searchIcon = _searchIcon;
 
 - (instancetype)init {
   self = [super init];
   if (self) {
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
     _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
+    _overlayObserver = std::make_unique<OverlayPresenterObserverBridge>(self);
   }
   return self;
 }
@@ -73,10 +83,11 @@
 - (void)updateConsumerForWebState:(web::WebState*)webState {
   [self updateNavigationBackAndForwardStateForWebState:webState];
   [self updateShareMenuForWebState:webState];
-  [self updateBookmarksForWebState:webState];
 }
 
 - (void)disconnect {
+  self.webContentAreaOverlayPresenter = nullptr;
+
   if (_webStateList) {
     _webStateList->RemoveObserver(_webStateListObserver.get());
     _webStateListObserver.reset();
@@ -88,8 +99,6 @@
     _webStateObserver.reset();
     _webState = nullptr;
   }
-  _bookmarkModelBridge.reset();
-  _searchEngineObserver.reset();
 }
 
 #pragma mark - CRWWebStateObserver
@@ -111,12 +120,6 @@
   [self updateConsumer];
 }
 
-- (void)webState:(web::WebState*)webState
-    didPruneNavigationItemsWithCount:(size_t)pruned_item_count {
-  DCHECK_EQ(_webState, webState);
-  [self updateConsumer];
-}
-
 - (void)webStateDidStartLoading:(web::WebState*)webState {
   DCHECK_EQ(_webState, webState);
   [self updateConsumer];
@@ -124,7 +127,7 @@
 
 - (void)webStateDidStopLoading:(web::WebState*)webState {
   DCHECK_EQ(_webState, webState);
-  [self.consumer setLoadingState:self.webState->IsLoading()];
+  [self updateConsumer];
 }
 
 - (void)webState:(web::WebState*)webState
@@ -171,9 +174,30 @@
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   DCHECK_EQ(_webStateList, webStateList);
   self.webState = newWebState;
+}
+
+#pragma mark - AdaptiveToolbarMenusProvider
+
+- (UIMenu*)menuForButtonOfType:(AdaptiveToolbarButtonType)buttonType {
+  switch (buttonType) {
+    case AdaptiveToolbarButtonTypeBack:
+      return [self menuForNavigationItems:self.webState->GetNavigationManager()
+                                              ->GetBackwardItems()];
+
+    case AdaptiveToolbarButtonTypeForward:
+      return [self menuForNavigationItems:self.webState->GetNavigationManager()
+                                              ->GetForwardItems()];
+
+    case AdaptiveToolbarButtonTypeNewTab:
+      return [self menuForNewTabButton];
+
+    case AdaptiveToolbarButtonTypeTabGrid:
+      return [self menuForTabGridButton];
+  }
+  return nil;
 }
 
 #pragma mark - Setters
@@ -183,20 +207,6 @@
     return;
 
   _incognito = incognito;
-  if (self.searchIcon) {
-    // If the searchEngine was already initialized, ask for the new image.
-    [self searchEngineChanged];
-  }
-}
-
-- (void)setTemplateURLService:(TemplateURLService*)templateURLService {
-  _templateURLService = templateURLService;
-  if (templateURLService) {
-    // Listen for default search engine changes.
-    _searchEngineObserver =
-        std::make_unique<SearchEngineObserverBridge>(self, templateURLService);
-    templateURLService->Load();
-  }
 }
 
 - (void)setWebState:(web::WebState*)webState {
@@ -217,9 +227,7 @@
 
 - (void)setConsumer:(id<ToolbarConsumer>)consumer {
   _consumer = consumer;
-  [_consumer setVoiceSearchEnabled:ios::GetChromeBrowserProvider()
-                                       ->GetVoiceSearchProvider()
-                                       ->IsVoiceSearchEnabled()];
+  [_consumer setVoiceSearchEnabled:ios::provider::IsVoiceSearchEnabled()];
   if (self.webState) {
     [self updateConsumer];
   }
@@ -247,19 +255,25 @@
   }
 }
 
-- (void)setBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel {
-  _bookmarkModel = bookmarkModel;
-  if (self.webState && self.consumer) {
-    [self updateConsumer];
-  }
-  _bookmarkModelBridge.reset();
-  if (bookmarkModel) {
-    _bookmarkModelBridge =
-        std::make_unique<bookmarks::BookmarkModelBridge>(self, bookmarkModel);
-  }
+- (void)setWebContentAreaOverlayPresenter:
+    (OverlayPresenter*)webContentAreaOverlayPresenter {
+  if (_webContentAreaOverlayPresenter)
+    _webContentAreaOverlayPresenter->RemoveObserver(_overlayObserver.get());
+
+  _webContentAreaOverlayPresenter = webContentAreaOverlayPresenter;
+
+  if (_webContentAreaOverlayPresenter)
+    _webContentAreaOverlayPresenter->AddObserver(_overlayObserver.get());
 }
 
-#pragma mark - Helper methods
+- (void)setWebContentAreaShowingOverlay:(BOOL)webContentAreaShowingOverlay {
+  if (_webContentAreaShowingOverlay == webContentAreaShowingOverlay)
+    return;
+  _webContentAreaShowingOverlay = webContentAreaShowingOverlay;
+  [self updateShareMenuForWebState:self.webState];
+}
+
+#pragma mark - Update helper methods
 
 // Updates the consumer to match the current WebState.
 - (void)updateConsumer {
@@ -272,7 +286,10 @@
   // Never show the loading UI for an NTP.
   BOOL isLoading = self.webState->IsLoading() && !isNTP;
   [self.consumer setLoadingState:isLoading];
-  [self updateBookmarksForWebState:self.webState];
+  if (isLoading) {
+    [self.consumer
+        setLoadingProgressFraction:self.webState->GetLoadingProgress()];
+  }
   [self updateShareMenuForWebState:self.webState];
 }
 
@@ -285,73 +302,155 @@
   [self.consumer setCanGoBack:webState->GetNavigationManager()->CanGoBack()];
 }
 
-// Updates the bookmark state of the consumer.
-- (void)updateBookmarksForWebState:(web::WebState*)webState {
-  if (self.webState) {
-    GURL URL = webState->GetVisibleURL();
-    [self.consumer setPageBookmarked:self.bookmarkModel &&
-                                     self.bookmarkModel->IsBookmarked(URL)];
-  }
-}
-
 // Updates the Share Menu button of the consumer.
 - (void)updateShareMenuForWebState:(web::WebState*)webState {
+  if (!self.webState)
+    return;
   const GURL& URL = webState->GetLastCommittedURL();
   BOOL shareMenuEnabled =
       URL.is_valid() && !web::GetWebClient()->IsAppSpecificURL(URL);
-  [self.consumer setShareMenuEnabled:shareMenuEnabled];
+  // Page sharing requires JavaScript execution, which is paused while overlays
+  // are displayed over the web content area.
+  [self.consumer setShareMenuEnabled:shareMenuEnabled &&
+                                     !self.webContentAreaShowingOverlay];
 }
 
-#pragma mark - BookmarkModelBridgeObserver
+#pragma mark - OverlayPresesenterObserving
 
-// If an added or removed bookmark is the same as the current url, update the
-// toolbar so the star highlight is kept in sync.
-- (void)bookmarkNodeChildrenChanged:
-    (const bookmarks::BookmarkNode*)bookmarkNode {
-  [self updateBookmarksForWebState:self.webState];
+- (void)overlayPresenter:(OverlayPresenter*)presenter
+    willShowOverlayForRequest:(OverlayRequest*)request
+          initialPresentation:(BOOL)initialPresentation {
+  self.webContentAreaShowingOverlay = YES;
 }
 
-// If all bookmarks are removed, update the toolbar so the star highlight is
-// kept in sync.
-- (void)bookmarkModelRemovedAllNodes {
-  [self updateBookmarksForWebState:self.webState];
+- (void)overlayPresenter:(OverlayPresenter*)presenter
+    didHideOverlayForRequest:(OverlayRequest*)request {
+  self.webContentAreaShowingOverlay = NO;
 }
 
-// In case we are on a bookmarked page before the model is loaded.
-- (void)bookmarkModelLoaded {
-  [self updateBookmarksForWebState:self.webState];
-}
+#pragma mark - Private
 
-- (void)bookmarkNodeChanged:(const bookmarks::BookmarkNode*)bookmarkNode {
-  // No-op -- required by BookmarkModelBridgeObserver but not used.
-}
-- (void)bookmarkNode:(const bookmarks::BookmarkNode*)bookmarkNode
-     movedFromParent:(const bookmarks::BookmarkNode*)oldParent
-            toParent:(const bookmarks::BookmarkNode*)newParent {
-  // No-op -- required by BookmarkModelBridgeObserver but not used.
-}
-- (void)bookmarkNodeDeleted:(const bookmarks::BookmarkNode*)node
-                 fromFolder:(const bookmarks::BookmarkNode*)folder {
-  // No-op -- required by BookmarkModelBridgeObserver but not used.
-}
+// Returns a menu for the `navigationItems`.
+- (UIMenu*)menuForNavigationItems:
+    (const std::vector<web::NavigationItem*>)navigationItems {
+  NSMutableArray<UIMenuElement*>* actions = [NSMutableArray array];
+  for (web::NavigationItem* navigationItem : navigationItems) {
+    NSString* title;
+    UIImage* image;
+    if ([self shouldUseIncognitoNTPResourcesForURL:navigationItem
+                                                       ->GetVirtualURL()]) {
+      title = l10n_util::GetNSStringWithFixup(IDS_IOS_NEW_INCOGNITO_TAB);
+      image = UseSymbols()
+                  ? CustomSymbolWithPointSize(kIncognitoCircleFillSymbol,
+                                              kSymbolImagePointSize)
+                  : [UIImage imageNamed:@"incognito_badge"];
+    } else {
+      title = base::SysUTF16ToNSString(navigationItem->GetTitleForDisplay());
+      const gfx::Image& gfxImage = navigationItem->GetFaviconStatus().image;
+      if (!gfxImage.IsEmpty()) {
+        image = gfxImage.ToUIImage();
+      } else {
+        image = [UIImage imageNamed:@"default_favicon"];
+      }
+    }
 
-#pragma mark - SearchEngineObserving
-
-- (void)searchEngineChanged {
-  SearchEngineIcon searchEngineIcon = SEARCH_ENGINE_ICON_OTHER;
-  if (self.templateURLService &&
-      self.templateURLService->GetDefaultSearchProvider() &&
-      self.templateURLService->GetDefaultSearchProvider()->GetEngineType(
-          self.templateURLService->search_terms_data()) ==
-          SEARCH_ENGINE_GOOGLE) {
-    searchEngineIcon = SEARCH_ENGINE_ICON_GOOGLE_SEARCH;
+    __weak __typeof(self) weakSelf = self;
+    UIAction* action =
+        [UIAction actionWithTitle:title
+                            image:image
+                       identifier:nil
+                          handler:^(UIAction* uiAction) {
+                            [weakSelf navigateToPageForItem:navigationItem];
+                          }];
+    [actions addObject:action];
   }
-  UIImage* searchIcon =
-      ios::GetChromeBrowserProvider()
-          ->GetBrandedImageProvider()
-          ->GetToolbarSearchIcon(searchEngineIcon, self.incognito);
-  DCHECK(searchIcon);
-  [self.consumer setSearchIcon:searchIcon];
+  return [UIMenu menuWithTitle:@"" children:actions];
+}
+
+// Returns YES if incognito NTP title and image should be used for back/forward
+// item associated with `URL`.
+- (BOOL)shouldUseIncognitoNTPResourcesForURL:(const GURL&)URL {
+  return URL.DeprecatedGetOriginAsURL() == kChromeUINewTabURL &&
+         self.isIncognito &&
+         base::FeatureList::IsEnabled(kUpdateHistoryEntryPointsInIncognito);
+}
+
+// Returns the menu for the new tab button.
+- (UIMenu*)menuForNewTabButton {
+  UIAction* QRCodeSearch = [self.actionFactory actionToShowQRScanner];
+  UIAction* voiceSearch = [self.actionFactory actionToStartVoiceSearch];
+  UIAction* newSearch = [self.actionFactory actionToStartNewSearch];
+  UIAction* newIncognitoSearch =
+      [self.actionFactory actionToStartNewIncognitoSearch];
+
+  NSArray* staticActions =
+      @[ newSearch, newIncognitoSearch, voiceSearch, QRCodeSearch ];
+
+  UIMenuElement* clipboardAction = [self menuElementForPasteboard];
+
+  if (clipboardAction) {
+    UIMenu* staticMenu = [UIMenu menuWithTitle:@""
+                                         image:nil
+                                    identifier:nil
+                                       options:UIMenuOptionsDisplayInline
+                                      children:staticActions];
+
+    return [UIMenu menuWithTitle:@"" children:@[ staticMenu, clipboardAction ]];
+  }
+  return [UIMenu menuWithTitle:@"" children:staticActions];
+}
+
+// Returns the menu for the TabGrid button.
+- (UIMenu*)menuForTabGridButton {
+  UIAction* openNewTab = [self.actionFactory actionToOpenNewTab];
+
+  UIAction* openNewIncognitoTab =
+      [self.actionFactory actionToOpenNewIncognitoTab];
+
+  UIMenu* newTabActions =
+      [UIMenu menuWithTitle:@""
+                      image:nil
+                 identifier:nil
+                    options:UIMenuOptionsDisplayInline
+                   children:@[ openNewTab, openNewIncognitoTab ]];
+
+  UIAction* closeTab = [self.actionFactory actionToCloseCurrentTab];
+
+  return [UIMenu menuWithTitle:@"" children:@[ newTabActions, closeTab ]];
+}
+
+// Returns the UIMenuElement for the content of the pasteboard. Can return nil.
+- (UIMenuElement*)menuElementForPasteboard {
+  absl::optional<std::set<ClipboardContentType>> clipboardContentType =
+      ClipboardRecentContent::GetInstance()->GetCachedClipboardContentTypes();
+
+  if (clipboardContentType.has_value()) {
+    std::set<ClipboardContentType> clipboardContentTypeValues =
+        clipboardContentType.value();
+
+    if (search_engines::SupportsSearchByImage(self.templateURLService) &&
+        clipboardContentTypeValues.find(ClipboardContentType::Image) !=
+            clipboardContentTypeValues.end()) {
+      return [self.actionFactory actionToSearchCopiedImage];
+    } else if (clipboardContentTypeValues.find(ClipboardContentType::URL) !=
+               clipboardContentTypeValues.end()) {
+      return [self.actionFactory actionToSearchCopiedURL];
+    } else if (clipboardContentTypeValues.find(ClipboardContentType::Text) !=
+               clipboardContentTypeValues.end()) {
+      return [self.actionFactory actionToSearchCopiedText];
+    }
+  }
+  return nil;
+}
+
+// Navigates to the page associated with `item`.
+- (void)navigateToPageForItem:(web::NavigationItem*)item {
+  if (!self.webState)
+    return;
+
+  int index = self.webState->GetNavigationManager()->GetIndexOfItem(item);
+  DCHECK_NE(index, -1);
+  self.webState->GetNavigationManager()->GoToIndex(index);
 }
 
 @end

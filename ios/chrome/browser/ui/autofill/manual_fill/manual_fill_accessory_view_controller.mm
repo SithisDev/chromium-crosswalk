@@ -1,16 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_accessory_view_controller.h"
 
-#include "base/metrics/user_metrics.h"
-#include "components/autofill/core/common/autofill_features.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "base/metrics/user_metrics.h"
+#import "components/password_manager/core/common/password_manager_features.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/device_form_factor.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -45,6 +45,16 @@ constexpr CGFloat ManualFillIconsSpacing = 10;
 
 // iPad override for the icons' spacing.
 constexpr CGFloat ManualFillIconsIPadSpacing = 15;
+
+// Color to use for the buttons while enabled.
+UIColor* IconActiveTintColor() {
+  return [UIColor colorNamed:kToolbarButtonColor];
+}
+
+// Color to use for the buttons while highlighted.
+UIColor* IconHighlightTintColor() {
+  return [UIColor colorNamed:kBlueColor];
+}
 
 }  // namespace
 
@@ -87,16 +97,23 @@ static NSTimeInterval MFAnimationDuration = 0.2;
 - (void)resetAnimated:(BOOL)animated {
   [UIView animateWithDuration:animated ? MFAnimationDuration : 0
                    animations:^{
-                     [self resetTintColors];
-                     // Workaround the |hidden| property in stacked views.
-                     if (!self.keyboardButton.hidden) {
-                       self.keyboardButton.hidden = YES;
-                       self.keyboardButton.alpha = 0.0;
-                     }
+                     [self resetIcons];
                    }];
+  if (!self.keyboardButton.hidden) {
+    [self setKeyboardButtonHidden:YES animated:animated];
+  }
 }
 
-#pragma mark - Setters
+#pragma mark - Accessors
+
+- (BOOL)allButtonsHidden {
+  BOOL manualFillButtonsHidden = self.addressButtonHidden &&
+                                 self.creditCardButtonHidden &&
+                                 self.passwordButtonHidden;
+  return ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET
+             ? manualFillButtonsHidden
+             : self.keyboardButton.hidden && manualFillButtonsHidden;
+}
 
 - (void)setAddressButtonHidden:(BOOL)addressButtonHidden {
   if (addressButtonHidden == _addressButtonHidden) {
@@ -124,7 +141,7 @@ static NSTimeInterval MFAnimationDuration = 0.2;
 
 #pragma mark - Private
 
-// Helper to create a system button with the passed data and |self| as the
+// Helper to create a system button with the passed data and `self` as the
 // target. Such button has been configured to have some preset properties
 - (UIButton*)manualFillButtonWithAction:(SEL)selector
                              ImageNamed:(NSString*)imageName
@@ -133,7 +150,7 @@ static NSTimeInterval MFAnimationDuration = 0.2;
   UIButton* button = [UIButton buttonWithType:UIButtonTypeSystem];
   UIImage* image = [UIImage imageNamed:imageName];
   [button setImage:image forState:UIControlStateNormal];
-  button.tintColor = [self activeTintColor];
+  button.tintColor = IconActiveTintColor();
   button.translatesAutoresizingMaskIntoConstraints = NO;
   [button addTarget:self
                 action:selector
@@ -150,7 +167,7 @@ static NSTimeInterval MFAnimationDuration = 0.2;
 
   NSMutableArray<UIView*>* icons = [[NSMutableArray alloc] init];
 
-  if (!IsIPadIdiom()) {
+  if (ui::GetDeviceFormFactor() != ui::DEVICE_FORM_FACTOR_TABLET) {
     self.keyboardButton = [self
         manualFillButtonWithAction:@selector(keyboardButtonPressed)
                         ImageNamed:@"mf_keyboard"
@@ -163,9 +180,15 @@ static NSTimeInterval MFAnimationDuration = 0.2;
     self.keyboardButton.alpha = 0.0;
   }
 
+  NSString* imageName =
+      base::FeatureList::IsEnabled(
+          password_manager::features::kIOSEnablePasswordManagerBrandingUpdate)
+          ? @"password_key"
+          : @"ic_vpn_key";
+
   self.passwordButton = [self
       manualFillButtonWithAction:@selector(passwordButtonPressed:)
-                      ImageNamed:@"ic_vpn_key"
+                      ImageNamed:imageName
          accessibilityIdentifier:manual_fill::
                                      AccessoryPasswordAccessibilityIdentifier
               accessibilityLabel:l10n_util::GetNSString(
@@ -175,37 +198,44 @@ static NSTimeInterval MFAnimationDuration = 0.2;
   self.passwordButton.contentEdgeInsets = UIEdgeInsetsMake(0, 2, 0, 2);
   [icons addObject:self.passwordButton];
 
-    self.cardsButton =
-        [self manualFillButtonWithAction:@selector(cardButtonPressed:)
-                              ImageNamed:@"ic_credit_card"
-                 accessibilityIdentifier:
-                     manual_fill::AccessoryCreditCardAccessibilityIdentifier
-                      accessibilityLabel:
-                          l10n_util::GetNSString(
-                              IDS_IOS_MANUAL_FALLBACK_SHOW_CREDIT_CARDS)];
-    self.cardsButton.hidden = self.isCreditCardButtonHidden;
-    [icons addObject:self.cardsButton];
+  self.cardsButton =
+      [self manualFillButtonWithAction:@selector(cardButtonPressed:)
+                            ImageNamed:@"ic_credit_card"
+               accessibilityIdentifier:
+                   manual_fill::AccessoryCreditCardAccessibilityIdentifier
+                    accessibilityLabel:
+                        l10n_util::GetNSString(
+                            IDS_IOS_MANUAL_FALLBACK_SHOW_CREDIT_CARDS)];
+  self.cardsButton.hidden = self.isCreditCardButtonHidden;
+  [icons addObject:self.cardsButton];
 
-    self.accountButton = [self
-        manualFillButtonWithAction:@selector(accountButtonPressed:)
-                        ImageNamed:@"ic_place"
-           accessibilityIdentifier:manual_fill::
-                                       AccessoryAddressAccessibilityIdentifier
-                accessibilityLabel:l10n_util::GetNSString(
-                                       IDS_IOS_MANUAL_FALLBACK_SHOW_ADDRESSES)];
+  self.accountButton = [self
+      manualFillButtonWithAction:@selector(accountButtonPressed:)
+                      ImageNamed:@"ic_place"
+         accessibilityIdentifier:manual_fill::
+                                     AccessoryAddressAccessibilityIdentifier
+              accessibilityLabel:l10n_util::GetNSString(
+                                     IDS_IOS_MANUAL_FALLBACK_SHOW_ADDRESSES)];
 
-    self.accountButton.hidden = self.isAddressButtonHidden;
-    [icons addObject:self.accountButton];
+  self.accountButton.hidden = self.isAddressButtonHidden;
+  [icons addObject:self.accountButton];
+
+  for (UIButton* button in icons)
+    button.pointerInteractionEnabled = YES;
 
   UIStackView* stackView = [[UIStackView alloc] initWithArrangedSubviews:icons];
   stackView.spacing =
-      IsIPadIdiom() ? ManualFillIconsIPadSpacing : ManualFillIconsSpacing;
+      (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET)
+          ? ManualFillIconsIPadSpacing
+          : ManualFillIconsSpacing;
   stackView.axis = UILayoutConstraintAxisHorizontal;
   stackView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:stackView];
 
-  CGFloat trailingInset = IsIPadIdiom() ? ManualFillIconsIPadTrailingInset
-                                        : ManualFillIconsTrailingInset;
+  CGFloat trailingInset =
+      (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET)
+          ? ManualFillIconsIPadTrailingInset
+          : ManualFillIconsTrailingInset;
   id<LayoutGuideProvider> safeAreaLayoutGuide = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
     // Vertical constraints.
@@ -222,22 +252,21 @@ static NSTimeInterval MFAnimationDuration = 0.2;
   ]];
 }
 
-// Resets the colors of all the icons to the active color.
-- (void)resetTintColors {
-  UIColor* activeTintColor = [self activeTintColor];
-  [self.accountButton setTintColor:activeTintColor];
-  [self.passwordButton setTintColor:activeTintColor];
-  [self.cardsButton setTintColor:activeTintColor];
+// Resets the icon's color and userInteractionEnabled.
+- (void)resetIcons {
+  self.accountButton.userInteractionEnabled = YES;
+  self.cardsButton.userInteractionEnabled = YES;
+  self.passwordButton.userInteractionEnabled = YES;
+
+  [self.accountButton setTintColor:IconActiveTintColor()];
+  [self.passwordButton setTintColor:IconActiveTintColor()];
+  [self.cardsButton setTintColor:IconActiveTintColor()];
 }
 
-- (UIColor*)activeTintColor {
-  return [UIColor colorWithWhite:0.5 alpha:1.0];
-}
-
-- (void)animateKeyboardButtonHidden:(BOOL)hidden {
-  [UIView animateWithDuration:MFAnimationDuration
+- (void)setKeyboardButtonHidden:(BOOL)hidden animated:(BOOL)animated {
+  [UIView animateWithDuration:animated ? MFAnimationDuration : 0
                    animations:^{
-                     // Workaround setting more than once the |hidden| property
+                     // Workaround setting more than once the `hidden` property
                      // in stacked views.
                      if (self.keyboardButton.hidden != hidden) {
                        self.keyboardButton.hidden = hidden;
@@ -253,32 +282,34 @@ static NSTimeInterval MFAnimationDuration = 0.2;
 
 - (void)keyboardButtonPressed {
   base::RecordAction(base::UserMetricsAction("ManualFallback_Close"));
-  [self animateKeyboardButtonHidden:YES];
-  [self resetTintColors];
+  [self resetAnimated:YES];
   [self.delegate keyboardButtonPressed];
 }
 
 - (void)passwordButtonPressed:(UIButton*)sender {
   base::RecordAction(base::UserMetricsAction("ManualFallback_OpenPassword"));
-  [self animateKeyboardButtonHidden:NO];
-  [self resetTintColors];
-  [self.passwordButton setTintColor:[UIColor colorNamed:kTintColor]];
+  [self setKeyboardButtonHidden:NO animated:YES];
+  [self resetIcons];
+  self.passwordButton.userInteractionEnabled = NO;
+  self.passwordButton.tintColor = IconHighlightTintColor();
   [self.delegate passwordButtonPressed:sender];
 }
 
 - (void)cardButtonPressed:(UIButton*)sender {
   base::RecordAction(base::UserMetricsAction("ManualFallback_OpenCreditCard"));
-  [self animateKeyboardButtonHidden:NO];
-  [self resetTintColors];
-  [self.cardsButton setTintColor:[UIColor colorNamed:kTintColor]];
+  [self setKeyboardButtonHidden:NO animated:YES];
+  [self resetIcons];
+  self.cardsButton.userInteractionEnabled = NO;
+  self.cardsButton.tintColor = IconHighlightTintColor();
   [self.delegate cardButtonPressed:sender];
 }
 
 - (void)accountButtonPressed:(UIButton*)sender {
   base::RecordAction(base::UserMetricsAction("ManualFallback_OpenProfile"));
-  [self animateKeyboardButtonHidden:NO];
-  [self resetTintColors];
-  [self.accountButton setTintColor:[UIColor colorNamed:kTintColor]];
+  [self setKeyboardButtonHidden:NO animated:YES];
+  [self resetIcons];
+  self.accountButton.userInteractionEnabled = NO;
+  self.accountButton.tintColor = IconHighlightTintColor();
   [self.delegate accountButtonPressed:sender];
 }
 

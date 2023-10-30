@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,13 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
+class ChromeBrowserState;
+
 namespace sessions {
 class TabRestoreService;
-}
-
-namespace ios {
-class ChromeBrowserState;
 }
 
 // Singleton that owns all TabRestoreServices and associates them with
@@ -25,13 +22,18 @@ class IOSChromeTabRestoreServiceFactory
     : public BrowserStateKeyedServiceFactory {
  public:
   static sessions::TabRestoreService* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
 
   static IOSChromeTabRestoreServiceFactory* GetInstance();
 
   // Returns the default factory used to build TabRestoreServices. Can be
   // registered with SetTestingFactory to use real instances during testing.
   static TestingFactory GetDefaultFactory();
+
+  IOSChromeTabRestoreServiceFactory(const IOSChromeTabRestoreServiceFactory&) =
+      delete;
+  IOSChromeTabRestoreServiceFactory& operator=(
+      const IOSChromeTabRestoreServiceFactory&) = delete;
 
  private:
   friend class base::NoDestructor<IOSChromeTabRestoreServiceFactory>;
@@ -43,8 +45,6 @@ class IOSChromeTabRestoreServiceFactory
   std::unique_ptr<KeyedService> BuildServiceInstanceFor(
       web::BrowserState* context) const override;
   bool ServiceIsNULLWhileTesting() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(IOSChromeTabRestoreServiceFactory);
 };
 
 #endif  // IOS_CHROME_BROWSER_SESSIONS_IOS_CHROME_TAB_RESTORE_SERVICE_FACTORY_H_

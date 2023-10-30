@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 // InfobarBannerPositioner contains methods used to position the InfobarBanner.
 @protocol InfobarBannerPositioner
 
-// Y axis value used to position the InfobarBanner.
+// The vertical positioning of the infobar banner in window coordinates.
 - (CGFloat)bannerYPosition;
 
 // The InfobarBanner view that will be presented. Used to calculate the

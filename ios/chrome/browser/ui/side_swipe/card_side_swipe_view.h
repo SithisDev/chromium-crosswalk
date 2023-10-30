@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 @class SideSwipeGestureRecognizer;
 @protocol SideSwipeToolbarSnapshotProviding;
-@class TabModel;
+class WebStateList;
 
 @interface CardSideSwipeView : UIView
 
@@ -27,7 +27,7 @@
 
 - (instancetype)initWithFrame:(CGRect)frame
                     topMargin:(CGFloat)margin
-                        model:(TabModel*)model;
+                 webStateList:(WebStateList*)webStateList;
 - (void)updateViewsForDirection:(UISwipeGestureRecognizerDirection)direction;
 - (void)handleHorizontalPan:(SideSwipeGestureRecognizer*)gesture;
 

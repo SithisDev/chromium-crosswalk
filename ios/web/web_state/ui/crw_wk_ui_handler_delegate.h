@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,17 @@
 
 #import <WebKit/WebKit.h>
 
-@class CRWWebController;
+#import "ios/web/web_state/ui/crw_web_view_handler_delegate.h"
+
 @class CRWWKUIHandler;
-class GURL;
 namespace web {
-class WebStateImpl;
 class WebState;
 }
 
 // Delegate for the CRWWKUIHandler.
-@protocol CRWWKUIHandlerDelegate
+@protocol CRWWKUIHandlerDelegate <CRWWebViewHandlerDelegate>
 
-// Returns the URL of the document object (i.e. last committed URL).
-- (const GURL&)documentURLForUIHandler:(CRWWKUIHandler*)UIHandler;
-
-// Creates and returns a web view with given |config|, in the |webController|.
+// Creates and returns a web view with given `config`, in the `webController`.
 - (WKWebView*)UIHandler:(CRWWKUIHandler*)UIHandler
     createWebViewWithConfiguration:(WKWebViewConfiguration*)configuration
                        forWebState:(web::WebState*)webState;
@@ -29,9 +25,6 @@ class WebState;
 // Returns whether the the action is user initiated.
 - (BOOL)UIHandler:(CRWWKUIHandler*)UIHandler
     isUserInitiatedAction:(WKNavigationAction*)action;
-
-// Returns the WebStateImpl.
-- (web::WebStateImpl*)webStateImplForUIHandler:(CRWWKUIHandler*)UIHandler;
 
 @end
 

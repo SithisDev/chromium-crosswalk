@@ -1,11 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/app/main_application_delegate.h"
 
-#include "base/mac/foundation_util.h"
-#import "ios/chrome/app/application_delegate/app_navigation.h"
+#import <UserNotifications/UserNotifications.h>
+
+#import "base/ios/ios_util.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/metrics/user_metrics.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/download/public/background_service/background_download_service.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
 #import "ios/chrome/app/application_delegate/browser_launcher.h"
 #import "ios/chrome/app/application_delegate/memory_warning_helper.h"
@@ -14,19 +20,32 @@
 #import "ios/chrome/app/application_delegate/tab_opening.h"
 #import "ios/chrome/app/application_delegate/tab_switching.h"
 #import "ios/chrome/app/application_delegate/url_opener.h"
+#import "ios/chrome/app/application_delegate/url_opener_params.h"
 #import "ios/chrome/app/application_delegate/user_activity_handler.h"
 #import "ios/chrome/app/chrome_overlay_window.h"
 #import "ios/chrome/app/main_application_delegate_testing.h"
 #import "ios/chrome/app/main_controller.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
-#import "ios/testing/perf/startupLoggers.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/commerce/price_alert_util.h"
+#import "ios/chrome/browser/download/background_service/background_download_service_factory.h"
+#import "ios/chrome/browser/push_notification/push_notification_delegate.h"
+#import "ios/chrome/browser/push_notification/push_notification_util.h"
+#import "ios/chrome/browser/ui/main/scene_controller.h"
+#import "ios/chrome/browser/ui/main/scene_delegate.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/web/common/uikit_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface MainApplicationDelegate () {
+namespace {
+// The time delay after firstSceneWillEnterForeground: before checking for main
+// intent signals.
+const int kMainIntentCheckDelay = 1;
+}  // namespace
+
+@interface MainApplicationDelegate () <AppStateObserver> {
   MainController* _mainController;
   // Memory helper used to log the number of memory warnings received.
   MemoryWarningHelper* _memoryHelper;
@@ -39,13 +58,20 @@
   id<StartupInformation> _startupInformation;
   // Helper to open new tabs.
   id<TabOpening> _tabOpener;
-  // Handles the application stage changes.
-  AppState* _appState;
   // Handles tab switcher.
-  id<AppNavigation> _appNavigation;
-  // Handles tab switcher.
-  id<TabSwitching> _tabSwitcherProtocol;
+  id<TabSwitching> _tabSwitcher;
+  // The set of "scene sessions" that needs to be discarded. See
+  // -applicatiopn:didDiscardSceneSessions: for details.
+  NSSet<UISceneSession*>* _sceneSessionsToDiscard;
+  // Delegate that handles delivered push notification
+  // workflows.
+  PushNotificationDelegate* _pushNotificationDelegate;
 }
+
+// YES if application:didFinishLaunchingWithOptions: was called. Used to
+// determine whether or not shutdown should be invoked from
+// applicationWillTerminate:.
+@property(nonatomic, assign) BOOL didFinishLaunching;
 
 @end
 
@@ -59,199 +85,305 @@
     [_mainController setMetricsMediator:_metricsMediator];
     _browserLauncher = _mainController;
     _startupInformation = _mainController;
-    _tabOpener = _mainController;
+    _pushNotificationDelegate = [[PushNotificationDelegate alloc] init];
     _appState = [[AppState alloc] initWithBrowserLauncher:_browserLauncher
                                        startupInformation:_startupInformation
                                       applicationDelegate:self];
-    _tabSwitcherProtocol = _mainController;
-    _appNavigation = _mainController;
     [_mainController setAppState:_appState];
   }
   return self;
 }
 
-- (UIWindow*)window {
-  return [_mainController window];
-}
-
-- (void)setWindow:(UIWindow*)newWindow {
-  DCHECK(newWindow);
-  [_mainController setWindow:newWindow];
-  // self.window has been set by this time. _appState window can now be set.
-  [_appState setWindow:newWindow];
-}
-
 #pragma mark - UIApplicationDelegate methods -
 
 #pragma mark Responding to App State Changes and System Events
-
 // Called by the OS to create the UI for display.  The UI will not be displayed,
 // even if it is ready, until this function returns.
 // The absolute minimum work should be done here, to ensure that the application
 // startup is fast, and the UI appears as soon as possible.
 - (BOOL)application:(UIApplication*)application
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
-  startup_loggers::RegisterAppDidFinishLaunchingTime();
-  // Main window must be ChromeOverlayWindow or a subclass of it.
-  self.window = [[ChromeOverlayWindow alloc]
-      initWithFrame:[[UIScreen mainScreen] bounds]];
+  self.didFinishLaunching = YES;
 
+  _appState.startupInformation.didFinishLaunchingTime = base::TimeTicks::Now();
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  [defaults
+      setInteger:[defaults integerForKey:
+                               metrics_mediator::
+                                   kAppDidFinishLaunchingConsecutiveCallsKey] +
+                 1
+          forKey:metrics_mediator::kAppDidFinishLaunchingConsecutiveCallsKey];
   BOOL inBackground =
       [application applicationState] == UIApplicationStateBackground;
-  return [_appState requiresHandlingAfterLaunchWithOptions:launchOptions
-                                           stateBackground:inBackground];
-}
+  // `inBackground` is wrongly always YES, even in regular foreground launches.
+  // TODO(crbug.com/1346512): Remove this code path after some time in
+  // canary. This is meant to be easy to revert.
+  DCHECK(inBackground);
+  BOOL requiresHandling =
+      [_appState requiresHandlingAfterLaunchWithOptions:launchOptions
+                                        stateBackground:inBackground];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(sceneWillConnect:)
+             name:UISceneWillConnectNotification
+           object:nil];
+  // UIApplicationWillResignActiveNotification is delivered before the last
+  // scene has entered the background.
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(lastSceneWillEnterBackground:)
+             name:UIApplicationWillResignActiveNotification
+           object:nil];
+  // UIApplicationDidEnterBackgroundNotification is delivered after the last
+  // scene has entered the background.
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(lastSceneDidEnterBackground:)
+             name:UIApplicationDidEnterBackgroundNotification
+           object:nil];
+  // UIApplicationWillEnterForegroundNotification will be delivered right
+  // after the first scene sends UISceneWillEnterForegroundNotification.
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(firstSceneWillEnterForeground:)
+             name:UIApplicationWillEnterForegroundNotification
+           object:nil];
 
-- (void)applicationDidBecomeActive:(UIApplication*)application {
-  startup_loggers::RegisterAppDidBecomeActiveTime();
-  if ([_appState isInSafeMode])
-    return;
+  if (IsPriceNotificationsEnabled()) {
+    UNUserNotificationCenter* center =
+        UNUserNotificationCenter.currentNotificationCenter;
+    center.delegate = _pushNotificationDelegate;
 
-  [_appState resumeSessionWithTabOpener:_tabOpener
-                            tabSwitcher:_tabSwitcherProtocol];
-}
+    [PushNotificationUtil
+        getPermissionSettings:^(UNNotificationSettings* settings) {
+          if (settings.authorizationStatus == UNAuthorizationStatusAuthorized) {
+            [PushNotificationUtil registerDeviceWithAPNS];
+          }
+        }];
+  }
 
-- (void)applicationWillResignActive:(UIApplication*)application {
-  if ([_appState isInSafeMode])
-    return;
-
-  [_appState willResignActiveTabModel];
-}
-
-// Called when going into the background. iOS already broadcasts, so
-// stakeholders can register for it directly.
-- (void)applicationDidEnterBackground:(UIApplication*)application {
-  [_appState
-      applicationDidEnterBackground:application
-                       memoryHelper:_memoryHelper
-            incognitoContentVisible:_mainController.incognitoContentVisible];
-}
-
-// Called when returning to the foreground.
-- (void)applicationWillEnterForeground:(UIApplication*)application {
-  [_appState applicationWillEnterForeground:application
-                            metricsMediator:_metricsMediator
-                               memoryHelper:_memoryHelper
-                                  tabOpener:_tabOpener
-                              appNavigation:_appNavigation];
+  return requiresHandling;
 }
 
 - (void)applicationWillTerminate:(UIApplication*)application {
-  if ([_appState isInSafeMode])
+  // If `self.didFinishLaunching` is NO, that indicates that the app was
+  // terminated before startup could be run. In this situation, skip running
+  // shutdown, since the app was never fully started.
+  if (!self.didFinishLaunching)
+    return;
+
+  if (_appState.initStage <= InitStageSafeMode)
     return;
 
   // Instead of adding code here, consider if it could be handled by listening
   // for  UIApplicationWillterminate.
-  [_appState applicationWillTerminate:application
-                applicationNavigation:_appNavigation];
+  [_appState applicationWillTerminate:application];
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication*)application {
-  if ([_appState isInSafeMode])
+  if (_appState.initStage <= InitStageSafeMode)
     return;
 
   [_memoryHelper handleMemoryPressure];
 }
 
-#pragma mark Downloading Data in the Background
+- (void)application:(UIApplication*)application
+    didDiscardSceneSessions:(NSSet<UISceneSession*>*)sceneSessions {
+  // This method is invoked by iOS to inform the application that the sessions
+  // for "closed windows" is garbage collected and that any data associated with
+  // them by the application needs to be deleted.
+  //
+  // The documentation says that if the application is not running when the OS
+  // decides to discard the sessions, then it will call this method the next
+  // time the application starts up. As seen by crbug.com/1292641, this call
+  // happens before -[UIApplicationDelegate sceneWillConnect:] which means
+  // that it can happen before Chrome has properly initialized. In that case,
+  // record the list of sessions to discard and clean them once Chrome is
+  // initialized.
+  if (_appState.initStage <= InitStageBrowserObjectsForBackgroundHandlers) {
+    _sceneSessionsToDiscard = [sceneSessions copy];
+    [_appState addObserver:self];
+    return;
+  }
+
+  [_appState application:application didDiscardSceneSessions:sceneSessions];
+}
+
+- (UIInterfaceOrientationMask)application:(UIApplication*)application
+    supportedInterfaceOrientationsForWindow:(UIWindow*)window {
+  if (_appState.portraitOnly) {
+    return UIInterfaceOrientationMaskPortrait;
+  }
+  // Apply a no-op mask by default.
+  return UIInterfaceOrientationMaskAll;
+}
+
+- (void)application:(UIApplication*)application
+    didReceiveRemoteNotification:(NSDictionary*)userInfo
+          fetchCompletionHandler:
+              (void (^)(UIBackgroundFetchResult result))completionHandler {
+  // This method is invoked by iOS to process an incoming remote push
+  // notification for the application and fetch any additional data.
+
+  // According to the documentation, iOS invokes this function whether the
+  // application is in the foreground or background. In addition, iOS will
+  // launch the application and place it in background mode to invoke this
+  // function. However, iOS will not do this if the user has force-quit the
+  // application. In that case, the user must relaunch the application or must
+  // restart the device before the system will launch the application and invoke
+  // this function.
+  UIBackgroundFetchResult result = [_pushNotificationDelegate
+      applicationWillProcessIncomingRemoteNotification:userInfo];
+  if (completionHandler) {
+    completionHandler(result);
+  }
+}
+
+- (void)application:(UIApplication*)application
+    didRegisterForRemoteNotificationsWithDeviceToken:(NSData*)deviceToken {
+  // This method is invoked by iOS on the successful registration of the app to
+  // APNS and retrieval of the device's APNS token.
+  [_pushNotificationDelegate applicationDidRegisterWithAPNS:deviceToken];
+}
+
+- (void)application:(UIApplication*)application
+    didFailToRegisterForRemoteNotificationsWithError:(NSError*)error {
+  // This method is invoked by iOS to inform the application that the attempt to
+  // obtain the device's APNS token from APNS failed
+  base::UmaHistogramBoolean("IOS.PushNotification.APNSDeviceRegistration",
+                            false);
+}
 
 - (void)application:(UIApplication*)application
     handleEventsForBackgroundURLSession:(NSString*)identifier
-                      completionHandler:(void (^)(void))completionHandler {
-  if ([_appState isInSafeMode])
+                      completionHandler:(void (^)())completionHandler {
+  if (![identifier
+          hasPrefix:base::SysUTF8ToNSString(
+                        download::kBackgroundDownloadIdentifierPrefix)]) {
+    completionHandler();
     return;
-  // This initialization to BACKGROUND stage may not be necessary, but is
-  // preserved in case somewhere there is a dependency on this.
-  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_BACKGROUND];
+  }
+  ChromeBrowserState* browserState =
+      _mainController.interfaceProvider.mainInterface.browserState;
+  if (!browserState) {
+    // TODO(crbug.com/1368617): We should store the completionHandler and wait
+    // for mainInterface creation.
+    completionHandler();
+    return;
+  }
+  download::BackgroundDownloadService* download_service =
+      BackgroundDownloadServiceFactory::GetForBrowserState(browserState);
+  if (download_service) {
+    download_service->HandleEventsForBackgroundURLSession(
+        base::BindOnce(completionHandler));
+    return;
+  }
   completionHandler();
 }
 
-#pragma mark Continuing User Activity and Handling Quick Actions
+#pragma mark - Scenes lifecycle
 
-- (BOOL)application:(UIApplication*)application
-    willContinueUserActivityWithType:(NSString*)userActivityType {
-  if ([_appState isInSafeMode])
-    return NO;
-
-  // Enusre Chrome is fuilly started up in case it had launched to the
-  // background.
-  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_FOREGROUND];
-
-  return
-      [UserActivityHandler willContinueUserActivityWithType:userActivityType];
+- (NSInteger)foregroundSceneCount {
+  NSInteger foregroundSceneCount = 0;
+  for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+    if ((scene.activationState == UISceneActivationStateForegroundInactive) ||
+        (scene.activationState == UISceneActivationStateForegroundActive)) {
+      foregroundSceneCount++;
+    }
+  }
+  return foregroundSceneCount;
 }
 
-- (BOOL)application:(UIApplication*)application
-    continueUserActivity:(NSUserActivity*)userActivity
-      restorationHandler:
-          (void (^)(NSArray<id<UIUserActivityRestoring>>*))restorationHandler {
-  if ([_appState isInSafeMode])
-    return NO;
+- (void)sceneWillConnect:(NSNotification*)notification {
+  UIWindowScene* scene =
+      base::mac::ObjCCastStrict<UIWindowScene>(notification.object);
+  SceneDelegate* sceneDelegate =
+      base::mac::ObjCCastStrict<SceneDelegate>(scene.delegate);
 
-  // Enusre Chrome is fuilly started up in case it had launched to the
-  // background.
-  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_FOREGROUND];
-
-  BOOL applicationIsActive =
-      [application applicationState] == UIApplicationStateActive;
-
-  return [UserActivityHandler continueUserActivity:userActivity
-                               applicationIsActive:applicationIsActive
-                                         tabOpener:_tabOpener
-                                startupInformation:_startupInformation];
-}
-
-- (void)application:(UIApplication*)application
-    performActionForShortcutItem:(UIApplicationShortcutItem*)shortcutItem
-               completionHandler:(void (^)(BOOL succeeded))completionHandler {
-  if ([_appState isInSafeMode])
+  // Under some iOS 15 betas, Chrome gets scene connection events for some
+  // system scene connections. To handle this, early return if the connecting
+  // scene doesn't have a valid delegate. (See crbug.com/1217461)
+  if (!sceneDelegate)
     return;
 
-  // Enusre Chrome is fuilly started up in case it had launched to the
-  // background.
-  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_FOREGROUND];
+  SceneController* sceneController = sceneDelegate.sceneController;
+  _tabSwitcher = sceneController;
+  _tabOpener = sceneController;
 
-  [UserActivityHandler
-      performActionForShortcutItem:shortcutItem
-                 completionHandler:completionHandler
-                         tabOpener:_tabOpener
-                startupInformation:_startupInformation
-                 interfaceProvider:_mainController.interfaceProvider];
+  // TODO(crbug.com/1060645): This should be called later, or this flow should
+  // be changed completely.
+  if (self.foregroundSceneCount == 0) {
+    [_appState applicationWillEnterForeground:UIApplication.sharedApplication
+                              metricsMediator:_metricsMediator
+                                 memoryHelper:_memoryHelper];
+  }
 }
 
-#pragma mark Opening a URL-Specified Resource
+- (void)lastSceneWillEnterBackground:(NSNotification*)notification {
+  if (_appState.initStage <= InitStageSafeMode)
+    return;
 
-// Handles open URL. The registered URL Schemes are defined in project
-// variables ${CHROMIUM_URL_SCHEME_x}.
-// The url can either be empty, in which case the app is simply opened or
-// can contain an URL that will be opened in a new tab.
-- (BOOL)application:(UIApplication*)application
-            openURL:(NSURL*)url
-            options:(NSDictionary<NSString*, id>*)options {
-  if ([_appState isInSafeMode])
-    return NO;
+  [_appState willResignActive];
+}
 
-  // The various URL handling mechanisms require that the application has
-  // fully started up; there are some cases (crbug.com/658420) where a
-  // launch via this method crashes because some services (specifically,
-  // CommandLine) aren't initialized yet. So: before anything further is
-  // done, make sure that Chrome is fully started up.
-  [_browserLauncher startUpBrowserToStage:INITIALIZATION_STAGE_FOREGROUND];
-
-  if (ios::GetChromeBrowserProvider()
-          ->GetChromeIdentityService()
-          ->HandleApplicationOpenURL(application, url, options)) {
-    return YES;
+- (void)lastSceneDidEnterBackground:(NSNotification*)notification {
+  // Reset `startupHadExternalIntent` for all Scenes in case external intents
+  // were triggered while the application was in the foreground.
+  for (SceneState* scene in self.appState.connectedScenes) {
+    if (scene.startupHadExternalIntent) {
+      scene.startupHadExternalIntent = NO;
+    }
   }
+  [_appState applicationDidEnterBackground:UIApplication.sharedApplication
+                              memoryHelper:_memoryHelper];
+}
 
-  BOOL applicationActive =
-      [application applicationState] == UIApplicationStateActive;
+- (void)firstSceneWillEnterForeground:(NSNotification*)notification {
+  __weak MainApplicationDelegate* weakSelf = self;
+  // Delay Main Intent check since signals for intents like spotlight actions
+  // are not guaranteed to occur before firstSceneWillEnterForeground.
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW,
+                    static_cast<int64_t>(kMainIntentCheckDelay * NSEC_PER_SEC)),
+      dispatch_get_main_queue(), ^{
+        MainApplicationDelegate* strongSelf = weakSelf;
+        if (!strongSelf) {
+          return;
+        }
 
-  return [URLOpener openURL:url
-          applicationActive:applicationActive
-                    options:options
-                  tabOpener:_tabOpener
-         startupInformation:_startupInformation];
+        BOOL appStartupFromExternalIntent = NO;
+        for (SceneState* scene in strongSelf.appState.connectedScenes) {
+          if (scene.startupHadExternalIntent) {
+            appStartupFromExternalIntent = YES;
+            scene.startupHadExternalIntent = NO;
+          }
+        }
+        if (!appStartupFromExternalIntent) {
+          base::RecordAction(base::UserMetricsAction("IOSOpenByMainIntent"));
+        } else {
+          base::RecordAction(base::UserMetricsAction("IOSOpenByViewIntent"));
+        }
+      });
+  [_appState applicationWillEnterForeground:UIApplication.sharedApplication
+                            metricsMediator:_metricsMediator
+                               memoryHelper:_memoryHelper];
+}
+
+#pragma mark - AppStateObserver methods
+
+- (void)appState:(AppState*)appState
+    didTransitionFromInitStage:(InitStage)previousInitStage {
+  DCHECK_EQ(_appState, appState);
+
+  // The app transitioned to InitStageBrowserObjectsForBackgroundHandlers
+  // or past that stage.
+  if (_appState.initStage >= InitStageBrowserObjectsForBackgroundHandlers) {
+    DCHECK(_sceneSessionsToDiscard);
+    [_appState removeObserver:self];
+    [_appState application:[UIApplication sharedApplication]
+        didDiscardSceneSessions:_sceneSessionsToDiscard];
+    _sceneSessionsToDiscard = nil;
+  }
 }
 
 #pragma mark - Testing methods
@@ -262,6 +394,12 @@
 
 - (AppState*)appState {
   return _appState;
+}
+
++ (AppState*)sharedAppState {
+  return base::mac::ObjCCast<MainApplicationDelegate>(
+             [[UIApplication sharedApplication] delegate])
+      .appState;
 }
 
 + (MainController*)sharedMainController {

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -33,13 +33,5 @@ imageset("clear_browsing_data_history") {
     "clear_browsing_data_history.imageset/Contents.json",
     "clear_browsing_data_history.imageset/clear_browsing_data_history@2x.png",
     "clear_browsing_data_history.imageset/clear_browsing_data_history@3x.png",
-  ]
-}
-
-imageset("clear_browsing_data_passwords") {
-  sources = [
-    "clear_browsing_data_passwords.imageset/Contents.json",
-    "clear_browsing_data_passwords.imageset/clear_browsing_data_passwords@2x.png",
-    "clear_browsing_data_passwords.imageset/clear_browsing_data_passwords@3x.png",
   ]
 }

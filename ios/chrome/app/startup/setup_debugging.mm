@@ -1,14 +1,18 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/app/startup/setup_debugging.h"
+#import "ios/chrome/app/startup/setup_debugging.h"
 
-#include <objc/runtime.h>
+#import <objc/runtime.h>
 
-#include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/crash/core/common/objc_zombie.h"
+#import <ostream>
+
+#import "base/check.h"
+#import "base/logging.h"
+#import "base/strings/sys_string_conversions.h"
+#import "build/build_config.h"
+#import "components/crash/core/common/objc_zombie.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -47,20 +51,19 @@ void SwizzleUIColorColorNamed() {
 // attempted to be loaded.
 void SwizzleUIImageImageNamed() {
   // Retained by the swizzle block.
-  NSMutableSet* whiteList = [NSMutableSet set];
+  // A set of image names that are exceptions to the 'missing image' check.
+  NSMutableSet* exceptions = [NSMutableSet set];
 
   // TODO(crbug.com/720337): Add missing image.
-  [whiteList addObject:@"card_close_button_pressed_incognito"];
+  [exceptions addObject:@"card_close_button_pressed_incognito"];
   // TODO(crbug.com/720355): Add missing image.
-  [whiteList addObject:@"find_close_pressed_incognito"];
+  [exceptions addObject:@"find_close_pressed_incognito"];
   // TODO(crbug.com/720338): Add missing images.
-  [whiteList addObject:@"glif-mic-to-dots-small_37"];
-  [whiteList addObject:@"glif-mic-to-dots-large_37"];
-  [whiteList addObject:@"glif-google-to-dots_28"];
+  [exceptions addObject:@"glif-mic-to-dots-small_37"];
+  [exceptions addObject:@"glif-mic-to-dots-large_37"];
+  [exceptions addObject:@"glif-google-to-dots_28"];
   // TODO(crbug.com/721338): Add missing image.
-  [whiteList addObject:@"voice_icon_keyboard_accessory"];
-  // TODO(crbug.com/754032): Add missing image.
-  [whiteList addObject:@"ios_default_avatar"];
+  [exceptions addObject:@"voice_icon_keyboard_accessory"];
 
   // The original implementation of [UIImage imageNamed:].
   // Called by the new implementation.
@@ -73,8 +76,15 @@ void SwizzleUIImageImageNamed() {
     Class aClass = objc_getClass("UIImage");
     UIImage* image = imp(aClass, @selector(imageNamed:), imageName);
 
-    if (![whiteList containsObject:imageName]) {
+    if (![exceptions containsObject:imageName] &&
+        ![imageName containsString:@".FAUXBUNDLEID."]) {
+// TODO(crbug.com/1325334): Temporarily turn off DCHECK while bootstrapping
+// Catalyst. Log the error to the console instead.
+#if BUILDFLAG(IS_IOS_MACCATALYST)
+      DLOG(ERROR) << "Missing image: " << base::SysNSStringToUTF8(imageName);
+#else
       DCHECK(image) << "Missing image: " << base::SysNSStringToUTF8(imageName);
+#endif
     }
     return image;
   };

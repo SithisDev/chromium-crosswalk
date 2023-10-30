@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,9 @@ class GURL;
 // SearchEngineItem contains the model data for a TableViewURLCell.
 @interface SearchEngineItem : TableViewItem
 
+// The enabled/disabled state. If disabled, user interaction will be forbidden
+// and cell's alpha will be reduced.
+@property(nonatomic, assign) BOOL enabled;
 // The text for the title.
 @property(nonatomic, readwrite, copy) NSString* text;
 // The text for the subtitle.

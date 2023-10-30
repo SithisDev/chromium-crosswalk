@@ -1,26 +1,25 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <PassKit/PassKit.h>
 
-#include <memory>
+#import <memory>
 
-#include "base/bind.h"
+#import "base/bind.h"
 #import "base/test/ios/wait_util.h"
-#import "ios/chrome/app/main_controller.h"
-#include "ios/chrome/browser/download/download_test_util.h"
-#include "ios/chrome/browser/download/pass_kit_mime_type.h"
-#import "ios/chrome/browser/ui/browser_view/browser_view_controller.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
+#import "ios/chrome/browser/download/download_test_util.h"
+#import "ios/chrome/browser/download/mime_type_util.h"
+#import "ios/chrome/browser/ui/infobars/banners/infobar_banner_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "net/test/embedded_test_server/http_request.h"
-#include "net/test/embedded_test_server/http_response.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/testing/earl_grey/app_launch_manager.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
+#import "net/test/embedded_test_server/http_request.h"
+#import "net/test/embedded_test_server/http_response.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -28,15 +27,15 @@
 
 using base::test::ios::WaitUntilConditionOrTimeout;
 using base::test::ios::kWaitForDownloadTimeout;
-using chrome_test_util::GetMainController;
 
 namespace {
 
 // Returns matcher for PassKit error infobar.
 id<GREYMatcher> PassKitErrorInfobar() {
-  using l10n_util::GetNSStringWithFixup;
-  NSString* label = GetNSStringWithFixup(IDS_IOS_GENERIC_PASSKIT_ERROR);
-  return grey_accessibilityLabel(label);
+  return grey_allOf(grey_accessibilityID(kInfobarBannerViewIdentifier),
+                    grey_accessibilityLabel(
+                        l10n_util::GetNSString(IDS_IOS_GENERIC_PASSKIT_ERROR)),
+                    nil);
 }
 
 // PassKit landing page and download request handler.
@@ -66,12 +65,13 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
 @interface PassKitEGTest : ChromeTestCase
 @end
 
-@implementation PassKitEGTest
+@implementation PassKitEGTest {
+}
 
 - (void)setUp {
   [super setUp];
 
-  self.testServer->RegisterRequestHandler(base::Bind(&GetResponse));
+  self.testServer->RegisterRequestHandler(base::BindRepeating(&GetResponse));
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
 }
 
@@ -104,17 +104,14 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
   [ChromeEarlGrey tapWebStateElementWithID:@"good"];
 
   // PKAddPassesViewController UI is rendered out of host process so EarlGrey
-  // matcher can not find PassKit Dialog UI. Instead this test relies on view
-  // controller presentation as the signal that PassKit Dialog is shown.
-  id<BrowserInterface> interface =
-      GetMainController().interfaceProvider.mainInterface;
-  UIViewController* viewController = interface.viewController;
-  bool dialogShown = WaitUntilConditionOrTimeout(kWaitForDownloadTimeout, ^{
-    UIViewController* presentedController =
-        viewController.presentedViewController;
-    return [presentedController class] == [PKAddPassesViewController class];
-  });
-  GREYAssert(dialogShown, @"PassKit dialog was not shown");
+  // matcher can not find PassKit Dialog UI.
+  // EG2 test can use XCUIApplication API to check for PassKit dialog UI
+  // presentation.
+  XCUIApplication* app = [[XCUIApplication alloc] init];
+  XCUIElement* title = nil;
+  title = app.staticTexts[@"Toy Town"];
+  GREYAssert([title waitForExistenceWithTimeout:kWaitForDownloadTimeout],
+             @"PassKit dialog UI was not presented");
 }
 
 @end

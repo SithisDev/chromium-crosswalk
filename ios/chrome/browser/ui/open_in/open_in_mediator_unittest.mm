@@ -1,21 +1,20 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/open_in/open_in_mediator.h"
 
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/main/test_browser.h"
 #import "ios/chrome/browser/ui/open_in/open_in_toolbar.h"
-#include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
-#include "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
-#include "testing/gtest_mac.h"
-#include "testing/platform_test.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
+#import "testing/gtest_mac.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -25,13 +24,14 @@
 class OpenInMediatorTest : public PlatformTest {
  protected:
   OpenInMediatorTest()
-      : web_state_list_(&web_state_list_delegate_),
-        browser_state_(TestChromeBrowserState::Builder().Build()),
-        mediator_(
-            [[OpenInMediator alloc] initWithWebStateList:&web_state_list_]) {}
+      : browser_state_(TestChromeBrowserState::Builder().Build()),
+        browser_(std::make_unique<TestBrowser>(browser_state_.get())),
+        mediator_([[OpenInMediator alloc]
+            initWithBaseViewController:nil
+                               browser:browser_.get()]) {}
 
-  std::unique_ptr<web::TestWebState> CreateWebStateWithView() {
-    auto web_state = std::make_unique<web::TestWebState>();
+  std::unique_ptr<web::FakeWebState> CreateWebStateWithView() {
+    auto web_state = std::make_unique<web::FakeWebState>();
     CGRect web_view_frame = CGRectMake(0, 0, 100, 100);
     UIView* web_state_view = [[UIView alloc] initWithFrame:web_view_frame];
     web_view_proxy_mock = OCMProtocolMock(@protocol(CRWWebViewProxy));
@@ -43,10 +43,9 @@ class OpenInMediatorTest : public PlatformTest {
     return web_state;
   }
 
-  web::TestWebThreadBundle thread_bundle_;
-  FakeWebStateListDelegate web_state_list_delegate_;
-  WebStateList web_state_list_;
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> browser_state_;
+  std::unique_ptr<Browser> browser_;
   id web_view_proxy_mock;
   CRWWebViewScrollViewProxy* scroll_view_proxy_;
   OpenInMediator* mediator_;
@@ -102,8 +101,8 @@ TEST_F(OpenInMediatorTest, MultipleWebStates) {
   [mediator_ destroyOpenInForWebState:web_state_1.get()];
   EXPECT_FALSE(web_state_1->GetView().subviews.count);
 
-  // Verify that destroying OpenIn for |web_state_1| doesn't affect
-  // |web_state_2|.
+  // Verify that destroying OpenIn for `web_state_1` doesn't affect
+  // `web_state_2`.
   EXPECT_EQ(1U, web_state_2->GetView().subviews.count);
 
   // Verify that calling disableAll remove any remaining views.

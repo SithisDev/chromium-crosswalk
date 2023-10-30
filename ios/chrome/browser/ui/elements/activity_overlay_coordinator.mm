@@ -1,11 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/elements/activity_overlay_coordinator.h"
 
 #import "ios/chrome/browser/ui/elements/activity_overlay_view_controller.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,8 +31,15 @@
       addSubview:self.activityOverlayViewController.view];
   [self.activityOverlayViewController
       didMoveToParentViewController:self.baseViewController];
-  AddSameConstraints(self.baseViewController.view,
-                     self.activityOverlayViewController.view);
+  UIView* baseView = self.baseViewController.view;
+  UIView* activityOverlayView = self.activityOverlayViewController.view;
+  AddSameCenterConstraints(baseView, activityOverlayView);
+  [NSLayoutConstraint activateConstraints:@[
+    [baseView.heightAnchor
+        constraintEqualToAnchor:activityOverlayView.heightAnchor],
+    [baseView.widthAnchor
+        constraintEqualToAnchor:activityOverlayView.widthAnchor],
+  ]];
 }
 
 - (void)stop {

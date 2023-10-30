@@ -1,19 +1,20 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_WEB_PUBLIC_TEST_URL_TEST_UTIL_H_
 #define IOS_WEB_PUBLIC_TEST_URL_TEST_UTIL_H_
 
-#include "base/strings/string16.h"
+#include <string>
+
 
 class GURL;
 
 namespace web {
 
-// Returns a formatted version of |url| that would be used as the fallback title
+// Returns a formatted version of `url` that would be used as the fallback title
 // for a page with that URL.
-base::string16 GetDisplayTitleForUrl(const GURL& url);
+std::u16string GetDisplayTitleForUrl(const GURL& url);
 
 }  // namespace web
 

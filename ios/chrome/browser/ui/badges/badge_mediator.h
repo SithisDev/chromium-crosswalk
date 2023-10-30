@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,28 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/ui/badges/badge_delegate.h"
+
 @protocol BadgeConsumer;
-class WebStateList;
+@protocol BadgeItem;
+class Browser;
+@protocol BrowserCoordinatorCommands;
 
 // A mediator object that updates the consumer when the state of badges changes.
-@interface BadgeMediator : NSObject
+@interface BadgeMediator : NSObject <BadgeDelegate>
 
-- (instancetype)initWithConsumer:(id<BadgeConsumer>)consumer
-                    webStateList:(WebStateList*)webStateList
-    NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithBrowser:(Browser*)browser NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 // Stops observing all objects.
 - (void)disconnect;
+
+// The dispatcher for badge related actions.
+@property(nonatomic, weak) id<BrowserCoordinatorCommands> dispatcher;
+
+// The consumer being set up by this mediator.  Setting to a new value updates
+// the new consumer.
+@property(nonatomic, weak) id<BadgeConsumer> consumer;
 
 @end
 

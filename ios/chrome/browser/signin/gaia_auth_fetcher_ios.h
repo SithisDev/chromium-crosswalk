@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,13 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "ios/chrome/browser/signin/gaia_auth_fetcher_ios_bridge.h"
+#include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
 class GaiaAuthFetcherIOSBridge;
 class GURL;
-
-namespace net {
-class URLRequestStatus;
-}  // namespace net
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -37,22 +33,15 @@ class GaiaAuthFetcherIOS
     : public GaiaAuthFetcher,
       public GaiaAuthFetcherIOSBridge::GaiaAuthFetcherIOSBridgeDelegate {
  public:
-  // Sets whether the iOS specialization of the GaiaAuthFetcher should be used.
-  // Mainly used for testing.
-  // Note that if |should_use| is true, it might still not be used if it is
-  // unnecessary or WKWebView isn't enabled.
-  static void SetShouldUseGaiaAuthFetcherIOSForTesting(
-      bool use_gaia_fetcher_ios);
-
-  // Returns whether the iOS specialization of the GaiaAuthFetcher should be
-  // used.
-  static bool ShouldUseGaiaAuthFetcherIOS();
-
   GaiaAuthFetcherIOS(
       GaiaAuthConsumer* consumer,
       gaia::GaiaSource source,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       web::BrowserState* browser_state);
+
+  GaiaAuthFetcherIOS(const GaiaAuthFetcherIOS&) = delete;
+  GaiaAuthFetcherIOS& operator=(const GaiaAuthFetcherIOS&) = delete;
+
   ~GaiaAuthFetcherIOS() override;
 
   void CancelRequest() override;
@@ -64,20 +53,19 @@ class GaiaAuthFetcherIOS
   // GaiaAuthFetcher.
   void CreateAndStartGaiaFetcher(
       const std::string& body,
+      const std::string& body_content_type,
       const std::string& headers,
       const GURL& gaia_gurl,
-      int load_flags,
+      network::mojom::CredentialsMode credentials_mode,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override;
   // GaiaAuthFetcherIOSBridge::GaiaAuthFetcherIOSBridgeDelegate.
   void OnFetchComplete(const GURL& url,
                        const std::string& data,
-                       const net::URLRequestStatus& status,
+                       net::Error net_error,
                        int response_code) override;
 
-  std::unique_ptr<GaiaAuthFetcherIOSBridge> bridge_;
   web::BrowserState* browser_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(GaiaAuthFetcherIOS);
+  std::unique_ptr<GaiaAuthFetcherIOSBridge> bridge_;
 };
 
 #endif  // IOS_CHROME_BROWSER_SIGNIN_GAIA_AUTH_FETCHER_IOS_H_

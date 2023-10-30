@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class CWVAutofillDataManager;
 @class CWVPreferences;
+@class CWVLeakCheckService;
+@class CWVSyncController;
 @class CWVUserContentController;
 @class CWVWebsiteDataStore;
 
@@ -20,10 +23,17 @@ CWV_EXPORT
 @interface CWVWebViewConfiguration : NSObject
 
 // Configuration with persistent data store which stores all data on disk.
+// Every call returns the same instance.
 + (instancetype)defaultConfiguration;
 
-// Configuration with ephemeral data store that neven stores data on disk.
+// Configuration with ephemeral data store that never stores data on disk.
+// Every call returns the same instance.
+// Deprecated. Use |nonPersistentConfiguration| instead.
 + (instancetype)incognitoConfiguration;
+
+// Configuration with non-persistent data store that never stores data on disk.
+// Every call returns a new instance.
++ (instancetype)nonPersistentConfiguration;
 
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -34,8 +44,21 @@ CWV_EXPORT
 // configuration.
 @property(nonatomic, readonly) CWVUserContentController* userContentController;
 
-// YES if it is a configuration with persistent data store which stores all data
-// on disk.
+// This web view configuration's sync controller.
+// nil if -[CWVWebViewConfiguration isPersistent] is NO.
+@property(nonatomic, readonly, nullable) CWVSyncController* syncController;
+
+// This web view configuration's autofill data manager.
+// nil if -[CWVWebViewConfiguration isPersistent] is NO.
+@property(nonatomic, readonly, nullable)
+    CWVAutofillDataManager* autofillDataManager;
+
+// This web view configuration's leak check service.
+// nil if -[CWVWebViewConfiguration isPersistent] is NO.
+@property(nonatomic, readonly, nullable) CWVLeakCheckService* leakCheckService;
+
+// YES if this is a configuration with a persistent data store which stores all
+// data on disk, for example cookies.
 @property(nonatomic, readonly, getter=isPersistent) BOOL persistent;
 
 @end

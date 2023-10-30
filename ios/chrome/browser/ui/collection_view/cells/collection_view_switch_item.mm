@@ -1,15 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_switch_item.h"
 
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -74,14 +72,13 @@ const CGFloat kVerticalPadding = 16;
     _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:_textLabel];
 
-    _textLabel.textColor = [[MDCPalette greyPalette] tint900];
+    _textLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
     _textLabel.numberOfLines = 0;
 
     _switchView = [[UISwitch alloc] initWithFrame:CGRectZero];
     _switchView.translatesAutoresizingMaskIntoConstraints = NO;
-    _switchView.onTintColor = [[MDCPalette cr_bluePalette] tint500];
-    _switchView.accessibilityHint = l10n_util::GetNSString(
-        IDS_IOS_TOGGLE_SETTING_SWITCH_ACCESSIBILITY_HINT);
+    _switchView.accessibilityHint =
+        l10n_util::GetNSString(IDS_IOS_TOGGLE_SWITCH_ACCESSIBILITY_HINT);
     [self.contentView addSubview:_switchView];
 
     [self useScaledFont:NO];
@@ -111,12 +108,14 @@ const CGFloat kVerticalPadding = 16;
 
 - (void)useScaledFont:(BOOL)useScaledFont {
   MaybeSetUILabelScaledFont(useScaledFont, _textLabel,
-                            [[MDCTypography fontLoader] mediumFontOfSize:14]);
+                            [UIFont systemFontOfSize:14
+                                              weight:UIFontWeightMedium]);
 }
 
 + (UIColor*)defaultTextColorForState:(UIControlState)state {
-  MDCPalette* grey = [MDCPalette greyPalette];
-  return (state & UIControlStateDisabled) ? grey.tint500 : grey.tint900;
+  return (state & UIControlStateDisabled)
+             ? [UIColor colorNamed:kDisabledTintColor]
+             : [UIColor colorNamed:kTextPrimaryColor];
 }
 
 // Implement -layoutSubviews as per instructions in documentation for

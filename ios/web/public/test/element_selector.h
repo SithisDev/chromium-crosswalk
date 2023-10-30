@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,11 @@
 
 // Returns an ElementSelector to retrieve an element by a xpath query.
 + (ElementSelector*)selectorWithXPathQuery:(const std::string&)query;
+
+// Returns an ElementSelector to retrieve an element described by
+// `selectorDescription` using `selectorScript`.
++ (ElementSelector*)selectorWithScript:(NSString*)selectorScript
+                   selectorDescription:(NSString*)selectorDescription;
 
 - (instancetype)init NS_UNAVAILABLE;
 

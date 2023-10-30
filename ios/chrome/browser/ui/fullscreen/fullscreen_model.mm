@@ -1,21 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model.h"
 
-#include <algorithm>
+#import <algorithm>
 
-#include "base/logging.h"
+#import "base/check_op.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model_observer.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Object that increments |counter| by 1 for its lifetime.
+// Object that increments `counter` by 1 for its lifetime.
 class ScopedIncrementer {
  public:
   explicit ScopedIncrementer(size_t* counter) : counter_(counter) {
@@ -79,11 +79,11 @@ void FullscreenModel::AnimationEndedWithProgress(CGFloat progress) {
 }
 
 void FullscreenModel::SetCollapsedToolbarHeight(CGFloat height) {
-  if (AreCGFloatsEqual(collapsed_toolbar_height_, height))
+  if (AreCGFloatsEqual(GetCollapsedToolbarHeight(), height))
     return;
   DCHECK_GE(height, 0.0);
   collapsed_toolbar_height_ = height;
-  ResetForNavigation();
+  base_offset_ = NAN;
   ScopedIncrementer toolbar_height_incrementer(&observer_callback_count_);
   for (auto& observer : observers_) {
     observer.FullscreenModelToolbarHeightsUpdated(this);
@@ -91,15 +91,15 @@ void FullscreenModel::SetCollapsedToolbarHeight(CGFloat height) {
 }
 
 CGFloat FullscreenModel::GetCollapsedToolbarHeight() const {
-  return collapsed_toolbar_height_;
+  return GetFreezeToolbarHeight() ? 0 : collapsed_toolbar_height_;
 }
 
 void FullscreenModel::SetExpandedToolbarHeight(CGFloat height) {
-  if (AreCGFloatsEqual(expanded_toolbar_height_, height))
+  if (AreCGFloatsEqual(GetExpandedToolbarHeight(), height))
     return;
   DCHECK_GE(height, 0.0);
   expanded_toolbar_height_ = height;
-  ResetForNavigation();
+  base_offset_ = NAN;
   ScopedIncrementer toolbar_height_incrementer(&observer_callback_count_);
   for (auto& observer : observers_) {
     observer.FullscreenModelToolbarHeightsUpdated(this);
@@ -107,7 +107,7 @@ void FullscreenModel::SetExpandedToolbarHeight(CGFloat height) {
 }
 
 CGFloat FullscreenModel::GetExpandedToolbarHeight() const {
-  return expanded_toolbar_height_;
+  return GetFreezeToolbarHeight() ? 0 : expanded_toolbar_height_;
 }
 
 void FullscreenModel::SetBottomToolbarHeight(CGFloat height) {
@@ -115,7 +115,7 @@ void FullscreenModel::SetBottomToolbarHeight(CGFloat height) {
     return;
   DCHECK_GE(height, 0.0);
   bottom_toolbar_height_ = height;
-  ResetForNavigation();
+  base_offset_ = NAN;
   ScopedIncrementer toolbar_height_incrementer(&observer_callback_count_);
   for (auto& observer : observers_) {
     observer.FullscreenModelToolbarHeightsUpdated(this);
@@ -180,7 +180,13 @@ void FullscreenModel::SetScrollViewIsScrolling(bool scrolling) {
   if (scrolling_ == scrolling)
     return;
   scrolling_ = scrolling;
-  if (!scrolling_) {
+  if (scrolling_) {
+    // Notify observers that the scroll event has begun.
+    ScopedIncrementer scroll_started_incrementer(&observer_callback_count_);
+    for (auto& observer : observers_) {
+      observer.FullscreenModelScrollEventStarted(this);
+    }
+  } else {
     // Stop ignoring the current scroll.
     ignoring_current_scroll_ = false;
     // Notify observers that the scroll event has ended.
@@ -208,10 +214,6 @@ void FullscreenModel::SetScrollViewIsDragging(bool dragging) {
     return;
   dragging_ = dragging;
   if (dragging_) {
-    ScopedIncrementer scroll_started_incrementer(&observer_callback_count_);
-    for (auto& observer : observers_) {
-      observer.FullscreenModelScrollEventStarted(this);
-    }
     // Update the base offset for each new scroll event.
     UpdateBaseOffset();
     // Re-rendering events are ignored during scrolls since disabling the model
@@ -243,6 +245,22 @@ void FullscreenModel::SetWebViewSafeAreaInsets(UIEdgeInsets safe_area_insets) {
 
 UIEdgeInsets FullscreenModel::GetWebViewSafeAreaInsets() const {
   return safe_area_insets_;
+}
+
+void FullscreenModel::SetFreezeToolbarHeight(bool freeze_toolbar_height) {
+  if (freeze_toolbar_height_ == freeze_toolbar_height) {
+    return;
+  }
+  freeze_toolbar_height_ = freeze_toolbar_height;
+  base_offset_ = NAN;
+  ScopedIncrementer toolbar_height_incrementer(&observer_callback_count_);
+  for (auto& observer : observers_) {
+    observer.FullscreenModelToolbarHeightsUpdated(this);
+  }
+}
+
+bool FullscreenModel::GetFreezeToolbarHeight() const {
+  return freeze_toolbar_height_;
 }
 
 FullscreenModel::ScrollAction FullscreenModel::ActionForScrollFromOffset(
@@ -304,10 +322,10 @@ void FullscreenModel::UpdateDisabledCounterForContentHeight() {
   // The model should be disabled when the content fits.
   CGFloat disabling_threshold = scroll_view_height_;
   if (resizes_scroll_view_) {
-    // When the FullscreenProvider is disabled, the scroll view can sometimes be
+    // When Smooth Scrolling is disabled, the scroll view can sometimes be
     // resized to account for the viewport insets after the page has been
     // rendered, so account for the maximum toolbar insets in the threshold.
-    disabling_threshold += expanded_toolbar_height_ + bottom_toolbar_height_;
+    disabling_threshold += GetExpandedToolbarHeight() + bottom_toolbar_height_;
   } else {
     // After reloads, pages whose viewports fit the screen are sometimes resized
     // to account for the safe area insets.  Adding these to the threshold helps

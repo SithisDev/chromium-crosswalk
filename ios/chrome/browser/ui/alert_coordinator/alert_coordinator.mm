@@ -1,12 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 
-#include "base/logging.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/strings/grit/ui_strings.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/strings/grit/ui_strings.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -15,15 +15,13 @@
 @interface AlertCoordinator () {
   // Variable backing a property from Subclassing category.
   UIAlertController* _alertController;
-  // Title for the alert.
-  NSString* _title;
 }
 
 // Redefined to readwrite.
 @property(nonatomic, readwrite, getter=isVisible) BOOL visible;
 
 // Cancel action passed using the public API.
-// It will called from the overridden block stored in the |cancelAction|
+// It will called from the overridden block stored in the `cancelAction`
 // property.
 @property(nonatomic, copy) ProceduralBlock rawCancelAction;
 
@@ -41,24 +39,13 @@
 @synthesize noInteractionAction = _noInteractionAction;
 @synthesize rawCancelAction = _rawCancelAction;
 @synthesize message = _message;
+@synthesize title = _title;
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message {
-  self = [super initWithBaseViewController:viewController browserState:nullptr];
-  if (self) {
-    [self commonInitWithTitle:title message:message];
-  }
-  return self;
-}
-
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                                     title:(NSString*)title
-                                   message:(NSString*)message
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState {
-  self = [super initWithBaseViewController:viewController
-                              browserState:browserState];
+  self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     [self commonInitWithTitle:title message:message];
   }
@@ -75,6 +62,13 @@
 - (void)addItemWithTitle:(NSString*)title
                   action:(ProceduralBlock)actionBlock
                    style:(UIAlertActionStyle)style {
+  [self addItemWithTitle:title action:actionBlock style:style enabled:YES];
+}
+
+- (void)addItemWithTitle:(NSString*)title
+                  action:(ProceduralBlock)actionBlock
+                   style:(UIAlertActionStyle)style
+                 enabled:(BOOL)enabled {
   if (self.visible ||
       (style == UIAlertActionStyleCancel && self.cancelButtonAdded)) {
     return;
@@ -89,11 +83,12 @@
       [UIAlertAction actionWithTitle:title
                                style:style
                              handler:^(UIAlertAction*) {
-                               [weakSelf setNoInteractionAction:nil];
+                               [weakSelf alertDismissed];
                                if (actionBlock)
                                  actionBlock();
-                               [weakSelf alertDismissed];
                              }];
+
+  alertAction.enabled = enabled;
 
   [self.alertController addAction:alertAction];
 }

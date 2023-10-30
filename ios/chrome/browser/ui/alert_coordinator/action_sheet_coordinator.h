@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 // Init with the parameters for anchoring the popover to a UIView.
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message
                                       rect:(CGRect)rect
@@ -20,20 +21,16 @@
 
 // Init with the parameters for anchoring the popover to a UIBarButtonItem.
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message
                              barButtonItem:(UIBarButtonItem*)barButtonItem
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message NS_UNAVAILABLE;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                                     title:(NSString*)title
-                                   message:(NSString*)message
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_UNAVAILABLE;
 
 // Configures the underlying UIAlertController's popover arrow direction.
 // Default is UIPopoverArrowDirectionAny.
@@ -43,14 +40,14 @@
 // UIAlertControllerStyleActionSheet.
 @property(nonatomic, assign) UIAlertControllerStyle alertStyle;
 
-// Allows replacing title with an attributed string. |updateAttributedText| must
+// Allows replacing title with an attributed string. `updateAttributedText` must
 // be called afterward.
 @property(nonatomic, copy) NSAttributedString* attributedTitle;
-// Allows replacing message with an attributed string. |updateAttributedText|
+// Allows replacing message with an attributed string. `updateAttributedText`
 // must be called afterward.
 @property(nonatomic, copy) NSAttributedString* attributedMessage;
 
-// Updates text based on current |attributedTitle| and |attributedMessage|.
+// Updates text based on current `attributedTitle` and `attributedMessage`.
 - (void)updateAttributedText;
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #import <objc/runtime.h>
 
-#include <memory>
+#import <memory>
 
-#include "base/logging.h"
+#import "base/check.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
 #import "ios/chrome/browser/ui/fullscreen/scoped_fullscreen_disabler.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -36,10 +36,10 @@ const void* const kFullscreenDisablerKey = &kFullscreenDisablerKey;
 @property(nonatomic, readonly) FullscreenController* controller;
 
 // Factory method that returns the disabler wrapper associated with
-// |coordinator|, lazily instantiating it if necessary.
+// `coordinator`, lazily instantiating it if necessary.
 + (instancetype)wrapperForCoordinator:(ChromeCoordinator*)coordinator;
 
-// Initializer for a wrapper that disables |controller|.
+// Initializer for a wrapper that disables `controller`.
 - (instancetype)initWithFullscreenController:(FullscreenController*)controller
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
@@ -56,15 +56,14 @@ const void* const kFullscreenDisablerKey = &kFullscreenDisablerKey;
 + (instancetype)wrapperForCoordinator:(ChromeCoordinator*)coordinator {
   // ChromeCoordinators that need to disable fullscreen must be initialized with
   // a ChromeBrowserState.
-  ios::ChromeBrowserState* browserState = coordinator.browserState;
+  ChromeBrowserState* browserState = coordinator.browser->GetBrowserState();
   DCHECK(browserState);
   // Fetch the associated wrapper.
   ScopedFullscreenDisablerWrapper* wrapper =
       objc_getAssociatedObject(coordinator, kFullscreenDisablerKey);
   if (!wrapper) {
     FullscreenController* controller =
-        FullscreenControllerFactory::GetInstance()->GetForBrowserState(
-            browserState);
+        FullscreenController::FromBrowser(coordinator.browser);
     wrapper = [[ScopedFullscreenDisablerWrapper alloc]
         initWithFullscreenController:controller];
     objc_setAssociatedObject(coordinator, kFullscreenDisablerKey, wrapper,

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
+
+class ChromeBrowserState;
 
 namespace base {
 template <typename T>
@@ -21,18 +22,18 @@ class DeviceInfoSyncService;
 class DeviceInfoTracker;
 }  // namespace syncer
 
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
-
 // Singleton that owns all DeviceInfoSyncService and associates them with
-// ios::ChromeBrowserState.
+// ChromeBrowserState.
 class DeviceInfoSyncServiceFactory : public BrowserStateKeyedServiceFactory {
  public:
   static syncer::DeviceInfoSyncService* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
 
   static DeviceInfoSyncServiceFactory* GetInstance();
+
+  DeviceInfoSyncServiceFactory(const DeviceInfoSyncServiceFactory&) = delete;
+  DeviceInfoSyncServiceFactory& operator=(const DeviceInfoSyncServiceFactory&) =
+      delete;
 
   // Iterates over browser states and returns any trackers that can be found.
   static void GetAllDeviceInfoTrackers(
@@ -47,8 +48,6 @@ class DeviceInfoSyncServiceFactory : public BrowserStateKeyedServiceFactory {
   // BrowserStateKeyedServiceFactory implementation.
   std::unique_ptr<KeyedService> BuildServiceInstanceFor(
       web::BrowserState* context) const override;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceInfoSyncServiceFactory);
 };
 
 #endif  // IOS_CHROME_BROWSER_SYNC_DEVICE_INFO_SYNC_SERVICE_FACTORY_H_

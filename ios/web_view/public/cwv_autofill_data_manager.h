@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class CWVAutofillProfile;
 @class CWVCreditCard;
+@class CWVPassword;
 @protocol CWVAutofillDataManagerObserver;
 
-CWV_EXPORT
 // Exposes saved autofill data such as address profiles and credit cards.
+CWV_EXPORT
 @interface CWVAutofillDataManager : NSObject
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -41,14 +42,40 @@ CWV_EXPORT
 - (void)fetchCreditCardsWithCompletionHandler:
     (void (^)(NSArray<CWVCreditCard*>* creditCards))completionHandler;
 
-// Updates the card.
-- (void)updateCreditCard:(CWVCreditCard*)creditCard;
+// Returns all saved passwords for password autofill in |completionHandler|.
+- (void)fetchPasswordsWithCompletionHandler:
+    (void (^)(NSArray<CWVPassword*>* passwords))completionHandler;
 
-// Deletes the card.
-- (void)deleteCreditCard:(CWVCreditCard*)creditCard;
+// Updates a |password| with a new username and password.
+// |password| The password to update.
+// |newUsername| The new username to set for |password|. Ignored if nil.
+// |newPassword| The new password to set for |password|. Ignored if nil.
+- (void)updatePassword:(CWVPassword*)password
+           newUsername:(nullable NSString*)newUsername
+           newPassword:(nullable NSString*)newPassword;
 
-// Deletes all locally saved data.
-- (void)clearAllLocalData;
+// Deletes the password.
+- (void)deletePassword:(CWVPassword*)password;
+
+// Adds a new password.
+// |username| The desired username. For example an email address.
+// |password| The desired password.
+// |site| The website this password is used for. For example
+// "https://www.chromium.org/".
+- (void)addNewPasswordForUsername:(NSString*)username
+                         password:(NSString*)password
+                             site:(NSString*)site;
+
+// Adds a new password created from the iOS credential provider extension.
+// |username| The login username for this password.
+// |serviceIdentifier| The service for which this password is for. This should
+// be derived from a -[ASCredentialServiceIdentifier identifier].
+// |keychainIdentifier| Used to retrieve the password value from the keychain.
+// This should identify a password previously stored using the APIs in
+// CWVCredentialProviderUtils.
+- (void)addNewPasswordForUsername:(NSString*)username
+                serviceIdentifier:(NSString*)serviceIdentifier
+               keychainIdentifier:(NSString*)keychainIdentifier;
 
 @end
 

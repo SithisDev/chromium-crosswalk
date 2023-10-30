@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,15 @@
   for (id<NewTabPageControllerDelegate> coordinator in self.coordinators) {
     [coordinator setScrollProgressForTabletOmnibox:progress];
   }
+}
+
+- (UIResponder<UITextInput>*)fakeboxScribbleForwardingTarget {
+  for (id<NewTabPageControllerDelegate> coordinator in self.coordinators) {
+    if (coordinator.fakeboxScribbleForwardingTarget) {
+      return coordinator.fakeboxScribbleForwardingTarget;
+    }
+  }
+  return nil;
 }
 
 #pragma mark - ToolbarCommands

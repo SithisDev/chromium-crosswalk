@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,38 +8,64 @@
 #import <Foundation/Foundation.h>
 #import <PassKit/PassKit.h>
 
-#include <memory>
+#import <memory>
 
-#include "components/search_engines/template_url_service.h"
+#import "components/open_from_clipboard/fake_clipboard_recent_content.h"
+#import "components/search_engines/template_url_service.h"
+#import "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
-#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
-#include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
+#import "ios/chrome/browser/favicon/favicon_service_factory.h"
+#import "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
+#import "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
+#import "ios/chrome/browser/history/history_service_factory.h"
+#import "ios/chrome/browser/main/test_browser.h"
+#import "ios/chrome/browser/prerender/fake_prerender_service.h"
+#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
+#import "ios/chrome/browser/sessions/session_restoration_browser_agent.h"
+#import "ios/chrome/browser/sessions/test_session_service.h"
+#import "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/authentication_service_fake.h"
 #import "ios/chrome/browser/tabs/tab_helper_util.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/ui/bookmarks/bookmark_interaction_controller.h"
 #import "ios/chrome/browser/ui/browser_container/browser_container_view_controller.h"
-#import "ios/chrome/browser/ui/browser_view/browser_view_controller_dependency_factory.h"
-#import "ios/chrome/browser/ui/browser_view/browser_view_controller_helper.h"
 #import "ios/chrome/browser/ui/browser_view/key_commands_provider.h"
+#import "ios/chrome/browser/ui/bubble/bubble_presenter.h"
+#import "ios/chrome/browser/ui/commands/activity_service_commands.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/chrome/browser/ui/commands/find_in_page_commands.h"
 #import "ios/chrome/browser/ui/commands/page_info_commands.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
-#include "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/ui/commands/qr_scanner_commands.h"
+#import "ios/chrome/browser/ui/commands/snackbar_commands.h"
+#import "ios/chrome/browser/ui/commands/text_zoom_commands.h"
+#import "ios/chrome/browser/ui/download/download_manager_coordinator.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_coordinator.h"
+#import "ios/chrome/browser/ui/side_swipe/side_swipe_controller.h"
+#import "ios/chrome/browser/ui/tab_switcher/tab_strip/tab_strip_coordinator.h"
+#import "ios/chrome/browser/ui/tabs/tab_strip_legacy_coordinator.h"
+#import "ios/chrome/browser/ui/toolbar/primary_toolbar_coordinator.h"
+#import "ios/chrome/browser/ui/toolbar/secondary_toolbar_coordinator.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_coordinator_adaptor.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_notifier_browser_agent.h"
+#import "ios/chrome/browser/web/web_navigation_browser_agent.h"
+#import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler.h"
-#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler_factory.h"
-#include "ios/chrome/test/block_cleanup_test.h"
-#include "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
-#import "ios/testing/ocmock_complex_type_helper.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "testing/gtest_mac.h"
+#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_usage_enabler_browser_agent.h"
+#import "ios/chrome/test/block_cleanup_test.h"
+#import "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "ios/web/public/web_state.h"
+#import "testing/gmock/include/gmock/gmock.h"
+#import "testing/gtest/include/gtest/gtest.h"
+#import "testing/gtest_mac.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -52,43 +78,20 @@
            notifyToolbar:(BOOL)notifyToolbar;
 @end
 
-@interface BVCTestTabModel : OCMockComplexTypeHelper
-- (instancetype)init NS_DESIGNATED_INITIALIZER;
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-@property(nonatomic, readonly) WebStateList* webStateList;
-@end
-
-@implementation BVCTestTabModel {
-  FakeWebStateListDelegate _webStateListDelegate;
-  std::unique_ptr<WebStateList> _webStateList;
-}
-
-- (instancetype)init {
-  if ((self = [super
-           initWithRepresentedObject:[OCMockObject
-                                         niceMockForClass:[TabModel class]]])) {
-    _webStateList = std::make_unique<WebStateList>(&_webStateListDelegate);
-  }
-  return self;
-}
-
-- (WebStateList*)webStateList {
-  return _webStateList.get();
-}
-@end
-
 #pragma mark -
 
 namespace {
 class BrowserViewControllerTest : public BlockCleanupTest {
  public:
-  BrowserViewControllerTest() {}
-
  protected:
+  BrowserViewControllerTest()
+      : scene_state_([[SceneState alloc] initWithAppState:nil]) {}
+
   void SetUp() override {
     BlockCleanupTest::SetUp();
     // Set up a TestChromeBrowserState instance.
     TestChromeBrowserState::Builder test_cbs_builder;
+
     test_cbs_builder.AddTestingFactory(
         IOSChromeTabRestoreServiceFactory::GetInstance(),
         IOSChromeTabRestoreServiceFactory::GetDefaultFactory());
@@ -98,50 +101,92 @@ class BrowserViewControllerTest : public BlockCleanupTest {
     test_cbs_builder.AddTestingFactory(
         IOSChromeLargeIconServiceFactory::GetInstance(),
         IOSChromeLargeIconServiceFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        IOSChromeFaviconLoaderFactory::GetInstance(),
+        IOSChromeFaviconLoaderFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        ios::FaviconServiceFactory::GetInstance(),
+        ios::FaviconServiceFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        ios::HistoryServiceFactory::GetInstance(),
+        ios::HistoryServiceFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        ios::BookmarkModelFactory::GetInstance(),
+        ios::BookmarkModelFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        AuthenticationServiceFactory::GetInstance(),
+        base::BindRepeating(
+            &AuthenticationServiceFake::CreateAuthenticationService));
+
     chrome_browser_state_ = test_cbs_builder.Build();
-
-    // Set up mock TabModel.
-    id tabModel = [[BVCTestTabModel alloc] init];
-    [tabModel setBrowserState:chrome_browser_state_.get()];
-
-    // Enable web usage for the mock TabModel's WebStateList.
-    WebStateListWebUsageEnabler* enabler =
-        WebStateListWebUsageEnablerFactory::GetInstance()->GetForBrowserState(
-            chrome_browser_state_.get());
-    enabler->SetWebStateList([tabModel webStateList]);
-    enabler->SetWebUsageEnabled(true);
 
     id passKitController =
         [OCMockObject niceMockForClass:[PKAddPassesViewController class]];
     passKitViewController_ = passKitController;
 
-    bvcHelper_ = [[BrowserViewControllerHelper alloc] init];
+    browser_ = std::make_unique<TestBrowser>(chrome_browser_state_.get());
+    WebUsageEnablerBrowserAgent::CreateForBrowser(browser_.get());
+    UrlLoadingNotifierBrowserAgent::CreateForBrowser(browser_.get());
+    WebNavigationBrowserAgent::CreateForBrowser(browser_.get());
 
-    // Set up a stub dependency factory.
-    id factory = [OCMockObject
-        mockForClass:[BrowserViewControllerDependencyFactory class]];
-    [[[factory stub] andReturn:bvcHelper_] newBrowserViewControllerHelper];
+    WebUsageEnablerBrowserAgent::FromBrowser(browser_.get())
+        ->SetWebUsageEnabled(true);
 
-    tabModel_ = tabModel;
-    dependencyFactory_ = factory;
-    command_dispatcher_ = [[CommandDispatcher alloc] init];
+    SessionRestorationBrowserAgent::CreateForBrowser(
+        browser_.get(), [[TestSessionService alloc] init]);
+    SessionRestorationBrowserAgent::FromBrowser(browser_.get())
+        ->SetSessionID([[NSUUID UUID] UUIDString]);
+
+    SceneStateBrowserAgent::CreateForBrowser(browser_.get(), scene_state_);
+
+    CommandDispatcher* dispatcher = browser_->GetCommandDispatcher();
+
+    id mockActivityServiceCommandHandler =
+        OCMProtocolMock(@protocol(ActivityServiceCommands));
+    [dispatcher startDispatchingToTarget:mockActivityServiceCommandHandler
+                             forProtocol:@protocol(ActivityServiceCommands)];
+    id mockFindInPageCommandHandler =
+        OCMProtocolMock(@protocol(FindInPageCommands));
+    [dispatcher startDispatchingToTarget:mockFindInPageCommandHandler
+                             forProtocol:@protocol(FindInPageCommands)];
+    id mockTextZoomCommandHandler =
+        OCMProtocolMock(@protocol(TextZoomCommands));
+    [dispatcher startDispatchingToTarget:mockTextZoomCommandHandler
+                             forProtocol:@protocol(TextZoomCommands)];
     id mockPageInfoCommandHandler =
         OCMProtocolMock(@protocol(PageInfoCommands));
-    [command_dispatcher_ startDispatchingToTarget:mockPageInfoCommandHandler
-                                      forProtocol:@protocol(PageInfoCommands)];
+    [dispatcher startDispatchingToTarget:mockPageInfoCommandHandler
+                             forProtocol:@protocol(PageInfoCommands)];
+    id mockQrScannerCommandHandler =
+        OCMProtocolMock(@protocol(QRScannerCommands));
+    [dispatcher startDispatchingToTarget:mockQrScannerCommandHandler
+                             forProtocol:@protocol(QRScannerCommands)];
+    id mockSnackbarCommandHandler =
+        OCMProtocolMock(@protocol(SnackbarCommands));
+    [dispatcher startDispatchingToTarget:mockSnackbarCommandHandler
+                             forProtocol:@protocol(SnackbarCommands)];
+
+    // Set up ApplicationCommands mock. Because ApplicationCommands conforms
+    // to ApplicationSettingsCommands, that needs to be mocked and dispatched
+    // as well.
     id mockApplicationCommandHandler =
         OCMProtocolMock(@protocol(ApplicationCommands));
-    [[tabModel stub] saveSessionImmediately:NO];
-    [[tabModel stub] closeAllTabs];
+    id mockApplicationSettingsCommandHandler =
+        OCMProtocolMock(@protocol(ApplicationSettingsCommands));
+    [dispatcher startDispatchingToTarget:mockApplicationCommandHandler
+                             forProtocol:@protocol(ApplicationCommands)];
+    [dispatcher
+        startDispatchingToTarget:mockApplicationSettingsCommandHandler
+                     forProtocol:@protocol(ApplicationSettingsCommands)];
 
     // Create three web states.
     for (int i = 0; i < 3; i++) {
       web::WebState::CreateParams params(chrome_browser_state_.get());
       std::unique_ptr<web::WebState> webState = web::WebState::Create(params);
       AttachTabHelpers(webState.get(), NO);
-      tabModel_.webStateList->InsertWebState(0, std::move(webState), 0,
-                                             WebStateOpener());
-      tabModel_.webStateList->ActivateWebStateAt(0);
+      browser_->GetWebStateList()->InsertWebState(0, std::move(webState), 0,
+                                                  WebStateOpener());
+      browser_->GetWebStateList()->ActivateWebStateAt(0);
     }
 
     // Load TemplateURLService.
@@ -150,15 +195,71 @@ class BrowserViewControllerTest : public BlockCleanupTest {
             chrome_browser_state_.get());
     template_url_service->Load();
 
-    // Instantiate the BVC.
-    bvc_ = [[BrowserViewController alloc]
-                      initWithTabModel:tabModel_
-                          browserState:chrome_browser_state_.get()
-                     dependencyFactory:factory
-            applicationCommandEndpoint:mockApplicationCommandHandler
-                     commandDispatcher:command_dispatcher_
-        browserContainerViewController:[[BrowserContainerViewController alloc]
-                                           init]];
+    ClipboardRecentContent::SetInstance(
+        std::make_unique<FakeClipboardRecentContent>());
+
+    container_ = [[BrowserContainerViewController alloc] init];
+    key_commands_provider_ =
+        [[KeyCommandsProvider alloc] initWithBrowser:browser_.get()];
+
+    fake_prerender_service_ = std::make_unique<FakePrerenderService>();
+
+    download_manager_coordinator_ = [[DownloadManagerCoordinator alloc]
+        initWithBaseViewController:[[UIViewController alloc] init]
+                           browser:browser_.get()];
+
+    popup_menu_coordinator_ =
+        [[PopupMenuCoordinator alloc] initWithBrowser:browser_.get()];
+    [popup_menu_coordinator_ start];
+
+    toolbar_coordinator_adaptor_ =
+        [[ToolbarCoordinatorAdaptor alloc] initWithDispatcher:dispatcher];
+
+    primary_toolbar_coordinator_ =
+        [[PrimaryToolbarCoordinator alloc] initWithBrowser:browser_.get()];
+    [primary_toolbar_coordinator_ start];
+
+    secondary_toolbar_coordinator_ =
+        [[SecondaryToolbarCoordinator alloc] initWithBrowser:browser_.get()];
+
+    bubble_presenter_ = [[BubblePresenter alloc]
+        initWithBrowserState:chrome_browser_state_.get()];
+    [dispatcher startDispatchingToTarget:bubble_presenter_
+                             forProtocol:@protocol(HelpCommands)];
+
+    tab_strip_coordinator_ =
+        [[TabStripCoordinator alloc] initWithBrowser:browser_.get()];
+
+    legacy_tab_strip_coordinator_ =
+        [[TabStripLegacyCoordinator alloc] initWithBrowser:browser_.get()];
+
+    side_swipe_controller_ =
+        [[SideSwipeController alloc] initWithBrowser:browser_.get()];
+
+    bookmark_interaction_controller_ =
+        [[BookmarkInteractionController alloc] initWithBrowser:browser_.get()];
+
+    fullscreen_controller_ = FullscreenController::FromBrowser(browser_.get());
+
+    BrowserViewControllerDependencies dependencies;
+    dependencies.prerenderService = fake_prerender_service_.get();
+    dependencies.bubblePresenter = bubble_presenter_;
+    dependencies.popupMenuCoordinator = popup_menu_coordinator_;
+    dependencies.downloadManagerCoordinator = download_manager_coordinator_;
+    dependencies.primaryToolbarCoordinator = primary_toolbar_coordinator_;
+    dependencies.secondaryToolbarCoordinator = secondary_toolbar_coordinator_;
+    dependencies.tabStripCoordinator = tab_strip_coordinator_;
+    dependencies.legacyTabStripCoordinator = legacy_tab_strip_coordinator_;
+    dependencies.sideSwipeController = side_swipe_controller_;
+    dependencies.bookmarkInteractionController =
+        bookmark_interaction_controller_;
+    dependencies.fullscreenController = fullscreen_controller_;
+
+    bvc_ = [[BrowserViewController alloc] initWithBrowser:browser_.get()
+                           browserContainerViewController:container_
+                                               dispatcher:dispatcher
+                                      keyCommandsProvider:key_commands_provider_
+                                             dependencies:dependencies];
 
     // Force the view to load.
     UIWindow* window = [[UIWindow alloc] initWithFrame:CGRectZero];
@@ -167,66 +268,50 @@ class BrowserViewControllerTest : public BlockCleanupTest {
   }
 
   void TearDown() override {
+    [download_manager_coordinator_ stop];
+
     [[bvc_ view] removeFromSuperview];
     [bvc_ shutdown];
-
-    // Cleanup to avoid debugger crash in non empty observer lists.
-    WebStateList* web_state_list = tabModel_.webStateList;
-    web_state_list->CloseAllWebStates(
-        WebStateList::ClosingFlags::CLOSE_NO_FLAGS);
 
     BlockCleanupTest::TearDown();
   }
 
   web::WebState* ActiveWebState() {
-    return tabModel_.webStateList->GetActiveWebState();
+    return browser_->GetWebStateList()->GetActiveWebState();
   }
 
   MOCK_METHOD0(OnCompletionCalled, void());
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   IOSChromeScopedTestingLocalState local_state_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
-  TabModel* tabModel_;
-  BrowserViewControllerHelper* bvcHelper_;
+  std::unique_ptr<Browser> browser_;
+  std::unique_ptr<PrerenderService> fake_prerender_service_;
+  KeyCommandsProvider* key_commands_provider_;
   PKAddPassesViewController* passKitViewController_;
   OCMockObject* dependencyFactory_;
   CommandDispatcher* command_dispatcher_;
+  BubblePresenter* bubble_presenter_;
+  BrowserContainerViewController* container_;
   BrowserViewController* bvc_;
   UIWindow* window_;
+  SceneState* scene_state_;
+  PopupMenuCoordinator* popup_menu_coordinator_;
+  DownloadManagerCoordinator* download_manager_coordinator_;
+  ToolbarCoordinatorAdaptor* toolbar_coordinator_adaptor_;
+  PrimaryToolbarCoordinator* primary_toolbar_coordinator_;
+  SecondaryToolbarCoordinator* secondary_toolbar_coordinator_;
+  TabStripCoordinator* tab_strip_coordinator_;
+  TabStripLegacyCoordinator* legacy_tab_strip_coordinator_;
+  SideSwipeController* side_swipe_controller_;
+  BookmarkInteractionController* bookmark_interaction_controller_;
+  FullscreenController* fullscreen_controller_;
 };
 
 TEST_F(BrowserViewControllerTest, TestWebStateSelected) {
   [bvc_ webStateSelected:ActiveWebState() notifyToolbar:YES];
-  EXPECT_EQ([ActiveWebState()->GetView() superview], [bvc_ contentArea]);
+  EXPECT_EQ(ActiveWebState()->GetView().superview, container_.view);
   EXPECT_TRUE(ActiveWebState()->IsVisible());
-}
-
-// TODO(altse): Needs a testing |Profile| that implements AutocompleteClassifier
-//             before enabling again.
-TEST_F(BrowserViewControllerTest, DISABLED_TestShieldWasTapped) {
-  [bvc_.dispatcher focusOmnibox];
-  EXPECT_TRUE([[bvc_ typingShield] superview] != nil);
-  EXPECT_FALSE([[bvc_ typingShield] isHidden]);
-  [bvc_ shieldWasTapped:nil];
-  EXPECT_TRUE([[bvc_ typingShield] superview] == nil);
-  EXPECT_TRUE([[bvc_ typingShield] isHidden]);
-}
-
-// Verifies that editing the omnimbox while the page is loading will stop the
-// load on a handset, but not stop the load on a tablet.
-TEST_F(BrowserViewControllerTest,
-       TestLocationBarBeganEdit_whenPageLoadIsInProgress) {
-  // Have the TestLocationBarModel indicate that a page load is in progress.
-  id partialMock = OCMPartialMock(bvcHelper_);
-  OCMExpect([partialMock isToolbarLoading:static_cast<web::WebState*>(
-                                              [OCMArg anyPointer])])
-      .andReturn(YES);
-
-  // The tab should stop loading on iPhones.
-  [bvc_ locationBarBeganEdit];
-  if (!IsIPadIdiom())
-    EXPECT_FALSE(ActiveWebState()->IsLoading());
 }
 
 TEST_F(BrowserViewControllerTest, TestClearPresentedState) {
@@ -238,30 +323,25 @@ TEST_F(BrowserViewControllerTest, TestClearPresentedState) {
                          dismissOmnibox:YES];
 }
 
-// Verifies the the next/previous tab commands from the keyboard work OK.
-TEST_F(BrowserViewControllerTest, TestFocusNextPrevious) {
-  // Add more web states.
-  WebStateList* web_state_list = tabModel_.webStateList;
-  // This test assumes there are exactly three web states in the list.
-  ASSERT_EQ(web_state_list->count(), 3);
+// Tests that WebState::WasShown() and WebState::WasHidden() is properly called
+// for WebState activations in the BrowserViewController's WebStateList.
+TEST_F(BrowserViewControllerTest, UpdateWebStateVisibility) {
+  WebStateList* web_state_list = browser_->GetWebStateList();
+  ASSERT_EQ(3, web_state_list->count());
 
-  ASSERT_TRUE([bvc_ conformsToProtocol:@protocol(KeyCommandsPlumbing)]);
-
-  id<KeyCommandsPlumbing> keyHandler =
-      static_cast<id<KeyCommandsPlumbing>>(bvc_);
-
-  [keyHandler focusNextTab];
-  EXPECT_EQ(web_state_list->active_index(), 1);
-  [keyHandler focusNextTab];
-  EXPECT_EQ(web_state_list->active_index(), 2);
-  [keyHandler focusNextTab];
-  EXPECT_EQ(web_state_list->active_index(), 0);
-  [keyHandler focusPreviousTab];
-  EXPECT_EQ(web_state_list->active_index(), 2);
-  [keyHandler focusPreviousTab];
-  EXPECT_EQ(web_state_list->active_index(), 1);
-  [keyHandler focusPreviousTab];
-  EXPECT_EQ(web_state_list->active_index(), 0);
+  // Activate each WebState in the list and check the visibility.
+  web_state_list->ActivateWebStateAt(0);
+  EXPECT_EQ(web_state_list->GetWebStateAt(0)->IsVisible(), true);
+  EXPECT_EQ(web_state_list->GetWebStateAt(1)->IsVisible(), false);
+  EXPECT_EQ(web_state_list->GetWebStateAt(2)->IsVisible(), false);
+  web_state_list->ActivateWebStateAt(1);
+  EXPECT_EQ(web_state_list->GetWebStateAt(0)->IsVisible(), false);
+  EXPECT_EQ(web_state_list->GetWebStateAt(1)->IsVisible(), true);
+  EXPECT_EQ(web_state_list->GetWebStateAt(2)->IsVisible(), false);
+  web_state_list->ActivateWebStateAt(2);
+  EXPECT_EQ(web_state_list->GetWebStateAt(0)->IsVisible(), false);
+  EXPECT_EQ(web_state_list->GetWebStateAt(1)->IsVisible(), false);
+  EXPECT_EQ(web_state_list->GetWebStateAt(2)->IsVisible(), true);
 }
 
 }  // namespace

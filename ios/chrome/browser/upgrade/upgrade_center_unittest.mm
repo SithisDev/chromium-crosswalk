@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/upgrade/upgrade_center.h"
 
-#include "ios/chrome/browser/upgrade/upgrade_recommended_details.h"
-#include "testing/platform_test.h"
+#import "ios/chrome/browser/upgrade/upgrade_recommended_details.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -33,19 +33,19 @@ class UpgradeCenterTest : public PlatformTest {
 @end
 
 @implementation FakeUpgradeCenterClient {
-  UpgradeCenterTest* test_;
+  UpgradeCenterTest* _test;
 }
 
 - (instancetype)initWithTest:(UpgradeCenterTest*)test {
   self = [super init];
   if (self) {
-    test_ = test;
+    _test = test;
   }
   return self;
 }
 
 - (void)showUpgrade:(UpgradeCenter*)center {
-  test_->count_ += 1;
+  _test->count_ += 1;
 }
 
 @end
@@ -56,7 +56,7 @@ TEST_F(UpgradeCenterTest, NoUpgrade) {
   EXPECT_EQ(count_, 0u);
   FakeUpgradeCenterClient* fake =
       [[FakeUpgradeCenterClient alloc] initWithTest:this];
-  [[UpgradeCenter sharedInstance] registerClient:fake withDispatcher:nil];
+  [[UpgradeCenter sharedInstance] registerClient:fake withHandler:nil];
   EXPECT_EQ(count_, 0u);
   [[UpgradeCenter sharedInstance] unregisterClient:fake];
 }
@@ -65,7 +65,7 @@ TEST_F(UpgradeCenterTest, GoodUpgradeAfterRegistration) {
   EXPECT_EQ(count_, 0u);
   FakeUpgradeCenterClient* fake =
       [[FakeUpgradeCenterClient alloc] initWithTest:this];
-  [[UpgradeCenter sharedInstance] registerClient:fake withDispatcher:nil];
+  [[UpgradeCenter sharedInstance] registerClient:fake withHandler:nil];
   EXPECT_EQ(count_, 0u);
 
   UpgradeRecommendedDetails details;
@@ -84,7 +84,7 @@ TEST_F(UpgradeCenterTest, GoodUpgradeBeforeRegistration) {
   EXPECT_EQ(count_, 0u);
   FakeUpgradeCenterClient* fake =
       [[FakeUpgradeCenterClient alloc] initWithTest:this];
-  [[UpgradeCenter sharedInstance] registerClient:fake withDispatcher:nil];
+  [[UpgradeCenter sharedInstance] registerClient:fake withHandler:nil];
   EXPECT_EQ(count_, 1u);
   [[UpgradeCenter sharedInstance] unregisterClient:fake];
 }
@@ -92,7 +92,7 @@ TEST_F(UpgradeCenterTest, GoodUpgradeBeforeRegistration) {
 TEST_F(UpgradeCenterTest, NoRepeatedDisplay) {
   FakeUpgradeCenterClient* fake =
       [[FakeUpgradeCenterClient alloc] initWithTest:this];
-  [[UpgradeCenter sharedInstance] registerClient:fake withDispatcher:nil];
+  [[UpgradeCenter sharedInstance] registerClient:fake withHandler:nil];
   EXPECT_EQ(count_, 0u);
 
   // First notification should display
@@ -117,7 +117,7 @@ TEST_F(UpgradeCenterTest, NoRepeatedDisplay) {
 TEST_F(UpgradeCenterTest, NewVersionResetsInterval) {
   FakeUpgradeCenterClient* fake =
       [[FakeUpgradeCenterClient alloc] initWithTest:this];
-  [[UpgradeCenter sharedInstance] registerClient:fake withDispatcher:nil];
+  [[UpgradeCenter sharedInstance] registerClient:fake withHandler:nil];
   EXPECT_EQ(count_, 0u);
 
   // First notification should display

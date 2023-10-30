@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/mac/scoped_block.h"
 #include "base/memory/scoped_refptr.h"
 #include "url/gurl.h"
 
@@ -29,9 +28,9 @@ typedef void (^URLFetcherBlockAdapterCompletion)(NSData*,
 // Class to manage retrieval of WebUI resources.
 class URLFetcherBlockAdapter {
  public:
-  // Creates URLFetcherBlockAdapter for resource at |url| with
-  // |request_context|.
-  // |completion_handler| is called with results of the fetch.
+  // Creates URLFetcherBlockAdapter for resource at `url` with
+  // `request_context`.
+  // `completion_handler` is called with results of the fetch.
   URLFetcherBlockAdapter(
       const GURL& url,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
@@ -39,6 +38,8 @@ class URLFetcherBlockAdapter {
   virtual ~URLFetcherBlockAdapter();
   // Starts the fetch.
   virtual void Start();
+
+  GURL getUrl() { return url_; }
 
  protected:
   void OnURLLoadComplete(std::unique_ptr<std::string> response_body);
@@ -49,8 +50,7 @@ class URLFetcherBlockAdapter {
   // The URL loader factory.
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   // Callback for resource load.
-  base::mac::ScopedBlock<web::URLFetcherBlockAdapterCompletion>
-      completion_handler_;
+  __strong web::URLFetcherBlockAdapterCompletion completion_handler_;
   // URLLoader for retrieving data from net stack.
   std::unique_ptr<network::SimpleURLLoader> url_loader_;
 };

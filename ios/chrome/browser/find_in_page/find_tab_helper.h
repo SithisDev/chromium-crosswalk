@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,25 +8,21 @@
 #include <Foundation/Foundation.h>
 
 #include "base/ios/block_types.h"
-#include "base/macros.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "base/scoped_observation.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 @class FindInPageController;
 @class FindInPageModel;
 @protocol FindInPageResponseDelegate;
 
-typedef void (^FindInPageCompletionBlock)(FindInPageModel*);
-
-// Names for Find In Page UMA actions (Find, FindNext, FindPrevious).
-extern const char kFindActionName[];
-extern const char kFindNextActionName[];
-extern const char kFindPreviousActionName[];
-
 // Adds support for the "Find in page" feature.
 class FindTabHelper : public web::WebStateObserver,
                       public web::WebStateUserData<FindTabHelper> {
  public:
+  FindTabHelper(const FindTabHelper&) = delete;
+  FindTabHelper& operator=(const FindTabHelper&) = delete;
+
   ~FindTabHelper() override;
 
   enum FindDirection {
@@ -41,18 +37,16 @@ class FindTabHelper : public web::WebStateObserver,
   // Starts an asynchronous Find operation that will call the given completion
   // handler with results.  Highlights matches on the current page.  Always
   // searches in the FORWARD direction.
-  void StartFinding(NSString* search_string,
-                    FindInPageCompletionBlock completion);
+  void StartFinding(NSString* search_string);
 
   // Runs an asynchronous Find operation that will call the given completion
   // handler with results.  Highlights matches on the current page.  Uses the
-  // previously remembered search string and searches in the given |direction|.
-  void ContinueFinding(FindDirection direction,
-                       FindInPageCompletionBlock completion);
+  // previously remembered search string and searches in the given `direction`.
+  void ContinueFinding(FindDirection direction);
 
   // Stops any running find operations and runs the given completion block.
   // Removes any highlighting from the current page.
-  void StopFinding(ProceduralBlock completion);
+  void StopFinding();
 
   // Returns the FindInPageModel that contains the latest find results.
   FindInPageModel* GetFindResult() const;
@@ -81,17 +75,27 @@ class FindTabHelper : public web::WebStateObserver,
   // Private constructor used by CreateForWebState().
   FindTabHelper(web::WebState* web_state);
 
+  // Create the FindInPageController for `web_state`. Only called if/when
+  // the WebState is realized.
+  void CreateFindInPageController(web::WebState* web_state);
+
   // web::WebStateObserver.
+  void WebStateRealized(web::WebState* web_state) override;
+  void WebStateDestroyed(web::WebState* web_state) override;
   void DidFinishNavigation(web::WebState* web_state,
                            web::NavigationContext* navigation_context) override;
-  void WebStateDestroyed(web::WebState* web_state) override;
 
-  // The ObjC find in page controller.
-  FindInPageController* controller_;
+  // The ObjC find in page controller (nil if the WebState is not realized).
+  FindInPageController* controller_ = nil;
+
+  // The delegate to register with FindInPageController when it is created.
+  __weak id<FindInPageResponseDelegate> response_delegate_ = nil;
+
+  // Manage the registration of this instance as a WebStateObserver.
+  base::ScopedObservation<web::WebState, web::WebStateObserver> observation_{
+      this};
 
   WEB_STATE_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(FindTabHelper);
 };
 
 #endif  // IOS_CHROME_BROWSER_FIND_IN_PAGE_FIND_TAB_HELPER_H_

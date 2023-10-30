@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,13 @@ class CreditCard;
 
 @interface CWVCreditCard ()
 
-// The internal autofill credit card that is wrapped by this object.
-@property(nonatomic, readonly) autofill::CreditCard* internalCard;
-
 - (instancetype)initWithCreditCard:(const autofill::CreditCard&)creditCard
     NS_DESIGNATED_INITIALIZER;
+
+// The internal autofill credit card that is wrapped by this object.
+// Intentionally not declared as a property to avoid issues when read by
+// -[NSObject valueForKey:].
+- (autofill::CreditCard*)internalCard;
 
 @end
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,21 @@
 @protocol OmniboxTextFieldDelegate<UITextFieldDelegate>
 
 @optional
-// Called when the OmniboxTextFieldIOS performs a copy operation.  Returns YES
-// if the delegate handled the copy operation itself.  If the delegate returns
-// NO, the field must perform the copy.  Some platforms (iOS 4) do not expose an
-// API that allows the delegate to handle the copy.
-- (BOOL)onCopy;
+// Called when the OmniboxTextFieldIOS performs a copy operation.
+- (void)onCopy;
 
 // Called before the OmniboxTextFieldIOS performs a paste operation.
 - (void)willPaste;
 
 // Called when the backspace button is tapped in the OmniboxTextFieldIOS.
 - (void)onDeleteBackward;
+
+// Called when the UIPasteControl in the omnibox's keyboard accessory is shown.
+// Returns whether or not the paste control should be enabled.
+- (BOOL)canPasteItemProviders:(NSArray<NSItemProvider*>*)itemProviders;
+
+// Called when the UIPasteControl in the omnibox's keyboard accessory is tapped.
+- (void)pasteItemProviders:(NSArray<NSItemProvider*>*)itemProviders;
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_TEXT_FIELD_DELEGATE_H_

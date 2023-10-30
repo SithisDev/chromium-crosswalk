@@ -1,21 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/password/password_exporter_for_testing.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
-#include "components/autofill/core/common/password_form.h"
-#include "components/password_manager/core/browser/password_manager_metrics_util.h"
-#include "components/strings/grit/components_strings.h"
-#include "ios/chrome/grit/ios_strings.h"
+#import "base/strings/utf_string_conversions.h"
+#import "base/test/metrics/histogram_tester.h"
+#import "base/test/task_environment.h"
+#import "components/password_manager/core/browser/password_form.h"
+#import "components/password_manager/core/browser/password_manager_metrics_util.h"
+#import "components/password_manager/core/browser/ui/credential_ui_entry.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/password_test_util.h"
-#include "testing/platform_test.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -35,7 +36,7 @@
 }
 
 - (void)serializePasswords:
-            (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords
+            (const std::vector<password_manager::CredentialUIEntry>&)passwords
                    handler:(void (^)(std::string))serializedPasswordsHandler {
   _serializedPasswordsHandler = serializedPasswordsHandler;
 }
@@ -106,28 +107,27 @@ class PasswordExporterTest : public PlatformTest {
                               delegate:password_exporter_delegate_];
   }
 
-  std::vector<std::unique_ptr<autofill::PasswordForm>> CreatePasswordList() {
-    auto password_form = std::make_unique<autofill::PasswordForm>();
-    password_form->origin = GURL("http://accounts.google.com/a/LoginAuth");
-    password_form->username_value = base::ASCIIToUTF16("test@testmail.com");
-    password_form->password_value = base::ASCIIToUTF16("test1");
+  std::vector<password_manager::CredentialUIEntry> CreatePasswordList() {
+    password_manager::PasswordForm password_form;
+    password_form.url = GURL("http://accounts.google.com/a/LoginAuth");
+    password_form.username_value = u"test@testmail.com";
+    password_form.password_value = u"test1";
 
-    std::vector<std::unique_ptr<autofill::PasswordForm>> password_forms;
-    password_forms.push_back(std::move(password_form));
-    return password_forms;
+    return {password_manager::CredentialUIEntry(password_form)};
   }
 
   id password_exporter_delegate_;
   PasswordExporter* password_exporter_;
   MockReauthenticationModule* mock_reauthentication_module_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::HistogramTester histogram_tester_;
 };
 
 // Tests that when reauthentication is successful, writing the passwords file
 // is attempted and a call to show the activity view is made.
 TEST_F(PasswordExporterTest, PasswordFileWriteReauthSucceeded) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordFileWriter* fake_password_file_writer =
       [[FakePasswordFileWriter alloc] init];
   fake_password_file_writer.writingStatus = WriteToURLStatus::SUCCESS;
@@ -140,7 +140,7 @@ TEST_F(PasswordExporterTest, PasswordFileWriteReauthSucceeded) {
   [password_exporter_ startExportFlow:CreatePasswordList()];
 
   // Wait for all asynchronous tasks to complete.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_TRUE(fake_password_file_writer.writeAttempted);
 
@@ -154,7 +154,8 @@ TEST_F(PasswordExporterTest, PasswordFileWriteReauthSucceeded) {
 // the appropriate error is displayed and the export operation
 // is interrupted.
 TEST_F(PasswordExporterTest, WritingFailedOutOfDiskSpace) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordFileWriter* fake_password_file_writer =
       [[FakePasswordFileWriter alloc] init];
   fake_password_file_writer.writingStatus =
@@ -171,7 +172,7 @@ TEST_F(PasswordExporterTest, WritingFailedOutOfDiskSpace) {
   [password_exporter_ startExportFlow:CreatePasswordList()];
 
   // Wait for all asynchronous tasks to complete.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Use @try/@catch as -reject raises an exception.
   @try {
@@ -192,7 +193,8 @@ TEST_F(PasswordExporterTest, WritingFailedOutOfDiskSpace) {
 // enough disk space, the appropriate error is displayed and the export
 // operation is interrupted.
 TEST_F(PasswordExporterTest, WritingFailedUnknownError) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordFileWriter* fake_password_file_writer =
       [[FakePasswordFileWriter alloc] init];
   fake_password_file_writer.writingStatus = WriteToURLStatus::UNKNOWN_ERROR;
@@ -208,7 +210,7 @@ TEST_F(PasswordExporterTest, WritingFailedUnknownError) {
   [password_exporter_ startExportFlow:CreatePasswordList()];
 
   // Wait for all asynchronous tasks to complete.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Use @try/@catch as -reject raises an exception.
   @try {
@@ -227,7 +229,8 @@ TEST_F(PasswordExporterTest, WritingFailedUnknownError) {
 
 // Tests that when reauthentication fails the export flow is interrupted.
 TEST_F(PasswordExporterTest, ExportInterruptedWhenReauthFails) {
-  mock_reauthentication_module_.shouldSucceed = NO;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kFailure;
   FakePasswordSerialzerBridge* fake_password_serializer_bridge =
       [[FakePasswordSerialzerBridge alloc] init];
   [password_exporter_
@@ -246,7 +249,7 @@ TEST_F(PasswordExporterTest, ExportInterruptedWhenReauthFails) {
     [password_exporter_ startExportFlow:CreatePasswordList()];
 
     // Wait for all asynchronous tasks to complete.
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     EXPECT_OCMOCK_VERIFY(password_exporter_delegate_);
   } @catch (NSException* exception) {
     // The exception is raised when
@@ -261,7 +264,7 @@ TEST_F(PasswordExporterTest, ExportInterruptedWhenReauthFails) {
 
   // Make sure this test doesn't pass only because file writing hasn't finished
   // yet.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Serializing passwords has finished, but reauthentication was not
   // successful, so writing the file was not attempted.
@@ -272,7 +275,8 @@ TEST_F(PasswordExporterTest, ExportInterruptedWhenReauthFails) {
 // Tests that cancelling the export while serialization is still ongoing
 // waits for it to finish before cleaning up.
 TEST_F(PasswordExporterTest, CancelWaitsForSerializationFinished) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordSerialzerBridge* fake_password_serializer_bridge =
       [[FakePasswordSerialzerBridge alloc] init];
   [password_exporter_
@@ -294,7 +298,7 @@ TEST_F(PasswordExporterTest, CancelWaitsForSerializationFinished) {
   @try {
     [fake_password_serializer_bridge executeHandler];
     // Wait for all asynchronous tasks to complete.
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     EXPECT_OCMOCK_VERIFY(password_exporter_delegate_);
   } @catch (NSException* exception) {
     // The exception is raised when
@@ -309,7 +313,8 @@ TEST_F(PasswordExporterTest, CancelWaitsForSerializationFinished) {
 // Tests that if the export is cancelled before writing to file finishes
 // successfully the request to show the activity controller isn't made.
 TEST_F(PasswordExporterTest, CancelledBeforeWriteToFileFinishesSuccessfully) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordFileWriter* fake_password_file_writer =
       [[FakePasswordFileWriter alloc] init];
   fake_password_file_writer.writingStatus = WriteToURLStatus::SUCCESS;
@@ -321,7 +326,7 @@ TEST_F(PasswordExporterTest, CancelledBeforeWriteToFileFinishesSuccessfully) {
 
   [password_exporter_ startExportFlow:CreatePasswordList()];
   // Wait for all asynchronous tasks to complete.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   [password_exporter_ cancelExport];
   EXPECT_EQ(ExportState::CANCELLING, password_exporter_.exportState);
 
@@ -341,7 +346,8 @@ TEST_F(PasswordExporterTest, CancelledBeforeWriteToFileFinishesSuccessfully) {
 // Tests that if the export is cancelled before writing to file fails
 // with an error, the request to show the error alert isn't made.
 TEST_F(PasswordExporterTest, CancelledBeforeWriteToFileFails) {
-  mock_reauthentication_module_.shouldSucceed = YES;
+  mock_reauthentication_module_.expectedResult =
+      ReauthenticationResult::kSuccess;
   FakePasswordFileWriter* fake_password_file_writer =
       [[FakePasswordFileWriter alloc] init];
   fake_password_file_writer.writingStatus = WriteToURLStatus::UNKNOWN_ERROR;
@@ -352,7 +358,7 @@ TEST_F(PasswordExporterTest, CancelledBeforeWriteToFileFails) {
 
   [password_exporter_ startExportFlow:CreatePasswordList()];
   // Wait for all asynchronous tasks to complete.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   [password_exporter_ cancelExport];
   EXPECT_EQ(ExportState::CANCELLING, password_exporter_.exportState);
 

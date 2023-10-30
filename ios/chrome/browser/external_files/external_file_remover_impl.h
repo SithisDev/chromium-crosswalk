@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,8 @@
 #include "components/sessions/core/tab_restore_service_observer.h"
 #import "ios/chrome/browser/external_files/external_file_remover.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
+
 namespace sessions {
 class TabRestoreService;
 }
@@ -28,8 +27,12 @@ class ExternalFileRemoverImpl : public ExternalFileRemover,
   // Creates an ExternalFileRemoverImpl to remove external documents not
   // referenced by the specified BrowserViewController. Use Remove to initiate
   // the removal.
-  ExternalFileRemoverImpl(ios::ChromeBrowserState* browser_state,
+  ExternalFileRemoverImpl(ChromeBrowserState* browser_state,
                           sessions::TabRestoreService* tab_restore_service);
+
+  ExternalFileRemoverImpl(const ExternalFileRemoverImpl&) = delete;
+  ExternalFileRemoverImpl& operator=(const ExternalFileRemoverImpl&) = delete;
+
   ~ExternalFileRemoverImpl() override;
 
   // ExternalFileRemover methods.
@@ -50,14 +53,14 @@ class ExternalFileRemoverImpl : public ExternalFileRemover,
     bool remove_all_files;
     base::ScopedClosureRunner closure_runner;
   };
-  // Removes all files received from other apps if |all_files| is true.
-  // Otherwise, removes the unreferenced files only. |closure_runner| is called
+  // Removes all files received from other apps if `all_files` is true.
+  // Otherwise, removes the unreferenced files only. `closure_runner` is called
   // when the removal finishes.
   void Remove(bool all_files, base::ScopedClosureRunner closure_runner);
-  // Removes files received from other apps. If |all_files| is true, then
+  // Removes files received from other apps. If `all_files` is true, then
   // all files including files that may be referenced by tabs through restore
   // service or history. Otherwise, only the unreferenced files are removed.
-  // |closure_runner| is called when the removal finishes.
+  // `closure_runner` is called when the removal finishes.
   void RemoveFiles(bool all_files, base::ScopedClosureRunner closure_runner);
   // Returns all Referenced External files.
   NSSet* GetReferencedExternalFiles();
@@ -67,13 +70,11 @@ class ExternalFileRemoverImpl : public ExternalFileRemover,
   sessions::TabRestoreService* tab_restore_service_ = nullptr;
   // ChromeBrowserState used to get the referenced files. Must outlive this
   // object.
-  ios::ChromeBrowserState* browser_state_ = nullptr;
+  ChromeBrowserState* browser_state_ = nullptr;
   // Used to ensure that this class' methods are called on the correct sequence.
   SEQUENCE_CHECKER(sequence_checker_);
-  // Used to ensure |Remove()| is not run when this object is destroyed.
+  // Used to ensure `Remove()` is not run when this object is destroyed.
   base::WeakPtrFactory<ExternalFileRemoverImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalFileRemoverImpl);
 };
 
 #endif  // IOS_CHROME_BROWSER_EXTERNAL_FILES_EXTERNAL_FILE_REMOVER_IMPL_H_

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,7 @@
 
 #include "base/callback.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 namespace sessions {
 class SerializedNavigationEntry;
@@ -25,10 +23,10 @@ class WebState;
 // Utility method that allows to access the iOS SessionService from C++ code.
 namespace session_util {
 
-// Create a WebState initialized with |browser_state| and serialized navigation.
+// Create a WebState initialized with `browser_state` and serialized navigation.
 // The returned WebState has web usage enabled.
 std::unique_ptr<web::WebState> CreateWebStateWithNavigationEntries(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     int last_committed_item_index,
     const std::vector<sessions::SerializedNavigationEntry>& navigations);
 

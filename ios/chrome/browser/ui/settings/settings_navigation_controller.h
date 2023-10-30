@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,30 +8,17 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/settings/settings_controller_protocol.h"
 
+class Browser;
 @protocol BrowserCommands;
+@protocol BrowsingDataCommands;
 @protocol ImportDataControllerDelegate;
-@protocol UserFeedbackDataSource;
-
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
+@protocol SnackbarCommands;
+@class UserFeedbackData;
 
 // The accessibility identifier for the settings' "Done" button.
 extern NSString* const kSettingsDoneButtonId;
-
-@protocol SettingsControllerProtocol<NSObject>
-
-@optional
-
-// Notifies the controller that the settings screen is being dismissed.
-- (void)settingsWillBeDismissed;
-
-// Notifies the controller that is popped out from the settings navigation
-// controller.
-- (void)viewControllerWasPopped;
-
-@end
 
 @protocol SettingsNavigationControllerDelegate<NSObject>
 
@@ -39,9 +26,23 @@ extern NSString* const kSettingsDoneButtonId;
 // closed.
 - (void)closeSettings;
 
-// Asks the delegate for a dispatcher that can be passed into child view
+// Informs the delegate that settings navigation controller has been dismissed
+// (e.g. it was swiped down). This means that closeSettings wasn't called and we
+// need to perform some clean up tasks.
+- (void)settingsWasDismissed;
+
+// Asks the delegate for a handler that can be passed into child view
 // controllers when they are created.
-- (id<ApplicationCommands, BrowserCommands>)dispatcherForSettings;
+- (id<ApplicationCommands, BrowserCommands, BrowsingDataCommands>)
+    handlerForSettings;
+
+// Asks the delegate for an ApplicationCommands handler that can be passed into
+// child view controllers when they are created.
+- (id<ApplicationCommands>)handlerForApplicationCommands;
+
+// Asks the delegate for a SnackbarCommands handler that can be passed into
+// child view controllers when they are created.
+- (id<SnackbarCommands>)handlerForSnackbarCommands;
 
 @end
 
@@ -49,97 +50,143 @@ extern NSString* const kSettingsDoneButtonId;
 @interface SettingsNavigationController
     : UINavigationController<ApplicationSettingsCommands>
 
-// Whether sync changes should be committed when the settings are being
-// dismissed. Defaults to YES.
-@property(nonatomic, assign) BOOL shouldCommitSyncChangesOnDismissal;
-
 // Creates a new SettingsTableViewController and the chrome around it.
-// |browserState| is used to personalize some settings aspects and should not be
-// nil nor Off-the-Record. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newSettingsMainControllerWithBrowserState:(ios::ChromeBrowserState*)browserState
+// `browser` is the browser where settings are being displayed and should not be
+// nil nor Off-the-Record. `delegate` may be nil.
++ (instancetype)
+    mainSettingsControllerForBrowser:(Browser*)browser
+                            delegate:(id<SettingsNavigationControllerDelegate>)
+                                         delegate;
+
+// Creates a new AccountsTableViewController and the chrome around it.
+// `browser` is the browser where settings are being displayed and should not be
+// nil. `delegate` may be nil.
++ (instancetype)
+    accountsControllerForBrowser:(Browser*)browser
+                        delegate:
+                            (id<SettingsNavigationControllerDelegate>)delegate;
+
+// Creates a new GoogleServicesSettingsCollectionViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    googleServicesControllerForBrowser:(Browser*)browser
+                              delegate:
+                                  (id<SettingsNavigationControllerDelegate>)
+                                      delegate;
+
+// Creates a new SettingsNavigationController that displays the sync management
+// UI. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    syncSettingsControllerForBrowser:(Browser*)browser
+                            delegate:(id<SettingsNavigationControllerDelegate>)
+                                         delegate;
+
+// Creates a new SyncEncryptionPassphraseCollectionViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    syncPassphraseControllerForBrowser:(Browser*)browser
+                              delegate:
+                                  (id<SettingsNavigationControllerDelegate>)
+                                      delegate;
+
+// Creates a new SavePasswordsCollectionViewController and the chrome around it.
+// `browser` is the browser where settings are being displayed and should not be
+// nil. `delegate` may be nil. `startCheck` indicates whether startPasswordCheck
+// should be called right after creating view controller. `showCancelButton`
+// indicates whether a cancel button should be shown in the upper left corner
+// if the navigation stack is empty.
++ (instancetype)
+    savePasswordsControllerForBrowser:(Browser*)browser
+                             delegate:(id<SettingsNavigationControllerDelegate>)
+                                          delegate
+      startPasswordCheckAutomatically:(BOOL)startCheck
+                     showCancelButton:(BOOL)showCancelButton;
+
+// Creates and displays a new UIViewController for user to report an issue.
+// `browser` is the browser where settings are being displayed and should not be
+// nil. `dataSource` is used to populate the UIViewController. `dispatcher`,
+// which can be nil, is an object that can perform operations for the view
+// controller. `delegate` may be nil.
++ (instancetype)
+    userFeedbackControllerForBrowser:(Browser*)browser
+                            delegate:(id<SettingsNavigationControllerDelegate>)
+                                         delegate
+                    userFeedbackData:(UserFeedbackData*)userFeedbackData
+                             handler:(id<ApplicationCommands>)handler;
+
+// Creates and displays a new ImportDataTableViewController. `browserState`
+// should not be nil.
+// TODO(crbug.com/1018746) pass Browser instead of BrowserState
++ (instancetype)
+    importDataControllerForBrowser:(Browser*)browser
+                          delegate:
+                              (id<SettingsNavigationControllerDelegate>)delegate
+                importDataDelegate:
+                    (id<ImportDataControllerDelegate>)importDataDelegate
+                         fromEmail:(NSString*)fromEmail
+                           toEmail:(NSString*)toEmail;
+
+// Creates a new AutofillProfileTableViewController and the chrome around
+// it. `browser` is the browser where settings are being displayed and should
+// not be nil. `delegate` may be nil.
++ (instancetype)
+    autofillProfileControllerForBrowser:(Browser*)browser
+                               delegate:
+                                   (id<SettingsNavigationControllerDelegate>)
+                                       delegate;
+
+// Creates a new AutofillCreditCardCollectionViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    autofillCreditCardControllerForBrowser:(Browser*)browser
+                                  delegate:
+                                      (id<SettingsNavigationControllerDelegate>)
+                                          delegate;
+
+// Creates a new DefaultBrowserSettingsTableViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    defaultBrowserControllerForBrowser:(Browser*)browser
+                              delegate:
+                                  (id<SettingsNavigationControllerDelegate>)
+                                      delegate;
+
+// Creates a new ClearBrowsingDataTableViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    clearBrowsingDataControllerForBrowser:(Browser*)browser
                                  delegate:
                                      (id<SettingsNavigationControllerDelegate>)
                                          delegate;
 
-// Creates a new AccountsTableViewController and the chrome around it.
-// |browserState| is used to personalize some settings aspects and should not be
-// nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newAccountsController:(ios::ChromeBrowserState*)browserState
-             delegate:(id<SettingsNavigationControllerDelegate>)delegate;
+// Creates a new SafetyCheckTableViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    safetyCheckControllerForBrowser:(Browser*)browser
+                           delegate:(id<SettingsNavigationControllerDelegate>)
+                                        delegate;
 
-// Creates a new GoogleServicesSettingsCollectionViewController and the chrome
-// around it. |browserState| is used to personalize some settings aspects and
-// should not be nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-    newGoogleServicesController:(ios::ChromeBrowserState*)browserState
-                       delegate:
-                           (id<SettingsNavigationControllerDelegate>)delegate;
+// Creates a new PrivacySafeBrowsingViewController and the chrome
+// around it. `browser` is the browser where settings are being displayed and
+// should not be nil. `delegate` may be nil.
++ (instancetype)
+    safeBrowsingControllerForBrowser:(Browser*)browser
+                            delegate:(id<SettingsNavigationControllerDelegate>)
+                                         delegate;
 
-// Creates a new SyncSettingsCollectionViewController and the chrome around
-// it. |browserState| is used to personalize some settings aspects and should
-// not be nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-     newSyncController:(ios::ChromeBrowserState*)browserState
-              delegate:(id<SettingsNavigationControllerDelegate>)delegate;
-
-// Creates a new SyncEncryptionPassphraseCollectionViewController and the chrome
-// around it. |browserState| is used to personalize some settings aspects and
-// should not be nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
-                             delegate:(id<SettingsNavigationControllerDelegate>)
-                                          delegate;
-
-// Creates a new SavePasswordsCollectionViewController and the chrome around it.
-// |browserState| is used to personalize some settings aspects and should not be
-// nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newSavePasswordsController:(ios::ChromeBrowserState*)browserState
-                  delegate:(id<SettingsNavigationControllerDelegate>)delegate;
-
-// Creates and displays a new UIViewController for user to report an issue.
-// |browserState| is used to personalize some settings aspects and should not
-// be nil. |dataSource| is used to populate the UIViewController. |delegate|
-// may be nil.
-+ (SettingsNavigationController*)
-newUserFeedbackController:(ios::ChromeBrowserState*)browserState
-                 delegate:(id<SettingsNavigationControllerDelegate>)delegate
-       feedbackDataSource:(id<UserFeedbackDataSource>)dataSource;
-
-// Creates and displays a new ImportDataTableViewController. |browserState|
-// should not be nil.
-+ (SettingsNavigationController*)
-newImportDataController:(ios::ChromeBrowserState*)browserState
-               delegate:(id<SettingsNavigationControllerDelegate>)delegate
-     importDataDelegate:(id<ImportDataControllerDelegate>)importDataDelegate
-              fromEmail:(NSString*)fromEmail
-                toEmail:(NSString*)toEmail
-             isSignedIn:(BOOL)isSignedIn;
-
-// Creates a new AutofillProfileTableViewController and the chrome around
-// it. |browserState| is used to personalize some settings aspects and should
-// not be nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newAutofillProfilleController:(ios::ChromeBrowserState*)browserState
-                     delegate:
-                         (id<SettingsNavigationControllerDelegate>)delegate;
-
-// Creates a new AutofillCreditCardCollectionViewController and the chrome
-// around it. |browserState| is used to personalize some settings aspects and
-// should not be nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newAutofillCreditCardController:(ios::ChromeBrowserState*)browserState
-                       delegate:
-                           (id<SettingsNavigationControllerDelegate>)delegate;
-
-// Initializes the UINavigationController with |rootViewController|.
-- (instancetype)
-initWithRootViewController:(UIViewController*)rootViewController
-              browserState:(ios::ChromeBrowserState*)browserState
-                  delegate:(id<SettingsNavigationControllerDelegate>)delegate
-    NS_DESIGNATED_INITIALIZER;
+// Initializes the UINavigationController with `rootViewController`.
+- (instancetype)initWithRootViewController:(UIViewController*)rootViewController
+                                   browser:(Browser*)browser
+                                  delegate:
+                                      (id<SettingsNavigationControllerDelegate>)
+                                          delegate NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithRootViewController:(UIViewController*)rootViewController
     NS_UNAVAILABLE;
@@ -154,14 +201,11 @@ initWithRootViewController:(UIViewController*)rootViewController
 // owned by SettingsNavigationController.
 - (UIBarButtonItem*)doneButton;
 
-// Returns the current main browser state.
-- (ios::ChromeBrowserState*)mainBrowserState;
-
-// Notifies this |SettingsNavigationController| that it will be dismissed such
+// Notifies this `SettingsNavigationController` of a dismissal such
 // that it has a possibility to do necessary clean up.
-- (void)settingsWillBeDismissed;
+- (void)cleanUpSettings;
 
-// Closes this |SettingsNavigationController| by asking its delegate.
+// Closes this `SettingsNavigationController` by asking its delegate.
 - (void)closeSettings;
 
 // Pops the top view controller if there exists more than one view controller in

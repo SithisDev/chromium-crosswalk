@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 
+#import "base/ios/block_types.h"
 #include "ios/chrome/browser/signin/constants.h"
 
 @class UIViewController;
@@ -38,8 +39,23 @@
 // Indicates that the user cancelled signing in to a managed account.
 - (void)didCancelManagedConfirmation;
 
-// The view controller that is showing the sign-in flow.
-@property(readonly) UIViewController* presentingViewController;
+// Dismisses the view controller that is showing the sign-in flow.
+- (void)dismissPresentingViewControllerAnimated:(BOOL)animated
+                                     completion:(ProceduralBlock)completion;
+
+// Presents a view controller on the sign-in flow.
+- (void)presentViewController:(UIViewController*)viewController
+                     animated:(BOOL)animated
+                   completion:(ProceduralBlock)completion;
+
+// Indicates the account of the user was registered for user policy. `dmToken`
+// is empty when registration failed.
+- (void)didRegisterForUserPolicyWithDMToken:(NSString*)dmToken
+                                   clientID:(NSString*)clientID;
+
+// Indicates that user policies were fetched. `success` is true when the fetch
+// was successful.
+- (void)didFetchUserPolicyWithSuccess:(BOOL)success;
 
 @end
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,6 @@ namespace web {
 
 // URL scheme for testing WebUI.
 extern const char kTestWebUIScheme[];
-
-// URL scheme for testing Native Content.
-extern const char kTestNativeContentScheme[];
 
 // App specific URL scheme which is neither WebUI nor Native Content.
 extern const char kTestAppSpecificScheme[];

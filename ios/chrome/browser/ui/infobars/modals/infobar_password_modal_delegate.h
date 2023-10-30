@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,12 @@
 // Delegate to handle Password Infobar Modal actions.
 @protocol InfobarPasswordModalDelegate <InfobarModalDelegate>
 
-// Updates (or saves in case they haven't been previously saved) the |username|
-// and |password| of the PasswordManagerInfobarDelegate.
+// Updates (or saves in case they haven't been previously saved) the `username`
+// and `password` of the PasswordManagerInfobarDelegate.
 - (void)updateCredentialsWithUsername:(NSString*)username
                              password:(NSString*)password;
 
-// Blacklists the current site to never prompt the user to save its credentials
+// Blocks the current site to never prompt the user to save its credentials
 // again.
 - (void)neverSaveCredentialsForCurrentSite;
 

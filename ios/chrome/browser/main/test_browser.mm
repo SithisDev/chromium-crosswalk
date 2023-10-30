@@ -1,25 +1,34 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/main/test_browser.h"
 
-#include "ios/chrome/browser/main/browser_observer.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/main/browser_observer.h"
+#import "ios/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-TestBrowser::TestBrowser(ios::ChromeBrowserState* browser_state,
-                         TabModel* tab_model)
+TestBrowser::TestBrowser(
+    ChromeBrowserState* browser_state,
+    std::unique_ptr<WebStateListDelegate> web_state_list_delegate)
     : browser_state_(browser_state),
-      tab_model_(tab_model),
-      web_state_list_(tab_model_.webStateList) {}
+      web_state_list_delegate_(std::move(web_state_list_delegate)),
+      command_dispatcher_([[CommandDispatcher alloc] init]) {
+  DCHECK(browser_state_);
+  DCHECK(web_state_list_delegate_);
+  web_state_list_ =
+      std::make_unique<WebStateList>(web_state_list_delegate_.get());
+}
 
-TestBrowser::TestBrowser(ios::ChromeBrowserState* browser_state,
-                         WebStateList* web_state_list)
-    : browser_state_(browser_state), web_state_list_(web_state_list) {}
+TestBrowser::TestBrowser(ChromeBrowserState* browser_state)
+    : TestBrowser(browser_state, std::make_unique<FakeWebStateListDelegate>()) {
+}
 
 TestBrowser::~TestBrowser() {
   for (auto& observer : observers_) {
@@ -27,16 +36,18 @@ TestBrowser::~TestBrowser() {
   }
 }
 
-ios::ChromeBrowserState* TestBrowser::GetBrowserState() const {
+#pragma mark - Browser
+
+ChromeBrowserState* TestBrowser::GetBrowserState() {
   return browser_state_;
 }
 
-TabModel* TestBrowser::GetTabModel() const {
-  return tab_model_;
+WebStateList* TestBrowser::GetWebStateList() {
+  return web_state_list_.get();
 }
 
-WebStateList* TestBrowser::GetWebStateList() const {
-  return web_state_list_;
+CommandDispatcher* TestBrowser::GetCommandDispatcher() {
+  return command_dispatcher_;
 }
 
 void TestBrowser::AddObserver(BrowserObserver* observer) {

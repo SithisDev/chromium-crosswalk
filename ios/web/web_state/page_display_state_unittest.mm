@@ -1,13 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/web/public/web_state/page_display_state.h"
+#import "ios/web/public/ui/page_display_state.h"
 
-#include "testing/gtest/include/gtest/gtest.h"
+#import "testing/gtest/include/gtest/gtest.h"
 
 #define EXPECT_NAN(value) EXPECT_NE(value, value)
-#include "testing/platform_test.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -60,20 +60,6 @@ TEST_F(PageDisplayStateTest, Serialization) {
                               1.0);
   web::PageDisplayState new_state(state.GetSerialization());
   EXPECT_EQ(state, new_state);
-}
-
-// Tests that the PageScrollState is updated correctly when restored from the
-// deprecated serialization keys.
-// TODO(crbug.com/926041): Delete this test when legacy keys are removed.
-TEST_F(PageDisplayStateTest, LegacySerialization) {
-  const CGPoint kContentOffset = CGPointMake(25.0, 100.0);
-  web::PageDisplayState state(
-      @{@"scrollX" : @(kContentOffset.x),
-        @"scrollY" : @(kContentOffset.y)});
-  EXPECT_TRUE(CGPointEqualToPoint(kContentOffset,
-                                  state.scroll_state().content_offset()));
-  EXPECT_TRUE(UIEdgeInsetsEqualToEdgeInsets(
-      state.scroll_state().content_inset(), UIEdgeInsetsZero));
 }
 
 // Tests PageScrollState::GetEffectiveContentOffsetForContentInset().

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,14 @@
 // Object to navigate different views in manual fallback's passwords list.
 @protocol PasswordListNavigator
 
-// Dismisses the presented view controller and continues as pop over on iPads
-// or above the keyboard elsewhere.
-- (void)dismissPresentedViewController;
-
 // Requests to open the list of all passwords.
 - (void)openAllPasswordsList;
 
 // Opens passwords settings.
 - (void)openPasswordSettings;
+
+// Opens password suggestion.
+- (void)openPasswordSuggestion;
 
 @end
 

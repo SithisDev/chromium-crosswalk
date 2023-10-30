@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/time/time.h"
 #import "ios/net/protocol_handler_util.h"
 #include "net/base/auth.h"
@@ -191,18 +191,6 @@
 
 // Feature support methods that don't forward to the NSURLProtocolClient.
 - (void)didCreateNativeRequest:(net::URLRequest*)nativeRequest {
-  // no-op.
-}
-
-- (void)didRecieveAuthChallenge:(const net::AuthChallengeInfo&)authInfo
-                  nativeRequest:(const net::URLRequest&)nativeRequest
-                       callback:(const network_client::AuthCallback&)callback {
-  // If we get this far, authentication has failed.
-  base::string16 empty;
-  callback.Run(false, empty, empty);
-}
-
-- (void)cancelAuthRequest {
   // no-op.
 }
 

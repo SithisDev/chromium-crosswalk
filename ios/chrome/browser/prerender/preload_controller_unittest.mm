@@ -1,29 +1,24 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
+#import <memory>
 
-#include "base/ios/device_util.h"
-#include "base/run_loop.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/prefs/pref_service.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/pref_names.h"
+#import "base/ios/device_util.h"
+#import "base/run_loop.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/prefs/pref_service.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/prefs/pref_names.h"
 #import "ios/chrome/browser/prerender/preload_controller.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "testing/gmock/include/gmock/gmock.h"
-#include "testing/platform_test.h"
+#import "ios/chrome/browser/prerender/prerender_pref.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "testing/gmock/include/gmock/gmock.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-@interface PreloadController (ExposedForTesting)
-- (BOOL)shouldPreloadURL:(const GURL&)url;
-- (BOOL)isPrerenderingEnabled;
-@end
 
 namespace {
 
@@ -35,7 +30,11 @@ class TestNetworkChangeNotifier : public net::NetworkChangeNotifier {
         connection_type_to_return_(
             net::NetworkChangeNotifier::CONNECTION_UNKNOWN) {}
 
-  // Simulates a change of the connection type to |type|. This will notify any
+  TestNetworkChangeNotifier(const TestNetworkChangeNotifier&) = delete;
+  TestNetworkChangeNotifier& operator=(const TestNetworkChangeNotifier&) =
+      delete;
+
+  // Simulates a change of the connection type to `type`. This will notify any
   // objects that are NetworkChangeNotifiers.
   void SimulateNetworkConnectionChange(
       net::NetworkChangeNotifier::ConnectionType type) {
@@ -52,8 +51,6 @@ class TestNetworkChangeNotifier : public net::NetworkChangeNotifier {
   // The currently simulated network connection type. If this is set to
   // CONNECTION_NONE, then NetworkChangeNotifier::IsOffline will return true.
   net::NetworkChangeNotifier::ConnectionType connection_type_to_return_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestNetworkChangeNotifier);
 };
 
 class PreloadControllerTest : public PlatformTest {
@@ -65,32 +62,31 @@ class PreloadControllerTest : public PlatformTest {
     // cellular connection.
     network_change_notifier_.reset(new TestNetworkChangeNotifier);
 
-    test_url_fetcher_factory_.reset(new net::TestURLFetcherFactory());
-
     controller_ = [[PreloadController alloc]
         initWithBrowserState:chrome_browser_state_.get()];
   }
 
   // Set the "Preload webpages" setting to "Always".
   void PreloadWebpagesAlways() {
-    chrome_browser_state_->GetPrefs()->SetBoolean(
-        prefs::kNetworkPredictionEnabled, YES);
-    chrome_browser_state_->GetPrefs()->SetBoolean(
-        prefs::kNetworkPredictionWifiOnly, NO);
+    chrome_browser_state_->GetPrefs()->SetInteger(
+        prefs::kNetworkPredictionSetting,
+        static_cast<int>(prerender_prefs::NetworkPredictionSetting::
+                             kEnabledWifiAndCellular));
   }
 
   // Set the "Preload webpages" setting to "Only on Wi-Fi".
   void PreloadWebpagesWiFiOnly() {
-    chrome_browser_state_->GetPrefs()->SetBoolean(
-        prefs::kNetworkPredictionEnabled, YES);
-    chrome_browser_state_->GetPrefs()->SetBoolean(
-        prefs::kNetworkPredictionWifiOnly, YES);
+    chrome_browser_state_->GetPrefs()->SetInteger(
+        prefs::kNetworkPredictionSetting,
+        static_cast<int>(
+            prerender_prefs::NetworkPredictionSetting::kEnabledWifiOnly));
   }
 
   // Set the "Preload webpages" setting to "Never".
   void PreloadWebpagesNever() {
-    chrome_browser_state_->GetPrefs()->SetBoolean(
-        prefs::kNetworkPredictionEnabled, NO);
+    chrome_browser_state_->GetPrefs()->SetInteger(
+        prefs::kNetworkPredictionSetting,
+        static_cast<int>(prerender_prefs::NetworkPredictionSetting::kDisabled));
   }
 
   void SimulateWiFiConnection() {
@@ -98,41 +94,69 @@ class PreloadControllerTest : public PlatformTest {
         net::NetworkChangeNotifier::CONNECTION_WIFI);
   }
 
+  void SimulateOffline() {
+    network_change_notifier_->SimulateNetworkConnectionChange(
+        net::NetworkChangeNotifier::CONNECTION_NONE);
+  }
+
   void SimulateCellularConnection() {
     network_change_notifier_->SimulateNetworkConnectionChange(
         net::NetworkChangeNotifier::CONNECTION_3G);
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
   std::unique_ptr<TestNetworkChangeNotifier> network_change_notifier_;
-  std::unique_ptr<net::TestURLFetcherFactory> test_url_fetcher_factory_;
   PreloadController* controller_;
 };
 
 // Tests that the preload controller does not try to preload non-web urls.
-TEST_F(PreloadControllerTest, ShouldPreloadURL) {
-  EXPECT_TRUE([controller_ shouldPreloadURL:GURL("http://www.google.com/")]);
-  EXPECT_TRUE([controller_ shouldPreloadURL:GURL("https://www.google.com/")]);
+TEST_F(PreloadControllerTest, DontPreloadNonWebURLs) {
+  const web::Referrer kReferrer;
+  const ui::PageTransition kTransition = ui::PAGE_TRANSITION_LINK;
 
-  EXPECT_FALSE([controller_ shouldPreloadURL:GURL()]);
-  EXPECT_FALSE([controller_ shouldPreloadURL:GURL("chrome://newtab")]);
-  EXPECT_FALSE([controller_ shouldPreloadURL:GURL("about:flags")]);
+  // Attempt to prerender an empty URL and verify that no WebState was created
+  // to preload.
+  [controller_ prerenderURL:GURL()
+                   referrer:kReferrer
+                 transition:kTransition
+            currentWebState:nil
+                immediately:YES];
+  EXPECT_FALSE([controller_ releasePrerenderContents]);
+
+  // Attempt to prerender the NTP and verify that no WebState was created
+  // to preload.
+  [controller_ prerenderURL:GURL("chrome://newtab")
+                   referrer:kReferrer
+                 transition:kTransition
+            currentWebState:nil
+                immediately:YES];
+  EXPECT_FALSE([controller_ releasePrerenderContents]);
+
+  // Attempt to prerender the flags UI and verify that no WebState was created
+  // to preload.
+  [controller_ prerenderURL:GURL("about:flags")
+                   referrer:kReferrer
+                 transition:kTransition
+            currentWebState:nil
+                immediately:YES];
+  EXPECT_FALSE([controller_ releasePrerenderContents]);
 }
 
 TEST_F(PreloadControllerTest, TestIsPrerenderingEnabled_preloadAlways) {
   // With the "Preload Webpages" setting set to "Always", prerendering is
-  // enabled regardless of network type.
+  // enabled regardless of network type, unless offline.
   PreloadWebpagesAlways();
 
   SimulateWiFiConnection();
-  EXPECT_TRUE([controller_ isPrerenderingEnabled] ||
-              ios::device_util::IsSingleCoreDevice() ||
+  EXPECT_TRUE(controller_.enabled || ios::device_util::IsSingleCoreDevice() ||
               !ios::device_util::RamIsAtLeast512Mb());
 
+  SimulateOffline();
+  EXPECT_FALSE(controller_.enabled);
+
   SimulateCellularConnection();
-  EXPECT_TRUE([controller_ isPrerenderingEnabled] ||
-              ios::device_util::IsSingleCoreDevice() ||
+  EXPECT_TRUE(controller_.enabled || ios::device_util::IsSingleCoreDevice() ||
               !ios::device_util::RamIsAtLeast512Mb());
 }
 
@@ -142,12 +166,14 @@ TEST_F(PreloadControllerTest, TestIsPrerenderingEnabled_preloadWiFiOnly) {
   PreloadWebpagesWiFiOnly();
 
   SimulateWiFiConnection();
-  EXPECT_TRUE([controller_ isPrerenderingEnabled] ||
-              ios::device_util::IsSingleCoreDevice() ||
+  EXPECT_TRUE(controller_.enabled || ios::device_util::IsSingleCoreDevice() ||
               !ios::device_util::RamIsAtLeast512Mb());
 
+  SimulateOffline();
+  EXPECT_FALSE(controller_.enabled);
+
   SimulateCellularConnection();
-  EXPECT_FALSE([controller_ isPrerenderingEnabled]);
+  EXPECT_FALSE(controller_.enabled);
 }
 
 TEST_F(PreloadControllerTest, TestIsPrerenderingEnabled_preloadNever) {
@@ -156,10 +182,13 @@ TEST_F(PreloadControllerTest, TestIsPrerenderingEnabled_preloadNever) {
   PreloadWebpagesNever();
 
   SimulateWiFiConnection();
-  EXPECT_FALSE([controller_ isPrerenderingEnabled]);
+  EXPECT_FALSE(controller_.enabled);
+
+  SimulateOffline();
+  EXPECT_FALSE(controller_.enabled);
 
   SimulateCellularConnection();
-  EXPECT_FALSE([controller_ isPrerenderingEnabled]);
+  EXPECT_FALSE(controller_.enabled);
 }
 
 }  // anonymous namespace

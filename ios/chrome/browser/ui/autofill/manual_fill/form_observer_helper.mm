@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #import "components/autofill/ios/form_util/form_activity_observer_bridge.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
-#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -27,7 +26,7 @@
   // Bridge to observe the web state list from Objective-C.
   std::unique_ptr<WebStateListObserverBridge> _webStateListObserver;
 
-  // Bridge to observe form activity in |_webState|.
+  // Bridge to observe form activity in `_webState`.
   std::unique_ptr<autofill::FormActivityObserverBridge>
       _formActivityObserverBridge;
 }
@@ -82,16 +81,15 @@
     didSubmitDocumentWithFormNamed:(const std::string&)formName
                           withData:(const std::string&)formData
                     hasUserGesture:(BOOL)hasUserGesture
-                   formInMainFrame:(BOOL)formInMainFrame
                            inFrame:(web::WebFrame*)frame {
   if ([self.delegate respondsToSelector:@selector
-                     (webState:didSubmitDocumentWithFormNamed:withData
-                                 :hasUserGesture:formInMainFrame:inFrame:)]) {
+                     (webState:
+                         didSubmitDocumentWithFormNamed:withData:hasUserGesture
+                                                       :inFrame:)]) {
     [self.delegate webState:webState
         didSubmitDocumentWithFormNamed:formName
                               withData:formData
                         hasUserGesture:hasUserGesture
-                       formInMainFrame:formInMainFrame
                                inFrame:frame];
   }
 }
@@ -102,7 +100,7 @@
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   self.webState = newWebState;
 }
 

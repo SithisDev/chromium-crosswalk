@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,11 +25,10 @@
 // See comment for -resetEditViewOffsetAndOffsetSteadyViewToMatch.
 - (void)resetSteadyViewOffsetAndOffsetEditViewToMatch;
 
-// Hides leading button for steady view.
-- (void)hideSteadyViewLeadingButton;
-// Call this after calling -hideSteadyViewLeadingButton. Restores the displayed
-// state of the leading button of the steady view.
-- (void)showSteadyViewLeadingButtonIfNeeded;
+// Hides badge view for steady view.
+- (void)hideSteadyViewBadgeView;
+// Displays the badge view of the steady view.
+- (void)showSteadyViewBadgeView;
 
 - (void)setSteadyViewFaded:(BOOL)hidden;
 - (void)setEditViewFaded:(BOOL)hidden;

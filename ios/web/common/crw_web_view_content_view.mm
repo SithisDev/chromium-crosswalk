@@ -1,14 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/common/crw_web_view_content_view.h"
 
 #import <WebKit/WebKit.h>
-#include <cmath>
-#include <limits>
+#import <cmath>
+#import <limits>
 
-#include "base/logging.h"
+#import "base/check.h"
+#import "base/notreached.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -17,7 +18,7 @@
 namespace {
 
 // Background color RGB values for the content view which is displayed when the
-// |_webView| is offset from the screen due to user interaction. Displaying this
+// `_webView` is offset from the screen due to user interaction. Displaying this
 // background color is handled by UIWebView but not WKWebView, so it needs to be
 // set in CRWWebViewContentView to support both. The color value matches that
 // used by UIWebView.
@@ -28,12 +29,16 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 @implementation CRWWebViewContentView
 @synthesize contentOffset = _contentOffset;
 @synthesize contentInset = _contentInset;
-@synthesize shouldUseViewContentInset = _shouldUseViewContentInset;
 @synthesize scrollView = _scrollView;
+@synthesize shouldUseViewContentInset = _shouldUseViewContentInset;
+@synthesize viewportEdgesAffectedBySafeArea = _viewportEdgesAffectedBySafeArea;
+@synthesize viewportInsets = _viewportInsets;
 @synthesize webView = _webView;
+@synthesize fullscreenState = _fullscreenState;
 
 - (instancetype)initWithWebView:(UIView*)webView
-                     scrollView:(UIScrollView*)scrollView {
+                     scrollView:(UIScrollView*)scrollView
+                fullscreenState:(CrFullscreenState)fullscreenState {
   self = [super initWithFrame:CGRectZero];
   if (self) {
     DCHECK(webView);
@@ -41,6 +46,7 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
     DCHECK([scrollView isDescendantOfView:webView]);
     _webView = webView;
     _scrollView = scrollView;
+    _fullscreenState = fullscreenState;
   }
   return self;
 }
@@ -74,6 +80,10 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 
 - (BOOL)becomeFirstResponder {
   return [_webView becomeFirstResponder];
+}
+
+- (void)updateFullscreenState:(CrFullscreenState)fullscreenState {
+  _fullscreenState = fullscreenState;
 }
 
 #pragma mark Layout
@@ -111,6 +121,13 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
     _shouldUseViewContentInset = shouldUseViewContentInset;
     self.contentInset = oldContentInset;
   }
+}
+
+#pragma mark - CRWViewportAdjusting
+
+// TODO(crbug.com/1064041): Implement.
+- (void)updateMinViewportInsets:(UIEdgeInsets)minInsets
+              maxViewportInsets:(UIEdgeInsets)maxInsets {
 }
 
 @end

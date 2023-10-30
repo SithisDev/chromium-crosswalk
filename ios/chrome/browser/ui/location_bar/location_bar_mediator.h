@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,22 +10,13 @@
 @protocol LocationBarConsumer;
 class TemplateURLService;
 class WebStateList;
-class LocationBarModel;
 
-// A mediator object that updates the mediator when the web state changes.
+// A mediator object that updates location bar state not relating to the
+// LocationBarSteadyView. In practice, this is any state not relating to the
+// WebState.
 @interface LocationBarMediator : NSObject
 
-- (instancetype)initWithLocationBarModel:(LocationBarModel*)locationBarModel
-    NS_DESIGNATED_INITIALIZER;
-- (instancetype)init NS_UNAVAILABLE;
-
-// The WebStateList that this mediator listens for any changes on the active web
-// state.
-@property(nonatomic, assign) WebStateList* webStateList;
-
-// The location bar model used by this mediator to extract the current URL and
-// the security state.
-@property(nonatomic, assign, readonly) LocationBarModel* locationBarModel;
+- (instancetype)init;
 
 // The templateURLService used by this mediator to extract whether the default
 // search engine supports search-by-image.
@@ -34,6 +25,10 @@ class LocationBarModel;
 // The consumer for this object. This can change during the lifetime of this
 // object and may be nil.
 @property(nonatomic, weak) id<LocationBarConsumer> consumer;
+
+// The WebStateList that this mediator listens for any changes on the active web
+// state.
+@property(nonatomic, assign) WebStateList* webStateList;
 
 // Stops observing all objects.
 - (void)disconnect;

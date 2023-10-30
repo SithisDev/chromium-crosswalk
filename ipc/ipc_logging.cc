@@ -1,8 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ipc/ipc_logging.h"
+
+#include "build/build_config.h"
 
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
@@ -12,14 +14,14 @@
 #include <stdint.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -27,7 +29,7 @@
 #include "ipc/ipc_sender.h"
 #include "ipc/ipc_sync_message.h"
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include <unistd.h>
 #endif
 
@@ -48,10 +50,10 @@ Logging::Logging()
       enabled_on_stderr_(false),
       enabled_color_(false),
       queue_invoke_later_pending_(false),
-      sender_(NULL),
+      sender_(nullptr),
       main_thread_(base::ThreadTaskRunnerHandle::Get()),
-      consumer_(NULL) {
-#if defined(OS_WIN)
+      consumer_(nullptr) {
+#if BUILDFLAG(IS_WIN)
   // getenv triggers an unsafe warning. Simply check how big of a buffer
   // would be needed to fetch the value to see if the enviornment variable is
   // set.
@@ -64,12 +66,12 @@ Logging::Logging()
     if (requiredSize && !strncmp("color", buffer, 6))
       enabled_color_ = true;
   }
-#else  // !defined(OS_WIN)
+#else   // !BUILDFLAG(IS_WIN)
   const char* ipc_logging = getenv("CHROME_IPC_LOGGING");
   bool logging_env_var_set = (ipc_logging != NULL);
   if (ipc_logging && !strcmp(ipc_logging, "color"))
     enabled_color_ = true;
-#endif  //defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   if (logging_env_var_set) {
     enabled_ = true;
     enabled_on_stderr_ = true;
@@ -236,7 +238,7 @@ void Logging::Log(const LogData& data) {
         base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
             FROM_HERE,
             base::BindOnce(&Logging::OnSendLogs, base::Unretained(this)),
-            base::TimeDelta::FromMilliseconds(kLogSendDelayMs));
+            base::Milliseconds(kLogSendDelayMs));
       }
     }
   }

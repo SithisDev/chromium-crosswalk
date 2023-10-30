@@ -1,20 +1,20 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/app/spotlight/bookmarks_spotlight_manager.h"
 
-#include <memory>
+#import <memory>
 
 #import <CoreSpotlight/CoreSpotlight.h>
 
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/version.h"
-#include "components/bookmarks/browser/base_bookmark_model_observer.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/version.h"
+#import "components/bookmarks/browser/base_bookmark_model_observer.h"
+#import "components/bookmarks/browser/bookmark_model.h"
+#import "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
+#import "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -41,7 +41,7 @@ class SpotlightBookmarkModelBridge;
 
   // Keep a reference to detach before deallocing. Life cycle of _bookmarkModel
   // is longer than life cycle of a SpotlightManager as
-  // |BookmarkModelBeingDeleted| will cause deletion of SpotlightManager.
+  // `BookmarkModelBeingDeleted` will cause deletion of SpotlightManager.
   bookmarks::BookmarkModel* _bookmarkModel;  // weak
 
   // Number of nodes indexed in initial scan.
@@ -51,7 +51,7 @@ class SpotlightBookmarkModelBridge;
   BOOL _initialIndexDone;
 }
 
-// Detaches the |SpotlightBookmarkModelBridge| from the bookmark model. The
+// Detaches the `SpotlightBookmarkModelBridge` from the bookmark model. The
 // manager must not be used after calling this method.
 - (void)detachBookmarkModel;
 
@@ -63,7 +63,7 @@ class SpotlightBookmarkModelBridge;
 - (void)clearAndReindexModel;
 
 // Refreshes all nodes in the subtree of node.
-// If |initial| is YES, limit the number of nodes to kMaxInitialIndexSize.
+// If `initial` is YES, limit the number of nodes to kMaxInitialIndexSize.
 - (void)refreshNodeInIndex:(const bookmarks::BookmarkNode*)node
                    initial:(BOOL)initial;
 
@@ -105,7 +105,8 @@ class SpotlightBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override {
+                         size_t index,
+                         bool added_by_user) override {
     [owner_ refreshNodeInIndex:parent->children()[index].get() initial:NO];
   }
 
@@ -151,7 +152,7 @@ class SpotlightBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 @implementation BookmarksSpotlightManager
 
 + (BookmarksSpotlightManager*)bookmarksSpotlightManagerWithBrowserState:
-    (ios::ChromeBrowserState*)browserState {
+    (ChromeBrowserState*)browserState {
   return [[BookmarksSpotlightManager alloc]
       initWithLargeIconService:IOSChromeLargeIconServiceFactory::
                                    GetForBrowserState(browserState)
@@ -201,21 +202,31 @@ initWithLargeIconService:(favicon::LargeIconService*)largeIconService
 
 - (void)removeNodeFromIndex:(const bookmarks::BookmarkNode*)node {
   if (node->is_url()) {
-    GURL url(node->url());
-    NSString* title = base::SysUTF16ToNSString(node->GetTitle());
-    NSString* spotlightID = [self spotlightIDForURL:url title:title];
-    __weak BookmarksSpotlightManager* weakself = self;
-    BlockWithError completion = ^(NSError* error) {
-      dispatch_async(dispatch_get_main_queue(), ^{
-        [weakself refreshItemsWithURL:url title:nil];
-        [_delegate bookmarkUpdated];
-      });
-    };
-    spotlight::DeleteItemsWithIdentifiers(@[ spotlightID ], completion);
+    [self removeURLNodeFromIndex:node];
     return;
   }
   for (const auto& child : node->children())
     [self removeNodeFromIndex:child.get()];
+}
+
+// Helper to remove URL nodes at the leaves of the bookmark index.
+- (void)removeURLNodeFromIndex:(const bookmarks::BookmarkNode*)node {
+  DCHECK(node->is_url());
+  const GURL URL(node->url());
+  NSString* title = base::SysUTF16ToNSString(node->GetTitle());
+  NSString* spotlightID = [self spotlightIDForURL:URL title:title];
+  __weak BookmarksSpotlightManager* weakSelf = self;
+  spotlight::DeleteItemsWithIdentifiers(@[ spotlightID ], ^(NSError*) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [weakSelf onCompletedDeleteItemsWithURL:URL];
+    });
+  });
+}
+
+// Completion helper for URL node deletion.
+- (void)onCompletedDeleteItemsWithURL:(const GURL&)URL {
+  [self refreshItemsWithURL:URL title:nil];
+  [_delegate bookmarkUpdated];
 }
 
 - (BOOL)shouldReindex {
@@ -305,40 +316,37 @@ initWithLargeIconService:(favicon::LargeIconService*)largeIconService
 }
 
 - (void)clearAndReindexModel {
+  __weak BookmarksSpotlightManager* weakSelf = self;
   [self cancelAllLargeIconPendingTasks];
-  __weak BookmarksSpotlightManager* weakself = self;
-  BlockWithError completion = ^(NSError* error) {
-    if (!error) {
-      dispatch_async(dispatch_get_main_queue(), ^{
-        BookmarksSpotlightManager* strongSelf = weakself;
-        if (!strongSelf)
-          return;
+  [self clearAllSpotlightItems:^(NSError* error) {
+    if (error)
+      return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [weakSelf completedClearAllSpotlightItems];
+    });
+  }];
+}
 
-        NSDate* startOfReindexing = [NSDate date];
-        strongSelf->_nodesIndexed = 0;
-        [strongSelf refreshNodeInIndex:strongSelf->_bookmarkModel->root_node()
-                               initial:YES];
-        NSDate* endOfReindexing = [NSDate date];
-        NSTimeInterval indexingDuration =
-            [endOfReindexing timeIntervalSinceDate:startOfReindexing];
-        UMA_HISTOGRAM_TIMES(
-            "IOS.Spotlight.BookmarksIndexingDuration",
-            base::TimeDelta::FromMillisecondsD(1000 * indexingDuration));
-        UMA_HISTOGRAM_COUNTS_1000("IOS.Spotlight.BookmarksInitialIndexSize",
-                                  [strongSelf pendingLargeIconTasksCount]);
-        [[NSUserDefaults standardUserDefaults]
-            setObject:endOfReindexing
-               forKey:@(spotlight::kSpotlightLastIndexingDateKey)];
+- (void)completedClearAllSpotlightItems {
+  NSDate* startOfReindexing = [NSDate date];
+  _nodesIndexed = 0;
+  [self refreshNodeInIndex:_bookmarkModel->root_node() initial:YES];
+  NSDate* endOfReindexing = [NSDate date];
+  NSTimeInterval indexingDuration =
+      [endOfReindexing timeIntervalSinceDate:startOfReindexing];
+  UMA_HISTOGRAM_TIMES("IOS.Spotlight.BookmarksIndexingDuration",
+                      base::Milliseconds(1000 * indexingDuration));
+  UMA_HISTOGRAM_COUNTS_1000("IOS.Spotlight.BookmarksInitialIndexSize",
+                            [self pendingLargeIconTasksCount]);
+  [[NSUserDefaults standardUserDefaults]
+      setObject:endOfReindexing
+         forKey:@(spotlight::kSpotlightLastIndexingDateKey)];
 
-        [[NSUserDefaults standardUserDefaults]
-            setObject:[NSNumber numberWithInteger:
-                                    spotlight::kCurrentSpotlightIndexVersion]
-               forKey:@(spotlight::kSpotlightLastIndexingVersionKey)];
-        [_delegate bookmarkUpdated];
-      });
-    }
-  };
-  [self clearAllSpotlightItems:completion];
+  [[NSUserDefaults standardUserDefaults]
+      setObject:@(spotlight::kCurrentSpotlightIndexVersion)
+         forKey:@(spotlight::kSpotlightLastIndexingVersionKey)];
+
+  [_delegate bookmarkUpdated];
 }
 
 @end

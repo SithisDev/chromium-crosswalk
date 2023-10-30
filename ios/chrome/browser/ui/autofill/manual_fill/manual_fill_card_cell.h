@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,18 @@
 
 #import <UIKit/UIKit.h>
 
-#import "ios/chrome/browser/ui/autofill/manual_fill/credit_card.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_credit_card.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_item.h"
 
 @protocol CardListDelegate;
-@protocol ManualFillContentDelegate;
+@protocol ManualFillContentInjector;
 
 // Wrapper to show card cells in a ChromeTableViewController.
 @interface ManualFillCardItem : TableViewItem
 
 - (instancetype)initWithCreditCard:(ManualFillCreditCard*)card
-                   contentDelegate:
-                       (id<ManualFillContentDelegate>)contentDelegate
+                   contentInjector:
+                       (id<ManualFillContentInjector>)contentInjector
                 navigationDelegate:(id<CardListDelegate>)navigationDelegate
     NS_DESIGNATED_INITIALIZER;
 
@@ -30,9 +30,9 @@
 // and send the data to the delegate.
 @interface ManualFillCardCell : TableViewCell
 
-// Updates the cell with credit card and the |delegate| to be notified.
+// Updates the cell with credit card and the `delegate` to be notified.
 - (void)setUpWithCreditCard:(ManualFillCreditCard*)card
-            contentDelegate:(id<ManualFillContentDelegate>)contentDelegate
+            contentInjector:(id<ManualFillContentInjector>)contentInjector
          navigationDelegate:(id<CardListDelegate>)navigationDelegate;
 
 @end

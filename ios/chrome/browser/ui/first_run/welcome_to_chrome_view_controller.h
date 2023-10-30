@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,16 @@
 
 #import <UIKit/UIKit.h>
 
-extern NSString* const kUMAMetricsButtonAccessibilityIdentifier;
-
 @protocol ApplicationCommands;
+@protocol BrowsingDataCommands;
+class Browser;
 @protocol SyncPresenter;
-@class TabModel;
-
-namespace ios {
-class ChromeBrowserState;
-}
 
 // The first screen displayed to the user on First Run. User must agree to the
 // Chrome Terms of Service before proceeding to use Chrome.
 //
 // Note: On iPhone, this controller supports portrait orientation only. It
-// should always be presented in an |OrientationLimitingNavigationController|.
+// should always be presented in an `OrientationLimitingNavigationController`.
 @interface WelcomeToChromeViewController : UIViewController
 
 // True when the stats checkbox should be checked by default.
@@ -29,15 +24,18 @@ class ChromeBrowserState;
 
 // Initializes with the given browser state object and tab model, neither of
 // which can be nil.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                            tabModel:(TabModel*)tabModel
-                           presenter:(id<SyncPresenter>)presenter
-                          dispatcher:(id<ApplicationCommands>)dispatcher
-    NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithBrowser:(Browser*)browser
+                    mainBrowser:(Browser*)mainBrowser
+                      presenter:(id<SyncPresenter>)presenter
+                     dispatcher:(id<ApplicationCommands, BrowsingDataCommands>)
+                                    dispatcher NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithNibName:(NSString*)nibNameOrNil
                          bundle:(NSBundle*)nibBundleOrNil NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
+
+// Interrupts and dismisses the sign-in UI.
+- (void)interruptSigninCoordinatorWithCompletion:(void (^)(void))completion;
 
 @end
 

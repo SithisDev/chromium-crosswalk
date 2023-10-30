@@ -1,30 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/upgrade/upgrade_center.h"
 
-#include <memory>
-#include <set>
-#include <utility>
+#import <memory>
+#import <set>
+#import <utility>
 
-#include "base/mac/bundle_locations.h"
-#include "base/scoped_observer.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/version.h"
-#include "components/infobars/core/confirm_infobar_delegate.h"
-#include "components/infobars/core/infobar.h"
-#include "components/infobars/core/infobar_manager.h"
-#include "components/version_info/version_info.h"
+#import "base/mac/bundle_locations.h"
+#import "base/scoped_observation.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/version.h"
+#import "components/infobars/core/confirm_infobar_delegate.h"
+#import "components/infobars/core/infobar.h"
+#import "components/infobars/core/infobar_manager.h"
+#import "components/version_info/version_info.h"
+#import "ios/chrome/browser/infobars/infobar_utils.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
-#include "ios/chrome/grit/ios_chromium_strings.h"
-#include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/browser/upgrade/upgrade_constants.h"
+#import "ios/chrome/grit/ios_chromium_strings.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/web/common/url_scheme_util.h"
 #import "net/base/mac/url_conversions.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/image/image.h"
-#include "url/gurl.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/gfx/image/image.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -48,26 +50,20 @@
 - (BOOL)infoBarShownRecently;
 // Called when the application become active again.
 - (void)applicationWillEnterForeground:(NSNotification*)note;
-// The dispatcher for this object.
-@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
+// The command handler for this object.
+@property(nonatomic, weak) id<ApplicationCommands> handler;
 @end
 
 namespace {
-
-// The user defaults key for the upgrade version.
-NSString* const kNextVersionKey = @"UpdateInfobarNextVersion";
-// The user defaults key for the upgrade URL.
-NSString* const kUpgradeURLKey = @"UpdateInfobarUpgradeURL";
-// The user defaults key for the last time the update infobar was shown.
-NSString* const kLastInfobarDisplayTimeKey = @"UpdateInfobarLastDisplayTime";
-// The amount of time that must elapse before showing the infobar again.
-const NSTimeInterval kInfobarDisplayInterval = 24 * 60 * 60;  // One day.
 
 // The class controlling the look of the infobar displayed when an upgrade is
 // available.
 class UpgradeInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   UpgradeInfoBarDelegate() : trigger_upgrade_(false) {}
+
+  UpgradeInfoBarDelegate(const UpgradeInfoBarDelegate&) = delete;
+  UpgradeInfoBarDelegate& operator=(const UpgradeInfoBarDelegate&) = delete;
 
   ~UpgradeInfoBarDelegate() override {}
 
@@ -89,14 +85,14 @@ class UpgradeInfoBarDelegate : public ConfirmInfoBarDelegate {
     return false;
   }
 
-  gfx::Image GetIcon() const override {
+  ui::ImageModel GetIcon() const override {
     if (icon_.IsEmpty()) {
       icon_ = gfx::Image([UIImage imageNamed:@"infobar_update"]);
     }
-    return icon_;
+    return ui::ImageModel::FromImage(icon_);
   }
 
-  base::string16 GetMessageText() const override {
+  std::u16string GetMessageText() const override {
     return l10n_util::GetStringUTF16(IDS_IOS_UPGRADE_AVAILABLE);
   }
 
@@ -107,15 +103,13 @@ class UpgradeInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   int GetButtons() const override { return BUTTON_OK; }
 
-  base::string16 GetButtonLabel(InfoBarButton button) const override {
+  std::u16string GetButtonLabel(InfoBarButton button) const override {
     DCHECK(button == BUTTON_OK);
     return l10n_util::GetStringUTF16(IDS_IOS_UPGRADE_AVAILABLE_BUTTON);
   }
 
   mutable gfx::Image icon_;
   bool trigger_upgrade_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpgradeInfoBarDelegate);
 };
 
 // The InfoBarDelegate unfortunately is not called at all when an infoBar is
@@ -126,9 +120,11 @@ class UpgradeInfoBarDismissObserver
     : public infobars::InfoBarManager::Observer {
  public:
   UpgradeInfoBarDismissObserver()
-      : infobar_delegate_(nullptr),
-        dismiss_delegate_(nil),
-        scoped_observer_(this) {}
+      : infobar_delegate_(nullptr), dismiss_delegate_(nil) {}
+
+  UpgradeInfoBarDismissObserver(const UpgradeInfoBarDismissObserver&) = delete;
+  UpgradeInfoBarDismissObserver& operator=(
+      const UpgradeInfoBarDismissObserver&) = delete;
 
   ~UpgradeInfoBarDismissObserver() override {}
 
@@ -136,7 +132,7 @@ class UpgradeInfoBarDismissObserver
                         UpgradeInfoBarDelegate* infobar_delegate,
                         NSString* tab_id,
                         UpgradeCenter* dismiss_delegate) {
-    scoped_observer_.Add(infobar_manager);
+    scoped_observation_.Observe(infobar_manager);
     infobar_delegate_ = infobar_delegate;
     dismiss_delegate_ = dismiss_delegate;
     tab_id_ = [tab_id copy];
@@ -155,16 +151,16 @@ class UpgradeInfoBarDismissObserver
 
   void OnManagerShuttingDown(
       infobars::InfoBarManager* infobar_manager) override {
-    scoped_observer_.Remove(infobar_manager);
+    DCHECK(scoped_observation_.IsObservingSource(infobar_manager));
+    scoped_observation_.Reset();
   }
 
   UpgradeInfoBarDelegate* infobar_delegate_;
   __weak UpgradeCenter* dismiss_delegate_;
   __strong NSString* tab_id_;
-  ScopedObserver<infobars::InfoBarManager, infobars::InfoBarManager::Observer>
-      scoped_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpgradeInfoBarDismissObserver);
+  base::ScopedObservation<infobars::InfoBarManager,
+                          infobars::InfoBarManager::Observer>
+      scoped_observation_{this};
 };
 
 }  // namespace
@@ -173,7 +169,7 @@ class UpgradeInfoBarDismissObserver
 // infoBarDelegate related information in an object that can be put in
 // an ObjectiveC container.
 @interface DelegateHolder : NSObject {
-  UpgradeInfoBarDismissObserver observer_;
+  UpgradeInfoBarDismissObserver _observer;
 }
 
 - (instancetype)initWithInfoBarManager:(infobars::InfoBarManager*)infoBarManager
@@ -192,32 +188,32 @@ class UpgradeInfoBarDismissObserver
                                  tabId:(NSString*)tabId {
   self = [super init];
   if (self) {
-    observer_.RegisterObserver(infoBarManager, infoBarDelegate, tabId,
+    _observer.RegisterObserver(infoBarManager, infoBarDelegate, tabId,
                                upgradeCenter);
   }
   return self;
 }
 
 - (UpgradeInfoBarDelegate*)infoBarDelegate {
-  return observer_.infobar_delegate();
+  return _observer.infobar_delegate();
 }
 
 @end
 
 @implementation UpgradeCenter {
   // YES if the infobars are currently visible.
-  BOOL upgradeInfoBarIsVisible_;
+  BOOL _upgradeInfoBarIsVisible;
   // Used to store the visible upgrade infobars, indexed by tabId.
   __strong NSMutableDictionary<NSString*, DelegateHolder*>*
-      upgradeInfoBarDelegates_;
+      _upgradeInfoBarDelegates;
   // Stores the clients of the upgrade center. These objectiveC objects are not
   // retained.
-  __strong NSHashTable<id<UpgradeCenterClient>>* clients_;
+  __strong NSHashTable<id<UpgradeCenterClient>>* _clients;
 #if DCHECK_IS_ON()
-  BOOL inCallback_;
+  BOOL _inCallback;
 #endif
 }
-@synthesize dispatcher = _dispatcher;
+@synthesize handler = _handler;
 
 + (UpgradeCenter*)sharedInstance {
   static UpgradeCenter* obj;
@@ -231,7 +227,7 @@ class UpgradeInfoBarDismissObserver
 - (instancetype)init {
   self = [super init];
   if (self) {
-    upgradeInfoBarDelegates_ = [[NSMutableDictionary alloc] init];
+    _upgradeInfoBarDelegates = [[NSMutableDictionary alloc] init];
 
     // There is no dealloc and no unregister as this class is a never
     // deallocated singleton.
@@ -241,8 +237,8 @@ class UpgradeInfoBarDismissObserver
                name:UIApplicationWillEnterForegroundNotification
              object:nil];
 
-    upgradeInfoBarIsVisible_ = [self shouldShowInfoBar];
-    clients_ = [NSHashTable weakObjectsHashTable];
+    _upgradeInfoBarIsVisible = [self shouldShowInfoBar];
+    _clients = [NSHashTable weakObjectsHashTable];
   }
   return self;
 }
@@ -253,7 +249,7 @@ class UpgradeInfoBarDismissObserver
 
 - (BOOL)isCurrentVersionObsolete {
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-  NSString* nextVersion = [defaults stringForKey:kNextVersionKey];
+  NSString* nextVersion = [defaults stringForKey:kIOSChromeNextVersionKey];
   if (nextVersion) {
     const base::Version& current_version = version_info::GetVersion();
     const std::string upgrade = base::SysNSStringToUTF8(nextVersion);
@@ -267,15 +263,15 @@ class UpgradeInfoBarDismissObserver
   NSDate* lastDisplay = [defaults objectForKey:kLastInfobarDisplayTimeKey];
   // Absolute value is to ensure the infobar won't be suppressed forever if the
   // clock temporarily jumps to the distant future.
-  if (lastDisplay &&
-      fabs([lastDisplay timeIntervalSinceNow]) < kInfobarDisplayInterval) {
+  if (lastDisplay && fabs([lastDisplay timeIntervalSinceNow]) <
+                         kInfobarDisplayIntervalInSeconds) {
     return YES;
   }
   return NO;
 }
 
 - (void)applicationWillEnterForeground:(NSNotification*)note {
-  if (upgradeInfoBarIsVisible_)
+  if (_upgradeInfoBarIsVisible)
     return;
 
   // When returning to active if the upgrade notification has been dismissed,
@@ -285,18 +281,18 @@ class UpgradeInfoBarDismissObserver
 }
 
 - (void)registerClient:(id<UpgradeCenterClient>)client
-        withDispatcher:(id<ApplicationCommands>)dispatcher {
-  [clients_ addObject:client];
-  self.dispatcher = dispatcher;
-  if (upgradeInfoBarIsVisible_)
+           withHandler:(id<ApplicationCommands>)handler {
+  [_clients addObject:client];
+  self.handler = handler;
+  if (_upgradeInfoBarIsVisible)
     [client showUpgrade:self];
 }
 
 - (void)unregisterClient:(id<UpgradeCenterClient>)client {
 #if DCHECK_IS_ON()
-  DCHECK(!inCallback_);
+  DCHECK(!_inCallback);
 #endif
-  [clients_ removeObject:client];
+  [_clients removeObject:client];
 }
 
 - (void)addInfoBarToManager:(infobars::InfoBarManager*)infoBarManager
@@ -305,11 +301,11 @@ class UpgradeInfoBarDismissObserver
   DCHECK(infoBarManager);
 
   // Nothing to do if the infobar are not visible at this point in time.
-  if (!upgradeInfoBarIsVisible_)
+  if (!_upgradeInfoBarIsVisible)
     return;
 
   // Nothing to do if the infobar is already there.
-  if ([upgradeInfoBarDelegates_ objectForKey:tabId])
+  if ([_upgradeInfoBarDelegates objectForKey:tabId])
     return;
 
   auto infobarDelegate = std::make_unique<UpgradeInfoBarDelegate>();
@@ -319,13 +315,12 @@ class UpgradeInfoBarDismissObserver
                                        upgradeCenter:self
                                                tabId:tabId];
 
-  [upgradeInfoBarDelegates_ setObject:delegateHolder forKey:tabId];
-  infoBarManager->AddInfoBar(
-      infoBarManager->CreateConfirmInfoBar(std::move(infobarDelegate)));
+  [_upgradeInfoBarDelegates setObject:delegateHolder forKey:tabId];
+  infoBarManager->AddInfoBar(CreateConfirmInfoBar(std::move(infobarDelegate)));
 }
 
 - (void)tabWillClose:(NSString*)tabId {
-  [upgradeInfoBarDelegates_ removeObjectForKey:tabId];
+  [_upgradeInfoBarDelegates removeObjectForKey:tabId];
 }
 
 - (void)dismissedInfoBar:(NSString*)tabId performUpgrade:(BOOL)shouldUpgrade {
@@ -334,19 +329,19 @@ class UpgradeInfoBarDismissObserver
   // -hideUpgradeInfoBars. Or because a tab was closed without dismissing the
   // infobar.
   DelegateHolder* delegateHolder =
-      [upgradeInfoBarDelegates_ objectForKey:tabId];
+      [_upgradeInfoBarDelegates objectForKey:tabId];
   if (!delegateHolder)
     return;
 
   // Forget about this dismissed infobar.
-  [upgradeInfoBarDelegates_ removeObjectForKey:tabId];
+  [_upgradeInfoBarDelegates removeObjectForKey:tabId];
 
   // Get rid of all the infobars on the other tabs.
   [self hideUpgradeInfoBars];
 
   if (shouldUpgrade) {
-    NSString* urlString =
-        [[NSUserDefaults standardUserDefaults] valueForKey:kUpgradeURLKey];
+    NSString* urlString = [[NSUserDefaults standardUserDefaults]
+        valueForKey:kIOSChromeUpgradeURLKey];
     if (!urlString)
       return;  // Missing URL, no upgrade possible.
 
@@ -358,7 +353,7 @@ class UpgradeInfoBarDismissObserver
       // This URL can be opened in the application, just open in a new tab.
       OpenNewTabCommand* command =
           [OpenNewTabCommand commandWithURLFromChrome:URL];
-      [self.dispatcher openURLInNewTab:command];
+      [self.handler openURLInNewTab:command];
     } else {
       // This URL scheme is not understood, ask the system to open it.
       NSURL* launchURL = [NSURL URLWithString:urlString];
@@ -374,13 +369,13 @@ class UpgradeInfoBarDismissObserver
 - (void)showUpgradeInfoBars {
 // Add an infobar on all the open tabs.
 #if DCHECK_IS_ON()
-  inCallback_ = YES;
+  _inCallback = YES;
 #endif
-  upgradeInfoBarIsVisible_ = YES;
-  for (id<UpgradeCenterClient> upgradeClient in clients_)
+  _upgradeInfoBarIsVisible = YES;
+  for (id<UpgradeCenterClient> upgradeClient in _clients)
     [upgradeClient showUpgrade:self];
 #if DCHECK_IS_ON()
-  inCallback_ = NO;
+  _inCallback = NO;
 #endif
 
   [[NSUserDefaults standardUserDefaults] setObject:[NSDate date]
@@ -388,16 +383,16 @@ class UpgradeInfoBarDismissObserver
 }
 
 - (void)hideUpgradeInfoBars {
-  upgradeInfoBarIsVisible_ = NO;
+  _upgradeInfoBarIsVisible = NO;
   // It is important to call -allKeys here and not using a fast iteration on the
   // dictionary directly: the dictionary is modified as we go...
-  for (NSString* tabId in [upgradeInfoBarDelegates_ allKeys]) {
+  for (NSString* tabId in [_upgradeInfoBarDelegates allKeys]) {
     // It is important to retain the delegateHolder as otherwise it is
     // deallocated as soon as it is removed from the dictionary.
     DelegateHolder* delegateHolder =
-        [upgradeInfoBarDelegates_ objectForKey:tabId];
+        [_upgradeInfoBarDelegates objectForKey:tabId];
     if (delegateHolder) {
-      [upgradeInfoBarDelegates_ removeObjectForKey:tabId];
+      [_upgradeInfoBarDelegates removeObjectForKey:tabId];
       UpgradeInfoBarDelegate* delegate = [delegateHolder infoBarDelegate];
       DCHECK(delegate);
       delegate->RemoveSelf();
@@ -428,15 +423,16 @@ class UpgradeInfoBarDismissObserver
 
   // Reset the display clock when the version changes.
   NSString* newVersionString = base::SysUTF8ToNSString(details.next_version);
-  NSString* previousVersionString = [defaults stringForKey:kNextVersionKey];
+  NSString* previousVersionString =
+      [defaults stringForKey:kIOSChromeNextVersionKey];
   if (!previousVersionString ||
       ![previousVersionString isEqualToString:newVersionString]) {
     [defaults removeObjectForKey:kLastInfobarDisplayTimeKey];
   }
 
   [defaults setValue:base::SysUTF8ToNSString(upgradeUrl.spec())
-              forKey:kUpgradeURLKey];
-  [defaults setValue:newVersionString forKey:kNextVersionKey];
+              forKey:kIOSChromeUpgradeURLKey];
+  [defaults setValue:newVersionString forKey:kIOSChromeNextVersionKey];
 
   if ([self shouldShowInfoBar])
     [self showUpgradeInfoBars];
@@ -445,15 +441,16 @@ class UpgradeInfoBarDismissObserver
 - (void)resetForTests {
   [[UpgradeCenter sharedInstance] hideUpgradeInfoBars];
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-  [defaults removeObjectForKey:kNextVersionKey];
-  [defaults removeObjectForKey:kUpgradeURLKey];
+  [defaults removeObjectForKey:kIOSChromeNextVersionKey];
+  [defaults removeObjectForKey:kIOSChromeUpgradeURLKey];
   [defaults removeObjectForKey:kLastInfobarDisplayTimeKey];
-  [clients_ removeAllObjects];
+  [defaults removeObjectForKey:kIOSChromeUpToDateKey];
+  [_clients removeAllObjects];
 }
 
 - (void)setLastDisplayToPast {
-  NSDate* pastDate =
-      [NSDate dateWithTimeIntervalSinceNow:-(kInfobarDisplayInterval + 1)];
+  NSDate* pastDate = [NSDate
+      dateWithTimeIntervalSinceNow:-(kInfobarDisplayIntervalInSeconds + 1)];
   [[NSUserDefaults standardUserDefaults] setObject:pastDate
                                             forKey:kLastInfobarDisplayTimeKey];
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,13 +30,18 @@ class WebOmniboxEditControllerImpl : public WebOmniboxEditController {
   void OnSetFocus() override;
 
   // OmniboxEditController methods.
-  void OnAutocompleteAccept(const GURL& destination_url,
-                            TemplateURLRef::PostContent* post_content,
-                            WindowOpenDisposition disposition,
-                            ui::PageTransition transition,
-                            AutocompleteMatchType::Type match_type,
-                            base::TimeTicks match_selection_timestamp) override;
-  void OnInputInProgress(bool in_progress) override;
+  void OnAutocompleteAccept(
+      const GURL& destination_url,
+      TemplateURLRef::PostContent* post_content,
+      WindowOpenDisposition disposition,
+      ui::PageTransition transition,
+      AutocompleteMatchType::Type match_type,
+      base::TimeTicks match_selection_timestamp,
+      bool destination_url_entered_without_scheme,
+      const std::u16string& text,
+      const AutocompleteMatch& match,
+      const AutocompleteMatch& alternative_nav_match,
+      IDNA2008DeviationCharacter deviation_char_in_hostname) override;
   void OnChanged() override;
   LocationBarModel* GetLocationBarModel() override;
   const LocationBarModel* GetLocationBarModel() const override;

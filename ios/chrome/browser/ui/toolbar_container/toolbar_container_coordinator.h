@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,16 +15,11 @@ enum class ToolbarContainerType { kPrimary, kSecondary };
 // Coordinator that manages a stack of toolbars.
 @interface ToolbarContainerCoordinator : ChromeCoordinator
 
-// Initializes a container with |type| and |browserState|.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                                type:(ToolbarContainerType)type
+// Initializes a container with `type` and `browserState`.
+- (instancetype)initWithBrowser:(Browser*)browser
+                           type:(ToolbarContainerType)type
     NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-    NS_UNAVAILABLE;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_UNAVAILABLE;
+
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser NS_UNAVAILABLE;
 
@@ -34,7 +29,7 @@ enum class ToolbarContainerType { kPrimary, kSecondary };
 // The toolbar coordinators being managed by this container.
 @property(nonatomic, strong) NSArray<ChromeCoordinator*>* toolbarCoordinators;
 
-// Returns the height of the toolbars managed by this container at |progress|.
+// Returns the height of the toolbars managed by this container at `progress`.
 - (CGFloat)toolbarStackHeightForFullscreenProgress:(CGFloat)progress;
 
 @end

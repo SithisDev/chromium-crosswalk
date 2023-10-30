@@ -1,39 +1,37 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/web_state/ui/crw_web_controller_container_view.h"
 
-#include "base/logging.h"
+#import "base/check.h"
+#import "base/notreached.h"
 #import "ios/web/common/crw_content_view.h"
+#import "ios/web/common/crw_viewport_adjustment_container.h"
 #import "ios/web/common/crw_web_view_content_view.h"
-#include "ios/web/common/features.h"
-#import "ios/web/public/deprecated/crw_native_content.h"
-#import "ios/web/public/deprecated/crw_native_content_holder.h"
+#import "ios/web/common/features.h"
+#import "ios/web/public/ui/crw_context_menu_item.h"
 #import "ios/web/web_state/ui/crw_web_view_proxy_impl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface CRWWebControllerContainerView ()
+@interface CRWWebControllerContainerView () <CRWViewportAdjustmentContainer>
 
 // Redefine properties as readwrite.
 @property(nonatomic, strong, readwrite)
     CRWWebViewContentView* webViewContentView;
-@property(nonatomic, strong, readwrite) CRWContentView* transientContentView;
 
 // Convenience getter for the proxy object.
 @property(nonatomic, weak, readonly) CRWWebViewProxyImpl* contentViewProxy;
 
-// The native controller whose content is being displayed.
-@property(nonatomic, strong, readonly) id<CRWNativeContent> nativeController;
-
 @end
 
-@implementation CRWWebControllerContainerView
+@implementation CRWWebControllerContainerView {
+  NSMutableDictionary<NSString*, ProceduralBlock>* _currentMenuItems;
+}
 @synthesize webViewContentView = _webViewContentView;
-@synthesize transientContentView = _transientContentView;
 @synthesize delegate = _delegate;
 
 - (instancetype)initWithDelegate:
@@ -65,9 +63,12 @@
 
 #pragma mark Accessors
 
-- (id<CRWNativeContent>)nativeController {
-  return
-      [[self.delegate containerViewNativeContentHolder:self] nativeController];
+- (UIView<CRWViewportAdjustment>*)fullscreenViewportAdjuster {
+  if (![self.webViewContentView
+          conformsToProtocol:@protocol(CRWViewportAdjustment)]) {
+    return nil;
+  }
+  return self.webViewContentView;
 }
 
 - (void)setWebViewContentView:(CRWWebViewContentView*)webViewContentView {
@@ -76,13 +77,6 @@
     _webViewContentView = webViewContentView;
     [_webViewContentView setFrame:self.bounds];
     [self addSubview:_webViewContentView];
-  }
-}
-
-- (void)setTransientContentView:(CRWContentView*)transientContentView {
-  if (![_transientContentView isEqual:transientContentView]) {
-    [_transientContentView removeFromSuperview];
-    _transientContentView = transientContentView;
   }
 }
 
@@ -104,37 +98,14 @@
 - (void)layoutSubviews {
   [super layoutSubviews];
 
-  // webViewContentView layout.  |-setNeedsLayout| is called in case any webview
+  // webViewContentView layout.  `-setNeedsLayout` is called in case any webview
   // layout updates need to occur despite the bounds size staying constant.
   self.webViewContentView.frame = self.bounds;
   [self.webViewContentView setNeedsLayout];
-
-  // TODO(crbug.com/570114): Move adding of the following subviews to another
-  // place.
-
-  // nativeController layout.
-  if (self.nativeController) {
-    UIView* nativeView = [self.nativeController view];
-    if (!nativeView.superview) {
-      [self addSubview:nativeView];
-      [nativeView setNeedsUpdateConstraints];
-    }
-    nativeView.frame = UIEdgeInsetsInsetRect(
-        self.bounds, [self.delegate nativeContentInsetsForContainerView:self]);
-  }
-
-  // transientContentView layout.
-  if (self.transientContentView) {
-    if (!self.transientContentView.superview)
-      [self addSubview:self.transientContentView];
-    [self bringSubviewToFront:self.transientContentView];
-    self.transientContentView.frame = self.bounds;
-  }
 }
 
 - (BOOL)isViewAlive {
-  return self.webViewContentView || self.transientContentView ||
-         [self.nativeController isViewAlive];
+  return self.webViewContentView;
 }
 
 - (void)willMoveToWindow:(UIWindow*)newWindow {
@@ -149,74 +120,42 @@
   if (!self.webViewContentView)
     return;
 
-  // If there's a containerWindow or |webViewContentView| is inactive, put it
+  // If there's a containerWindow or `webViewContentView` is inactive, put it
   // back where it belongs.
   if (containerWindow ||
       ![_delegate shouldKeepRenderProcessAliveForContainerView:self]) {
     if (self.webViewContentView.superview != self) {
       [_webViewContentView setFrame:self.bounds];
-      [self addSubview:_webViewContentView];
+      // Insert the content view on the back of the container view so any view
+      // that was presented on top of the content view can still appear.
+      [self insertSubview:_webViewContentView atIndex:0];
     }
     return;
   }
 
-  // There's no window and |webViewContentView| is active, stash it.
+  // There's no window and `webViewContentView` is active, stash it.
   [_delegate containerView:self storeWebViewInWindow:self.webViewContentView];
 }
 
 #pragma mark Content Setters
 
-- (void)resetNativeContent:(id<CRWNativeContent>)nativeControllerToReset {
-  __weak id oldController = nativeControllerToReset;
-  if ([oldController respondsToSelector:@selector(willBeDismissed)]) {
-    [oldController willBeDismissed];
-  }
-  [[oldController view] removeFromSuperview];
-  // TODO(crbug.com/503297): Re-enable this DCHECK once native controller
-  // leaks are fixed.
-  //    DCHECK(!oldController);
-}
-
 - (void)resetContent {
   self.webViewContentView = nil;
-  [self resetNativeContent:self.nativeController];
-  [self.delegate containerViewResetNativeController:self];
-  self.transientContentView = nil;
   self.contentViewProxy.contentView = nil;
 }
 
 - (void)displayWebViewContentView:(CRWWebViewContentView*)webViewContentView {
   DCHECK(webViewContentView);
   self.webViewContentView = webViewContentView;
-  [self resetNativeContent:self.nativeController];
-  [self.delegate containerViewResetNativeController:self];
-  self.transientContentView = nil;
   self.contentViewProxy.contentView = self.webViewContentView;
   [self updateWebViewContentViewForContainerWindow:self.window];
   [self setNeedsLayout];
 }
 
-- (void)nativeContentDidChange:(id<CRWNativeContent>)previousNativeController {
-  DCHECK(self.nativeController);
-  self.webViewContentView = nil;
-  if (![self.nativeController isEqual:previousNativeController]) {
-    [self resetNativeContent:previousNativeController];
-  }
-  self.transientContentView = nil;
-  self.contentViewProxy.contentView = nil;
-  [self setNeedsLayout];
-}
-
-- (void)displayTransientContent:(CRWContentView*)transientContentView {
-  DCHECK(transientContentView);
-  self.transientContentView = transientContentView;
-  self.contentViewProxy.contentView = self.transientContentView;
-  [self setNeedsLayout];
-}
-
-- (void)clearTransientContentView {
-  self.transientContentView = nil;
-  self.contentViewProxy.contentView = self.webViewContentView;
+- (void)updateWebViewContentViewFullscreenState:
+    (CrFullscreenState)fullscreenState {
+  DCHECK(_webViewContentView);
+  [self.webViewContentView updateFullscreenState:fullscreenState];
 }
 
 #pragma mark UIView (printing)
@@ -229,6 +168,80 @@
 - (void)drawRect:(CGRect)rect
     forViewPrintFormatter:(UIViewPrintFormatter*)formatter {
   [self.webViewContentView.webView drawRect:rect];
+}
+
+#pragma mark Custom Context Menu
+
+- (void)showMenuWithItems:(NSArray<CRWContextMenuItem*>*)items
+                     rect:(CGRect)rect {
+  [self becomeFirstResponder];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(didHideMenuNotification)
+             name:UIMenuControllerDidHideMenuNotification
+           object:nil];
+
+  _currentMenuItems = [[NSMutableDictionary alloc] init];
+  NSMutableArray* menuItems = [[NSMutableArray alloc] init];
+  for (CRWContextMenuItem* item in items) {
+    UIMenuItem* menuItem =
+        [[UIMenuItem alloc] initWithTitle:item.title
+                                   action:NSSelectorFromString(item.ID)];
+    [menuItems addObject:menuItem];
+
+    _currentMenuItems[item.ID] = item.action;
+  }
+
+  UIMenuController* menu = [UIMenuController sharedMenuController];
+  menu.menuItems = menuItems;
+
+  [menu showMenuFromView:self rect:rect];
+}
+
+// Called when menu is dismissed for cleanup.
+- (void)didHideMenuNotification {
+  [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:UIMenuControllerDidHideMenuNotification
+              object:nil];
+  _currentMenuItems = nil;
+}
+
+// Checks is selector is one for an item of the custom menu and if so, tell objc
+// runtime that it exists, even if it doesn't.
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+  if (_currentMenuItems[NSStringFromSelector(action)]) {
+    return YES;
+  }
+  return [super canPerformAction:action withSender:sender];
+}
+
+// Catches a menu item selector and replace with `selectedMenuItemWithID` so it
+// passes the test made to check is selector exists.
+- (NSMethodSignature*)methodSignatureForSelector:(SEL)sel {
+  if (_currentMenuItems[NSStringFromSelector(sel)]) {
+    return
+        [super methodSignatureForSelector:@selector(selectedMenuItemWithID:)];
+  }
+  return [super methodSignatureForSelector:sel];
+}
+
+// Catches invovation of a menu item selector and forward to
+// `selectedMenuItemWithID` tagging on the menu item id for recognition.
+- (void)forwardInvocation:(NSInvocation*)invocation {
+  NSString* sel = NSStringFromSelector(invocation.selector);
+  if (_currentMenuItems[sel]) {
+    [self selectedMenuItemWithID:sel];
+    return;
+  }
+  [super forwardInvocation:invocation];
+}
+
+// Triggers the action for the menu item with given `ID`.
+- (void)selectedMenuItemWithID:(NSString*)ID {
+  if (_currentMenuItems[ID]) {
+    _currentMenuItems[ID]();
+  }
 }
 
 @end

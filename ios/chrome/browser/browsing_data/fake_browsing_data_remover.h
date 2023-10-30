@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ class FakeBrowsingDataRemover : public BrowsingDataRemover {
   void Remove(browsing_data::TimePeriod time_period,
               BrowsingDataRemoveMask remove_mask,
               base::OnceClosure callback) override;
+  void RemoveSessionsData(NSArray<NSString*>* session_ids) override;
 };
 
 #endif  // IOS_CHROME_BROWSER_BROWSING_DATA_FAKE_BROWSING_DATA_REMOVER_H_

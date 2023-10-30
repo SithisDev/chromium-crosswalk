@@ -1,21 +1,23 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_text_field_legacy.h"
 
-#include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/files/file_util.h"
-#include "base/path_service.h"
-#include "base/strings/string_split.h"
-#include "base/strings/sys_string_conversions.h"
-#include "ios/chrome/browser/chrome_paths.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "testing/gtest_mac.h"
-#include "testing/platform_test.h"
+#import "base/command_line.h"
+#import "base/files/file_path.h"
+#import "base/files/file_util.h"
+#import "base/path_service.h"
+#import "base/strings/string_split.h"
+#import "base/strings/sys_string_conversions.h"
+#import "ios/chrome/browser/paths/paths.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/web/common/uikit_ui_util.h"
+#import "testing/gtest_mac.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,8 +32,8 @@ class OmniboxTextFieldTest : public PlatformTest {
     // This rect is fairly arbitrary. The text field just needs a non-zero width
     // so that the pre-edit label's text alignment can be tested.
     CGRect rect = CGRectMake(0, 0, 100, 20);
-    textfield_ = [[OmniboxTextFieldIOS alloc] initWithFrame:rect];
-    [[[UIApplication sharedApplication] keyWindow] addSubview:textfield_];
+    textfield_ = [[OmniboxTextFieldLegacy alloc] initWithFrame:rect];
+    [GetAnyKeyWindow() addSubview:textfield_];
   }
 
   void TearDown() override { [textfield_ removeFromSuperview]; }
@@ -43,7 +45,7 @@ class OmniboxTextFieldTest : public PlatformTest {
     EXPECT_EQ(expectedRect.size.height, actualRect.size.height);
   }
 
-  // Verifies that the |selectedNSRange| function properly converts from opaque
+  // Verifies that the `selectedNSRange` function properly converts from opaque
   // UITextRanges to NSRanges.  This function selects blocks of text in the text
   // field and compares the field's actual selected text to the converted
   // NSRange.
@@ -54,9 +56,9 @@ class OmniboxTextFieldTest : public PlatformTest {
     [textfield_ becomeFirstResponder];
     ASSERT_TRUE([textfield_ isFirstResponder]);
 
-    // |i| and |j| hold the start and end offsets of the range that is currently
+    // `i` and `j` hold the start and end offsets of the range that is currently
     // being tested.  This function iterates through all possible combinations
-    // of |i| and |j|.
+    // of `i` and `j`.
     NSInteger i = 0;
     NSInteger j = i + 1;
     UITextPosition* beginning = [textfield_ beginningOfDocument];
@@ -65,10 +67,10 @@ class OmniboxTextFieldTest : public PlatformTest {
                                   offset:i];
 
     // In order to avoid making any assumptions about the length of the text in
-    // the field, this test operates by incrementing the |i| and |j| offsets and
-    // converting them to opaque UITextPositions.  If either |i| or |j| are
+    // the field, this test operates by incrementing the `i` and `j` offsets and
+    // converting them to opaque UITextPositions.  If either `i` or `j` are
     // invalid offsets for the current field text,
-    // |positionFromPosition:offset:| is documented to return nil.  This is used
+    // `positionFromPosition:offset:` is documented to return nil.  This is used
     // as a signal to stop incrementing that offset and reset (or end the test).
     while (start) {
       UITextPosition* end =
@@ -89,14 +91,14 @@ class OmniboxTextFieldTest : public PlatformTest {
         NSString* uitext = [textfield_ textInRange:uirange];
         EXPECT_NSEQ(nstext, uitext);
 
-        // Increment |j| and |end| for the next iteration of the inner while
+        // Increment `j` and `end` for the next iteration of the inner while
         // loop.
         ++j;
         end = [textfield_ positionFromPosition:beginning offset:j];
       }
 
-      // Increment |i| and |start| for the next iteration of the outer while
-      // loop.  This also requires |j| to be reset.
+      // Increment `i` and `start` for the next iteration of the outer while
+      // loop.  This also requires `j` to be reset.
       ++i;
       j = i + 1;
       start = [textfield_ positionFromPosition:beginning offset:i];
@@ -138,7 +140,13 @@ TEST_F(OmniboxTextFieldTest, enterPreEditState_preEditTextAlignment_change) {
   [textfield_ resignFirstResponder];
 }
 
-TEST_F(OmniboxTextFieldTest, SelectedRanges) {
+// TODO:(crbug.com/1156541): Re-enable this test on devices.
+#if TARGET_OS_SIMULATOR
+#define MAYBE_SelectedRanges SelectedRanges
+#else
+#define MAYBE_SelectedRanges FLAKY_SelectedRanges
+#endif
+TEST_F(OmniboxTextFieldTest, MAYBE_SelectedRanges) {
   base::FilePath test_data_directory;
   ASSERT_TRUE(base::PathService::Get(ios::DIR_TEST_DATA, &test_data_directory));
   base::FilePath test_file = test_data_directory.Append(
@@ -179,7 +187,7 @@ TEST_F(OmniboxTextFieldTest, CopyInPreedit) {
   [textfield_ becomeFirstResponder];
   [textfield_ enterPreEditState];
   EXPECT_TRUE([textfield_ canPerformAction:@selector(copy:) withSender:nil]);
-  OCMExpect([delegateMock onCopy]).andReturn(YES);
+  [delegateMock onCopy];
   [textfield_ copy:nil];
   EXPECT_TRUE([textfield_.text isEqualToString:testString]);
   [delegateMock verify];
@@ -193,7 +201,7 @@ TEST_F(OmniboxTextFieldTest, CutInPreedit) {
   [textfield_ becomeFirstResponder];
   [textfield_ enterPreEditState];
   EXPECT_TRUE([textfield_ canPerformAction:@selector(cut:) withSender:nil]);
-  OCMExpect([delegateMock onCopy]).andReturn(YES);
+  [delegateMock onCopy];
   [textfield_ cut:nil];
   EXPECT_TRUE([textfield_.text isEqualToString:@""]);
   [delegateMock verify];

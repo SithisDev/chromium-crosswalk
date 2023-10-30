@@ -1,16 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/web/page_placeholder_tab_helper.h"
 
-#include "base/bind.h"
-#include "base/logging.h"
-#include "base/threading/thread_task_runner_handle.h"
+#import "base/bind.h"
+#import "base/check_op.h"
+#import "base/threading/thread_task_runner_handle.h"
 #import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -113,14 +113,10 @@ void PagePlaceholderTabHelper::AddPlaceholder() {
       FROM_HERE,
       base::BindOnce(&PagePlaceholderTabHelper::RemovePlaceholder,
                      weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSecondsD(kPlaceholderMaxDisplayTimeInSeconds));
+      base::Seconds(kPlaceholderMaxDisplayTimeInSeconds));
 }
 
 void PagePlaceholderTabHelper::DisplaySnapshotImage(UIImage* snapshot) {
-  DCHECK(web_state_->IsVisible())
-      << "The WebState must be visible to display a page placeholder.";
-  DCHECK([web_state_->GetView() window])
-      << "The WebState's view must be in the main window's view hierarchy.";
   UIView* web_state_view = web_state_->GetView();
   NamedGuide* guide = [NamedGuide guideWithName:kContentAreaGuide
                                            view:web_state_view];

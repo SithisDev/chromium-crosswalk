@@ -1,11 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_BROWSER_STATE_OFF_THE_RECORD_CHROME_BROWSER_STATE_IMPL_H_
 #define IOS_CHROME_BROWSER_BROWSER_STATE_OFF_THE_RECORD_CHROME_BROWSER_STATE_IMPL_H_
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/browser_state/off_the_record_chrome_browser_state_io_data.h"
 
@@ -13,28 +13,36 @@ namespace sync_preferences {
 class PrefServiceSyncable;
 }
 
+namespace policy {
+class UserCloudPolicyManager;
+}
+
 // The implementation of ChromeBrowserState that is used for incognito browsing.
 // Each OffTheRecordChromeBrowserStateImpl instance is associated with and owned
 // by a non-incognito ChromeBrowserState instance.
-class OffTheRecordChromeBrowserStateImpl : public ios::ChromeBrowserState {
+class OffTheRecordChromeBrowserStateImpl final : public ChromeBrowserState {
  public:
+  OffTheRecordChromeBrowserStateImpl(
+      const OffTheRecordChromeBrowserStateImpl&) = delete;
+  OffTheRecordChromeBrowserStateImpl& operator=(
+      const OffTheRecordChromeBrowserStateImpl&) = delete;
+
   ~OffTheRecordChromeBrowserStateImpl() override;
 
   // ChromeBrowserState:
-  ios::ChromeBrowserState* GetOriginalChromeBrowserState() override;
+  ChromeBrowserState* GetOriginalChromeBrowserState() override;
   bool HasOffTheRecordChromeBrowserState() const override;
-  ios::ChromeBrowserState* GetOffTheRecordChromeBrowserState() override;
+  ChromeBrowserState* GetOffTheRecordChromeBrowserState() override;
   void DestroyOffTheRecordChromeBrowserState() override;
   PrefProxyConfigTracker* GetProxyConfigTracker() override;
-  PrefService* GetPrefs() override;
-  PrefService* GetOffTheRecordPrefs() override;
+  BrowserStatePolicyConnector* GetPolicyConnector() override;
+  policy::UserCloudPolicyManager* GetUserCloudPolicyManager() override;
+  sync_preferences::PrefServiceSyncable* GetSyncablePrefs() override;
   ChromeBrowserStateIOData* GetIOData() override;
   void ClearNetworkingHistorySince(base::Time time,
-                                   const base::Closure& completion) override;
+                                   base::OnceClosure completion) override;
   net::URLRequestContextGetter* CreateRequestContext(
       ProtocolHandlerMap* protocol_handlers) override;
-  net::URLRequestContextGetter* CreateIsolatedRequestContext(
-      const base::FilePath& partition_path) override;
 
   // BrowserState:
   bool IsOffTheRecord() const override;
@@ -43,23 +51,23 @@ class OffTheRecordChromeBrowserStateImpl : public ios::ChromeBrowserState {
  private:
   friend class ChromeBrowserStateImpl;
 
-  // |original_chrome_browser_state_| is the non-incognito
+  // `original_chrome_browser_state_` is the non-incognito
   // ChromeBrowserState instance that owns this instance.
   OffTheRecordChromeBrowserStateImpl(
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-      ios::ChromeBrowserState* original_chrome_browser_state,
+      ChromeBrowserState* original_chrome_browser_state,
       const base::FilePath& otr_path);
 
   base::FilePath otr_state_path_;
-  ios::ChromeBrowserState* original_chrome_browser_state_;  // weak
+  ChromeBrowserState* original_chrome_browser_state_;  // weak
 
-  // Weak pointer owned by |original_chrome_browser_state_|.
-  sync_preferences::PrefServiceSyncable* prefs_;
+  // Creation time of the off-the-record BrowserState.
+  const base::Time start_time_;
+
+  std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs_;
 
   std::unique_ptr<OffTheRecordChromeBrowserStateIOData::Handle> io_data_;
   std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(OffTheRecordChromeBrowserStateImpl);
 };
 
 #endif  // IOS_CHROME_BROWSER_BROWSER_STATE_OFF_THE_RECORD_CHROME_BROWSER_STATE_IMPL_H_

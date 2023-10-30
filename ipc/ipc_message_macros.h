@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -200,7 +200,7 @@
 
 #include "base/export_template.h"
 #include "base/hash/md5_constexpr.h"
-#include "base/location.h"
+#include "base/notreached.h"
 #include "base/task/common/task_annotator.h"
 #include "ipc/ipc_message_templates.h"
 #include "ipc/ipc_message_utils.h"
@@ -270,16 +270,8 @@
   template class EXPORT_TEMPLATE_DEFINE(IPC_MESSAGE_EXPORT) \
       IPC::MessageT<msg_name##_Meta>;
 
-// MSVC has an intentionally non-compliant "feature" that results in LNK2005
-// ("symbol already defined") errors if we provide an out-of-line definition
-// for kKind.  Microsoft's official response is to test for _MSC_EXTENSIONS:
-// https://connect.microsoft.com/VisualStudio/feedback/details/786583/
-#if defined(_MSC_EXTENSIONS)
-#define IPC_MESSAGE_DEFINE_KIND(msg_name)
-#else
 #define IPC_MESSAGE_DEFINE_KIND(msg_name) \
   const IPC::MessageKind msg_name##_Meta::kKind;
-#endif
 
 #elif defined(IPC_MESSAGE_MACROS_LOG_ENABLED)
 
@@ -336,20 +328,20 @@
       base::MD5Hash32Constexpr(IPC_TASK_ANNOTATOR_STRINGIFY(msg_class)); \
   base::TaskAnnotator::ScopedSetIpcHash scoped_ipc_hash(kMessageHash);
 
-#define IPC_BEGIN_MESSAGE_MAP(class_name, msg) \
-  { \
-    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED_TYPE; \
-    void* param__ = NULL; \
-    (void)param__; \
-    const IPC::Message& ipc_message__ = msg; \
+#define IPC_BEGIN_MESSAGE_MAP(class_name, msg)                   \
+  {                                                              \
+    using _IpcMessageHandlerClass [[maybe_unused]] = class_name; \
+    [[maybe_unused]] void* param__ = nullptr;                    \
+    const IPC::Message& ipc_message__ = msg;                     \
     switch (ipc_message__.type()) {
 
-#define IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(class_name, msg, param)  \
-  {                                                               \
-    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED_TYPE; \
-    decltype(param) param__ = param;                              \
-    const IPC::Message& ipc_message__ = msg;                      \
+#define IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(class_name, msg, param) \
+  {                                                              \
+    using _IpcMessageHandlerClass [[maybe_unused]] = class_name; \
+    decltype(param) param__ = param;                             \
+    const IPC::Message& ipc_message__ = msg;                     \
     switch (ipc_message__.type()) {
+
 #define IPC_MESSAGE_FORWARD(msg_class, obj, member_func)         \
   case msg_class::ID: {                                          \
     IPC_TASK_ANNOTATOR_CONTEXT(msg_class)                        \

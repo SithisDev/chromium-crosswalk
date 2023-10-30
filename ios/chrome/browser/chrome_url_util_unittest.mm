@@ -1,16 +1,16 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/chrome_url_util.h"
 
-#include "base/stl_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
+#import "base/strings/sys_string_conversions.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/components/webui/web_ui_url_constants.h"
 #import "net/base/mac/url_conversions.h"
 #import "testing/gtest_mac.h"
-#include "testing/platform_test.h"
-#include "url/gurl.h"
+#import "testing/platform_test.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -39,7 +39,7 @@ const char* kSchemeTestData[] = {
 
 // Tests UrlHasChromeScheme with NSURL* parameter.
 TEST_F(ChromeURLUtilTest, NSURLHasChromeScheme) {
-  for (unsigned int i = 0; i < base::size(kSchemeTestData); ++i) {
+  for (unsigned int i = 0; i < std::size(kSchemeTestData); ++i) {
     const char* url = kSchemeTestData[i];
     NSURL* nsurl = [NSURL URLWithString:base::SysUTF8ToNSString(url)];
     bool nsurl_result = UrlHasChromeScheme(nsurl);
@@ -50,7 +50,7 @@ TEST_F(ChromeURLUtilTest, NSURLHasChromeScheme) {
 
 // Tests UrlHasChromeScheme with const GURL& paramter.
 TEST_F(ChromeURLUtilTest, GURLHasChromeScheme) {
-  for (unsigned int i = 0; i < base::size(kSchemeTestData); ++i) {
+  for (unsigned int i = 0; i < std::size(kSchemeTestData); ++i) {
     GURL gurl(kSchemeTestData[i]);
     bool result = UrlHasChromeScheme(gurl);
     EXPECT_EQ(gurl.SchemeIs(kChromeUIScheme), result)
@@ -61,12 +61,12 @@ TEST_F(ChromeURLUtilTest, GURLHasChromeScheme) {
 TEST_F(ChromeURLUtilTest, GetBundleURLScheme) {
   // Verifies that there is some default values.
   ChromeAppConstants* constants = [ChromeAppConstants sharedInstance];
-  NSString* originalScheme = [constants getBundleURLScheme];
+  NSString* originalScheme = [constants bundleURLScheme];
   EXPECT_GT([originalScheme length], 0U);
 
   // Verifies that Chrome scheme can be reset for testing.
   [constants setCallbackSchemeForTesting:@"blah"];
-  EXPECT_NSEQ(@"blah", [constants getBundleURLScheme]);
+  EXPECT_NSEQ(@"blah", [constants bundleURLScheme]);
 
   // Resets state in case of further tests.
   [constants setCallbackSchemeForTesting:originalScheme];
@@ -75,7 +75,7 @@ TEST_F(ChromeURLUtilTest, GetBundleURLScheme) {
 TEST_F(ChromeURLUtilTest, GetAllBundleURLSchemes) {
   // Verifies that there is at least 3 scheme (regular, secure and callback).
   ChromeAppConstants* constants = [ChromeAppConstants sharedInstance];
-  NSArray* schemes = [constants getAllBundleURLSchemes];
+  NSArray* schemes = [constants allBundleURLSchemes];
   EXPECT_GT([schemes count], 2U);
 
   // Verifies that at least the main unit test scheme is in returned schemes.

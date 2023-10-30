@@ -1,30 +1,30 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 
-#include <memory>
-#include <utility>
+#import <memory>
+#import <utility>
 
-#include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/sequenced_task_runner.h"
-#include "components/sync_preferences/pref_service_syncable.h"
-#include "components/variations/net/variations_http_headers.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/webui/web_ui_ios.h"
-#include "ios/web/webui/url_data_manager_ios_backend.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_interceptor.h"
+#import "base/check_op.h"
+#import "base/files/file_path.h"
+#import "base/task/sequenced_task_runner.h"
+#import "components/sync_preferences/pref_service_syncable.h"
+#import "components/variations/net/variations_http_headers.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/components/webui/web_ui_url_constants.h"
+#import "ios/web/public/thread/web_thread.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/webui/web_ui_ios.h"
+#import "ios/web/webui/url_data_manager_ios_backend.h"
+#import "net/url_request/url_request_context_getter.h"
+#import "net/url_request/url_request_interceptor.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-namespace ios {
 namespace {
 // All ChromeBrowserState will store a dummy base::SupportsUserData::Data
 // object with this key. It can be used to check that a web::BrowserState
@@ -75,8 +75,8 @@ scoped_refptr<base::SequencedTaskRunner> ChromeBrowserState::GetIOTaskRunner() {
   return io_task_runner_;
 }
 
-sync_preferences::PrefServiceSyncable* ChromeBrowserState::GetSyncablePrefs() {
-  return static_cast<sync_preferences::PrefServiceSyncable*>(GetPrefs());
+PrefService* ChromeBrowserState::GetPrefs() {
+  return GetSyncablePrefs();
 }
 
 net::URLRequestContextGetter* ChromeBrowserState::GetRequestContext() {
@@ -95,5 +95,3 @@ void ChromeBrowserState::UpdateCorsExemptHeader(
     network::mojom::NetworkContextParams* params) {
   variations::UpdateCorsExemptHeaderForVariations(params);
 }
-
-}  // namespace ios

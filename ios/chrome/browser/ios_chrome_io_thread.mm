@@ -1,14 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/ios_chrome_io_thread.h"
+#import "ios/chrome/browser/ios_chrome_io_thread.h"
 
-#include "components/variations/net/variations_http_headers.h"
-#include "ios/chrome/browser/net/ios_chrome_network_delegate.h"
-#include "ios/chrome/common/channel_info.h"
-#include "ios/web/public/init/network_context_owner.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#import "components/variations/net/variations_http_headers.h"
+#import "ios/chrome/browser/net/ios_chrome_network_delegate.h"
+#import "ios/chrome/common/channel_info.h"
+#import "ios/web/public/init/network_context_owner.h"
+#import "ios/web/public/thread/web_task_traits.h"
+#import "ios/web/public/thread/web_thread.h"
+#import "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -51,8 +53,9 @@ IOSChromeIOThread::GetSharedURLLoaderFactory() {
         network::mojom::URLLoaderFactoryParams::New();
     url_loader_factory_params->process_id = network::mojom::kBrowserProcessId;
     url_loader_factory_params->is_corb_enabled = false;
+    url_loader_factory_params->is_trusted = true;
     GetSystemNetworkContext()->CreateURLLoaderFactory(
-        mojo::MakeRequest(&url_loader_factory_),
+        url_loader_factory_.BindNewPipeAndPassReceiver(),
         std::move(url_loader_factory_params));
     shared_url_loader_factory_ =
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
@@ -66,7 +69,7 @@ void IOSChromeIOThread::NetworkTearDown() {
     shared_url_loader_factory_->Detach();
 
   if (network_context_) {
-    web::WebThread::DeleteSoon(web::WebThread::IO, FROM_HERE,
-                               network_context_owner_.release());
+    web::GetIOThreadTaskRunner({})->DeleteSoon(
+        FROM_HERE, network_context_owner_.release());
   }
 }

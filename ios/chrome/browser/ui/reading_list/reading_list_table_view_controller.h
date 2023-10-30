@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,14 @@
 @protocol ReadingListDataSource;
 @protocol ReadingListListViewControllerAudience;
 @protocol ReadingListListViewControllerDelegate;
+@protocol ReadingListMenuProvider;
+
+class Browser;
 
 // View controller that displays reading list items in a table view.
 @interface ReadingListTableViewController
-    : ChromeTableViewController<ReadingListListItemAccessibilityDelegate>
+    : ChromeTableViewController <ReadingListListItemAccessibilityDelegate,
+                                 UIAdaptivePresentationControllerDelegate>
 
 // The delegate.
 @property(nonatomic, weak) id<ReadingListListViewControllerDelegate> delegate;
@@ -23,13 +27,14 @@
 @property(nonatomic, weak) id<ReadingListListViewControllerAudience> audience;
 // The table's data source.
 @property(nonatomic, weak) id<ReadingListDataSource> dataSource;
+// The browser.
+@property(nonatomic, assign) Browser* browser;
+// Provider of menu configurations for the readingList component.
+@property(nonatomic, weak) id<ReadingListMenuProvider> menuProvider;
 
 // Initializers.
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithTableViewStyle:(UITableViewStyle)style
-                           appBarStyle:
-                               (ChromeTableViewControllerStyle)appBarStyle
-    NS_UNAVAILABLE;
+- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
 
 // Prepares this view controller to be dismissed.
 - (void)willBeDismissed;

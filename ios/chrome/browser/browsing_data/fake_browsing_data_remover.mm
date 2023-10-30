@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,3 +15,6 @@ bool FakeBrowsingDataRemover::IsRemoving() const {
 void FakeBrowsingDataRemover::Remove(browsing_data::TimePeriod time_period,
                                      BrowsingDataRemoveMask remove_mask,
                                      base::OnceClosure callback) {}
+
+void FakeBrowsingDataRemover::RemoveSessionsData(
+    NSArray<NSString*>* session_ids) {}

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,58 +6,47 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "components/omnibox/browser/autocomplete_match.h"
-#include "components/omnibox/browser/suggestion_answer.h"
+#import "base/metrics/field_trial_params.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/strings/utf_string_conversions.h"
+#import "components/omnibox/browser/autocomplete_match.h"
+#import "components/omnibox/browser/suggestion_answer.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_ui_features.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_icon_formatter.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/omnibox/popup/popup_swift.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
+
 // The color of the main text of a suggest cell.
 UIColor* SuggestionTextColor() {
-  return [UIColor blackColor];
+  return [UIColor colorNamed:kTextPrimaryColor];
 }
 // The color of the detail text of a suggest cell.
 UIColor* SuggestionDetailTextColor() {
-  return [UIColor colorWithWhite:0 alpha:0.41];
-}
-// The color of the detail text of a suggest cell.
-UIColor* SuggestionDetailTextColorIncognito() {
-  return [UIColor colorWithWhite:1 alpha:0.5];
+  return [UIColor colorNamed:kTextSecondaryColor];
 }
 // The color of the text in the portion of a search suggestion that matches the
 // omnibox input text.
 UIColor* DimColor() {
   return [UIColor colorWithWhite:(161 / 255.0) alpha:1.0];
 }
-UIColor* SuggestionTextColorIncognito() {
-  return [UIColor whiteColor];
-}
-
 UIColor* DimColorIncognito() {
-  return [UIColor whiteColor];
+  return UIColor.whiteColor;
 }
 
-// Temporary convenience accessor for this flag.
-// Cleanup along with feature: crbug.com/945334.
-bool ShouldUseNewFormatting() {
-  return base::FeatureList::IsEnabled(kNewOmniboxPopupLayout);
-}
 }  // namespace
 
 @implementation AutocompleteMatchFormatter {
   AutocompleteMatch _match;
 }
-@synthesize incognito = _incognito;
-@synthesize starred = _starred;
 
 - (instancetype)initWithMatch:(const AutocompleteMatch&)match {
   self = [super init];
@@ -74,8 +63,14 @@ bool ShouldUseNewFormatting() {
 #pragma mark - NSObject
 
 - (NSString*)description {
-  return [NSString
-      stringWithFormat:@"%@ (%@)", self.text.string, self.detailText.string];
+  NSString* description = [NSString
+      stringWithFormat:@"<%@ %p> %@ (%@)", self.class, self,
+                       self.text.string, self.detailText.string];
+  if (self.pedalData) {
+    description =
+        [description stringByAppendingFormat:@" P:[%@]", self.pedalData.title];
+  }
+  return description;
 }
 
 #pragma mark AutocompleteSuggestion
@@ -88,68 +83,62 @@ bool ShouldUseNewFormatting() {
   return _match.answer.has_value();
 }
 
-- (BOOL)hasImage {
-  BOOL hasAnswerImage =
-      self.hasAnswer && _match.answer->second_line().image_url().is_valid();
-  BOOL hasRichEntityImage =
-      ShouldUseNewFormatting() && !_match.image_url.empty();
-  return hasAnswerImage || hasRichEntityImage;
-}
-
 - (BOOL)isURL {
   return !AutocompleteMatch::IsSearchType(_match.type);
 }
 
 - (NSAttributedString*)detailText {
-  // The detail text should be the URL (|_match.contents|) for non-search
-  // suggestions and the entity type (|_match.description|) for search entity
-  // suggestions. For all other search suggestions, |_match.description| is the
-  // name of the currently selected search engine, which for mobile we suppress.
-  NSString* detailText = nil;
-  if (self.isURL)
-    detailText = base::SysUTF16ToNSString(_match.contents);
-  else if (_match.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY)
-    detailText = base::SysUTF16ToNSString(_match.description);
-
-  NSAttributedString* detailAttributedText = nil;
   if (self.hasAnswer) {
-    const SuggestionAnswer::ImageLine& detailTextLine =
-        ShouldUseNewFormatting() && !_match.answer->IsExceptedFromLineReversal()
-            ? _match.answer->first_line()
-            : _match.answer->second_line();
-    detailAttributedText = [self attributedStringWithAnswerLine:detailTextLine
-                                         useDeemphasizedStyling:YES];
+    if (!_match.answer->IsExceptedFromLineReversal()) {
+      NSAttributedString* detailBaseText = [self
+          attributedStringWithString:base::SysUTF16ToNSString(_match.contents)
+                     classifications:&_match.contents_class
+                           smallFont:NO
+                               color:SuggestionDetailTextColor()
+                            dimColor:DimColor()];
+      return [self addExtraTextFromAnswerLine:_match.answer->first_line()
+                           toAttributedString:detailBaseText
+                       useDeemphasizedStyling:YES];
+    } else {
+      return [self attributedStringWithAnswerLine:_match.answer->second_line()
+                           useDeemphasizedStyling:YES];
+    }
   } else {
+    // The detail text should be the URL (`_match.contents`) for non-search
+    // suggestions and the entity type (`_match.description`) for search entity
+    // suggestions. For all other search suggestions, `_match.description` is
+    // the name of the currently selected search engine, which for mobile we
+    // suppress.
+    NSString* detailText = nil;
+    if (self.isURL)
+      detailText = base::SysUTF16ToNSString(_match.contents);
+    else if (_match.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY)
+      detailText = base::SysUTF16ToNSString(_match.description);
     const ACMatchClassifications* classifications =
         self.isURL ? &_match.contents_class : nullptr;
     // The suggestion detail color should match the main text color for entity
     // suggestions. For non-search suggestions (URLs), a highlight color is used
     // instead.
     UIColor* suggestionDetailTextColor = nil;
-    if (_match.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY) {
-      suggestionDetailTextColor =
-          _incognito ? SuggestionTextColorIncognito() : SuggestionTextColor();
+    if (_match.type != AutocompleteMatchType::SEARCH_SUGGEST_ENTITY ||
+        IsOmniboxActionsVisualTreatment2()) {
+      suggestionDetailTextColor = SuggestionDetailTextColor();
     } else {
-      suggestionDetailTextColor = _incognito
-                                      ? SuggestionDetailTextColorIncognito()
-                                      : SuggestionDetailTextColor();
+      suggestionDetailTextColor = SuggestionTextColor();
     }
     DCHECK(suggestionDetailTextColor);
-    detailAttributedText =
-        [self attributedStringWithString:detailText
-                         classifications:classifications
-                               smallFont:YES
-                                   color:suggestionDetailTextColor
-                                dimColor:DimColor()];
+    return [self attributedStringWithString:detailText
+                            classifications:classifications
+                                  smallFont:YES
+                                      color:suggestionDetailTextColor
+                                   dimColor:DimColor()];
   }
-  return detailAttributedText;
 }
 
 - (id<OmniboxIcon>)icon {
   OmniboxIconFormatter* icon =
       [[OmniboxIconFormatter alloc] initWithMatch:_match];
   icon.defaultSearchEngineIsGoogle = self.defaultSearchEngineIsGoogle;
-  icon.incognito = self.incognito;
   return icon;
 }
 
@@ -165,41 +154,51 @@ bool ShouldUseNewFormatting() {
 }
 
 - (NSAttributedString*)text {
-  // The text should be search term (|_match.contents|) for searches, otherwise
-  // page title (|_match.description|).
-  base::string16 textString =
-      !self.isURL ? _match.contents : _match.description;
-  NSString* text = base::SysUTF16ToNSString(textString);
-
-  // If for some reason the title is empty, copy the detailText.
-  if ([text length] == 0 && [self.detailText length] != 0) {
-    text = [self.detailText string];
-  }
-
-  NSAttributedString* attributedText = nil;
-
   if (self.hasAnswer) {
-    const SuggestionAnswer::ImageLine& textLine =
-        ShouldUseNewFormatting() && !_match.answer->IsExceptedFromLineReversal()
-            ? _match.answer->second_line()
-            : _match.answer->first_line();
-    attributedText = [self attributedStringWithAnswerLine:textLine
-                                   useDeemphasizedStyling:NO];
+    if (!_match.answer->IsExceptedFromLineReversal()) {
+      return [self attributedStringWithAnswerLine:_match.answer->second_line()
+                           useDeemphasizedStyling:NO];
+    } else {
+      UIColor* suggestionTextColor = SuggestionTextColor();
+      UIColor* dimColor = self.incognito ? DimColorIncognito() : DimColor();
+      NSAttributedString* attributedBaseText = [self
+          attributedStringWithString:base::SysUTF16ToNSString(_match.contents)
+                     classifications:&_match.contents_class
+                           smallFont:NO
+                               color:suggestionTextColor
+                            dimColor:dimColor];
+      return [self addExtraTextFromAnswerLine:_match.answer->first_line()
+                           toAttributedString:attributedBaseText
+                       useDeemphasizedStyling:NO];
+    }
   } else {
+    // The text should be search term (`_match.contents`) for searches,
+    // otherwise page title (`_match.description`).
+    std::u16string textString =
+        !self.isURL ? _match.contents : _match.description;
+    NSString* text = base::SysUTF16ToNSString(textString);
+
+    // If for some reason the title is empty, copy the detailText.
+    if ([text length] == 0 && [self.detailText length] != 0) {
+      text = [self.detailText string];
+    }
+
     const ACMatchClassifications* textClassifications =
         !self.isURL ? &_match.contents_class : &_match.description_class;
-    UIColor* suggestionTextColor =
-        _incognito ? SuggestionTextColorIncognito() : SuggestionTextColor();
-    UIColor* dimColor = _incognito ? DimColorIncognito() : DimColor();
+    UIColor* suggestionTextColor = SuggestionTextColor();
+    UIColor* dimColor = self.incognito ? DimColorIncognito() : DimColor();
 
-    attributedText = [self attributedStringWithString:text
-                                      classifications:textClassifications
-                                            smallFont:NO
-                                                color:suggestionTextColor
-                                             dimColor:dimColor];
+    return [self attributedStringWithString:text
+                            classifications:textClassifications
+                                  smallFont:NO
+                                      color:suggestionTextColor
+                                   dimColor:dimColor];
   }
+}
 
-  return attributedText;
+- (NSAttributedString*)omniboxPreviewText {
+  return [[NSAttributedString alloc]
+      initWithString:base::SysUTF16ToNSString(_match.fill_into_edit)];
 }
 
 // The primary purpose of this list is to omit the "what you typed" types, since
@@ -210,11 +209,14 @@ bool ShouldUseNewFormatting() {
   return _match.type == AutocompleteMatchType::BOOKMARK_TITLE ||
          _match.type == AutocompleteMatchType::CALCULATOR ||
          _match.type == AutocompleteMatchType::HISTORY_BODY ||
+         _match.type == AutocompleteMatchType::HISTORY_CLUSTER ||
          _match.type == AutocompleteMatchType::HISTORY_KEYWORD ||
          _match.type == AutocompleteMatchType::HISTORY_TITLE ||
          _match.type == AutocompleteMatchType::HISTORY_URL ||
          _match.type == AutocompleteMatchType::NAVSUGGEST ||
          _match.type == AutocompleteMatchType::NAVSUGGEST_PERSONALIZED ||
+         _match.type == AutocompleteMatchType::STARTER_PACK ||
+         _match.type == AutocompleteMatchType::SEARCH_HISTORY ||
          _match.type == AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED ||
          _match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL ||
          _match.type == AutocompleteMatchType::SEARCH_SUGGEST ||
@@ -224,45 +226,83 @@ bool ShouldUseNewFormatting() {
          _match.type == AutocompleteMatchType::PHYSICAL_WEB_DEPRECATED;
 }
 
-- (GURL)imageURL {
-  if (self.hasAnswer && _match.answer->second_line().image_url().is_valid()) {
-    return _match.answer->second_line().image_url();
+- (BOOL)isTabMatch {
+  return _match.has_tab_match.value_or(false);
+}
+
+- (BOOL)isClipboardMatch {
+  if (base::FeatureList::IsEnabled(kOmniboxPasteButton)) {
+    return _match.type == AutocompleteMatchType::CLIPBOARD_URL ||
+           _match.type == AutocompleteMatchType::CLIPBOARD_TEXT ||
+           _match.type == AutocompleteMatchType::CLIPBOARD_IMAGE;
   } else {
-    return GURL(_match.image_url);
+    return NO;
   }
 }
 
-- (GURL)faviconPageURL {
-  return _match.destination_url;
+- (id<OmniboxPedal>)pedal {
+  return self.pedalData;
 }
 
-- (UIImage*)suggestionTypeIcon {
-  DCHECK(
-      !(self.isIncognito && _match.type == AutocompleteMatchType::CALCULATOR))
-      << "Calculator answers are never shown in incognito mode because input "
-         "is never sent to the search provider.";
-  return GetOmniboxSuggestionIconForAutocompleteMatchType(_match.type,
-                                                          self.isStarred);
+- (UIImage*)matchTypeIcon {
+  return GetOmniboxSuggestionIconForAutocompleteMatchType(
+      _match.type, /* is_starred */ false);
 }
 
-- (BOOL)isTabMatch {
-  return _match.has_tab_match;
+- (BOOL)isMatchTypeSearch {
+  return AutocompleteMatch::IsSearchType(_match.type);
+}
+
+- (CrURL*)destinationUrl {
+  return [[CrURL alloc] initWithGURL:_match.destination_url];
+}
+
+- (const AutocompleteMatch&)autocompleteMatch {
+  return _match;
+}
+
+#pragma mark tail suggest
+
+- (BOOL)isTailSuggestion {
+  return _match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
+}
+
+- (NSString*)commonPrefix {
+  if (!self.isTailSuggestion) {
+    return @"";
+  }
+  return base::SysUTF16ToNSString(_match.tail_suggest_common_prefix);
 }
 
 #pragma mark helpers
 
-// Create a string to display for an answer line.
-- (NSMutableAttributedString*)
+// Create a string to display for an entire answer line.
+- (NSAttributedString*)
     attributedStringWithAnswerLine:(const SuggestionAnswer::ImageLine&)line
             useDeemphasizedStyling:(BOOL)useDeemphasizedStyling {
   NSMutableAttributedString* result =
       [[NSMutableAttributedString alloc] initWithString:@""];
 
-  for (const auto field : line.text_fields()) {
+  for (const auto& field : line.text_fields()) {
     [result appendAttributedString:
                 [self attributedStringForTextfield:&field
                             useDeemphasizedStyling:useDeemphasizedStyling]];
   }
+
+  return [self addExtraTextFromAnswerLine:line
+                       toAttributedString:result
+                   useDeemphasizedStyling:useDeemphasizedStyling];
+}
+
+// Adds the `additional_text` and `status_text` from `line` to the given
+// attributed string. This is necessary because answers get their main text
+// from the match contents instead of the ImageLine's text_fields. This is
+// because those fields contain server-provided formatting, which aren't used.
+- (NSAttributedString*)
+    addExtraTextFromAnswerLine:(const SuggestionAnswer::ImageLine&)line
+            toAttributedString:(NSAttributedString*)attributedString
+        useDeemphasizedStyling:(BOOL)useDeemphasizedStyling {
+  NSMutableAttributedString* result = [attributedString mutableCopy];
 
   NSAttributedString* spacer =
       [[NSAttributedString alloc] initWithString:@"  "];
@@ -289,97 +329,26 @@ bool ShouldUseNewFormatting() {
 - (NSAttributedString*)
     attributedStringForTextfield:(const SuggestionAnswer::TextField*)field
           useDeemphasizedStyling:(BOOL)useDeemphasizedStyling {
-  const base::string16& string = field->text();
+  const std::u16string& string = field->text();
 
   NSString* unescapedString =
-      base::SysUTF16ToNSString(net::UnescapeForHTML(string));
-  // TODO(crbug.com/763894): Remove this tag stripping once the JSON parsing
-  // class handles HTML tags.
-  unescapedString = [unescapedString stringByReplacingOccurrencesOfString:@"<b>"
-                                                               withString:@""];
-  unescapedString =
-      [unescapedString stringByReplacingOccurrencesOfString:@"</b>"
-                                                 withString:@""];
+      base::SysUTF16ToNSString(base::UnescapeForHTML(string));
 
   NSDictionary* attributes =
-      ShouldUseNewFormatting()
-          ? [self formattingAttributesForSuggestionStyle:field->style()
-                                  useDeemphasizedStyling:useDeemphasizedStyling]
-          : [self attributesForSuggestionType:field->type()];
+      [self formattingAttributesForSuggestionStyle:field->style()
+                            useDeemphasizedStyling:useDeemphasizedStyling];
 
   return [[NSAttributedString alloc] initWithString:unescapedString
                                          attributes:attributes];
 }
 
-- (NSDictionary<NSAttributedStringKey, id>*)attributesForSuggestionType:
-    (int)type {
-  DCHECK(!ShouldUseNewFormatting());
-  // Answer types, sizes and colors specified at http://goto.google.com/ais_api.
-  switch (type) {
-    case SuggestionAnswer::TOP_ALIGNED:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:12],
-        NSBaselineOffsetAttributeName : @10.0f,
-        NSForegroundColorAttributeName : [UIColor grayColor],
-      };
-    case SuggestionAnswer::DESCRIPTION_POSITIVE:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:16],
-        NSForegroundColorAttributeName : [UIColor colorWithRed:11 / 255.0
-                                                         green:128 / 255.0
-                                                          blue:67 / 255.0
-                                                         alpha:1.0],
-      };
-    case SuggestionAnswer::DESCRIPTION_NEGATIVE:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:16],
-        NSForegroundColorAttributeName : [UIColor colorWithRed:197 / 255.0
-                                                         green:57 / 255.0
-                                                          blue:41 / 255.0
-                                                         alpha:1.0],
-      };
-    case SuggestionAnswer::PERSONALIZED_SUGGESTION:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:16],
-      };
-    case SuggestionAnswer::ANSWER_TEXT_MEDIUM:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:20],
-
-        NSForegroundColorAttributeName : [UIColor grayColor],
-      };
-    case SuggestionAnswer::ANSWER_TEXT_LARGE:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:24],
-        NSForegroundColorAttributeName : [UIColor grayColor],
-      };
-    case SuggestionAnswer::SUGGESTION_SECONDARY_TEXT_SMALL:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:12],
-        NSForegroundColorAttributeName : [UIColor grayColor],
-      };
-    case SuggestionAnswer::SUGGESTION_SECONDARY_TEXT_MEDIUM:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:14],
-        NSForegroundColorAttributeName : [UIColor grayColor],
-      };
-    case SuggestionAnswer::SUGGESTION:
-      // Fall through.
-    default:
-      return @{
-        NSFontAttributeName : [UIFont systemFontOfSize:16],
-      };
-  }
-}
-
 // Return correct formatting attributes for the given style.
-// |useDeemphasizedStyling| is necessary because some styles (e.g. SUPERIOR)
+// `useDeemphasizedStyling` is necessary because some styles (e.g. SUPERIOR)
 // should take their color from the surrounding line; they don't have a fixed
 // color.
 - (NSDictionary<NSAttributedStringKey, id>*)
     formattingAttributesForSuggestionStyle:(SuggestionAnswer::TextStyle)style
                     useDeemphasizedStyling:(BOOL)useDeemphasizedStyling {
-  DCHECK(ShouldUseNewFormatting());
   UIFontDescriptor* defaultFontDescriptor =
       useDeemphasizedStyling
           ? [[UIFontDescriptor
@@ -388,8 +357,8 @@ bool ShouldUseNewFormatting() {
                     UIFontDescriptorTraitTightLeading]
           : [UIFontDescriptor
                 preferredFontDescriptorWithTextStyle:UIFontTextStyleBody];
-  UIColor* defaultColor =
-      useDeemphasizedStyling ? UIColor.grayColor : UIColor.blackColor;
+  UIColor* defaultColor = useDeemphasizedStyling ? SuggestionDetailTextColor()
+                                                 : SuggestionTextColor();
 
   switch (style) {
     case SuggestionAnswer::TextStyle::NORMAL:
@@ -415,7 +384,7 @@ bool ShouldUseNewFormatting() {
           fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
       return @{
         NSFontAttributeName : [UIFont fontWithDescriptor:boldFontDescriptor
-                                                    size:0.0],
+                                                    size:0],
         NSForegroundColorAttributeName : defaultColor,
       };
     }
@@ -423,19 +392,13 @@ bool ShouldUseNewFormatting() {
       return @{
         NSFontAttributeName : [UIFont fontWithDescriptor:defaultFontDescriptor
                                                     size:0],
-        NSForegroundColorAttributeName : [UIColor colorWithRed:11 / 255.0
-                                                         green:128 / 255.0
-                                                          blue:67 / 255.0
-                                                         alpha:1.0],
+        NSForegroundColorAttributeName : [UIColor colorNamed:kGreenColor],
       };
     case SuggestionAnswer::TextStyle::NEGATIVE:
       return @{
         NSFontAttributeName : [UIFont fontWithDescriptor:defaultFontDescriptor
                                                     size:0],
-        NSForegroundColorAttributeName : [UIColor colorWithRed:197 / 255.0
-                                                         green:57 / 255.0
-                                                          blue:41 / 255.0
-                                                         alpha:1.0],
+        NSForegroundColorAttributeName : [UIColor colorNamed:kRedColor],
       };
     case SuggestionAnswer::TextStyle::SUPERIOR: {
       // Calculate a slightly smaller font. The ratio here is somewhat
@@ -475,15 +438,9 @@ bool ShouldUseNewFormatting() {
     return nil;
 
   UIFont* fontRef;
-  if (ShouldUseNewFormatting()) {
-    fontRef =
-        smallFont
-            ? [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]
-            : [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-  } else {
-    fontRef =
-        smallFont ? [UIFont systemFontOfSize:15] : [UIFont systemFontOfSize:17];
-  }
+  fontRef = smallFont
+                ? [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]
+                : [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
 
   NSMutableAttributedString* styledText =
       [[NSMutableAttributedString alloc] initWithString:text];
@@ -497,16 +454,10 @@ bool ShouldUseNewFormatting() {
 
   if (classifications != NULL) {
     UIFont* boldFontRef;
-    if (ShouldUseNewFormatting()) {
-      UIFontDescriptor* fontDescriptor = fontRef.fontDescriptor;
-      UIFontDescriptor* boldFontDescriptor = [fontDescriptor
-          fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
-      boldFontRef = [UIFont fontWithDescriptor:boldFontDescriptor size:0];
-    } else {
-      UIFontWeight boldFontWeight = UIFontWeightMedium;
-      boldFontRef = [UIFont systemFontOfSize:fontRef.pointSize
-                                      weight:boldFontWeight];
-    }
+    UIFontDescriptor* fontDescriptor = fontRef.fontDescriptor;
+    UIFontDescriptor* boldFontDescriptor = [fontDescriptor
+        fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
+    boldFontRef = [UIFont fontWithDescriptor:boldFontDescriptor size:0];
 
     for (ACMatchClassifications::const_iterator i = classifications->begin();
          i != classifications->end(); ++i) {

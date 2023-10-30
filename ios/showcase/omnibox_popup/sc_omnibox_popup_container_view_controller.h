@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,17 @@
 
 #include <UIKit/UIKit.h>
 
-@class OmniboxPopupBaseViewController;
+@class OmniboxPopupViewController;
 
 // In the main app, the |OmniboxPopupViewController| view is contained inside
 // another view (see |OmniboxPopupPresenter|). This class mimics that for
 // Showcase.
 @interface SCOmniboxPopupContainerViewController : UIViewController
 
-@property(nonatomic, strong)
-    OmniboxPopupBaseViewController* popupViewController;
+@property(nonatomic, strong) OmniboxPopupViewController* popupViewController;
 
 - (instancetype)initWithPopupViewController:
-    (OmniboxPopupBaseViewController*)popupViewController
-    NS_DESIGNATED_INITIALIZER;
+    (OmniboxPopupViewController*)popupViewController NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 

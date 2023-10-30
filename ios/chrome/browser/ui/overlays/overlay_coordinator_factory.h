@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "ios/chrome/browser/overlays/public/overlay_modality.h"
 
 class Browser;
-class OverlayUIDismissalDelegate;
+class OverlayRequestCoordinatorDelegate;
 @class OverlayRequestCoordinator;
 class OverlayRequest;
 
@@ -18,18 +18,23 @@ class OverlayRequest;
 // coordinators for a request.
 @interface OverlayRequestCoordinatorFactory : NSObject
 
-// Returns a coordinator factory for |browser| at |modality|.
+// Returns a coordinator factory for `browser` at `modality`.
 + (instancetype)factoryForBrowser:(Browser*)browser
                          modality:(OverlayModality)modality;
 
 // OverlayRequestCoordinatorFactory must be fetched using
-// |+factoryForBrowser:modality:|.
+// |+factoryForBrowser:modality:`.
 - (instancetype)init NS_UNAVAILABLE;
 
-// Creates a coordinator to show |request|'s overlay UI.
+// Returns whether the OverlayRequestCoordinator subclass responsible for
+// showing `request`'s overlay UI uses a child UIViewController instead of a
+// presented UIViewController.
+- (BOOL)coordinatorForRequestUsesChildViewController:(OverlayRequest*)request;
+
+// Creates a coordinator to show `request`'s overlay UI.
 - (OverlayRequestCoordinator*)
     newCoordinatorForRequest:(OverlayRequest*)request
-           dismissalDelegate:(OverlayUIDismissalDelegate*)dismissalDelegate
+                    delegate:(OverlayRequestCoordinatorDelegate*)delegate
           baseViewController:(UIViewController*)baseViewController;
 
 @end

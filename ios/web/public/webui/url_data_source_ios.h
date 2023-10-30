@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@ class BrowserState;
 // notify.
 class URLDataSourceIOS {
  public:
-  // Adds a URL data source to |browser_state|.
+  // Adds a URL data source to `browser_state`.
   static void Add(BrowserState* browser_state, URLDataSourceIOS* source);
 
   virtual ~URLDataSourceIOS() {}
@@ -42,15 +42,15 @@ class URLDataSourceIOS {
 
   // Used by StartDataRequest so that the child class can return the data when
   // it's available.
-  typedef base::Callback<void(scoped_refptr<base::RefCountedMemory>)>
+  typedef base::OnceCallback<void(scoped_refptr<base::RefCountedMemory>)>
       GotDataCallback;
 
-  // Called by URLDataSourceIOS to request data at |path|. The string parameter
-  // is the path of the request. The child class should run |callback| when the
+  // Called by URLDataSourceIOS to request data at `path`. The string parameter
+  // is the path of the request. The child class should run `callback` when the
   // data is available or if the request could not be satisfied. This can be
   // called either in this callback or asynchronously with the response.
   virtual void StartDataRequest(const std::string& path,
-                                const GotDataCallback& callback) = 0;
+                                GotDataCallback callback) = 0;
 
   // Return the mimetype that should be sent with this response, or empty
   // string to specify no mime type.
@@ -67,6 +67,10 @@ class URLDataSourceIOS {
   // TODO: nuke this and convert all callers to not replace.
   virtual bool ShouldReplaceExistingSource() const;
 
+  // Returns true if i18n replacemenents should be performed in JS files. Needed
+  // by UIs that use Web Components.
+  virtual bool ShouldReplaceI18nInJS() const;
+
   // Returns true if responses from this URLDataSourceIOS can be cached.
   virtual bool AllowCaching() const;
 
@@ -76,9 +80,6 @@ class URLDataSourceIOS {
   // By default, the "X-Frame-Options: DENY" header is sent. To stop this from
   // happening, return false. It is OK to return false as needed.
   virtual bool ShouldDenyXFrameOptions() const;
-
-  // Whether |path| is gzipped (and should be transmitted gzipped).
-  virtual bool IsGzipped(const std::string& path) const;
 
   // By default, only chrome: requests are allowed.  Override in specific WebUI
   // data sources to enable for additional schemes or to implement fancier

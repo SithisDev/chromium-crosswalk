@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@ namespace ios {
 
 // static
 scoped_refptr<content_settings::CookieSettings>
-CookieSettingsFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+CookieSettingsFactory::GetForBrowserState(ChromeBrowserState* browser_state) {
   return static_cast<content_settings::CookieSettings*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true).get());
 }
@@ -52,11 +51,11 @@ web::BrowserState* CookieSettingsFactory::GetBrowserStateToUse(
 scoped_refptr<RefcountedKeyedService>
 CookieSettingsFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   return base::MakeRefCounted<content_settings::CookieSettings>(
       ios::HostContentSettingsMapFactory::GetForBrowserState(browser_state),
-      browser_state->GetPrefs());
+      browser_state->GetPrefs(), browser_state->IsOffTheRecord());
 }
 
 }  // namespace ios

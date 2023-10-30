@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#import "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 @class AutofillAgent;
+class ChromeBrowserState;
 @protocol FormSuggestionProvider;
 @class UIViewController;
 
@@ -23,17 +23,16 @@ namespace password_manager {
 class PasswordManager;
 }
 
-namespace ios {
-class ChromeBrowserState;
-}
-
 // Class binding an instance of AutofillAgent to a WebState.
 class AutofillTabHelper : public web::WebStateObserver,
                           public web::WebStateUserData<AutofillTabHelper> {
  public:
+  AutofillTabHelper(const AutofillTabHelper&) = delete;
+  AutofillTabHelper& operator=(const AutofillTabHelper&) = delete;
+
   ~AutofillTabHelper() override;
 
-  // Create an AutofillTabHelper and attaches it to the given |web_state|.
+  // Create an AutofillTabHelper and attaches it to the given `web_state`.
   static void CreateForWebState(
       web::WebState* web_state,
       password_manager::PasswordManager* password_manager);
@@ -54,7 +53,7 @@ class AutofillTabHelper : public web::WebStateObserver,
   void WebStateDestroyed(web::WebState* web_state) override;
 
   // The BrowserState associated with this WebState.
-  ios::ChromeBrowserState* browser_state_;
+  ChromeBrowserState* browser_state_;
 
   // The Objective-C AutofillAgent instance.
   __strong AutofillAgent* autofill_agent_;
@@ -63,8 +62,6 @@ class AutofillTabHelper : public web::WebStateObserver,
   std::unique_ptr<autofill::ChromeAutofillClientIOS> autofill_client_;
 
   WEB_STATE_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(AutofillTabHelper);
 };
 
 #endif  // IOS_CHROME_BROWSER_AUTOFILL_AUTOFILL_TAB_HELPER_H_

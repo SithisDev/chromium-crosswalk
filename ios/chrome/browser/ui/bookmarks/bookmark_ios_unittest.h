@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #import <Foundation/Foundation.h>
 #include <memory>
 
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/platform_test.h"
 
 namespace bookmarks {
@@ -16,7 +17,7 @@ class BookmarkModel;
 class BookmarkNode;
 class ManagedBookmarkService;
 }  // namespace bookmarks
-
+class Browser;
 class TestChromeBrowserState;
 
 // Provides common bookmark testing infrastructure.
@@ -35,10 +36,12 @@ class BookmarkIOSUnitTest : public PlatformTest {
       NSString* title);
   void ChangeTitle(NSString* title, const bookmarks::BookmarkNode* node);
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
+  IOSChromeScopedTestingLocalState local_state_;
+  std::unique_ptr<Browser> browser_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
-  bookmarks::BookmarkModel* _bookmarkModel;
-  bookmarks::ManagedBookmarkService* _managedBookmarkService;
+  bookmarks::BookmarkModel* bookmark_model_;
+  bookmarks::ManagedBookmarkService* managed_bookmark_service_;
 };
 
 #endif  // IOS_CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_IOS_UNITTEST_H_

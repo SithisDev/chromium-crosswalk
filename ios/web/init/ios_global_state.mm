@@ -1,16 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/init/ios_global_state.h"
+#import "ios/web/public/init/ios_global_state.h"
 
-#include "base/at_exit.h"
-#include "base/command_line.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop_current.h"
-#include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/initialization_util.h"
-#include "net/base/network_change_notifier.h"
+#import "base/at_exit.h"
+#import "base/command_line.h"
+#import "base/memory/ptr_util.h"
+#import "base/message_loop/message_pump_type.h"
+#import "base/task/current_thread.h"
+#import "base/task/single_thread_task_executor.h"
+#import "base/task/thread_pool/initialization_util.h"
+#import "net/base/network_change_notifier.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -43,9 +44,9 @@ void BuildSingleThreadTaskExecutor() {
   dispatch_once(&once_token, ^{
     // Create a SingleThreadTaskExecutor if one does not already exist for the
     // current thread.
-    if (!base::MessageLoopCurrent::Get()) {
+    if (!base::CurrentThread::Get()) {
       g_task_executor =
-          new base::SingleThreadTaskExecutor(base::MessagePump::Type::UI);
+          new base::SingleThreadTaskExecutor(base::MessagePumpType::UI);
     }
   });
 }
@@ -58,7 +59,8 @@ void DestroySingleThreadTaskExecutor() {
 void CreateNetworkChangeNotifier() {
   static dispatch_once_t once_token;
   dispatch_once(&once_token, ^{
-    g_network_change_notifer = net::NetworkChangeNotifier::Create().release();
+    g_network_change_notifer =
+        net::NetworkChangeNotifier::CreateIfNeeded().release();
   });
 }
 
@@ -70,10 +72,10 @@ void DestroyNetworkChangeNotifier() {
 void StartThreadPool() {
   static dispatch_once_t once_token;
   dispatch_once(&once_token, ^{
-    constexpr int kMinForegroundThreads = 6;
-    constexpr int kMaxForegroundThreads = 16;
+    constexpr size_t kMinForegroundThreads = 6;
+    constexpr size_t kMaxForegroundThreads = 16;
     constexpr double kCoreMultiplierForegroundThreads = 0.6;
-    constexpr int kOffsetForegroundThreads = 0;
+    constexpr size_t kOffsetForegroundThreads = 0;
     base::ThreadPoolInstance::Get()->Start(
         {base::RecommendedMaxNumberOfThreadsInThreadGroup(
             kMinForegroundThreads, kMaxForegroundThreads,

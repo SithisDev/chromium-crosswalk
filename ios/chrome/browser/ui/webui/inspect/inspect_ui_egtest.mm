@@ -1,31 +1,25 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
 #import "base/strings/sys_string_conversions.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/chrome/test/app/tab_test_util.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "ios/web/public/test/element_selector.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#import "ios/web/public/test/element_selector.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-using chrome_test_util::GetCurrentWebState;
-
 namespace {
-// Directory containing the |kLogoPagePath| and |kLogoPageImageSourcePath|
-// resources.
-const char kServerFilesDir[] = "ios/testing/data/http_server_files/";
-
 // Id of the "Start Logging" button.
 NSString* const kStartLoggingButtonId = @"start-logging";
 // Id of the "Stop Logging" button.
@@ -55,36 +49,36 @@ const char kLogMessageLabel[] = "LOG";
 // Label for warning console messages.
 const char kWarningMessageLabel[] = "WARN";
 
-// Text of the message emitted from the |kDebugMessageButtonId| button on
-// |kConsolePage|.
+// Text of the message emitted from the `kDebugMessageButtonId` button on
+// `kConsolePage`.
 const char kDebugMessageText[] = "This is a debug message.";
-// Text of the message emitted from the |kErrorMessageButtonId| button on
-// |kConsolePage|.
+// Text of the message emitted from the `kErrorMessageButtonId` button on
+// `kConsolePage`.
 const char kErrorMessageText[] = "This is an error message.";
-// Text of the message emitted from the |kInfoMessageButtonId| button on
-// |kConsolePage|.
+// Text of the message emitted from the `kInfoMessageButtonId` button on
+// `kConsolePage`.
 const char kInfoMessageText[] = "This is an informative message.";
-// Text of the message emitted from the |kLogMessageButtonId| button on
-// |kConsolePage|.
+// Text of the message emitted from the `kLogMessageButtonId` button on
+// `kConsolePage`.
 const char kLogMessageText[] = "This log is very round.";
-// Text of the message emitted from the |kWarningMessageButtonId| button on
-// |kConsolePage|.
+// Text of the message emitted from the `kWarningMessageButtonId` button on
+// `kConsolePage`.
 const char kWarningMessageText[] = "This is a warning message.";
 
-// Text of the message emitted from the |kDebugMessageButtonId| button within
-// the iframe on |kConsolePage|.
+// Text of the message emitted from the `kDebugMessageButtonId` button within
+// the iframe on `kConsolePage`.
 const char kIFrameDebugMessageText[] = "This is an iframe debug message.";
-// Text of the message emitted from the |kErrorMessageButtonId| button within
-// the iframe on |kConsolePage|.
+// Text of the message emitted from the `kErrorMessageButtonId` button within
+// the iframe on `kConsolePage`.
 const char kIFrameErrorMessageText[] = "This is an iframe error message.";
-// Text of the message emitted from the |kInfoMessageButtonId| button within the
-// iframe on |kConsolePage|.
+// Text of the message emitted from the `kInfoMessageButtonId` button within the
+// iframe on `kConsolePage`.
 const char kIFrameInfoMessageText[] = "This is an iframe informative message.";
-// Text of the message emitted from the |kLogMessageButtonId| button within the
-// iframe on |kConsolePage|.
+// Text of the message emitted from the `kLogMessageButtonId` button within the
+// iframe on `kConsolePage`.
 const char kIFrameLogMessageText[] = "This iframe log is very round.";
-// Text of the message emitted from the |kWarningMessageButtonId| button within
-// the iframe on |kConsolePage|.
+// Text of the message emitted from the `kWarningMessageButtonId` button within
+// the iframe on `kConsolePage`.
 const char kIFrameWarningMessageText[] = "This is an iframe warning message.";
 
 ElementSelector* StartLoggingButton() {
@@ -102,8 +96,6 @@ ElementSelector* StartLoggingButton() {
 
 - (void)setUp {
   [super setUp];
-  self.testServer->ServeFilesFromSourceDirectory(
-      base::FilePath(kServerFilesDir));
   GREYAssertTrue(self.testServer->Start(), @"Server did not start.");
 }
 
@@ -304,30 +296,6 @@ ElementSelector* StartLoggingButton() {
   // Reload page.
   [ChromeEarlGrey reload];
   // Ensure message was cleared.
-  [ChromeEarlGrey waitForWebStateNotContainingText:kDebugMessageLabel];
-  [ChromeEarlGrey waitForWebStateNotContainingText:kDebugMessageText];
-}
-
-// Tests that messages are cleared for a tab which is closed.
-- (void)testMessagesClearedOnTabClosure {
-  [ChromeEarlGrey loadURL:GURL(kChromeUIInspectURL)];
-
-  // Start logging.
-  [ChromeEarlGrey waitForWebStateContainingElement:StartLoggingButton()];
-  [ChromeEarlGrey tapWebStateElementWithID:kStartLoggingButtonId];
-
-  // Open console test page.
-  [ChromeEarlGrey openNewTab];
-  const GURL consoleTestsURL = self.testServer->GetURL(kConsolePage);
-  [ChromeEarlGrey loadURL:consoleTestsURL];
-  std::string debugButtonID = base::SysNSStringToUTF8(kDebugMessageButtonId);
-  [ChromeEarlGrey waitForWebStateContainingElement:
-                      [ElementSelector selectorWithElementID:debugButtonID]];
-
-  [ChromeEarlGrey tapWebStateElementWithID:kDebugMessageButtonId];
-  [ChromeEarlGrey closeCurrentTab];
-
-  // Validate message and label are not displayed.
   [ChromeEarlGrey waitForWebStateNotContainingText:kDebugMessageLabel];
   [ChromeEarlGrey waitForWebStateNotContainingText:kDebugMessageText];
 }

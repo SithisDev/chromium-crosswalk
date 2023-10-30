@@ -1,13 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_TEST_NAVIGATION_MANAGER_H_
 #define IOS_CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_TEST_NAVIGATION_MANAGER_H_
 
-#import "ios/web/public/test/fakes/test_navigation_manager.h"
+#import "ios/web/public/test/fakes/fake_navigation_manager.h"
 
-class ToolbarTestNavigationManager : public web::TestNavigationManager {
+class ToolbarTestNavigationManager : public web::FakeNavigationManager {
  public:
   ToolbarTestNavigationManager();
 

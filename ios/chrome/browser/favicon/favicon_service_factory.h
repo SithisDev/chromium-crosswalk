@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
+class ChromeBrowserState;
 enum class ServiceAccessType;
 
 namespace favicon {
@@ -18,17 +18,20 @@ class FaviconService;
 }
 
 namespace ios {
-
-class ChromeBrowserState;
-
 // Singleton that owns all FaviconServices and associates them with
-// ios::ChromeBrowserState.
+// ChromeBrowserState.
 class FaviconServiceFactory : public BrowserStateKeyedServiceFactory {
  public:
   static favicon::FaviconService* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state,
+      ChromeBrowserState* browser_state,
       ServiceAccessType access_type);
   static FaviconServiceFactory* GetInstance();
+  // Returns the default factory used to build FaviconService. Can be
+  // registered with SetTestingFactory to use real instances during testing.
+  static TestingFactory GetDefaultFactory();
+
+  FaviconServiceFactory(const FaviconServiceFactory&) = delete;
+  FaviconServiceFactory& operator=(const FaviconServiceFactory&) = delete;
 
  private:
   friend class base::NoDestructor<FaviconServiceFactory>;
@@ -40,8 +43,6 @@ class FaviconServiceFactory : public BrowserStateKeyedServiceFactory {
   std::unique_ptr<KeyedService> BuildServiceInstanceFor(
       web::BrowserState* context) const override;
   bool ServiceIsNULLWhileTesting() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(FaviconServiceFactory);
 };
 
 }  // namespace ios

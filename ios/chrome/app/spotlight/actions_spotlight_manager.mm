@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,15 @@
 
 #import <CoreSpotlight/CoreSpotlight.h>
 
-#include "base/mac/foundation_util.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/sys_string_conversions.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/strings/sys_string_conversions.h"
 #import "ios/chrome/app/app_startup_parameters.h"
-#include "ios/chrome/common/app_group/app_group_constants.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "net/base/mac/url_conversions.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "url/gurl.h"
+#import "ios/chrome/common/app_group/app_group_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "net/base/mac/url_conversions.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,7 +53,7 @@ enum {
   // Recorded when a user pressed the QR scanner spotlight action.
   SPOTLIGHT_ACTION_QR_CODE_SCANNER_PRESSED,
   // NOTE: Add new spotlight actions in sources only immediately above this
-  // line. Also, make sure the enum list for histogram |SpotlightActions| in
+  // line. Also, make sure the enum list for histogram `SpotlightActions` in
   // histograms.xml is updated with any change in here.
   SPOTLIGHT_ACTION_COUNT
 };
@@ -71,24 +71,27 @@ BOOL SetStartupParametersForSpotlightAction(
     UMA_HISTOGRAM_ENUMERATION(kSpotlightActionsHistogram,
                               SPOTLIGHT_ACTION_NEW_INCOGNITO_TAB_PRESSED,
                               SPOTLIGHT_ACTION_COUNT);
-    [startupParams setLaunchInIncognito:YES];
+    [startupParams setApplicationMode:ApplicationModeForTabOpening::INCOGNITO];
   } else if ([action isEqualToString:base::SysUTF8ToNSString(
                                          kSpotlightActionVoiceSearch)]) {
     UMA_HISTOGRAM_ENUMERATION(kSpotlightActionsHistogram,
                               SPOTLIGHT_ACTION_VOICE_SEARCH_PRESSED,
                               SPOTLIGHT_ACTION_COUNT);
+    [startupParams setApplicationMode:ApplicationModeForTabOpening::NORMAL];
     [startupParams setPostOpeningAction:START_VOICE_SEARCH];
   } else if ([action isEqualToString:base::SysUTF8ToNSString(
                                          kSpotlightActionQRScanner)]) {
     UMA_HISTOGRAM_ENUMERATION(kSpotlightActionsHistogram,
                               SPOTLIGHT_ACTION_QR_CODE_SCANNER_PRESSED,
                               SPOTLIGHT_ACTION_COUNT);
+    [startupParams setApplicationMode:ApplicationModeForTabOpening::NORMAL];
     [startupParams setPostOpeningAction:START_QR_CODE_SCANNER];
   } else if ([action isEqualToString:base::SysUTF8ToNSString(
                                          kSpotlightActionNewTab)]) {
     UMA_HISTOGRAM_ENUMERATION(kSpotlightActionsHistogram,
                               SPOTLIGHT_ACTION_NEW_TAB_PRESSED,
                               SPOTLIGHT_ACTION_COUNT);
+    [startupParams setApplicationMode:ApplicationModeForTabOpening::NORMAL];
   } else {
     return NO;
   }
@@ -99,8 +102,8 @@ BOOL SetStartupParametersForSpotlightAction(
 
 @interface ActionsSpotlightManager ()
 
-// Creates a new Spotlight entry with title |title| for the given |action|.
-- (CSSearchableItem*)getItemForAction:(NSString*)action title:(NSString*)title;
+// Creates a new Spotlight entry with title `title` for the given `action`.
+- (CSSearchableItem*)itemForAction:(NSString*)action title:(NSString*)title;
 
 // Clears and re-inserts all Spotlight actions.
 - (void)clearAndAddSpotlightActions;
@@ -130,8 +133,8 @@ BOOL SetStartupParametersForSpotlightAction(
 #pragma mark private methods
 
 - (void)clearAndAddSpotlightActions {
+  __weak ActionsSpotlightManager* weakSelf = self;
   [self clearAllSpotlightItems:^(NSError* error) {
-    __weak ActionsSpotlightManager* weakSelf = self;
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW,
                       static_cast<int64_t>(1 * NSEC_PER_SEC)),
@@ -147,13 +150,13 @@ BOOL SetStartupParametersForSpotlightAction(
           NSString* voiceSearchAction =
               base::SysUTF8ToNSString(spotlight::kSpotlightActionVoiceSearch);
 
-          NSString* newTabTitle =
-              l10n_util::GetNSString(IDS_IOS_APPLICATION_SHORTCUT_NEWTAB_TITLE);
+          NSString* newTabTitle = l10n_util::GetNSString(
+              IDS_IOS_APPLICATION_SHORTCUT_NEWSEARCH_TITLE);
           NSString* newTabAction =
               base::SysUTF8ToNSString(spotlight::kSpotlightActionNewTab);
 
           NSString* incognitoTitle = l10n_util::GetNSString(
-              IDS_IOS_APPLICATION_SHORTCUT_NEWINCOGNITOTAB_TITLE);
+              IDS_IOS_APPLICATION_SHORTCUT_INCOGNITOSEARCH_TITLE);
           NSString* incognitoAction = base::SysUTF8ToNSString(
               spotlight::kSpotlightActionNewIncognitoTab);
 
@@ -163,11 +166,10 @@ BOOL SetStartupParametersForSpotlightAction(
               base::SysUTF8ToNSString(spotlight::kSpotlightActionQRScanner);
 
           NSArray* spotlightItems = @[
-            [strongSelf getItemForAction:voiceSearchAction
-                                   title:voiceSearchTitle],
-            [strongSelf getItemForAction:newTabAction title:newTabTitle],
-            [strongSelf getItemForAction:incognitoAction title:incognitoTitle],
-            [strongSelf getItemForAction:qrScannerAction title:qrScannerTitle],
+            [strongSelf itemForAction:voiceSearchAction title:voiceSearchTitle],
+            [strongSelf itemForAction:newTabAction title:newTabTitle],
+            [strongSelf itemForAction:incognitoAction title:incognitoTitle],
+            [strongSelf itemForAction:qrScannerAction title:qrScannerTitle],
           ];
 
           [[CSSearchableIndex defaultSearchableIndex]
@@ -177,7 +179,7 @@ BOOL SetStartupParametersForSpotlightAction(
   }];
 }
 
-- (CSSearchableItem*)getItemForAction:(NSString*)action title:(NSString*)title {
+- (CSSearchableItem*)itemForAction:(NSString*)action title:(NSString*)title {
   CSSearchableItemAttributeSet* attributeSet =
       [[CSSearchableItemAttributeSet alloc]
           initWithItemContentType:spotlight::StringFromSpotlightDomain(

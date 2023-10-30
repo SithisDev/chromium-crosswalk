@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/list_model/list_model.h"
 
-#include "base/logging.h"
+#import "base/check_op.h"
+#import "base/notreached.h"
 #import "base/numerics/safe_conversions.h"
 #import "ios/chrome/browser/ui/list_model/list_item.h"
 
@@ -35,6 +36,7 @@ typedef NSMutableArray<ListItem*> SectionItems;
 }
 
 @synthesize collapsableMode = _collapsableMode;
+@synthesize collapsableMediator = _collapsableMediator;
 
 - (instancetype)init {
   if ((self = [super init])) {
@@ -42,6 +44,7 @@ typedef NSMutableArray<ListItem*> SectionItems;
     _sections = [[NSMutableArray alloc] init];
     _headers = [[NSMutableDictionary alloc] init];
     _footers = [[NSMutableDictionary alloc] init];
+    _collapsableMediator = [[ListModelCollapsedMediator alloc] init];
   }
   return self;
 }
@@ -142,10 +145,10 @@ typedef NSMutableArray<ListItem*> SectionItems;
 
 #pragma mark Query model coordinates from index paths
 
-- (NSInteger)sectionIdentifierForSection:(NSInteger)section {
-  DCHECK_LT(base::checked_cast<NSUInteger>(section),
+- (NSInteger)sectionIdentifierForSectionIndex:(NSInteger)sectionIndex {
+  DCHECK_LT(base::checked_cast<NSUInteger>(sectionIndex),
             [_sectionIdentifiers count]);
-  return [[_sectionIdentifiers objectAtIndex:section] integerValue];
+  return [[_sectionIdentifiers objectAtIndex:sectionIndex] integerValue];
 }
 
 - (NSInteger)itemTypeForIndexPath:(NSIndexPath*)indexPath {
@@ -186,14 +189,16 @@ typedef NSMutableArray<ListItem*> SectionItems;
   return [items objectAtIndex:indexPath.item];
 }
 
-- (ListItem*)headerForSection:(NSInteger)section {
-  NSInteger sectionIdentifier = [self sectionIdentifierForSection:section];
+- (ListItem*)headerForSectionIndex:(NSInteger)sectionIndex {
+  NSInteger sectionIdentifier =
+      [self sectionIdentifierForSectionIndex:sectionIndex];
   NSNumber* key = [NSNumber numberWithInteger:sectionIdentifier];
   return [_headers objectForKey:key];
 }
 
-- (ListItem*)footerForSection:(NSInteger)section {
-  NSInteger sectionIdentifier = [self sectionIdentifierForSection:section];
+- (ListItem*)footerForSectionIndex:(NSInteger)sectionIndex {
+  NSInteger sectionIdentifier =
+      [self sectionIdentifierForSectionIndex:sectionIndex];
   NSNumber* key = [NSNumber numberWithInteger:sectionIdentifier];
   return [_footers objectForKey:key];
 }
@@ -283,6 +288,21 @@ typedef NSMutableArray<ListItem*> SectionItems;
   return indexPath;
 }
 
+- (NSArray<NSIndexPath*>*)indexPathsForItemType:(NSInteger)itemType
+                              sectionIdentifier:(NSInteger)sectionIdentifier {
+  NSMutableArray<NSIndexPath*>* indexPaths = [[NSMutableArray alloc] init];
+  NSInteger section = [self sectionForSectionIdentifier:sectionIdentifier];
+  SectionItems* items = [_sections objectAtIndex:section];
+  [items enumerateObjectsUsingBlock:^(ListItem* obj, NSUInteger itemIndex,
+                                      BOOL* itemStop) {
+    if (obj.type == itemType) {
+      [indexPaths addObject:[NSIndexPath indexPathForItem:itemIndex
+                                                inSection:section]];
+    }
+  }];
+  return indexPaths;
+}
+
 #pragma mark Query index paths from items
 
 - (BOOL)hasItem:(ListItem*)item
@@ -318,7 +338,7 @@ typedef NSMutableArray<ListItem*> SectionItems;
 
 - (NSInteger)numberOfItemsInSection:(NSInteger)section {
   DCHECK_LT(base::checked_cast<NSUInteger>(section), [_sections count]);
-  NSInteger sectionIdentifier = [self sectionIdentifierForSection:section];
+  NSInteger sectionIdentifier = [self sectionIdentifierForSectionIndex:section];
   SectionItems* items = [_sections objectAtIndex:section];
   if ([self sectionIsCollapsed:sectionIdentifier]) {
     switch (self.collapsableMode) {
@@ -345,36 +365,21 @@ typedef NSMutableArray<ListItem*> SectionItems;
 }
 
 - (void)setSection:(NSInteger)sectionIdentifier collapsed:(BOOL)collapsed {
-  // TODO(crbug.com/419346): Store in the browser state preference instead of
-  // NSUserDefaults.
   DCHECK([self hasSectionForSectionIdentifier:sectionIdentifier]);
   NSString* sectionKey = [self.collapsedKeys objectForKey:@(sectionIdentifier)];
   DCHECK(sectionKey);
-  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-  NSDictionary* collapsedSections =
-      [defaults dictionaryForKey:kListModelCollapsedKey];
-  NSMutableDictionary* newCollapsedSection =
-      [NSMutableDictionary dictionaryWithDictionary:collapsedSections];
-  NSNumber* value = [NSNumber numberWithBool:collapsed];
-  [newCollapsedSection setValue:value forKey:sectionKey];
-  [defaults setObject:newCollapsedSection forKey:kListModelCollapsedKey];
+  [self.collapsableMediator setSectionKey:sectionKey collapsed:collapsed];
 }
 
 - (BOOL)sectionIsCollapsed:(NSInteger)sectionIdentifier {
-  // TODO(crbug.com/419346): Store in the profile's preference instead of the
-  // NSUserDefaults.
   DCHECK([self hasSectionForSectionIdentifier:sectionIdentifier]);
   NSString* sectionKey = [self.collapsedKeys objectForKey:@(sectionIdentifier)];
   if (!sectionKey)
     return NO;
-  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
-  NSDictionary* collapsedSections =
-      [defaults dictionaryForKey:kListModelCollapsedKey];
-  NSNumber* value = (NSNumber*)[collapsedSections valueForKey:sectionKey];
-  return [value boolValue];
+  return [self.collapsableMediator sectionKeyIsCollapsed:sectionKey];
 }
 
-// |_collapsedKeys| lazy instantiation.
+// `_collapsedKeys` lazy instantiation.
 - (NSMutableDictionary*)collapsedKeys {
   if (!_collapsedKeys) {
     _collapsedKeys = [[NSMutableDictionary alloc] init];
@@ -411,8 +416,8 @@ typedef NSMutableArray<ListItem*> SectionItems;
   return item;
 }
 
-// Returns |item|'s index among all the items of the same type in the given
-// section items.  |item| must belong to |sectionItems|.
+// Returns `item`'s index among all the items of the same type in the given
+// section items.  `item` must belong to `sectionItems`.
 - (NSUInteger)indexInItemTypeForItem:(ListItem*)item
                       inSectionItems:(SectionItems*)sectionItems {
   DCHECK([sectionItems containsObject:item]);
@@ -429,6 +434,31 @@ typedef NSMutableArray<ListItem*> SectionItems;
   }
   DCHECK(found);
   return indexInItemType;
+}
+
+@end
+
+// TODO(crbug.com/419346): Store in the browser state preference or in
+// UISceneSession.unserInfo instead of NSUserDefaults.
+@implementation ListModelCollapsedMediator
+
+- (void)setSectionKey:(NSString*)sectionKey collapsed:(BOOL)collapsed {
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  NSDictionary* collapsedSections =
+      [defaults dictionaryForKey:kListModelCollapsedKey];
+  NSMutableDictionary* newCollapsedSection =
+      [NSMutableDictionary dictionaryWithDictionary:collapsedSections];
+  NSNumber* value = [NSNumber numberWithBool:collapsed];
+  [newCollapsedSection setValue:value forKey:sectionKey];
+  [defaults setObject:newCollapsedSection forKey:kListModelCollapsedKey];
+}
+
+- (BOOL)sectionKeyIsCollapsed:(NSString*)sectionKey {
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  NSDictionary* collapsedSections =
+      [defaults dictionaryForKey:kListModelCollapsedKey];
+  NSNumber* value = (NSNumber*)[collapsedSections valueForKey:sectionKey];
+  return [value boolValue];
 }
 
 @end

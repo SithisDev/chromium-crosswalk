@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ class FakeOverlayUserData : public OverlayUserData<FakeOverlayUserData> {
 
  private:
   OVERLAY_USER_DATA_SETUP(FakeOverlayUserData);
-  FakeOverlayUserData(void* value);
+  FakeOverlayUserData(void* value = nullptr);
 
   void* value_ = nullptr;
 };

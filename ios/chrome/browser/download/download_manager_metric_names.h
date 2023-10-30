@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,32 @@ enum class DownloadedFileAction {
   // manager UI) or opened via Extension (Chrome is not notified if the download
   // was open in the extension).
   NoActionOrOpenedViaExtension = 2,
+  Count
+};
+
+// Values of the UMA Download.IOSDownloadFileUI histogram. These values
+// are persisted to logs. Entries should not be renumbered and numeric values
+// should never be reused.
+enum class DownloadFileUI {
+  // Download UI is presented.
+  DownloadFilePresented = 0,
+  // Download started.
+  DownloadFileStarted = 1,
+  Count
+};
+
+// Values of the UMA Download.IOSDownloadFileUIGoogleDrive histogram. These
+// values are persisted to logs. Entries should not be renumbered and numeric
+// values should never be reused.
+enum class DownloadFileUIGoogleDrive {
+  // Google drive is already installed.
+  GoogleDriveAlreadyInstalled = 0,
+  // Google drive is not installed.
+  GoogleDriveNotInstalled = 1,
+  // Showing Google drive installator.
+  GoogleDriveInstallStarted = 2,
+  // Google drive is installed after showing installator.
+  GoogleDriveInstalledAfterDisplay = 3,
   Count
 };
 

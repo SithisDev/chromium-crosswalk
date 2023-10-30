@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include <memory>
 
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/scoped_testing_web_client.h"
+#include "ios/web/public/test/web_task_environment.h"
+#include "ios/web/public/web_client.h"
 #include "ios/web_view/internal/web_view_browser_state.h"
 #include "ios/web_view/test/test_with_locale_and_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,7 +22,11 @@ namespace ios_web_view {
 
 class CWVWebViewConfigurationTest : public TestWithLocaleAndResources {
  protected:
-  web::TestWebThreadBundle web_thread_bundle_;
+  CWVWebViewConfigurationTest()
+      : web_client_(std::make_unique<web::WebClient>()) {}
+
+  web::WebTaskEnvironment task_environment_;
+  web::ScopedTestingWebClient web_client_;
 };
 
 // Test CWVWebViewConfiguration initialization.
@@ -43,6 +49,24 @@ TEST_F(CWVWebViewConfigurationTest, ShutDown) {
   EXPECT_TRUE(configuration.browserState);
   [configuration shutDown];
   EXPECT_FALSE(configuration.browserState);
+}
+
+// Test CWVWebViewConfiguration shuts down all outstanding configurations.
+TEST_F(CWVWebViewConfigurationTest, ShutDownAllConfigurations) {
+  CWVWebViewConfiguration* defaultConfiguration =
+      [CWVWebViewConfiguration defaultConfiguration];
+  CWVWebViewConfiguration* nonPersistentConfigurationA =
+      [CWVWebViewConfiguration nonPersistentConfiguration];
+  CWVWebViewConfiguration* nonPersistentConfigurationB =
+      [CWVWebViewConfiguration nonPersistentConfiguration];
+
+  // Non persistent configurations must not be singletons.
+  ASSERT_NE(nonPersistentConfigurationA, nonPersistentConfigurationB);
+
+  [CWVWebViewConfiguration shutDown];
+  EXPECT_FALSE(defaultConfiguration.browserState);
+  EXPECT_FALSE(nonPersistentConfigurationA.browserState);
+  EXPECT_FALSE(nonPersistentConfigurationB.browserState);
 }
 
 }  // namespace ios_web_view

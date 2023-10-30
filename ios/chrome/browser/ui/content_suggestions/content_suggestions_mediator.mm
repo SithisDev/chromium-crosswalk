@@ -1,44 +1,76 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_mediator.h"
 
-#include "base/bind.h"
-#include "base/mac/foundation_util.h"
-#include "base/optional.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/ntp_snippets/category.h"
-#include "components/ntp_snippets/category_info.h"
-#include "components/ntp_snippets/content_suggestion.h"
-#include "components/ntp_tiles/metrics.h"
-#include "components/ntp_tiles/most_visited_sites.h"
-#include "components/ntp_tiles/ntp_tile.h"
-#include "components/reading_list/core/reading_list_model.h"
+#import <MaterialComponents/MaterialSnackbar.h>
+
+#import "base/bind.h"
+#import "base/callback.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/favicon/ios/web_favicon_driver.h"
+#import "components/feed/core/v2/public/ios/pref_names.h"
+#import "components/ntp_snippets/category.h"
+#import "components/ntp_snippets/category_info.h"
+#import "components/ntp_tiles/metrics.h"
+#import "components/ntp_tiles/most_visited_sites.h"
+#import "components/ntp_tiles/ntp_tile.h"
+#import "components/pref_registry/pref_registry_syncable.h"
+#import "components/reading_list/core/reading_list_model.h"
 #import "components/reading_list/ios/reading_list_model_bridge_observer.h"
-#include "ios/chrome/browser/application_context.h"
-#include "ios/chrome/browser/ntp_tiles/most_visited_sites_observer_bridge.h"
-#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_item.h"
-#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_learn_more_item.h"
+#import "components/search_engines/template_url.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
+#import "ios/chrome/browser/ntp_tiles/most_visited_sites_observer_bridge.h"
+#import "ios/chrome/browser/policy/policy_util.h"
+#import "ios/chrome/browser/prefs/pref_names.h"
+#import "ios/chrome/browser/signin/authentication_service.h"
+#import "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/commands/snackbar_commands.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_action_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_item.h"
-#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_whats_new_item.h"
+#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_return_to_recent_tab_item.h"
+#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_tile_constants.h"
+#import "ios/chrome/browser/ui/content_suggestions/cells/query_suggestion_view.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/suggested_content.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_category_wrapper.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_commands.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_data_sink.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_constants.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_favicon_mediator.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_provider.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_service_bridge_observer.h"
-#import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestion_identifier.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_feature.h"
 #import "ios/chrome/browser/ui/content_suggestions/identifier/content_suggestions_section_information.h"
 #import "ios/chrome/browser/ui/content_suggestions/mediator_util.h"
-#import "ios/chrome/browser/ui/ntp/notification_promo_whats_new.h"
-#include "ios/chrome/browser/ui/ntp/ntp_tile_saver.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#include "ios/chrome/common/app_group/app_group_constants.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "ios/public/provider/chrome/browser/images/branded_image_provider.h"
+#import "ios/chrome/browser/ui/content_suggestions/ntp_home_metrics.h"
+#import "ios/chrome/browser/ui/content_suggestions/start_suggest_service_factory.h"
+#import "ios/chrome/browser/ui/default_promo/default_browser_utils.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
+#import "ios/chrome/browser/ui/ntp/feed_delegate.h"
+#import "ios/chrome/browser/ui/ntp/metrics/metrics.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_feature.h"
+#import "ios/chrome/browser/ui/ntp/ntp_tile_saver.h"
+#import "ios/chrome/browser/ui/start_surface/start_surface_features.h"
+#import "ios/chrome/browser/ui/start_surface/start_surface_util.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/common/app_group/app_group_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "third_party/abseil-cpp/absl/types/optional.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,17 +85,29 @@ const NSInteger kMaxNumMostVisitedTiles = 4;
 
 }  // namespace
 
-@interface ContentSuggestionsMediator ()<ContentSuggestionsItemDelegate,
-                                         ContentSuggestionsServiceObserver,
-                                         MostVisitedSitesObserving,
-                                         ReadingListModelBridgeObserver> {
-  // Bridge for this class to become an observer of a ContentSuggestionsService.
-  std::unique_ptr<ContentSuggestionsServiceBridge> _suggestionBridge;
+@interface ContentSuggestionsMediator () <MostVisitedSitesObserving,
+                                          ReadingListModelBridgeObserver> {
   std::unique_ptr<ntp_tiles::MostVisitedSites> _mostVisitedSites;
   std::unique_ptr<ntp_tiles::MostVisitedSitesObserverBridge> _mostVisitedBridge;
-  std::unique_ptr<NotificationPromoWhatsNew> _notificationPromo;
   std::unique_ptr<ReadingListModelBridge> _readingListModelBridge;
+  std::unique_ptr<StartSuggestServiceResponseBridge>
+      _startSuggestServiceResponseBridge;
+  StartSuggestService* _startSuggestService;
 }
+
+// Whether the contents section should be hidden completely.
+// Don't use PrefBackedBoolean or PrefMember as this value needs to be checked
+// when the Preference is updated.
+@property(nonatomic, assign, readonly) BOOL contentSuggestionsEnabled;
+
+// Don't use PrefBackedBoolean or PrefMember as those values needs to be checked
+// when the Preference is updated.
+// Whether the suggestions have been disabled in Chrome Settings.
+@property(nonatomic, assign)
+    const PrefService::Preference* articleForYouEnabled;
+// Whether the suggestions have been disabled by a policy.
+@property(nonatomic, assign)
+    const PrefService::Preference* contentSuggestionsPolicyEnabled;
 
 // Most visited items from the MostVisitedSites service currently displayed.
 @property(nonatomic, strong)
@@ -77,21 +121,17 @@ const NSInteger kMaxNumMostVisitedTiles = 4;
 // Section Info for the logo and omnibox section.
 @property(nonatomic, strong)
     ContentSuggestionsSectionInformation* logoSectionInfo;
-// Section Info for the What's New promo section.
+// Section Info for the "Return to Recent Tab" section.
 @property(nonatomic, strong)
-    ContentSuggestionsSectionInformation* promoSectionInfo;
+    ContentSuggestionsSectionInformation* returnToRecentTabSectionInfo;
+// Item for the "Return to Recent Tab" tile.
+@property(nonatomic, strong)
+    ContentSuggestionsReturnToRecentTabItem* returnToRecentTabItem;
 // Section Info for the Most Visited section.
 @property(nonatomic, strong)
     ContentSuggestionsSectionInformation* mostVisitedSectionInfo;
-// Section Info for the footer message allowing the user to know more about the
-// suggested content.
-@property(nonatomic, strong)
-    ContentSuggestionsSectionInformation* learnMoreSectionInfo;
 // Whether the page impression has been recorded.
 @property(nonatomic, assign) BOOL recordedPageImpression;
-// The ContentSuggestionsService, serving suggestions.
-@property(nonatomic, assign)
-    ntp_snippets::ContentSuggestionsService* contentService;
 // Map the section information created to the relevant category.
 @property(nonatomic, strong, nonnull)
     NSMutableDictionary<ContentSuggestionsCategoryWrapper*,
@@ -99,389 +139,349 @@ const NSInteger kMaxNumMostVisitedTiles = 4;
         sectionInformationByCategory;
 // Mediator fetching the favicons for the items.
 @property(nonatomic, strong) ContentSuggestionsFaviconMediator* faviconMediator;
-// Item for the Learn More section, containing the string.
-@property(nonatomic, strong) ContentSuggestionsLearnMoreItem* learnMoreItem;
 // Item for the reading list action item.  Reference is used to update the
 // reading list count.
 @property(nonatomic, strong)
     ContentSuggestionsMostVisitedActionItem* readingListItem;
 // Number of unread items in reading list model.
 @property(nonatomic, assign) NSInteger readingListUnreadCount;
+// YES if the Return to Recent Tab tile is being shown.
+@property(nonatomic, assign, getter=mostRecentTabStartSurfaceTileIsShowing)
+    BOOL showMostRecentTabStartSurfaceTile;
+// Whether the incognito mode is available.
+@property(nonatomic, assign) BOOL incognitoAvailable;
+// Recorder for the metrics related to the NTP.
+@property(nonatomic, strong) NTPHomeMetrics* NTPMetrics;
+// Browser reference.
+@property(nonatomic, assign) Browser* browser;
+
+@property(nonatomic, strong)
+    NSMutableArray<QuerySuggestionConfig*>* trendingQueries;
 
 @end
 
 @implementation ContentSuggestionsMediator
 
-@synthesize mostVisitedItems = _mostVisitedItems;
-@synthesize actionButtonItems = _actionButtonItems;
-@synthesize freshMostVisitedItems = _freshMostVisitedItems;
-@synthesize logoSectionInfo = _logoSectionInfo;
-@synthesize promoSectionInfo = _promoSectionInfo;
-@synthesize mostVisitedSectionInfo = _mostVisitedSectionInfo;
-@synthesize learnMoreSectionInfo = _learnMoreSectionInfo;
-@synthesize recordedPageImpression = _recordedPageImpression;
-@synthesize contentService = _contentService;
-@synthesize dataSink = _dataSink;
-@synthesize sectionInformationByCategory = _sectionInformationByCategory;
-@synthesize commandHandler = _commandHandler;
-@synthesize headerProvider = _headerProvider;
-@synthesize faviconMediator = _faviconMediator;
-@synthesize learnMoreItem = _learnMoreItem;
-@synthesize readingListNeedsReload = _readingListNeedsReload;
-@synthesize readingListItem = _readingListItem;
-@synthesize readingListUnreadCount = _readingListUnreadCount;
-@synthesize contentArticlesExpanded = _contentArticlesExpanded;
-@synthesize contentArticlesEnabled = _contentArticlesEnabled;
-
 #pragma mark - Public
 
 - (instancetype)
-initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
-      largeIconService:(favicon::LargeIconService*)largeIconService
-        largeIconCache:(LargeIconCache*)largeIconCache
-       mostVisitedSite:
-           (std::unique_ptr<ntp_tiles::MostVisitedSites>)mostVisitedSites
-      readingListModel:(ReadingListModel*)readingListModel {
+         initWithLargeIconService:(favicon::LargeIconService*)largeIconService
+                   largeIconCache:(LargeIconCache*)largeIconCache
+                  mostVisitedSite:(std::unique_ptr<ntp_tiles::MostVisitedSites>)
+                                      mostVisitedSites
+                 readingListModel:(ReadingListModel*)readingListModel
+                      prefService:(PrefService*)prefService
+    isGoogleDefaultSearchProvider:(BOOL)isGoogleDefaultSearchProvider
+                          browser:(Browser*)browser {
   self = [super init];
   if (self) {
-    _suggestionBridge =
-        std::make_unique<ContentSuggestionsServiceBridge>(self, contentService);
-    _contentService = contentService;
+    _incognitoAvailable = !IsIncognitoModeDisabled(prefService);
+    _articleForYouEnabled =
+        prefService->FindPreference(prefs::kArticlesForYouEnabled);
+    _contentSuggestionsPolicyEnabled =
+        prefService->FindPreference(prefs::kNTPContentSuggestionsEnabled);
+
     _sectionInformationByCategory = [[NSMutableDictionary alloc] init];
 
     _faviconMediator = [[ContentSuggestionsFaviconMediator alloc]
-        initWithContentService:contentService
-              largeIconService:largeIconService
-                largeIconCache:largeIconCache];
+        initWithLargeIconService:largeIconService
+                  largeIconCache:largeIconCache];
 
     _logoSectionInfo = LogoSectionInformation();
-    _promoSectionInfo = PromoSectionInformation();
     _mostVisitedSectionInfo = MostVisitedSectionInformation();
-    _learnMoreSectionInfo = LearnMoreSectionInformation();
-
-    _learnMoreItem = [[ContentSuggestionsLearnMoreItem alloc] init];
-
-    _notificationPromo = std::make_unique<NotificationPromoWhatsNew>(
-        GetApplicationContext()->GetLocalState());
-    _notificationPromo->Init();
 
     _mostVisitedSites = std::move(mostVisitedSites);
     _mostVisitedBridge =
         std::make_unique<ntp_tiles::MostVisitedSitesObserverBridge>(self);
-    _mostVisitedSites->SetMostVisitedURLsObserver(_mostVisitedBridge.get(),
+    _mostVisitedSites->AddMostVisitedURLsObserver(_mostVisitedBridge.get(),
                                                   kMaxNumMostVisitedTiles);
+
     _readingListModelBridge =
         std::make_unique<ReadingListModelBridge>(self, readingListModel);
+    _browser = browser;
+    _NTPMetrics = [[NTPHomeMetrics alloc]
+        initWithBrowserState:_browser->GetBrowserState()];
+
+    if (IsTrendingQueriesModuleEnabled()) {
+      _startSuggestService = StartSuggestServiceFactory::GetForBrowserState(
+          self.browser->GetBrowserState(), true);
+      _startSuggestServiceResponseBridge =
+          std::make_unique<StartSuggestServiceResponseBridge>(self);
+    }
   }
   return self;
 }
 
-- (void)blacklistMostVisitedURL:(GURL)URL {
-  _mostVisitedSites->AddOrRemoveBlacklistedUrl(URL, true);
++ (void)registerBrowserStatePrefs:(user_prefs::PrefRegistrySyncable*)registry {
+  registry->RegisterInt64Pref(prefs::kIosDiscoverFeedLastRefreshTime, 0);
+}
+
+- (void)disconnect {
+  _mostVisitedBridge.reset();
+  _mostVisitedSites.reset();
+}
+
+- (void)refreshMostVisitedTiles {
+  // Refresh in case there are new MVT to show.
+  _mostVisitedSites->RefreshTiles();
+  _mostVisitedSites->Refresh();
+}
+
+- (void)reloadAllData {
+  if (!self.consumer) {
+    return;
+  }
+  if (self.returnToRecentTabItem) {
+    [self.consumer
+        showReturnToRecentTabTileWithConfig:self.returnToRecentTabItem];
+  }
+  if ([self.mostVisitedItems count]) {
+    [self.consumer setMostVisitedTilesWithConfigs:self.mostVisitedItems];
+  }
+  if (!ShouldHideShortcutsForTrendingQueries()) {
+    [self.consumer setShortcutTilesWithConfigs:self.actionButtonItems];
+  }
+  if (IsTrendingQueriesModuleEnabled()) {
+    [self fetchTrendingQueriesIfApplicable];
+  }
+}
+
+- (void)blockMostVisitedURL:(GURL)URL {
+  _mostVisitedSites->AddOrRemoveBlockedUrl(URL, true);
   [self useFreshMostVisited];
 }
 
-- (void)whitelistMostVisitedURL:(GURL)URL {
-  _mostVisitedSites->AddOrRemoveBlacklistedUrl(URL, false);
+- (void)allowMostVisitedURL:(GURL)URL {
+  _mostVisitedSites->AddOrRemoveBlockedUrl(URL, false);
   [self useFreshMostVisited];
 }
 
-- (NotificationPromoWhatsNew*)notificationPromo {
-  return _notificationPromo.get();
+- (void)setConsumer:(id<ContentSuggestionsConsumer>)consumer {
+  _consumer = consumer;
+  self.faviconMediator.consumer = consumer;
+  [self reloadAllData];
 }
 
-- (void)setDataSink:(id<ContentSuggestionsDataSink>)dataSink {
-  _dataSink = dataSink;
-  self.faviconMediator.dataSink = dataSink;
+- (void)setWebState:(web::WebState*)webState {
+  _webState = webState;
+  self.NTPMetrics.webState = self.webState;
+}
+
+- (void)setShowingStartSurface:(BOOL)showingStartSurface {
+  _showingStartSurface = showingStartSurface;
+  self.NTPMetrics.showingStartSurface = showingStartSurface;
 }
 
 + (NSUInteger)maxSitesShown {
   return kMaxNumMostVisitedTiles;
 }
 
-#pragma mark - ContentSuggestionsDataSource
-
-- (NSArray<ContentSuggestionsSectionInformation*>*)sectionsInfo {
-  NSMutableArray<ContentSuggestionsSectionInformation*>* sectionsInfo =
-      [NSMutableArray array];
-
-  [sectionsInfo addObject:self.logoSectionInfo];
-
-  if (_notificationPromo->CanShow()) {
-    [sectionsInfo addObject:self.promoSectionInfo];
+- (void)configureMostRecentTabItemWithWebState:(web::WebState*)webState
+                                     timeLabel:(NSString*)timeLabel {
+  DCHECK(IsStartSurfaceEnabled());
+  self.returnToRecentTabSectionInfo = ReturnToRecentTabSectionInformation();
+  if (!self.returnToRecentTabItem) {
+    self.returnToRecentTabItem =
+        [[ContentSuggestionsReturnToRecentTabItem alloc] init];
   }
 
-  [sectionsInfo addObject:self.mostVisitedSectionInfo];
-
-  std::vector<ntp_snippets::Category> categories =
-      self.contentService->GetCategories();
-
-  for (auto& category : categories) {
-    ContentSuggestionsCategoryWrapper* categoryWrapper =
-        [ContentSuggestionsCategoryWrapper wrapperWithCategory:category];
-    if (!self.sectionInformationByCategory[categoryWrapper]) {
-      [self addSectionInformationForCategory:category];
-    }
-    if ([self isCategoryAvailable:category]) {
-      [sectionsInfo
-          addObject:self.sectionInformationByCategory[categoryWrapper]];
+  // Retrieve favicon associated with the page.
+  favicon::WebFaviconDriver* driver =
+      favicon::WebFaviconDriver::FromWebState(webState);
+  if (driver->FaviconIsValid()) {
+    gfx::Image favicon = driver->GetFavicon();
+    if (!favicon.IsEmpty()) {
+      self.returnToRecentTabItem.icon = favicon.ToUIImage();
     }
   }
+  if (!self.returnToRecentTabItem.icon) {
+    driver->FetchFavicon(webState->GetLastCommittedURL(), false);
+  }
 
-  [sectionsInfo addObject:self.learnMoreSectionInfo];
-
-  return sectionsInfo;
+  self.returnToRecentTabItem.title =
+      l10n_util::GetNSString(IDS_IOS_RETURN_TO_RECENT_TAB_TITLE);
+  self.returnToRecentTabItem.subtitle = [self
+      constructReturnToRecentTabSubtitleWithPageTitle:base::SysUTF16ToNSString(
+                                                          webState->GetTitle())
+                                           timeString:timeLabel];
+  self.showMostRecentTabStartSurfaceTile = YES;
+  [self.consumer
+      showReturnToRecentTabTileWithConfig:self.returnToRecentTabItem];
 }
 
-- (NSArray<CSCollectionViewItem*>*)itemsForSectionInfo:
-    (ContentSuggestionsSectionInformation*)sectionInfo {
-  NSMutableArray<CSCollectionViewItem*>* convertedSuggestions =
-      [NSMutableArray array];
-
-  if (sectionInfo == self.logoSectionInfo) {
-    // Section empty on purpose.
-  } else if (sectionInfo == self.promoSectionInfo) {
-    if (_notificationPromo->CanShow()) {
-      ContentSuggestionsWhatsNewItem* item =
-          [[ContentSuggestionsWhatsNewItem alloc] initWithType:0];
-      item.icon = ios::GetChromeBrowserProvider()
-                      ->GetBrandedImageProvider()
-                      ->GetWhatsNewIconImage(_notificationPromo->icon());
-      item.text = base::SysUTF8ToNSString(_notificationPromo->promo_text());
-      [convertedSuggestions addObject:item];
-    }
-  } else if (sectionInfo == self.mostVisitedSectionInfo) {
-    [convertedSuggestions addObjectsFromArray:self.mostVisitedItems];
-    [convertedSuggestions addObjectsFromArray:self.actionButtonItems];
-  } else if (sectionInfo == self.learnMoreSectionInfo) {
-    [convertedSuggestions addObject:self.learnMoreItem];
-  } else {
-    ntp_snippets::Category category =
-        [[self categoryWrapperForSectionInfo:sectionInfo] category];
-
-    const std::vector<ntp_snippets::ContentSuggestion>& suggestions =
-        self.contentService->GetSuggestionsForCategory(category);
-    [self addSuggestions:suggestions
-            fromCategory:category
-             toItemArray:convertedSuggestions];
+- (void)hideRecentTabTile {
+  DCHECK(IsStartSurfaceEnabled());
+  if (self.showMostRecentTabStartSurfaceTile) {
+    self.showMostRecentTabStartSurfaceTile = NO;
+    self.returnToRecentTabItem = nil;
+    [self.consumer hideReturnToRecentTabTile];
   }
-
-  return convertedSuggestions;
 }
 
-- (void)fetchMoreSuggestionsKnowing:
-            (NSArray<ContentSuggestionIdentifier*>*)knownSuggestions
-                    fromSectionInfo:
-                        (ContentSuggestionsSectionInformation*)sectionInfo
-                           callback:(MoreSuggestionsFetched)callback {
-  if (![self isRelatedToContentSuggestionsService:sectionInfo]) {
-    callback(nil, content_suggestions::StatusCodeNotRun);
+#pragma mark - ContentSuggestionsCommands
+
+- (void)openMostVisitedItem:(NSObject*)item
+                    atIndex:(NSInteger)mostVisitedIndex {
+  NewTabPageTabHelper* NTPHelper =
+      NewTabPageTabHelper::FromWebState(self.webState);
+  if (NTPHelper && NTPHelper->IgnoreLoadRequests())
+    return;
+
+  if ([item isKindOfClass:[ContentSuggestionsMostVisitedActionItem class]]) {
+    [self.NTPMetrics recordContentSuggestionsActionForType:
+                         IOSContentSuggestionsActionType::kShortcuts];
+    ContentSuggestionsMostVisitedActionItem* mostVisitedItem =
+        base::mac::ObjCCastStrict<ContentSuggestionsMostVisitedActionItem>(
+            item);
+    switch (mostVisitedItem.collectionShortcutType) {
+      case NTPCollectionShortcutTypeBookmark:
+        base::RecordAction(base::UserMetricsAction("MobileNTPShowBookmarks"));
+        LogLikelyInterestedDefaultBrowserUserActivity(DefaultPromoTypeAllTabs);
+        [self.dispatcher showBookmarksManager];
+        break;
+      case NTPCollectionShortcutTypeReadingList:
+        base::RecordAction(base::UserMetricsAction("MobileNTPShowReadingList"));
+        [self.dispatcher showReadingList];
+        break;
+      case NTPCollectionShortcutTypeRecentTabs:
+        base::RecordAction(base::UserMetricsAction("MobileNTPShowRecentTabs"));
+        [self.dispatcher showRecentTabs];
+        break;
+      case NTPCollectionShortcutTypeHistory:
+        base::RecordAction(base::UserMetricsAction("MobileNTPShowHistory"));
+        [self.dispatcher showHistory];
+        break;
+      case NTPCollectionShortcutTypeCount:
+        NOTREACHED();
+        break;
+    }
     return;
   }
 
-  self.contentService->user_classifier()->OnEvent(
-      ntp_snippets::UserClassifier::Metric::SUGGESTIONS_USED);
+  ContentSuggestionsMostVisitedItem* mostVisitedItem =
+      base::mac::ObjCCastStrict<ContentSuggestionsMostVisitedItem>(item);
 
-  ContentSuggestionsCategoryWrapper* wrapper =
-      [self categoryWrapperForSectionInfo:sectionInfo];
+  [self logMostVisitedOpening:mostVisitedItem atIndex:mostVisitedIndex];
 
-  base::Optional<ntp_snippets::CategoryInfo> categoryInfo =
-      self.contentService->GetCategoryInfo([wrapper category]);
+  UrlLoadParams params = UrlLoadParams::InCurrentTab(mostVisitedItem.URL);
+  params.web_params.transition_type = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
+  UrlLoadingBrowserAgent::FromBrowser(self.browser)->Load(params);
+}
 
-  if (!categoryInfo) {
-    callback(nil, content_suggestions::StatusCodeNotRun);
+- (void)loadSuggestedQuery:(QuerySuggestionConfig*)config {
+  UMA_HISTOGRAM_ENUMERATION("IOS.TrendingQueries", config.index,
+                            kMaxTrendingQueries);
+  [self.NTPMetrics recordContentSuggestionsActionForType:
+                       IOSContentSuggestionsActionType::kTrendingQuery];
+  UrlLoadParams params = UrlLoadParams::InCurrentTab(config.URL);
+  params.web_params.transition_type = ui::PAGE_TRANSITION_LINK;
+  UrlLoadingBrowserAgent::FromBrowser(self.browser)->Load(params);
+}
+
+- (void)openMostRecentTab {
+  [self.NTPMetrics recordContentSuggestionsActionForType:
+                       IOSContentSuggestionsActionType::kReturnToRecentTab];
+  base::RecordAction(
+      base::UserMetricsAction("IOS.StartSurface.OpenMostRecentTab"));
+  [self hideRecentTabTile];
+  WebStateList* web_state_list = self.browser->GetWebStateList();
+  web::WebState* web_state =
+      StartSurfaceRecentTabBrowserAgent::FromBrowser(self.browser)
+          ->most_recent_tab();
+  if (!web_state) {
     return;
   }
+  int index = web_state_list->GetIndexOfWebState(web_state);
+  web_state_list->ActivateWebStateAt(index);
+}
 
-  switch (categoryInfo->additional_action()) {
-    case ntp_snippets::ContentSuggestionsAdditionalAction::NONE:
-      callback(nil, content_suggestions::StatusCodeNotRun);
-      return;
+#pragma mark - ContentSuggestionsGestureCommands
 
-    case ntp_snippets::ContentSuggestionsAdditionalAction::VIEW_ALL:
-      callback(nil, content_suggestions::StatusCodeNotRun);
-      if ([wrapper category].IsKnownCategory(
-              ntp_snippets::KnownCategories::READING_LIST)) {
-        [self.commandHandler openReadingList];
-      }
+- (void)openNewTabWithMostVisitedItem:(ContentSuggestionsMostVisitedItem*)item
+                            incognito:(BOOL)incognito
+                              atIndex:(NSInteger)index
+                            fromPoint:(CGPoint)point {
+  if (incognito &&
+      IsIncognitoModeDisabled(self.browser->GetBrowserState()->GetPrefs())) {
+    // This should only happen when the policy changes while the option is
+    // presented.
+    return;
+  }
+  [self logMostVisitedOpening:item atIndex:index];
+  [self openNewTabWithURL:item.URL incognito:incognito originPoint:point];
+}
+
+- (void)openNewTabWithMostVisitedItem:(ContentSuggestionsMostVisitedItem*)item
+                            incognito:(BOOL)incognito
+                              atIndex:(NSInteger)index {
+  if (incognito &&
+      IsIncognitoModeDisabled(self.browser->GetBrowserState()->GetPrefs())) {
+    // This should only happen when the policy changes while the option is
+    // presented.
+    return;
+  }
+  [self logMostVisitedOpening:item atIndex:index];
+  [self openNewTabWithURL:item.URL incognito:incognito originPoint:CGPointZero];
+}
+
+- (void)openNewTabWithMostVisitedItem:(ContentSuggestionsMostVisitedItem*)item
+                            incognito:(BOOL)incognito {
+  [self openNewTabWithMostVisitedItem:item
+                            incognito:incognito
+                              atIndex:item.index];
+}
+
+- (void)removeMostVisited:(ContentSuggestionsMostVisitedItem*)item {
+  base::RecordAction(base::UserMetricsAction("MostVisited_UrlBlacklisted"));
+  [self blockMostVisitedURL:item.URL];
+  [self showMostVisitedUndoForURL:item.URL];
+}
+
+#pragma mark - StartSuggestServiceDelegateBridge
+
+- (void)suggestionsReceived:(std::vector<QuerySuggestion>)suggestions {
+  self.trendingQueries = [NSMutableArray array];
+  int index = 0;
+  for (QuerySuggestion query : suggestions) {
+    if (index == kMaxTrendingQueries) {
       break;
-
-    case ntp_snippets::ContentSuggestionsAdditionalAction::FETCH: {
-      std::set<std::string> known_suggestion_ids;
-      for (ContentSuggestionIdentifier* identifier in knownSuggestions) {
-        if (identifier.sectionInfo != sectionInfo)
-          continue;
-        known_suggestion_ids.insert(identifier.IDInSection);
-      }
-
-      if (known_suggestion_ids.size() == 0) {
-        callback(nil, content_suggestions::StatusCodeNotRun);
-        // No elements in the section, reloads everything to have suggestions
-        // for the next NTP. Fetch() do not store the new data.
-        self.contentService->ReloadSuggestions();
-        return;
-      }
-
-      __weak ContentSuggestionsMediator* weakSelf = self;
-      ntp_snippets::FetchDoneCallback serviceCallback = base::BindOnce(
-          ^void(ntp_snippets::Status status,
-                std::vector<ntp_snippets::ContentSuggestion> suggestions) {
-            [weakSelf didFetchMoreSuggestions:suggestions
-                               withStatusCode:status
-                                     callback:callback];
-          });
-
-      self.contentService->Fetch([wrapper category], known_suggestion_ids,
-                                 std::move(serviceCallback));
-
-      break;
     }
+    QuerySuggestionConfig* suggestion = [[QuerySuggestionConfig alloc] init];
+    suggestion.URL = query.destination_url;
+    suggestion.query = base::SysUTF16ToNSString(query.query);
+    suggestion.index = index;
+    index++;
+    [self.trendingQueries addObject:suggestion];
+  }
+  [self.consumer setTrendingQueriesWithConfigs:self.trendingQueries];
+}
+
+#pragma mark - StartSurfaceRecentTabObserving
+
+- (void)mostRecentTabWasRemoved:(web::WebState*)web_state {
+  DCHECK(IsStartSurfaceEnabled());
+  [self hideRecentTabTile];
+}
+
+- (void)mostRecentTabFaviconUpdatedWithImage:(UIImage*)image {
+  if (self.returnToRecentTabItem) {
+    self.returnToRecentTabItem.icon = image;
+    [self.consumer
+        updateReturnToRecentTabTileWithConfig:self.returnToRecentTabItem];
   }
 }
 
-- (void)dismissSuggestion:(ContentSuggestionIdentifier*)suggestionIdentifier {
-  ContentSuggestionsCategoryWrapper* categoryWrapper =
-      [self categoryWrapperForSectionInfo:suggestionIdentifier.sectionInfo];
-  ntp_snippets::ContentSuggestion::ID suggestion_id =
-      ntp_snippets::ContentSuggestion::ID([categoryWrapper category],
-                                          suggestionIdentifier.IDInSection);
-
-  self.contentService->DismissSuggestion(suggestion_id);
-}
-
-- (UIView*)headerViewForWidth:(CGFloat)width {
-  return [self.headerProvider headerForWidth:width];
-}
-
-- (void)toggleArticlesVisibility {
-  [self.contentArticlesExpanded setValue:![self.contentArticlesExpanded value]];
-
-  // Update the section information for new collapsed state.
-  ntp_snippets::Category category = ntp_snippets::Category::FromKnownCategory(
-      ntp_snippets::KnownCategories::ARTICLES);
-  ContentSuggestionsCategoryWrapper* wrapper =
-      [ContentSuggestionsCategoryWrapper wrapperWithCategory:category];
-  ContentSuggestionsSectionInformation* sectionInfo =
-      self.sectionInformationByCategory[wrapper];
-  sectionInfo.expanded = [self.contentArticlesExpanded value];
-
-  // Reloading the section with animations looks bad because the section
-  // border with the new collapsed height draws before the elements collapse.
-  [UIView setAnimationsEnabled:NO];
-  [self.dataSink reloadSection:sectionInfo];
-  [UIView setAnimationsEnabled:YES];
-}
-
-#pragma mark - ContentSuggestionsServiceObserver
-
-- (void)contentSuggestionsService:
-            (ntp_snippets::ContentSuggestionsService*)suggestionsService
-         newSuggestionsInCategory:(ntp_snippets::Category)category {
-  ContentSuggestionsCategoryWrapper* wrapper =
-      [ContentSuggestionsCategoryWrapper wrapperWithCategory:category];
-  if (!self.sectionInformationByCategory[wrapper]) {
-    [self addSectionInformationForCategory:category];
+- (void)mostRecentTabTitleWasUpdated:(NSString*)title {
+  if (self.returnToRecentTabItem) {
+    SceneState* scene =
+        SceneStateBrowserAgent::FromBrowser(self.browser)->GetSceneState();
+    NSString* time_label = GetRecentTabTileTimeLabelForSceneState(scene);
+    self.returnToRecentTabItem.subtitle =
+        [self constructReturnToRecentTabSubtitleWithPageTitle:title
+                                                   timeString:time_label];
+    [self.consumer
+        updateReturnToRecentTabTileWithConfig:self.returnToRecentTabItem];
   }
-  BOOL forceReload = NO;
-  if (category.IsKnownCategory(ntp_snippets::KnownCategories::READING_LIST)) {
-    forceReload = self.readingListNeedsReload;
-    self.readingListNeedsReload = NO;
-  }
-
-  if ([self isCategoryAvailable:category]) {
-    [self.dataSink
-        dataAvailableForSection:self.sectionInformationByCategory[wrapper]
-                    forceReload:forceReload];
-  }
-}
-
-- (void)contentSuggestionsService:
-            (ntp_snippets::ContentSuggestionsService*)suggestionsService
-                         category:(ntp_snippets::Category)category
-                  statusChangedTo:(ntp_snippets::CategoryStatus)status {
-  ContentSuggestionsCategoryWrapper* wrapper =
-      [[ContentSuggestionsCategoryWrapper alloc] initWithCategory:category];
-  if (![self isCategoryInitOrAvailable:category]) {
-    // Remove the category from the UI if it is not available.
-    ContentSuggestionsSectionInformation* sectionInfo =
-        self.sectionInformationByCategory[wrapper];
-
-    [self.dataSink clearSection:sectionInfo];
-    [self.sectionInformationByCategory removeObjectForKey:wrapper];
-  } else {
-    if (!self.sectionInformationByCategory[wrapper]) {
-      [self addSectionInformationForCategory:category];
-    }
-    ContentSuggestionsSectionInformation* sectionInfo =
-        self.sectionInformationByCategory[wrapper];
-    [self.dataSink dataAvailableForSection:sectionInfo forceReload:NO];
-    if (status == ntp_snippets::CategoryStatus::AVAILABLE_LOADING) {
-      [self.dataSink section:sectionInfo isLoading:YES];
-    } else {
-      [self.dataSink section:sectionInfo isLoading:NO];
-    }
-  }
-}
-
-- (void)contentSuggestionsService:
-            (ntp_snippets::ContentSuggestionsService*)suggestionsService
-            suggestionInvalidated:
-                (const ntp_snippets::ContentSuggestion::ID&)suggestion_id {
-  ContentSuggestionsCategoryWrapper* wrapper =
-      [[ContentSuggestionsCategoryWrapper alloc]
-          initWithCategory:suggestion_id.category()];
-  ContentSuggestionIdentifier* suggestionIdentifier =
-      [[ContentSuggestionIdentifier alloc] init];
-  suggestionIdentifier.IDInSection = suggestion_id.id_within_category();
-  suggestionIdentifier.sectionInfo = self.sectionInformationByCategory[wrapper];
-
-  [self.dataSink clearSuggestion:suggestionIdentifier];
-}
-
-- (void)contentSuggestionsServiceFullRefreshRequired:
-    (ntp_snippets::ContentSuggestionsService*)suggestionsService {
-  // The UICollectionView -reloadData method is a no-op if it is called at the
-  // same time as other collection updates. This full refresh command can come
-  // at the same time as other collection update commands. To make sure that it
-  // is taken into account, dispatch it with a delay. See
-  // http://crbug.com/945726.
-  dispatch_after(
-      dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
-      dispatch_get_main_queue(), ^{
-        [self.dataSink reloadAllData];
-      });
-}
-
-- (void)contentSuggestionsServiceShutdown:
-    (ntp_snippets::ContentSuggestionsService*)suggestionsService {
-  // Update dataSink.
-}
-
-#pragma mark - ContentSuggestionsItemDelegate
-
-- (void)loadImageForSuggestedItem:(ContentSuggestionsItem*)suggestedItem {
-  __weak ContentSuggestionsMediator* weakSelf = self;
-  __weak ContentSuggestionsItem* weakItem = suggestedItem;
-
-  ntp_snippets::ContentSuggestion::ID suggestionID = SuggestionIDForSectionID(
-      [self categoryWrapperForSectionInfo:suggestedItem.suggestionIdentifier
-                                              .sectionInfo],
-      suggestedItem.suggestionIdentifier.IDInSection);
-  self.contentService->FetchSuggestionImage(
-      suggestionID, base::BindOnce(^(const gfx::Image& image) {
-        if (image.IsEmpty()) {
-          return;
-        }
-
-        ContentSuggestionsMediator* strongSelf = weakSelf;
-        ContentSuggestionsItem* strongItem = weakItem;
-        if (!strongSelf || !strongItem) {
-          return;
-        }
-
-        strongItem.image = [image.ToUIImage() copy];
-        [strongSelf.dataSink itemHasChanged:strongItem];
-      }));
 }
 
 #pragma mark - MostVisitedSitesObserving
@@ -494,18 +494,17 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
       app_group::ContentWidgetFaviconsFolder());
 
   self.freshMostVisitedItems = [NSMutableArray array];
+  int index = 0;
   for (const ntp_tiles::NTPTile& tile : mostVisited) {
     ContentSuggestionsMostVisitedItem* item =
         ConvertNTPTile(tile, self.mostVisitedSectionInfo);
-    item.commandHandler = self.commandHandler;
+    item.commandHandler = self;
+    item.incognitoAvailable = self.incognitoAvailable;
+    item.index = index;
+    DCHECK(index < kShortcutMinimumIndex);
+    index++;
     [self.faviconMediator fetchFaviconForMostVisited:item];
     [self.freshMostVisitedItems addObject:item];
-  }
-
-  if ([self.mostVisitedItems count] > 0) {
-    // If some content is already displayed to the user, do not update without a
-    // user action.
-    return;
   }
 
   [self useFreshMostVisited];
@@ -541,116 +540,95 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
 
 #pragma mark - Private
 
-// Converts the |suggestions| from |category| to CSCollectionViewItem and adds
-// them to the |contentArray| if the category is available.
-- (void)addSuggestions:
-            (const std::vector<ntp_snippets::ContentSuggestion>&)suggestions
-          fromCategory:(ntp_snippets::Category&)category
-           toItemArray:(NSMutableArray<CSCollectionViewItem*>*)itemArray {
-  if (![self isCategoryExpanded:category]) {
-    return;
-  }
-
-  ContentSuggestionsCategoryWrapper* categoryWrapper =
-      [ContentSuggestionsCategoryWrapper wrapperWithCategory:category];
-  if (!self.sectionInformationByCategory[categoryWrapper]) {
-    [self addSectionInformationForCategory:category];
-  }
-  ContentSuggestionsSectionInformation* sectionInfo =
-      self.sectionInformationByCategory[categoryWrapper];
-  for (auto& contentSuggestion : suggestions) {
-    ContentSuggestionsItem* suggestion =
-        ConvertSuggestion(contentSuggestion, sectionInfo, category);
-    suggestion.delegate = self;
-    suggestion.commandHandler = self.commandHandler;
-    [self.faviconMediator fetchFaviconForSuggestions:suggestion
-                                          inCategory:category];
-
-    [itemArray addObject:suggestion];
-  }
-}
-
-// Adds the section information for |category| in
-// self.sectionInformationByCategory.
-- (void)addSectionInformationForCategory:(ntp_snippets::Category)category {
-  base::Optional<ntp_snippets::CategoryInfo> categoryInfo =
-      self.contentService->GetCategoryInfo(category);
-
-  BOOL expanded = [self isCategoryExpanded:category];
-  ContentSuggestionsSectionInformation* sectionInfo =
-      SectionInformationFromCategoryInfo(categoryInfo, category, expanded);
-
-  self.sectionInformationByCategory[[ContentSuggestionsCategoryWrapper
-      wrapperWithCategory:category]] = sectionInfo;
-}
-
-// If the |statusCode| is a success and |suggestions| is not empty, runs the
-// |callback| with the |suggestions| converted to Objective-C.
-- (void)didFetchMoreSuggestions:
-            (const std::vector<ntp_snippets::ContentSuggestion>&)suggestions
-                 withStatusCode:(ntp_snippets::Status)statusCode
-                       callback:(MoreSuggestionsFetched)callback {
-  NSMutableArray<CSCollectionViewItem*>* contentSuggestions = nil;
-  if (statusCode.IsSuccess() && !suggestions.empty() && callback) {
-    contentSuggestions = [NSMutableArray array];
-    ntp_snippets::Category category = suggestions[0].id().category();
-    [self addSuggestions:suggestions
-            fromCategory:category
-             toItemArray:contentSuggestions];
-  }
-  callback(contentSuggestions, ConvertStatusCode(statusCode));
-}
-
-// Returns whether the |sectionInfo| is associated with a category from the
-// content suggestions service.
-- (BOOL)isRelatedToContentSuggestionsService:
-    (ContentSuggestionsSectionInformation*)sectionInfo {
-  return sectionInfo != self.mostVisitedSectionInfo &&
-         sectionInfo != self.logoSectionInfo;
-}
-
 // Replaces the Most Visited items currently displayed by the most recent ones.
 - (void)useFreshMostVisited {
   self.mostVisitedItems = self.freshMostVisitedItems;
-  [self.dataSink reloadSection:self.mostVisitedSectionInfo];
+  [self.consumer setMostVisitedTilesWithConfigs:self.mostVisitedItems];
+
+  [self.feedDelegate contentSuggestionsWasUpdated];
 }
 
-// ntp_snippets doesn't differentiate between disabled vs collapsed, so if
-// the status is |CATEGORY_EXPLICITLY_DISABLED|, check the value of
-// |contentArticlesEnabled|.
-- (BOOL)isCategoryInitOrAvailable:(ntp_snippets::Category)category {
-  ntp_snippets::CategoryStatus status =
-      self.contentService->GetCategoryStatus(category);
-  if (category.IsKnownCategory(ntp_snippets::KnownCategories::ARTICLES) &&
-      status == ntp_snippets::CategoryStatus::CATEGORY_EXPLICITLY_DISABLED)
-    return [self.contentArticlesEnabled value];
-  else
-    return IsCategoryStatusInitOrAvailable(
-        self.contentService->GetCategoryStatus(category));
+// Opens the `URL` in a new tab `incognito` or not. `originPoint` is the origin
+// of the new tab animation if the tab is opened in background, in window
+// coordinates.
+- (void)openNewTabWithURL:(const GURL&)URL
+                incognito:(BOOL)incognito
+              originPoint:(CGPoint)originPoint {
+  // Open the tab in background if it is non-incognito only.
+  UrlLoadParams params = UrlLoadParams::InNewTab(URL);
+  params.SetInBackground(!incognito);
+  params.in_incognito = incognito;
+  params.append_to = kCurrentTab;
+  params.origin_point = originPoint;
+  UrlLoadingBrowserAgent::FromBrowser(self.browser)->Load(params);
 }
 
-// ntp_snippets doesn't differentiate between disabled vs collapsed, so if
-// the status is |CATEGORY_EXPLICITLY_DISABLED|, check the value of
-// |contentArticlesEnabled|.
-- (BOOL)isCategoryAvailable:(ntp_snippets::Category)category {
-  ntp_snippets::CategoryStatus status =
-      self.contentService->GetCategoryStatus(category);
-  if (category.IsKnownCategory(ntp_snippets::KnownCategories::ARTICLES) &&
-      status == ntp_snippets::CategoryStatus::CATEGORY_EXPLICITLY_DISABLED) {
-    return [self.contentArticlesEnabled value];
-  } else {
-    return IsCategoryStatusAvailable(
-        self.contentService->GetCategoryStatus(category));
+// Logs a histogram due to a Most Visited item being opened.
+- (void)logMostVisitedOpening:(ContentSuggestionsMostVisitedItem*)item
+                      atIndex:(NSInteger)mostVisitedIndex {
+  [self.NTPMetrics
+      recordAction:new_tab_page_uma::ACTION_OPENED_MOST_VISITED_ENTRY];
+  [self.NTPMetrics recordContentSuggestionsActionForType:
+                       IOSContentSuggestionsActionType::kMostVisitedTile];
+  base::RecordAction(base::UserMetricsAction("MobileNTPMostVisited"));
+  RecordNTPTileClick(mostVisitedIndex, item.source, item.titleSource,
+                     item.attributes, GURL());
+}
+
+// Shows a snackbar with an action to undo the removal of the most visited item
+// with a `URL`.
+- (void)showMostVisitedUndoForURL:(GURL)URL {
+  GURL copiedURL = URL;
+
+  MDCSnackbarMessageAction* action = [[MDCSnackbarMessageAction alloc] init];
+  __weak ContentSuggestionsMediator* weakSelf = self;
+  action.handler = ^{
+    ContentSuggestionsMediator* strongSelf = weakSelf;
+    if (!strongSelf)
+      return;
+    [strongSelf allowMostVisitedURL:copiedURL];
+  };
+  action.title = l10n_util::GetNSString(IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE);
+  action.accessibilityIdentifier = @"Undo";
+
+  TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeSuccess);
+  MDCSnackbarMessage* message = [MDCSnackbarMessage
+      messageWithText:l10n_util::GetNSString(
+                          IDS_IOS_NEW_TAB_MOST_VISITED_ITEM_REMOVED)];
+  message.action = action;
+  message.category = @"MostVisitedUndo";
+  [self.dispatcher showSnackbarMessage:message];
+}
+
+- (void)fetchTrendingQueriesIfApplicable {
+  PrefService* pref_service =
+      ChromeBrowserState::FromBrowserState(self.browser->GetBrowserState())
+          ->GetPrefs();
+  BOOL isFeedVisible =
+      (pref_service->GetBoolean(prefs::kArticlesForYouEnabled) &&
+       pref_service->GetBoolean(prefs::kNTPContentSuggestionsEnabled) &&
+       !IsFeedAblationEnabled()) &&
+      pref_service->GetBoolean(feed::prefs::kArticlesListVisible);
+  if (ShouldOnlyShowTrendingQueriesForDisabledFeed() && isFeedVisible) {
+    // Notify consumer with empty array so it knows to remove the module.
+    [self.consumer setTrendingQueriesWithConfigs:@[]];
+    return;
   }
+
+  // Fetch Trending Queries
+  TemplateURLRef::SearchTermsArgs args;
+  args.request_source = TemplateURLRef::NON_SEARCHBOX_NTP;
+  _startSuggestService->FetchSuggestions(
+      args,
+      base::BindOnce(&StartSuggestServiceResponseBridge::OnSuggestionsReceived,
+                     _startSuggestServiceResponseBridge->AsWeakPtr()),
+      self.showingStartSurface);
 }
 
-// Returns whether the Articles category pref indicates it should be expanded,
-// otherwise returns YES.
-- (BOOL)isCategoryExpanded:(ntp_snippets::Category)category {
-  if (category.IsKnownCategory(ntp_snippets::KnownCategories::ARTICLES))
-    return [self.contentArticlesExpanded value];
-  else
-    return YES;
+- (NSString*)constructReturnToRecentTabSubtitleWithPageTitle:
+                 (NSString*)pageTitle
+                                                  timeString:(NSString*)time {
+  return [NSString stringWithFormat:@"%@%@", pageTitle, time];
 }
 
 #pragma mark - Properties
@@ -683,6 +661,11 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
   }
 }
 
+- (BOOL)contentSuggestionsEnabled {
+  return self.articleForYouEnabled->GetValue()->GetBool() &&
+         self.contentSuggestionsPolicyEnabled->GetValue()->GetBool();
+}
+
 #pragma mark - ReadingListModelBridgeObserver
 
 - (void)readingListModelLoaded:(const ReadingListModel*)model {
@@ -693,7 +676,7 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
   self.readingListUnreadCount = model->unread_size();
   if (self.readingListItem) {
     self.readingListItem.count = self.readingListUnreadCount;
-    [self.dataSink itemHasChanged:self.readingListItem];
+    [self.consumer updateReadingListCount:self.readingListUnreadCount];
   }
 }
 

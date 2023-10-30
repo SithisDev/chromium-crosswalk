@@ -1,30 +1,32 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
-#include <string>
-#include <vector>
+#import <memory>
+#import <string>
+#import <vector>
 
-#include "base/strings/sys_string_conversions.h"
+#import "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_task_environment.h"
-#include "components/language/core/browser/language_prefs.h"
-#include "components/language/core/browser/pref_names.h"
-#include "components/pref_registry/pref_registry_syncable.h"
-#include "components/prefs/pref_service.h"
-#include "components/sync_preferences/pref_service_mock_factory.h"
-#include "components/sync_preferences/pref_service_syncable.h"
-#include "components/translate/core/browser/translate_pref_names.h"
-#include "components/translate/core/browser/translate_prefs.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/prefs/browser_prefs.h"
+#import "base/test/task_environment.h"
+#import "components/language/core/browser/language_prefs.h"
+#import "components/language/core/browser/pref_names.h"
+#import "components/pref_registry/pref_registry_syncable.h"
+#import "components/prefs/pref_service.h"
+#import "components/sync_preferences/pref_service_mock_factory.h"
+#import "components/sync_preferences/pref_service_syncable.h"
+#import "components/translate/core/browser/translate_pref_names.h"
+#import "components/translate/core/browser/translate_prefs.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/prefs/browser_prefs.h"
 #import "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/ui/settings/language/cells/language_item.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_consumer.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_mediator.h"
-#include "testing/gtest_mac.h"
-#include "testing/platform_test.h"
+#import "testing/gmock/include/gmock/gmock.h"
+#import "testing/gtest_mac.h"
+#import "testing/platform_test.h"
+#import "ui/base/l10n/l10n_util_collator.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -35,18 +37,19 @@ using language::prefs::kAcceptLanguages;
 using sync_preferences::PrefServiceMockFactory;
 using sync_preferences::PrefServiceSyncable;
 using user_prefs::PrefRegistrySyncable;
+using ::testing::ElementsAreArray;
 
 namespace {
 
 // Constant for timeout while waiting for asynchronous sync operations.
 const NSTimeInterval kSyncOperationTimeout = 10.0;
 
-std::vector<std::string> ExtractDisplayNamesFromLanguageItems(
+std::vector<std::u16string> ExtractDisplayNamesFromLanguageItems(
     NSArray<LanguageItem*>* language_items) {
-  __block std::vector<std::string> output;
+  __block std::vector<std::u16string> output;
   [language_items enumerateObjectsUsingBlock:^(LanguageItem* item,
                                                NSUInteger index, BOOL* stop) {
-    output.push_back(base::SysNSStringToUTF8(item.text));
+    output.push_back(base::SysNSStringToUTF16(item.text));
   }];
   return output;
 }
@@ -89,8 +92,7 @@ std::vector<std::string> ExtractLanguageCodesFromLanguageItems(
 class LanguageSettingsMediatorTest : public PlatformTest {
  protected:
   LanguageSettingsMediatorTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {
     // Create BrowserState.
     TestChromeBrowserState::Builder test_cbs_builder;
     test_cbs_builder.SetPrefService(CreatePrefService());
@@ -135,7 +137,7 @@ class LanguageSettingsMediatorTest : public PlatformTest {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
   std::unique_ptr<translate::TranslatePrefs> translate_prefs_;
   FakeLanguageSettingsConsumer* consumer_;
@@ -143,12 +145,12 @@ class LanguageSettingsMediatorTest : public PlatformTest {
 };
 
 // Tests that the mediator notifies its consumer when the value of
-// prefs::kOfferTranslateEnabled, language::prefs::kAcceptLanguages or
-// language::prefs::kFluentLanguages change.
+// translate::prefs::kOfferTranslateEnabled, language::prefs::kAcceptLanguages
+// or translate::prefs::kBlockedLanguages change.
 TEST_F(LanguageSettingsMediatorTest, TestPrefsChanged) {
   consumer().translateEnabledWasCalled = NO;
   EXPECT_FALSE([consumer() translateEnabled]);
-  GetPrefs()->SetBoolean(prefs::kOfferTranslateEnabled, true);
+  GetPrefs()->SetBoolean(translate::prefs::kOfferTranslateEnabled, true);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kSyncOperationTimeout, ^bool() {
     return consumer().translateEnabledWasCalled;
   }));
@@ -156,7 +158,7 @@ TEST_F(LanguageSettingsMediatorTest, TestPrefsChanged) {
 
   consumer().translateEnabledWasCalled = NO;
   EXPECT_TRUE([consumer() translateEnabled]);
-  GetPrefs()->SetBoolean(prefs::kOfferTranslateEnabled, false);
+  GetPrefs()->SetBoolean(translate::prefs::kOfferTranslateEnabled, false);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kSyncOperationTimeout, ^bool() {
     return consumer().translateEnabledWasCalled;
   }));
@@ -183,9 +185,11 @@ TEST_F(LanguageSettingsMediatorTest, TestPrefsChanged) {
 // and excludes languages already in the accept languages list.
 TEST_F(LanguageSettingsMediatorTest, TestSupportedLanguagesItems) {
   NSArray<LanguageItem*>* language_items = [mediator() supportedLanguagesItems];
-  std::vector<std::string> display_names =
+  std::vector<std::u16string> display_names =
       ExtractDisplayNamesFromLanguageItems(language_items);
-  EXPECT_TRUE(std::is_sorted(display_names.begin(), display_names.end()));
+  std::vector<std::u16string> sorted(display_names);
+  l10n_util::SortVectorWithStringKey("en-US", &sorted, false);
+  EXPECT_THAT(display_names, ElementsAreArray(sorted));
 
   std::vector<std::string> language_codes =
       ExtractLanguageCodesFromLanguageItems(language_items);
@@ -203,7 +207,7 @@ TEST_F(LanguageSettingsMediatorTest, TestSupportedLanguagesItems) {
 TEST_F(LanguageSettingsMediatorTest, TestAcceptLanguagesItems) {
   translate_prefs()->AddToLanguageList("fa", /*force_blocked=*/false);
   translate_prefs()->AddToLanguageList("en-US", /*force_blocked=*/false);
-  translate_prefs()->AddToLanguageList("ug", /*force_blocked=*/false);
+  translate_prefs()->AddToLanguageList("to", /*force_blocked=*/false);
   translate_prefs()->SetRecentTargetLanguage("fa");
   translate_prefs()->UnblockLanguage("en-US");
 
@@ -221,7 +225,7 @@ TEST_F(LanguageSettingsMediatorTest, TestAcceptLanguagesItems) {
   EXPECT_FALSE(acceptLanguagesItems[1].targetLanguage);
   EXPECT_FALSE(acceptLanguagesItems[1].blocked);
 
-  EXPECT_EQ("ug", acceptLanguagesItems[2].languageCode);
+  EXPECT_EQ("to", acceptLanguagesItems[2].languageCode);
   EXPECT_FALSE(acceptLanguagesItems[2].supportsTranslate);
   EXPECT_FALSE(acceptLanguagesItems[2].targetLanguage);
   EXPECT_TRUE(acceptLanguagesItems[2].blocked);
@@ -230,10 +234,11 @@ TEST_F(LanguageSettingsMediatorTest, TestAcceptLanguagesItems) {
 // Tests that the mediator updates the model upon receiving the UI commands.
 TEST_F(LanguageSettingsMediatorTest, TestLanguageSettingsCommands) {
   [mediator() setTranslateEnabled:NO];
-  EXPECT_FALSE(GetPrefs()->GetBoolean(prefs::kOfferTranslateEnabled));
+  EXPECT_FALSE(
+      GetPrefs()->GetBoolean(translate::prefs::kOfferTranslateEnabled));
 
   [mediator() setTranslateEnabled:YES];
-  EXPECT_TRUE(GetPrefs()->GetBoolean(prefs::kOfferTranslateEnabled));
+  EXPECT_TRUE(GetPrefs()->GetBoolean(translate::prefs::kOfferTranslateEnabled));
 
   [mediator() addLanguage:"fa"];
   [mediator() addLanguage:"en-US"];

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,8 @@ typedef NS_ENUM(NSInteger, PopupMenuCommandType) {
 - (void)showToolsMenuPopup;
 // Shows the popup for the tab grid button.
 - (void)showTabGridButtonPopup;
-// Shows the popup for the tab grid button in the tab strip.
-- (void)showTabStripTabGridButtonPopup;
-// Shows the popup for the search button.
-- (void)showSearchButtonPopup;
+// Shows the popup for the new tab button.
+- (void)showNewTabButtonPopup;
 // Dismisses the currently presented popup.
 - (void)dismissPopupMenuAnimated:(BOOL)animated;
 

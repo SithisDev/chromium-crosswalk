@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,15 @@
 #include <stdio.h>
 
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "components/sync/base/stop_source.h"
 #include "components/sync/base/user_selectable_type.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
-#include "components/unified_consent/feature.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
 namespace {
 // The set of user-selectable datatypes. This must be in the same order as
-// |SyncSetupService::SyncableDatatype|.
+// `SyncSetupService::SyncableDatatype`.
 syncer::ModelType kDataTypes[] = {
     syncer::BOOKMARKS,    syncer::TYPED_URLS, syncer::PASSWORDS,
     syncer::PROXY_TABS,   syncer::AUTOFILL,   syncer::PREFERENCES,
@@ -30,11 +28,11 @@ SyncSetupService::SyncSetupService(syncer::SyncService* sync_service)
   DCHECK(sync_service_);
 }
 
-SyncSetupService::~SyncSetupService() {
-}
+SyncSetupService::~SyncSetupService() {}
 
+// static
 syncer::ModelType SyncSetupService::GetModelType(SyncableDatatype datatype) {
-  DCHECK(datatype < base::size(kDataTypes));
+  DCHECK(datatype < std::size(kDataTypes));
   return kDataTypes[datatype];
 }
 
@@ -59,24 +57,21 @@ void SyncSetupService::SetDataTypeEnabled(syncer::ModelType datatype,
     model_types.Put(datatype);
   else
     model_types.Remove(datatype);
+  syncer::SyncUserSettings* user_settings = sync_service_->GetUserSettings();
   // TODO(crbug.com/950874): support syncer::UserSelectableType in ios code,
   // get rid of this workaround and consider getting rid of SyncableDatatype.
   syncer::UserSelectableTypeSet selected_types;
-  for (syncer::UserSelectableType type : syncer::UserSelectableTypeSet::All()) {
+  for (syncer::UserSelectableType type :
+       user_settings->GetRegisteredSelectableTypes()) {
     if (model_types.Has(syncer::UserSelectableTypeToCanonicalModelType(type))) {
       selected_types.Put(type);
     }
   }
-  if (enabled && !IsSyncEnabled())
-    SetSyncEnabledWithoutChangingDatatypes(true);
-  sync_service_->GetUserSettings()->SetSelectedTypes(IsSyncingAllDataTypes(),
-                                                     selected_types);
-  if (GetPreferredDataTypes().Empty())
-    SetSyncEnabled(false);
+  user_settings->SetSelectedTypes(IsSyncingAllDataTypes(), selected_types);
 }
 
 bool SyncSetupService::UserActionIsRequiredToHaveTabSyncWork() {
-  if (!IsSyncEnabled() || !IsDataTypePreferred(syncer::PROXY_TABS)) {
+  if (!CanSyncFeatureStart() || !IsDataTypePreferred(syncer::PROXY_TABS)) {
     return true;
   }
   switch (this->GetSyncServiceState()) {
@@ -85,13 +80,15 @@ bool SyncSetupService::UserActionIsRequiredToHaveTabSyncWork() {
     // These errors are transient and don't mean that sync is off.
     case SyncSetupService::kSyncServiceCouldNotConnect:
     case SyncSetupService::kSyncServiceServiceUnavailable:
+    case SyncSetupService::kSyncServiceTrustedVaultRecoverabilityDegraded:
       return false;
     // These errors effectively amount to disabled sync and require a signin.
     case SyncSetupService::kSyncServiceSignInNeedsUpdate:
     case SyncSetupService::kSyncServiceNeedsPassphrase:
     case SyncSetupService::kSyncServiceUnrecoverableError:
-    case SyncSetupService::kSyncSettingsNotConfirmed:
       return true;
+    case SyncSetupService::kSyncServiceNeedsTrustedVaultKey:
+      return IsEncryptEverythingEnabled();
   }
   NOTREACHED() << "Unknown sync service state.";
   return true;
@@ -104,18 +101,27 @@ bool SyncSetupService::IsSyncingAllDataTypes() const {
 void SyncSetupService::SetSyncingAllDataTypes(bool sync_all) {
   if (!sync_blocker_)
     sync_blocker_ = sync_service_->GetSetupInProgressHandle();
-  if (sync_all && !IsSyncEnabled())
-    SetSyncEnabled(true);
   sync_service_->GetUserSettings()->SetSelectedTypes(
       sync_all, sync_service_->GetUserSettings()->GetSelectedTypes());
 }
 
-bool SyncSetupService::IsSyncEnabled() const {
+bool SyncSetupService::IsSyncRequested() const {
+  return sync_service_->GetUserSettings()->IsSyncRequested();
+}
+
+bool SyncSetupService::CanSyncFeatureStart() const {
   return sync_service_->CanSyncFeatureStart();
 }
 
 void SyncSetupService::SetSyncEnabled(bool sync_enabled) {
-  SetSyncEnabledWithoutChangingDatatypes(sync_enabled);
+  if (!sync_blocker_)
+    sync_blocker_ = sync_service_->GetSetupInProgressHandle();
+  if (!sync_enabled) {
+    UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", syncer::CHROME_SYNC_SETTINGS,
+                              syncer::STOP_SOURCE_LIMIT);
+  }
+  sync_service_->GetUserSettings()->SetSyncRequested(sync_enabled);
+
   if (sync_enabled && GetPreferredDataTypes().Empty())
     SetSyncingAllDataTypes(true);
 }
@@ -124,7 +130,9 @@ SyncSetupService::SyncServiceState SyncSetupService::GetSyncServiceState() {
   switch (sync_service_->GetAuthError().state()) {
     case GoogleServiceAuthError::REQUEST_CANCELED:
       return kSyncServiceCouldNotConnect;
-    // Based on sync_ui_util::GetStatusLabelsForAuthError, SERVICE_UNAVAILABLE
+    // TODO(crbug.com/1194007): This will support the SyncDisabled policy that
+    // can force the Sync service to become unavailable.
+    // Based on GetSyncStatusLabelsForAuthError, SERVICE_UNAVAILABLE
     // corresponds to sync having been disabled for the user's domain.
     case GoogleServiceAuthError::SERVICE_UNAVAILABLE:
       return kSyncServiceServiceUnavailable;
@@ -134,13 +142,14 @@ SyncSetupService::SyncServiceState SyncSetupService::GetSyncServiceState() {
     case GoogleServiceAuthError::NONE:
     // Connection failed is not shown to the user, as this will happen if the
     // service retuned a 500 error. A more detail error can always be checked
-    // on about:sync.
+    // on chrome://sync-internals.
     case GoogleServiceAuthError::CONNECTION_FAILED:
     case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
     case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
       break;
     // The following errors are unexpected on iOS.
     case GoogleServiceAuthError::SERVICE_ERROR:
+    case GoogleServiceAuthError::SCOPE_LIMITED_UNRECOVERABLE_ERROR:
     // Conventional value for counting the states, never used.
     case GoogleServiceAuthError::NUM_STATES:
       NOTREACHED() << "Unexpected Auth error ("
@@ -150,11 +159,23 @@ SyncSetupService::SyncServiceState SyncSetupService::GetSyncServiceState() {
   }
   if (sync_service_->HasUnrecoverableError())
     return kSyncServiceUnrecoverableError;
-  if (sync_service_->GetUserSettings()->IsPassphraseRequiredForDecryption())
+  if (sync_service_->GetUserSettings()
+          ->IsPassphraseRequiredForPreferredDataTypes()) {
     return kSyncServiceNeedsPassphrase;
-  if (!IsFirstSetupComplete() && IsSyncEnabled())
-    return kSyncSettingsNotConfirmed;
+  }
+  if (sync_service_->GetUserSettings()
+          ->IsTrustedVaultKeyRequiredForPreferredDataTypes()) {
+    return kSyncServiceNeedsTrustedVaultKey;
+  }
+  if (sync_service_->GetUserSettings()
+          ->IsTrustedVaultRecoverabilityDegraded()) {
+    return kSyncServiceTrustedVaultRecoverabilityDegraded;
+  }
   return kNoSyncServiceError;
+}
+
+bool SyncSetupService::IsEncryptEverythingEnabled() const {
+  return sync_service_->GetUserSettings()->IsEncryptEverythingEnabled();
 }
 
 bool SyncSetupService::HasFinishedInitialSetup() {
@@ -162,25 +183,29 @@ bool SyncSetupService::HasFinishedInitialSetup() {
   //   1. User is signed in with sync enabled and the sync setup was completed.
   //   OR
   //   2. User is not signed in or has disabled sync.
-  return !sync_service_->CanSyncFeatureStart() ||
+  // Note that if the user visits the Advanced Settings during the opt-in flow,
+  // the Sync consent is not granted yet. In this case, IsSyncRequested() is
+  // set to true, indicating that the sync was requested but the initial setup
+  // has not been finished yet.
+  return !IsSyncRequested() ||
          sync_service_->GetUserSettings()->IsFirstSetupComplete();
 }
 
 void SyncSetupService::PrepareForFirstSyncSetup() {
-  // |PrepareForFirstSyncSetup| should always be called while the user is signed
+  // `PrepareForFirstSyncSetup` should always be called while the user is signed
   // out. At that time, sync setup is not completed.
   DCHECK(!sync_service_->GetUserSettings()->IsFirstSetupComplete());
   if (!sync_blocker_)
     sync_blocker_ = sync_service_->GetSetupInProgressHandle();
 }
 
-void SyncSetupService::SetFirstSetupComplete() {
-  DCHECK(unified_consent::IsUnifiedConsentFeatureEnabled());
+void SyncSetupService::SetFirstSetupComplete(
+    syncer::SyncFirstSetupCompleteSource source) {
   DCHECK(sync_blocker_);
   // Turn on the sync setup completed flag only if the user did not turn sync
   // off.
   if (sync_service_->CanSyncFeatureStart()) {
-    sync_service_->GetUserSettings()->SetFirstSetupComplete();
+    sync_service_->GetUserSettings()->SetFirstSetupComplete(source);
   }
 }
 
@@ -188,35 +213,10 @@ bool SyncSetupService::IsFirstSetupComplete() const {
   return sync_service_->GetUserSettings()->IsFirstSetupComplete();
 }
 
-void SyncSetupService::PreUnityCommitChanges() {
-  DCHECK(!unified_consent::IsUnifiedConsentFeatureEnabled());
-  // If this was the first Sync setup and the user did not turn Sync off, then
-  // turn on the first-setup-complete flag now.
-  if (sync_service_->IsSetupInProgress() &&
-      !sync_service_->GetUserSettings()->IsFirstSetupComplete() &&
-      sync_service_->CanSyncFeatureStart()) {
-    sync_service_->GetUserSettings()->SetFirstSetupComplete();
-  }
-
-  sync_blocker_.reset();
-}
-
 void SyncSetupService::CommitSyncChanges() {
-  DCHECK(unified_consent::IsUnifiedConsentFeatureEnabled());
   sync_blocker_.reset();
 }
 
 bool SyncSetupService::HasUncommittedChanges() {
   return sync_service_->IsSetupInProgress();
-}
-
-void SyncSetupService::SetSyncEnabledWithoutChangingDatatypes(
-    bool sync_enabled) {
-  if (!sync_blocker_)
-    sync_blocker_ = sync_service_->GetSetupInProgressHandle();
-  if (!sync_enabled) {
-    UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", syncer::CHROME_SYNC_SETTINGS,
-                              syncer::STOP_SOURCE_LIMIT);
-  }
-  sync_service_->GetUserSettings()->SetSyncRequested(sync_enabled);
 }

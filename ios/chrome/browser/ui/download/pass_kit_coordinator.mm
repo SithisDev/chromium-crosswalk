@@ -1,18 +1,20 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/download/pass_kit_coordinator.h"
 
-#include <memory>
+#import <memory>
 
-#include "base/metrics/histogram_macros.h"
-#include "components/infobars/core/infobar_manager.h"
-#include "components/infobars/core/simple_alert_infobar_delegate.h"
-#include "ios/chrome/browser/infobars/infobar_manager_impl.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "base/metrics/histogram_functions.h"
+#import "components/infobars/core/infobar.h"
+#import "components/infobars/core/infobar_manager.h"
+#import "components/infobars/core/simple_alert_infobar_delegate.h"
+#import "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#import "ios/chrome/browser/infobars/infobar_utils.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/web/public/web_state_observer_bridge.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,8 +55,9 @@ PresentAddPassesDialogResult GetUmaResult(
 @synthesize pass = _pass;
 @synthesize webState = _webState;
 
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController {
-  self = [super initWithBaseViewController:viewController];
+- (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser {
+  self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
   }
@@ -99,9 +102,9 @@ PresentAddPassesDialogResult GetUmaResult(
     return;
   }
 
-  UMA_HISTOGRAM_ENUMERATION(kUmaPresentAddPassesDialogResult,
-                            GetUmaResult(self.baseViewController),
-                            PresentAddPassesDialogResult::kCount);
+  base::UmaHistogramEnumeration(kUmaPresentAddPassesDialogResult,
+                                GetUmaResult(self.baseViewController),
+                                PresentAddPassesDialogResult::kCount);
   if (_viewController)
     return;
 
@@ -114,13 +117,13 @@ PresentAddPassesDialogResult GetUmaResult(
 
 // Presents "failed to add pkpass" infobar.
 - (void)presentErrorUI {
-  DCHECK(InfoBarManagerImpl::FromWebState(_webState));
-  SimpleAlertInfoBarDelegate::Create(
-      InfoBarManagerImpl::FromWebState(_webState),
-      infobars::InfoBarDelegate::SHOW_PASSKIT_ERROR_INFOBAR_DELEGATE_IOS,
-      /*vector_icon=*/nullptr,
-      l10n_util::GetStringUTF16(IDS_IOS_GENERIC_PASSKIT_ERROR),
-      /*auto_expire=*/true);
+  InfoBarManagerImpl::FromWebState(_webState)->AddInfoBar(
+      CreateConfirmInfoBar(std::make_unique<SimpleAlertInfoBarDelegate>(
+          infobars::InfoBarDelegate::SHOW_PASSKIT_ERROR_INFOBAR_DELEGATE_IOS,
+          /*vector_icon=*/nullptr,
+          l10n_util::GetStringUTF16(IDS_IOS_GENERIC_PASSKIT_ERROR),
+          /*auto_expire=*/true,
+          /*should_animate=*/true)));
 
   // Infobar does not provide callback on dismissal.
   [self stop];

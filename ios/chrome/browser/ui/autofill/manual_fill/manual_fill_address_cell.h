@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,19 @@
 
 #import <UIKit/UIKit.h>
 
-#import "ios/chrome/browser/ui/autofill/manual_fill/address.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_address.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_item.h"
 
 // TODO(crbug.com/845472): rename, see
 // https://crrev.com/c/1317853/7/ios/chrome/browser/ui/autofill/manual_fill/manual_fill_address_cell.h#17.
-@protocol ManualFillContentDelegate;
+@protocol ManualFillContentInjector;
 
 // Wrapper to show address cells in a ChromeTableViewController.
 @interface ManualFillAddressItem : TableViewItem
 
-// Inits an address with a |profile| and the |delegate| for user selection.
+// Inits an address with a `profile` and the `delegate` for user selection.
 - (instancetype)initWithAddress:(ManualFillAddress*)address
-                       delegate:(id<ManualFillContentDelegate>)delegate
+                contentInjector:(id<ManualFillContentInjector>)contentInjector
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithType:(NSInteger)type NS_UNAVAILABLE;
@@ -30,9 +30,9 @@
 // and sendable the data to the delegate.
 @interface ManualFillAddressCell : TableViewCell
 
-// Updates the cell with address and the |delegate| to be notified.
+// Updates the cell with address and the `delegate` to be notified.
 - (void)setUpWithAddress:(ManualFillAddress*)profile
-                delegate:(id<ManualFillContentDelegate>)delegate;
+         contentInjector:(id<ManualFillContentInjector>)contentInjector;
 
 @end
 

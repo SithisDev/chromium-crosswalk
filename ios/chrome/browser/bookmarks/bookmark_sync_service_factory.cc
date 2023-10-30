@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ios/chrome/browser/bookmarks/bookmark_sync_service_factory.h"
 
+#include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/sync_bookmarks/bookmark_sync_service.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
@@ -15,7 +16,7 @@ namespace ios {
 // static
 sync_bookmarks::BookmarkSyncService*
 BookmarkSyncServiceFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<sync_bookmarks::BookmarkSyncService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -38,8 +39,8 @@ BookmarkSyncServiceFactory::~BookmarkSyncServiceFactory() {}
 std::unique_ptr<KeyedService>
 BookmarkSyncServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   std::unique_ptr<sync_bookmarks::BookmarkSyncService> bookmark_sync_service(
       new sync_bookmarks::BookmarkSyncService(
           BookmarkUndoServiceFactory::GetForBrowserStateIfExists(

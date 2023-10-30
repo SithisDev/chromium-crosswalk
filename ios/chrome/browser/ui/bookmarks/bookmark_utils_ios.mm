@@ -1,35 +1,36 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
 
-#include <stdint.h>
+#import <stdint.h>
 
-#include <memory>
-#include <vector>
+#import <memory>
+#import <vector>
 
-#include "base/hash/hash.h"
-#include "base/i18n/string_compare.h"
-#include "base/metrics/user_metrics_action.h"
-#include "base/stl_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "components/query_parser/query_parser.h"
-#include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/bookmarks/bookmarks_utils.h"
-#include "ios/chrome/browser/system_flags.h"
-#include "ios/chrome/browser/ui/bookmarks/undo_manager_wrapper.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import <MaterialComponents/MaterialSnackbar.h>
+
+#import "base/check.h"
+#import "base/hash/hash.h"
+#import "base/i18n/string_compare.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/strings/utf_string_conversions.h"
+#import "components/bookmarks/browser/bookmark_model.h"
+#import "components/bookmarks/common/bookmark_metrics.h"
+#import "components/query_parser/query_parser.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/bookmarks/bookmarks_utils.h"
+#import "ios/chrome/browser/flags/system_flags.h"
+#import "ios/chrome/browser/ui/bookmarks/undo_manager_wrapper.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/base/models/tree_node_iterator.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "third_party/skia/include/core/SkColor.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/base/l10n/l10n_util_mac.h"
+#import "ui/base/models/tree_node_iterator.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -41,15 +42,43 @@ namespace bookmark_utils_ios {
 
 NSString* const kBookmarksSnackbarCategory = @"BookmarksSnackbarCategory";
 
-const BookmarkNode* FindFolderById(bookmarks::BookmarkModel* model,
-                                   int64_t id) {
+absl::optional<NodeSet> FindNodesByIds(bookmarks::BookmarkModel* model,
+                                       const std::set<int64_t>& ids) {
+  DCHECK(model);
+  NodeSet nodes;
   ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
   while (iterator.has_next()) {
-    const BookmarkNode* bookmark = iterator.Next();
-    if (bookmark->id() == id && bookmark->is_folder())
-      return bookmark;
+    const BookmarkNode* node = iterator.Next();
+    if (ids.find(node->id()) == ids.end())
+      continue;
+
+    nodes.insert(node);
+    if (ids.size() == nodes.size())
+      break;
   }
-  return NULL;
+
+  if (ids.size() != nodes.size())
+    return absl::nullopt;
+
+  return nodes;
+}
+
+const BookmarkNode* FindNodeById(bookmarks::BookmarkModel* model, int64_t id) {
+  DCHECK(model);
+  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+  while (iterator.has_next()) {
+    const BookmarkNode* node = iterator.Next();
+    if (node->id() == id)
+      return node;
+  }
+
+  return nullptr;
+}
+
+const BookmarkNode* FindFolderById(bookmarks::BookmarkModel* model,
+                                   int64_t id) {
+  const BookmarkNode* node = FindNodeById(model, id);
+  return node && node->is_folder() ? node : nullptr;
 }
 
 NSString* TitleForBookmarkNode(const BookmarkNode* node) {
@@ -91,36 +120,9 @@ NSString* subtitleForBookmarkNode(const BookmarkNode* node) {
   return subtitle;
 }
 
-CGFloat StatusBarHeight() {
-  CGRect statusBarFrame = [UIApplication sharedApplication].statusBarFrame;
-  CGRect statusBarWindowRect =
-      [[UIApplication sharedApplication].keyWindow convertRect:statusBarFrame
-                                                    fromWindow:nil];
-  if (UIInterfaceOrientationIsPortrait(
-          [UIApplication sharedApplication].statusBarOrientation)) {
-    return CGRectGetHeight(statusBarWindowRect);
-  } else {
-    return CGRectGetWidth(statusBarWindowRect);
-  }
-}
-
-BOOL bookmarkMenuIsInSlideInPanel() {
-  return !IsIPadIdiom() || IsCompactTablet();
-}
-
-UIView* dropShadowWithWidth(CGFloat width) {
-  UIImage* shadowImage = [UIImage imageNamed:@"bookmark_bar_shadow"];
-  UIImageView* shadow = [[UIImageView alloc] initWithImage:shadowImage];
-  CGRect shadowFrame = CGRectMake(0, 0, width, 4);
-  shadow.frame = shadowFrame;
-  shadow.autoresizingMask =
-      UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleWidth;
-  return shadow;
-}
-
 #pragma mark - Updating Bookmarks
 
-// Deletes all subnodes of |node|, including |node|, that are in |bookmarks|.
+// Deletes all subnodes of `node`, including `node`, that are in `bookmarks`.
 void DeleteBookmarks(const std::set<const BookmarkNode*>& bookmarks,
                      bookmarks::BookmarkModel* model,
                      const BookmarkNode* node) {
@@ -161,9 +163,9 @@ MDCSnackbarMessage* CreateOrUpdateBookmarkWithUndoToast(
     const GURL& url,
     const BookmarkNode* folder,
     bookmarks::BookmarkModel* bookmark_model,
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   DCHECK(!node || node->is_url());
-  base::string16 titleString = base::SysNSStringToUTF16(title);
+  std::u16string titleString = base::SysNSStringToUTF16(title);
 
   // If the bookmark has no changes supporting Undo, just bail out.
   if (node && node->GetTitle() == titleString && node->url() == url &&
@@ -185,8 +187,10 @@ MDCSnackbarMessage* CreateOrUpdateBookmarkWithUndoToast(
     node = bookmark_model->AddURL(folder, folder->children().size(),
                                   titleString, url);
   } else {  // Update the information.
-    bookmark_model->SetTitle(node, titleString);
-    bookmark_model->SetURL(node, url);
+    bookmark_model->SetTitle(node, titleString,
+                             bookmarks::metrics::BookmarkEditSource::kUser);
+    bookmark_model->SetURL(node, url,
+                           bookmarks::metrics::BookmarkEditSource::kUser);
 
     DCHECK(folder);
     DCHECK(!folder->HasAncestor(node));
@@ -205,12 +209,39 @@ MDCSnackbarMessage* CreateOrUpdateBookmarkWithUndoToast(
   return CreateUndoToastWithWrapper(wrapper, text);
 }
 
-MDCSnackbarMessage* UpdateBookmarkPositionWithUndoToast(
-    const bookmarks::BookmarkNode* node,
+MDCSnackbarMessage* CreateBookmarkAtPositionWithUndoToast(
+    NSString* title,
+    const GURL& url,
     const bookmarks::BookmarkNode* folder,
     int position,
     bookmarks::BookmarkModel* bookmark_model,
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
+  std::u16string titleString = base::SysNSStringToUTF16(title);
+
+  UndoManagerWrapper* wrapper =
+      [[UndoManagerWrapper alloc] initWithBrowserState:browser_state];
+  [wrapper startGroupingActions];
+
+  bookmark_model->client()->RecordAction(
+      base::UserMetricsAction("BookmarkAdded"));
+  const bookmarks::BookmarkNode* node = bookmark_model->AddURL(
+      folder, folder->children().size(), titleString, url);
+  bookmark_model->Move(node, folder, position);
+
+  [wrapper stopGroupingActions];
+  [wrapper resetUndoManagerChanged];
+
+  NSString* text =
+      l10n_util::GetNSString(IDS_IOS_BOOKMARK_NEW_BOOKMARK_CREATED);
+  return CreateUndoToastWithWrapper(wrapper, text);
+}
+
+MDCSnackbarMessage* UpdateBookmarkPositionWithUndoToast(
+    const bookmarks::BookmarkNode* node,
+    const bookmarks::BookmarkNode* folder,
+    size_t position,
+    bookmarks::BookmarkModel* bookmark_model,
+    ChromeBrowserState* browser_state) {
   DCHECK(node);
   DCHECK(folder);
   DCHECK(!folder->HasAncestor(node));
@@ -219,7 +250,7 @@ MDCSnackbarMessage* UpdateBookmarkPositionWithUndoToast(
     return nil;
   }
 
-  int old_index = node->parent()->GetIndexOf(node);
+  size_t old_index = node->parent()->GetIndexOf(node).value();
   // Early return if no change in position.
   if (node->parent() == folder && old_index == position) {
     return nil;
@@ -250,7 +281,7 @@ void DeleteBookmarks(const std::set<const BookmarkNode*>& bookmarks,
 MDCSnackbarMessage* DeleteBookmarksWithUndoToast(
     const std::set<const BookmarkNode*>& nodes,
     bookmarks::BookmarkModel* model,
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   size_t nodeCount = nodes.size();
   DCHECK_GT(nodeCount, 0u);
 
@@ -283,7 +314,7 @@ bool MoveBookmarks(const std::set<const BookmarkNode*>& bookmarks,
   bool didPerformMove = false;
 
   // Calling Move() on the model will triger observer methods to fire, one of
-  // them may modify the passed in |bookmarks|. To protect against this scenario
+  // them may modify the passed in `bookmarks`. To protect against this scenario
   // a copy of the set is made first.
   const std::set<const BookmarkNode*> bookmarks_copy(bookmarks);
   for (const BookmarkNode* node : bookmarks_copy) {
@@ -303,7 +334,7 @@ MDCSnackbarMessage* MoveBookmarksWithUndoToast(
     const std::set<const BookmarkNode*>& nodes,
     bookmarks::BookmarkModel* model,
     const BookmarkNode* folder,
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   size_t nodeCount = nodes.size();
   DCHECK_GT(nodeCount, 0u);
 
@@ -410,30 +441,28 @@ void segregateNodes(
 
 #pragma mark - Useful bookmark manipulation.
 
-// Adds all children of |folder| that are not obstructed to |results|. They are
-// placed immediately after |folder|, using a depth-first, then alphabetically
-// ordering. |results| must contain |folder|.
+// Adds all children of `folder` that are not obstructed to `results`. They are
+// placed immediately after `folder`, using a depth-first, then alphabetically
+// ordering. `results` must contain `folder`.
 void UpdateFoldersFromNode(const BookmarkNode* folder,
                            NodeVector* results,
                            const NodeSet& obstructions);
-// Returns whether |folder| has an ancestor in any of the nodes in
-// |bookmarkNodes|.
+// Returns whether `folder` has an ancestor in any of the nodes in
+// `bookmarkNodes`.
 bool FolderHasAncestorInBookmarkNodes(const BookmarkNode* folder,
                                       const NodeSet& bookmarkNodes);
 // Returns true if the node is not a folder, is not visible, or is an ancestor
-// of any of the nodes in |obstructions|.
+// of any of the nodes in `obstructions`.
 bool IsObstructed(const BookmarkNode* node, const NodeSet& obstructions);
 
 namespace {
 // Comparator used to sort bookmarks. No folders are allowed.
-class FolderNodeComparator : public std::binary_function<const BookmarkNode*,
-                                                         const BookmarkNode*,
-                                                         bool> {
+class FolderNodeComparator {
  public:
   explicit FolderNodeComparator(icu::Collator* collator)
       : collator_(collator) {}
 
-  // Returns true if |n1| precedes |n2|.
+  // Returns true if `n1` precedes `n2`.
   bool operator()(const BookmarkNode* n1, const BookmarkNode* n2) {
     if (!collator_)
       return n1->GetTitle() < n2->GetTitle();
@@ -519,7 +548,7 @@ NodeVector VisibleNonDescendantNodes(const NodeSet& obstructions,
   return results;
 }
 
-// Whether |vector1| contains only elements of |vector2| in the same order.
+// Whether `vector1` contains only elements of `vector2` in the same order.
 BOOL IsSubvectorOfNodes(const NodeVector& vector1, const NodeVector& vector2) {
   NodeVector::const_iterator it = vector2.begin();
   // Scan the first vector.
@@ -537,9 +566,9 @@ BOOL IsSubvectorOfNodes(const NodeVector& vector1, const NodeVector& vector2) {
   return YES;
 }
 
-// Returns the indices in |vector2| of the items in |vector2| that are not
-// present in |vector1|.
-// |vector1| MUST be a subvector of |vector2| in the sense of |IsSubvector|.
+// Returns the indices in `vector2` of the items in `vector2` that are not
+// present in `vector1`.
+// `vector1` MUST be a subvector of `vector2` in the sense of `IsSubvector`.
 std::vector<NodeVector::size_type> MissingNodesIndices(
     const NodeVector& vector1,
     const NodeVector& vector2) {

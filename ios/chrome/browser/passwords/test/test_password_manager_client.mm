@@ -1,13 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/passwords/test/test_password_manager_client.h"
 
-#include "components/password_manager/core/browser/test_password_store.h"
-#include "components/password_manager/core/common/password_manager_pref_names.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/testing_pref_service.h"
+#import "base/callback_helpers.h"
+#import "components/password_manager/core/browser/password_form_manager_for_ui.h"
+#import "components/password_manager/core/browser/test_password_store.h"
+#import "components/password_manager/core/common/password_manager_pref_names.h"
+#import "components/prefs/pref_registry_simple.h"
+#import "components/prefs/testing_pref_service.h"
+#import "components/safe_browsing/core/common/safe_browsing_prefs.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -21,12 +24,16 @@ constexpr char kHttpsWebOrigin[] = "https://www.example.com/";
 TestPasswordManagerClient::TestPasswordManagerClient()
     : last_committed_url_(kHttpsWebOrigin), password_manager_(this) {
   store_ = base::MakeRefCounted<TestPasswordStore>();
-  store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
+  store_->Init(/*prefs=*/nullptr, /*affiliated_match_helper=*/nullptr);
   prefs_ = std::make_unique<TestingPrefServiceSimple>();
   prefs_->registry()->RegisterBooleanPref(
       password_manager::prefs::kCredentialsEnableAutosignin, true);
   prefs_->registry()->RegisterBooleanPref(
       password_manager::prefs::kWasAutoSignInFirstRunExperienceShown, true);
+  prefs_->registry()->RegisterBooleanPref(
+      password_manager::prefs::kPasswordLeakDetectionEnabled, true);
+  prefs_->registry()->RegisterBooleanPref(::prefs::kSafeBrowsingEnabled, true);
+  prefs_->registry()->RegisterBooleanPref(::prefs::kSafeBrowsingEnhanced, true);
 }
 
 TestPasswordManagerClient::~TestPasswordManagerClient() = default;
@@ -55,7 +62,8 @@ PrefService* TestPasswordManagerClient::GetPrefs() const {
   return prefs_.get();
 }
 
-PasswordStore* TestPasswordManagerClient::GetPasswordStore() const {
+PasswordStoreInterface* TestPasswordManagerClient::GetProfilePasswordStore()
+    const {
   return store_.get();
 }
 
@@ -63,8 +71,8 @@ const PasswordManager* TestPasswordManagerClient::GetPasswordManager() const {
   return &password_manager_;
 }
 
-const GURL& TestPasswordManagerClient::GetLastCommittedEntryURL() const {
-  return last_committed_url_;
+url::Origin TestPasswordManagerClient::GetLastCommittedOrigin() const {
+  return url::Origin::Create(last_committed_url_);
 }
 
 bool TestPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
@@ -77,19 +85,21 @@ bool TestPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
 }
 
 bool TestPasswordManagerClient::PromptUserToChooseCredentials(
-    std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
-    const GURL& origin,
-    const CredentialsCallback& callback) {
+    std::vector<std::unique_ptr<password_manager::PasswordForm>> local_forms,
+    const url::Origin& origin,
+    CredentialsCallback callback) {
   EXPECT_FALSE(local_forms.empty());
-  const autofill::PasswordForm* form = local_forms[0].get();
+  const password_manager::PasswordForm* form = local_forms[0].get();
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::BindOnce(callback, base::Owned(new autofill::PasswordForm(*form))));
-  std::vector<autofill::PasswordForm*> raw_forms(local_forms.size());
-  std::transform(local_forms.begin(), local_forms.end(), raw_forms.begin(),
-                 [](const std::unique_ptr<autofill::PasswordForm>& form) {
-                   return form.get();
-                 });
-  PromptUserToChooseCredentialsPtr(raw_forms, origin, callback);
+      base::BindOnce(std::move(callback),
+                     base::Owned(new password_manager::PasswordForm(*form))));
+  std::vector<password_manager::PasswordForm*> raw_forms(local_forms.size());
+  std::transform(
+      local_forms.begin(), local_forms.end(), raw_forms.begin(),
+      [](const std::unique_ptr<password_manager::PasswordForm>& form) {
+        return form.get();
+      });
+  PromptUserToChooseCredentialsPtr(raw_forms, origin, base::DoNothing());
   return true;
 }

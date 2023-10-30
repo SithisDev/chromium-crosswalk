@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,10 +49,8 @@
 - (ToolbarButton*)reloadButton;
 // Stop ToolbarButton.
 - (ToolbarButton*)stopButton;
-// Bookmark ToolbarButton.
-- (ToolbarButton*)bookmarkButton;
-// ToolbarButton to focus the omnibox.
-- (ToolbarButton*)searchButton;
+// ToolbarButton to create a new tab.
+- (ToolbarButton*)openNewTabButton;
 // Button to cancel the edit of the location bar.
 - (UIButton*)cancelButton;
 

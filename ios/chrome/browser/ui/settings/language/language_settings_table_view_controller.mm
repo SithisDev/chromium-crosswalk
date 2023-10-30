@@ -1,16 +1,23 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/language/language_settings_table_view_controller.h"
 
-#include "base/logging.h"
-#include "base/mac/foundation_util.h"
-#include "base/metrics/histogram_macros.h"
+#import "base/check_op.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/notreached.h"
+#import "components/password_manager/core/common/password_manager_features.h"
+#import "components/prefs/pref_service.h"
+#import "components/translate/core/browser/translate_pref_names.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/net/crurl.h"
 #import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
-#import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
-#import "ios/chrome/browser/ui/settings/cells/settings_switch_item.h"
+#import "ios/chrome/browser/ui/settings/elements/enterprise_info_popover_view_controller.h"
 #import "ios/chrome/browser/ui/settings/language/add_language_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/language/cells/language_item.h"
 #import "ios/chrome/browser/ui/settings/language/language_details_table_view_controller.h"
@@ -18,13 +25,21 @@
 #import "ios/chrome/browser/ui/settings/language/language_settings_data_source.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_histograms.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_ui_constants.h"
-#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_info_button_cell.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_info_button_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_link_header_footer_item.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_switch_cell.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_switch_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/table_view/table_view_utils.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "net/base/mac/url_conversions.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -41,14 +56,16 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeHeader = kItemTypeEnumZero,
   ItemTypeLanguage,  // This is a repeating type.
   ItemTypeAddLanguage,
-  ItemTypeTranslateSwitch
+  ItemTypeTranslateSwitch,
+  ItemTypeTranslateManaged,
 };
 
 }  // namespace
 
 @interface LanguageSettingsTableViewController () <
     AddLanguageTableViewControllerDelegate,
-    LanguageDetailsTableViewControllerDelegate>
+    LanguageDetailsTableViewControllerDelegate,
+    PopoverLabelViewControllerDelegate>
 
 // The data source passed to this instance.
 @property(nonatomic, strong) id<LanguageSettingsDataSource> dataSource;
@@ -60,7 +77,10 @@ typedef NS_ENUM(NSInteger, ItemType) {
 @property(nonatomic, weak) TableViewTextItem* addLanguageItem;
 
 // A reference to the Translate switch item for quick access.
-@property(nonatomic, weak) SettingsSwitchItem* translateSwitchItem;
+@property(nonatomic, weak) TableViewSwitchItem* translateSwitchItem;
+
+// A reference to the Translate switch item for quick access.
+@property(nonatomic, weak) TableViewInfoButtonItem* translateManagedItem;
 
 // A reference to the presented AddLanguageTableViewController, if any.
 @property(nonatomic, weak)
@@ -75,11 +95,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
                         (id<LanguageSettingsCommands>)commandHandler {
   DCHECK(dataSource);
   DCHECK(commandHandler);
-  UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
-                               ? UITableViewStylePlain
-                               : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+
+  self = [super initWithStyle:ChromeTableViewStyle()];
   if (self) {
     _dataSource = dataSource;
     _commandHandler = commandHandler;
@@ -96,12 +113,18 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [super viewDidLoad];
 
   self.title = l10n_util::GetNSString(IDS_IOS_LANGUAGE_SETTINGS_TITLE);
-  self.shouldHideDoneButton = YES;
+  self.shouldDisableDoneButtonOnEdit = YES;
+  self.shouldShowDeleteButtonInToolbar = NO;
   self.tableView.accessibilityIdentifier =
       kLanguageSettingsTableViewAccessibilityIdentifier;
 
   [self loadModel];
   [self updateUIForEditState];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+  [super viewWillAppear:animated];
+  self.navigationController.toolbarHidden = NO;
 }
 
 #pragma mark - ChromeTableViewController
@@ -113,31 +136,57 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [model addSectionWithIdentifier:SectionIdentifierLanguages];
   [self populateLanguagesSection];
 
-  // Translate switch item.
   [model addSectionWithIdentifier:SectionIdentifierTranslate];
-  SettingsSwitchItem* translateSwitchItem =
-      [[SettingsSwitchItem alloc] initWithType:ItemTypeTranslateSwitch];
-  self.translateSwitchItem = translateSwitchItem;
-  translateSwitchItem.accessibilityIdentifier =
-      kTranslateSwitchAccessibilityIdentifier;
-  translateSwitchItem.text =
-      l10n_util::GetNSString(IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_TITLE);
-  translateSwitchItem.detailText = l10n_util::GetNSString(
-      IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_SUBTITLE);
-  translateSwitchItem.on = [self.dataSource translateEnabled];
-  [model addItem:translateSwitchItem
-      toSectionWithIdentifier:SectionIdentifierTranslate];
+  if (self.dataSource.translateManaged) {
+    // Translate managed item.
+    TableViewInfoButtonItem* translateManagedItem =
+        [[TableViewInfoButtonItem alloc] initWithType:ItemTypeTranslateManaged];
+    self.translateManagedItem = translateManagedItem;
+    translateManagedItem.accessibilityIdentifier =
+        kTranslateManagedAccessibilityIdentifier;
+    translateManagedItem.text = l10n_util::GetNSString(
+        IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_TITLE);
+    translateManagedItem.detailText = l10n_util::GetNSString(
+        IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_SUBTITLE);
+    translateManagedItem.statusText =
+        [self.dataSource translateEnabled]
+            ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
+            : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
+    translateManagedItem.accessibilityHint = l10n_util::GetNSString(
+        IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT);
+
+    [model addItem:translateManagedItem
+        toSectionWithIdentifier:SectionIdentifierTranslate];
+  } else {
+    // Translate switch item.
+    TableViewSwitchItem* translateSwitchItem =
+        [[TableViewSwitchItem alloc] initWithType:ItemTypeTranslateSwitch];
+    self.translateSwitchItem = translateSwitchItem;
+    translateSwitchItem.accessibilityIdentifier =
+        kTranslateSwitchAccessibilityIdentifier;
+    translateSwitchItem.text = l10n_util::GetNSString(
+        IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_TITLE);
+    translateSwitchItem.detailText = l10n_util::GetNSString(
+        IDS_IOS_LANGUAGE_SETTINGS_TRANSLATE_SWITCH_SUBTITLE);
+    translateSwitchItem.on = [self.dataSource translateEnabled];
+    [model addItem:translateSwitchItem
+        toSectionWithIdentifier:SectionIdentifierTranslate];
+  }
 }
 
 #pragma mark - SettingsRootTableViewController
 
-- (BOOL)shouldShowEditButton {
-  return YES;
-}
-
 - (BOOL)editButtonEnabled {
   return [self.tableViewModel hasItemForItemType:ItemTypeLanguage
                                sectionIdentifier:SectionIdentifierLanguages];
+}
+
+- (BOOL)shouldHideToolbar {
+  return NO;
+}
+
+- (BOOL)shouldShowEditDoneButton {
+  return NO;
 }
 
 - (void)updateUIForEditState {
@@ -150,10 +199,21 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [self.tableView endUpdates];
 
   [self setAddLanguageItemEnabled:!self.isEditing];
-  [self setTranslateSwitchItemEnabled:!self.isEditing];
+  if (_translateSwitchItem) {
+    [self setTranslateSwitchItemEnabled:!self.isEditing];
+  }
+
+  [self updatedToolbarForEditState];
 }
 
 #pragma mark - SettingsControllerProtocol
+
+- (void)reportDismissalUserAction {
+}
+
+- (void)reportBackUserAction {
+  base::RecordAction(base::UserMetricsAction("MobileLanguageSettingsBack"));
+}
 
 - (void)settingsWillBeDismissed {
   [self.dataSource stopObservingModel];
@@ -224,6 +284,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     }
     case ItemTypeHeader:
     case ItemTypeTranslateSwitch:
+    case ItemTypeTranslateManaged:
       // Not handled.
       break;
   }
@@ -323,11 +384,20 @@ typedef NS_ENUM(NSInteger, ItemType) {
       (ItemType)[self.tableViewModel itemTypeForIndexPath:indexPath];
   switch (itemType) {
     case ItemTypeTranslateSwitch: {
-      SettingsSwitchCell* switchCell =
-          base::mac::ObjCCastStrict<SettingsSwitchCell>(cell);
+      TableViewSwitchCell* switchCell =
+          base::mac::ObjCCastStrict<TableViewSwitchCell>(cell);
       [switchCell.switchView addTarget:self
                                 action:@selector(translateSwitchChanged:)
                       forControlEvents:UIControlEventValueChanged];
+      break;
+    }
+    case ItemTypeTranslateManaged: {
+      TableViewInfoButtonCell* managedCell =
+          base::mac::ObjCCastStrict<TableViewInfoButtonCell>(cell);
+      [managedCell.trailingButton
+                 addTarget:self
+                    action:@selector(didTapManagedUIInfoButton:)
+          forControlEvents:UIControlEventTouchUpInside];
       break;
     }
     case ItemTypeHeader:
@@ -423,8 +493,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
   self.addLanguageItem = addLanguageItem;
   addLanguageItem.text = l10n_util::GetNSString(
       IDS_IOS_LANGUAGE_SETTINGS_ADD_LANGUAGE_BUTTON_TITLE);
-  addLanguageItem.textColor = UIColorFromRGB(kTableViewTextLabelColorBlue);
+  addLanguageItem.textColor = [UIColor colorNamed:kBlueColor];
   addLanguageItem.accessibilityTraits |= UIAccessibilityTraitButton;
+  addLanguageItem.accessibilityIdentifier = kSettingsAddLanguageCellId;
   [self.tableViewModel addItem:addLanguageItem
        toSectionWithIdentifier:SectionIdentifierLanguages];
 }
@@ -446,8 +517,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
   // Update the model.
   self.addLanguageItem.enabled = enabled;
   self.addLanguageItem.textColor =
-      self.isEditing ? UIColorFromRGB(kSettingsCellsDetailTextColor)
-                     : UIColorFromRGB(kTableViewTextLabelColorBlue);
+      self.isEditing ? [UIColor colorNamed:kTextSecondaryColor]
+                     : [UIColor colorNamed:kBlueColor];
 
   // Update the table view.
   [self reconfigureCellsForItems:@[ self.addLanguageItem ]];
@@ -509,6 +580,40 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
   // Update the model and the table view.
   [self translateEnabled:switchView.isOn];
+}
+
+// Called when the user clicks on the information button of the managed
+// setting's UI. Shows a textual bubble with the information of the enterprise.
+- (void)didTapManagedUIInfoButton:(UIButton*)buttonView {
+  EnterpriseInfoPopoverViewController* bubbleViewController =
+      [[EnterpriseInfoPopoverViewController alloc] initWithEnterpriseName:nil];
+
+  bubbleViewController.delegate = self;
+  // Disable the button when showing the bubble.
+  buttonView.enabled = NO;
+
+  // Set the anchor and arrow direction of the bubble.
+  bubbleViewController.popoverPresentationController.sourceView = buttonView;
+  bubbleViewController.popoverPresentationController.sourceRect =
+      buttonView.bounds;
+  bubbleViewController.popoverPresentationController.permittedArrowDirections =
+      UIPopoverArrowDirectionAny;
+
+  [self presentViewController:bubbleViewController animated:YES completion:nil];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  base::RecordAction(
+      base::UserMetricsAction("IOSLanguagesSettingsCloseWithSwipe"));
+}
+
+#pragma mark - PopoverLabelViewControllerDelegate
+
+- (void)didTapLinkURL:(NSURL*)URL {
+  [self view:nil didTapLinkURL:[[CrURL alloc] initWithNSURL:URL]];
 }
 
 @end

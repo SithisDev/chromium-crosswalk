@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,41 @@
 
 #include <dispatch/dispatch.h>
 
-#include "base/logging.h"
+#include "base/bind.h"
+#include "base/check.h"
+#import "base/ios/ns_error_util.h"
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task/post_task.h"
+#include "components/autofill/ios/browser/autofill_java_script_feature.h"
+#import "components/autofill/ios/browser/suggestion_controller_java_script_feature.h"
+#import "components/autofill/ios/form_util/form_handlers_java_script_feature.h"
+#import "components/password_manager/ios/password_manager_java_script_feature.h"
+#import "components/security_interstitials/core/unsafe_resource.h"
 #include "components/ssl_errors/error_info.h"
 #include "components/strings/grit/components_strings.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_container.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_error.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_error.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_unsafe_resource_container.h"
+#include "ios/components/webui/web_ui_url_constants.h"
+#include "ios/web/common/user_agent.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/ssl_status.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#include "ios/web/public/user_agent.h"
+#import "ios/web_view/internal/cwv_lookalike_url_handler_internal.h"
+#import "ios/web_view/internal/cwv_ssl_error_handler_internal.h"
 #import "ios/web_view/internal/cwv_ssl_status_internal.h"
+#import "ios/web_view/internal/cwv_ssl_util.h"
 #import "ios/web_view/internal/cwv_web_view_internal.h"
+#import "ios/web_view/internal/safe_browsing/cwv_unsafe_url_handler_internal.h"
 #include "ios/web_view/internal/web_view_browser_state.h"
 #import "ios/web_view/internal/web_view_early_page_script_provider.h"
+#import "ios/web_view/internal/web_view_message_handler_java_script_feature.h"
 #import "ios/web_view/internal/web_view_web_main_parts.h"
 #import "ios/web_view/public/cwv_navigation_delegate.h"
 #import "ios/web_view/public/cwv_web_view.h"
+#import "net/base/mac/url_conversions.h"
 #include "net/cert/cert_status_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -61,14 +79,27 @@ std::unique_ptr<web::WebMainParts> WebViewWebClient::CreateWebMainParts() {
   return std::make_unique<WebViewWebMainParts>();
 }
 
+void WebViewWebClient::AddAdditionalSchemes(Schemes* schemes) const {
+  schemes->standard_schemes.push_back(kChromeUIScheme);
+  schemes->secure_schemes.push_back(kChromeUIScheme);
+}
+
+bool WebViewWebClient::IsAppSpecificURL(const GURL& url) const {
+  return url.SchemeIs(kChromeUIScheme);
+}
+
 std::string WebViewWebClient::GetUserAgent(web::UserAgentType type) const {
-  return web::BuildUserAgentFromProduct(
-      base::SysNSStringToUTF8([CWVWebView userAgentProduct]));
+  if (CWVWebView.customUserAgent) {
+    return base::SysNSStringToUTF8(CWVWebView.customUserAgent);
+  } else {
+    return web::BuildMobileUserAgent(
+        base::SysNSStringToUTF8([CWVWebView userAgentProduct]));
+  }
 }
 
 base::StringPiece WebViewWebClient::GetDataResource(
     int resource_id,
-    ui::ScaleFactor scale_factor) const {
+    ui::ResourceScaleFactor scale_factor) const {
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
       resource_id, scale_factor);
 }
@@ -79,8 +110,13 @@ base::RefCountedMemory* WebViewWebClient::GetDataResourceBytes(
       resource_id);
 }
 
-bool WebViewWebClient::IsDataResourceGzipped(int resource_id) const {
-  return ui::ResourceBundle::GetSharedInstance().IsGzipped(resource_id);
+std::vector<web::JavaScriptFeature*> WebViewWebClient::GetJavaScriptFeatures(
+    web::BrowserState* browser_state) const {
+  return {autofill::AutofillJavaScriptFeature::GetInstance(),
+          autofill::FormHandlersJavaScriptFeature::GetInstance(),
+          autofill::SuggestionControllerJavaScriptFeature::GetInstance(),
+          password_manager::PasswordManagerJavaScriptFeature::GetInstance(),
+          WebViewMessageHandlerJavaScriptFeature::GetInstance()};
 }
 
 NSString* WebViewWebClient::GetDocumentStartScriptForMainFrame(
@@ -91,64 +127,84 @@ NSString* WebViewWebClient::GetDocumentStartScriptForMainFrame(
       WebViewEarlyPageScriptProvider::FromBrowserState(browser_state);
   [scripts addObject:provider.GetScript()];
 
-  [scripts addObject:GetPageScript(@"web_view_bundle")];
+  [scripts addObject:GetPageScript(@"language_detection")];
 
   return [scripts componentsJoinedByString:@";"];
 }
 
-base::string16 WebViewWebClient::GetPluginNotSupportedText() const {
+std::u16string WebViewWebClient::GetPluginNotSupportedText() const {
   return l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_SUPPORTED);
 }
 
-void WebViewWebClient::AllowCertificateError(
+void WebViewWebClient::PrepareErrorPage(
     web::WebState* web_state,
-    int cert_error,
-    const net::SSLInfo& ssl_info,
-    const GURL& request_url,
-    bool overridable,
-    const base::RepeatingCallback<void(bool)>& callback) {
+    const GURL& url,
+    NSError* error,
+    bool is_post,
+    bool is_off_the_record,
+    const absl::optional<net::SSLInfo>& info,
+    int64_t navigation_id,
+    base::OnceCallback<void(NSString*)> callback) {
+  DCHECK(error);
+
   CWVWebView* web_view = [CWVWebView webViewForWebState:web_state];
-  base::RepeatingCallback<void(bool)> callback_copy = callback;
+  id<CWVNavigationDelegate> navigation_delegate = web_view.navigationDelegate;
 
-  SEL selector = @selector
-      (webView:didFailNavigationWithSSLError:overridable:decisionHandler:);
-  if ([web_view.navigationDelegate respondsToSelector:selector]) {
-    CWVCertStatus cert_status = CWVCertStatusFromNetCertStatus(
-        net::MapNetErrorToCertStatus(cert_error));
-    ssl_errors::ErrorInfo error_info = ssl_errors::ErrorInfo::CreateError(
-        ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error),
-        ssl_info.cert.get(), request_url);
-    NSString* error_description =
-        base::SysUTF16ToNSString(error_info.short_description());
-    NSError* error =
-        [NSError errorWithDomain:NSURLErrorDomain
-                            code:NSURLErrorSecureConnectionFailed
-                        userInfo:@{
-                          NSLocalizedDescriptionKey : error_description,
-                          CWVCertStatusKey : @(cert_status),
-                        }];
-
-    void (^decisionHandler)(CWVSSLErrorDecision) =
-        ^(CWVSSLErrorDecision decision) {
-          switch (decision) {
-            case CWVSSLErrorDecisionOverrideErrorAndReload: {
-              callback_copy.Run(true);
-              break;
-            }
-            case CWVSSLErrorDecisionDoNothing: {
-              callback_copy.Run(false);
-              break;
-            }
-          }
-        };
-
-    [web_view.navigationDelegate webView:web_view
-           didFailNavigationWithSSLError:error
-                             overridable:overridable
-                         decisionHandler:decisionHandler];
+  // |final_underlying_error| should be checked first for any specific error
+  // cases such as lookalikes and safebrowsing errors. |info| is only non-empty
+  // if this is a SSL related error.
+  NSError* final_underlying_error =
+      base::ios::GetFinalUnderlyingErrorFromError(error);
+  if ([final_underlying_error.domain isEqual:kSafeBrowsingErrorDomain] &&
+      [navigation_delegate
+          respondsToSelector:@selector(webView:handleUnsafeURLWithHandler:)]) {
+    DCHECK_EQ(kUnsafeResourceErrorCode, final_underlying_error.code);
+    SafeBrowsingUnsafeResourceContainer* container =
+        SafeBrowsingUnsafeResourceContainer::FromWebState(web_state);
+    const security_interstitials::UnsafeResource* resource =
+        container->GetMainFrameUnsafeResource()
+            ?: container->GetSubFrameUnsafeResource(
+                   web_state->GetNavigationManager()->GetLastCommittedItem());
+    CWVUnsafeURLHandler* handler =
+        [[CWVUnsafeURLHandler alloc] initWithWebState:web_state
+                                       unsafeResource:*resource
+                                         htmlCallback:std::move(callback)];
+    [navigation_delegate webView:web_view handleUnsafeURLWithHandler:handler];
+  } else if ([final_underlying_error.domain isEqual:kLookalikeUrlErrorDomain] &&
+             [navigation_delegate respondsToSelector:@selector
+                                  (webView:handleLookalikeURLWithHandler:)]) {
+    DCHECK_EQ(kLookalikeUrlErrorCode, final_underlying_error.code);
+    LookalikeUrlContainer* container =
+        LookalikeUrlContainer::FromWebState(web_state);
+    std::unique_ptr<LookalikeUrlContainer::LookalikeUrlInfo> lookalike_info =
+        container->ReleaseLookalikeUrlInfo();
+    CWVLookalikeURLHandler* handler = [[CWVLookalikeURLHandler alloc]
+        initWithWebState:web_state
+        lookalikeURLInfo:std::move(lookalike_info)
+            htmlCallback:std::move(callback)];
+    [navigation_delegate webView:web_view
+        handleLookalikeURLWithHandler:handler];
+  } else if (info.has_value() &&
+             [navigation_delegate respondsToSelector:@selector
+                                  (webView:handleSSLErrorWithHandler:)]) {
+    __block base::OnceCallback<void(NSString*)> error_html_callback =
+        std::move(callback);
+    CWVSSLErrorHandler* handler =
+        [[CWVSSLErrorHandler alloc] initWithWebState:web_state
+                                                 URL:net::NSURLWithGURL(url)
+                                               error:error
+                                             SSLInfo:info.value()
+                               errorPageHTMLCallback:^(NSString* HTML) {
+                                 std::move(error_html_callback).Run(HTML);
+                               }];
+    [navigation_delegate webView:web_view handleSSLErrorWithHandler:handler];
   } else {
-    callback_copy.Run(false);
+    std::move(callback).Run(error.localizedDescription);
   }
+}
+
+bool WebViewWebClient::EnableLongPressUIContextMenu() const {
+  return CWVWebView.chromeContextMenuEnabled;
 }
 
 }  // namespace ios_web_view

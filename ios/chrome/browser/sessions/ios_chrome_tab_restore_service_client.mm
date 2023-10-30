@@ -1,24 +1,24 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_client.h"
+#import "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_client.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "components/sessions/ios/ios_live_tab.h"
-#include "ios/chrome/browser/application_context.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/sessions/tab_restore_service_delegate_impl_ios.h"
-#include "ios/chrome/browser/sessions/tab_restore_service_delegate_impl_ios_factory.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
-#import "ios/chrome/browser/tabs/tab_model_list.h"
-#include "ios/chrome/browser/tabs/tab_model_synced_window_delegate.h"
+#import "base/bind.h"
+#import "base/callback.h"
+#import "components/sessions/ios/ios_live_tab.h"
+#import "components/tab_groups/tab_group_id.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/main/browser_list.h"
+#import "ios/chrome/browser/main/browser_list_factory.h"
+#import "ios/chrome/browser/sessions/live_tab_context_browser_agent.h"
+#import "ios/chrome/browser/tabs/synced_window_delegate_browser_agent.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "url/gurl.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,36 +26,25 @@
 
 namespace {
 sessions::LiveTabContext* FindLiveTabContextWithCondition(
-    base::RepeatingCallback<bool(TabModel*)> condition) {
-  std::vector<ios::ChromeBrowserState*> browser_states =
+    base::RepeatingCallback<bool(Browser*)> condition) {
+  std::vector<ChromeBrowserState*> browser_states =
       GetApplicationContext()
           ->GetChromeBrowserStateManager()
           ->GetLoadedBrowserStates();
 
-  for (ios::ChromeBrowserState* browser_state : browser_states) {
+  for (ChromeBrowserState* browser_state : browser_states) {
     DCHECK(!browser_state->IsOffTheRecord());
-    NSArray<TabModel*>* tab_models;
-
-    tab_models = TabModelList::GetTabModelsForChromeBrowserState(browser_state);
-    for (TabModel* tab_model : tab_models) {
-      if (condition.Run(tab_model)) {
-        return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
-            browser_state);
+    BrowserList* browsers =
+        BrowserListFactory::GetForBrowserState(browser_state);
+    for (Browser* browser : browsers->AllRegularBrowsers()) {
+      if (condition.Run(browser)) {
+        return LiveTabContextBrowserAgent::FromBrowser(browser);
       }
     }
 
-    if (!browser_state->HasOffTheRecordChromeBrowserState())
-      continue;
-
-    ios::ChromeBrowserState* otr_browser_state =
-        browser_state->GetOffTheRecordChromeBrowserState();
-
-    tab_models =
-        TabModelList::GetTabModelsForChromeBrowserState(otr_browser_state);
-    for (TabModel* tab_model : tab_models) {
-      if (condition.Run(tab_model)) {
-        return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
-            browser_state);
+    for (Browser* browser : browsers->AllIncognitoBrowsers()) {
+      if (condition.Run(browser)) {
+        return LiveTabContextBrowserAgent::FromBrowser(browser);
       }
     }
   }
@@ -65,19 +54,23 @@ sessions::LiveTabContext* FindLiveTabContextWithCondition(
 }  // namespace
 
 IOSChromeTabRestoreServiceClient::IOSChromeTabRestoreServiceClient(
-    ios::ChromeBrowserState* browser_state)
+    ChromeBrowserState* browser_state)
     : browser_state_(browser_state) {}
 
 IOSChromeTabRestoreServiceClient::~IOSChromeTabRestoreServiceClient() {}
 
 sessions::LiveTabContext*
 IOSChromeTabRestoreServiceClient::CreateLiveTabContext(
+    sessions::LiveTabContext* /* existing_context */,
+    sessions::SessionWindow::WindowType type,
     const std::string& /* app_name */,
     const gfx::Rect& /* bounds */,
     ui::WindowShowState /* show_state */,
-    const std::string& /* workspace */) {
-  return TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
-      browser_state_);
+    const std::string& /* workspace */,
+    const std::string& /* user_title */,
+    const std::map<std::string, std::string>& /* extra_data */) {
+  NOTREACHED() << "Tab restore service attempting to create a new window.";
+  return nullptr;
 }
 
 sessions::LiveTabContext*
@@ -85,33 +78,43 @@ IOSChromeTabRestoreServiceClient::FindLiveTabContextForTab(
     const sessions::LiveTab* tab) {
   const sessions::IOSLiveTab* requested_tab =
       static_cast<const sessions::IOSLiveTab*>(tab);
-
-  return FindLiveTabContextWithCondition(base::Bind(
-      [](const web::WebState* web_state, TabModel* tab_model) {
-        WebStateList* web_state_list = tab_model.webStateList;
+  const web::WebState* web_state = requested_tab->GetWebState();
+  if (!web_state) {
+    return nullptr;
+  }
+  return FindLiveTabContextWithCondition(base::BindRepeating(
+      [](const web::WebState* web_state, Browser* browser) {
+        WebStateList* web_state_list = browser->GetWebStateList();
         const int index = web_state_list->GetIndexOfWebState(web_state);
         return index != WebStateList::kInvalidIndex;
       },
-      requested_tab->web_state()));
+      web_state));
 }
 
 sessions::LiveTabContext*
 IOSChromeTabRestoreServiceClient::FindLiveTabContextWithID(
     SessionID desired_id) {
-  return FindLiveTabContextWithCondition(base::Bind(
-      [](SessionID desired_id, TabModel* tab_model) {
-        DCHECK(tab_model.syncedWindowDelegate);
-        return tab_model.syncedWindowDelegate->GetSessionId() == desired_id;
+  return FindLiveTabContextWithCondition(base::BindRepeating(
+      [](SessionID desired_id, Browser* browser) {
+        SyncedWindowDelegateBrowserAgent* syncedWindowDelegate =
+            SyncedWindowDelegateBrowserAgent::FromBrowser(browser);
+        return syncedWindowDelegate->GetSessionId() == desired_id;
       },
       desired_id));
+}
+
+sessions::LiveTabContext*
+IOSChromeTabRestoreServiceClient::FindLiveTabContextWithGroup(
+    tab_groups::TabGroupId group) {
+  return nullptr;
 }
 
 bool IOSChromeTabRestoreServiceClient::ShouldTrackURLForRestore(
     const GURL& url) {
   // NOTE: In the //chrome client, chrome://quit and chrome://restart are
-  // blacklisted from being tracked to avoid entering infinite loops. However,
+  // blocked from being tracked to avoid entering infinite loops. However,
   // iOS intentionally does not support those URLs, so there is no need to
-  // blacklist them here.
+  // block them here.
   return url.is_valid();
 }
 
@@ -136,7 +139,6 @@ bool IOSChromeTabRestoreServiceClient::HasLastSession() {
 }
 
 void IOSChromeTabRestoreServiceClient::GetLastSession(
-    const sessions::GetLastSessionCallback& callback,
-    base::CancelableTaskTracker* tracker) {
+    sessions::GetLastSessionCallback callback) {
   NOTREACHED();
 }

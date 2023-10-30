@@ -1,14 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/omnibox/popup/simple_omnibox_icon.h"
 
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import "base/notreached.h"
+#import "ios/chrome/browser/net/crurl.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_suggestion_icon_util.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#include "ios/public/provider/chrome/browser/images/branded_image_provider.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/public/provider/chrome/browser/branded_images/branded_images_api.h"
 #import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -20,7 +21,7 @@
 @property(nonatomic, assign) OmniboxIconType iconType;
 @property(nonatomic, assign) OmniboxSuggestionIconType suggestionIconType;
 @property(nonatomic, assign) BOOL isAnswer;
-@property(nonatomic, assign) GURL imageURL;
+@property(nonatomic, strong) CrURL* imageURL;
 
 @end
 
@@ -29,7 +30,7 @@
 - (instancetype)initWithIconType:(OmniboxIconType)iconType
               suggestionIconType:(OmniboxSuggestionIconType)suggestionIconType
                         isAnswer:(BOOL)isAnswer
-                        imageURL:(GURL)imageURL {
+                        imageURL:(CrURL*)imageURL {
   self = [super init];
   if (self) {
     _iconType = iconType;
@@ -42,55 +43,54 @@
 
 - (instancetype)init {
   return [self initWithIconType:OmniboxIconTypeSuggestionIcon
-             suggestionIconType:DEFAULT_FAVICON
+             suggestionIconType:OmniboxSuggestionIconType::kDefaultFavicon
                        isAnswer:NO
-                       imageURL:GURL()];
+                       imageURL:[[CrURL alloc] initWithGURL:GURL()]];
 }
 
 - (UIImage*)iconImage {
-  if (self.suggestionIconType == FALLBACK_ANSWER &&
+  if (self.suggestionIconType == OmniboxSuggestionIconType::kFallbackAnswer &&
       self.defaultSearchEngineIsGoogle && [self fallbackAnswerBrandedIcon]) {
     return [[self fallbackAnswerBrandedIcon]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   }
-  return GetOmniboxSuggestionIcon(self.suggestionIconType, true);
+  return GetOmniboxSuggestionIcon(self.suggestionIconType);
 }
 
 - (BOOL)hasCustomAnswerIcon {
   switch (self.suggestionIconType) {
-    case BOOKMARK:
-    case DEFAULT_FAVICON:
-    case HISTORY:
-    case SEARCH:
-    case SEARCH_HISTORY:
+    case OmniboxSuggestionIconType::kBookmark:
+    case OmniboxSuggestionIconType::kDefaultFavicon:
+    case OmniboxSuggestionIconType::kHistory:
+    case OmniboxSuggestionIconType::kSearch:
+    case OmniboxSuggestionIconType::kSearchHistory:
       return NO;
-    case CALCULATOR:
-    case CONVERSION:
-    case DICTIONARY:
-    case STOCK:
-    case SUNRISE:
-    case LOCAL_TIME:
-    case WHEN_IS:
-    case TRANSLATION:
+    case OmniboxSuggestionIconType::kCalculator:
+    case OmniboxSuggestionIconType::kConversation:
+    case OmniboxSuggestionIconType::kDictionary:
+    case OmniboxSuggestionIconType::kStock:
+    case OmniboxSuggestionIconType::kSunrise:
+    case OmniboxSuggestionIconType::kLocalTime:
+    case OmniboxSuggestionIconType::kWhenIs:
+    case OmniboxSuggestionIconType::kTranslation:
       return YES;
     // For the fallback answer, this depends on whether the branded icon exists
     // and whether the default search engine is Google (the icon only exists for
     // Google branding).
     // The default fallback answer icon uses the grey background styling, like
     // the non-answer icons.
-    case FALLBACK_ANSWER:
+    case OmniboxSuggestionIconType::kFallbackAnswer:
       return self.defaultSearchEngineIsGoogle &&
              [self fallbackAnswerBrandedIcon];
-    case OMNIBOX_SUGGESTION_ICON_TYPE_COUNT:
+    case OmniboxSuggestionIconType::kCount:
       NOTREACHED();
       return NO;
   }
 }
 
 - (UIImage*)fallbackAnswerBrandedIcon {
-  return ios::GetChromeBrowserProvider()
-      ->GetBrandedImageProvider()
-      ->GetOmniboxAnswerIcon();
+  return ios::provider::GetBrandedImage(
+      ios::provider::BrandedImage::kOmniboxAnswer);
 }
 
 - (UIColor*)iconImageTintColor {
@@ -98,13 +98,11 @@
     case OmniboxIconTypeImage:
     case OmniboxIconTypeSuggestionIcon:
       if ([self hasCustomAnswerIcon]) {
-        return UIColor.whiteColor;
+        return [UIColor colorNamed:@"omnibox_suggestion_answer_icon_color"];
       }
-      return self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.52]
-                            : [UIColor.blackColor colorWithAlphaComponent:0.45];
+      return [UIColor colorNamed:@"omnibox_suggestion_icon_color"];
     case OmniboxIconTypeFavicon:
-      return self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.52]
-                            : [UIColor.blackColor colorWithAlphaComponent:0.31];
+      return [UIColor colorNamed:@"omnibox_suggestion_icon_color"];
   }
 }
 
@@ -113,11 +111,13 @@
     case OmniboxIconTypeImage:
       return nil;
     case OmniboxIconTypeSuggestionIcon:
-      return [[UIImage imageNamed:@"background_solid"]
-          imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+      if ([self hasCustomAnswerIcon]) {
+        return [[UIImage imageNamed:@"background_solid"]
+            imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+      }
+      return nil;
     case OmniboxIconTypeFavicon:
-      return [[UIImage imageNamed:@"background_stroke"]
-          imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+      return nil;
   }
 }
 
@@ -127,23 +127,17 @@
       return nil;
     case OmniboxIconTypeSuggestionIcon:
       if ([self hasCustomAnswerIcon]) {
-        return [MDCPalette.cr_bluePalette tint500];
+        return [UIColor colorNamed:kBlueColor];
       }
-      return self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.15]
-                            : [UIColor.blackColor colorWithAlphaComponent:0.08];
+      return nil;
     case OmniboxIconTypeFavicon:
-      return self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.16]
-                            : [UIColor.blackColor colorWithAlphaComponent:0.13];
+      return nil;
   }
 }
 
 - (UIImage*)overlayImage {
   switch (self.iconType) {
     case OmniboxIconTypeImage:
-      return self.isAnswer ? nil
-                           : [[UIImage imageNamed:@"background_stroke"]
-                                 imageWithRenderingMode:
-                                     UIImageRenderingModeAlwaysTemplate];
     case OmniboxIconTypeSuggestionIcon:
     case OmniboxIconTypeFavicon:
       return nil;
@@ -151,7 +145,7 @@
 }
 
 - (UIColor*)overlayImageTintColor {
-  return [UIColor.blackColor colorWithAlphaComponent:0.1];
+  return nil;
 }
 
 @end

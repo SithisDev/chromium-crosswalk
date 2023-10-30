@@ -1,18 +1,20 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import "base/strings/escape.h"
 #import "base/test/ios/wait_util.h"
-#include "ios/testing/embedded_test_server_handlers.h"
+#import "ios/testing/embedded_test_server_handlers.h"
+#import "ios/web/find_in_page/find_in_page_java_script_feature.h"
 #import "ios/web/public/find_in_page/find_in_page_manager.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/test/fakes/fake_find_in_page_manager_delegate.h"
+#import "ios/web/public/test/fakes/fake_web_client.h"
 #import "ios/web/public/test/navigation_test_util.h"
 #import "ios/web/public/test/web_test_with_web_state.h"
-#include "net/base/escape.h"
-#include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/embedded_test_server/request_handler_util.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
+#import "net/test/embedded_test_server/request_handler_util.h"
+#import "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -36,8 +38,10 @@ namespace web {
 // FindInPageManagerDelegate are correct.
 class FindInPageManagerTest : public WebTestWithWebState {
  protected:
+
   void SetUp() override {
     WebTestWithWebState::SetUp();
+
     test_server_.RegisterRequestHandler(base::BindRepeating(
         &net::test_server::HandlePrefixedRequest, "/echo-query",
         base::BindRepeating(&testing::HandlePageWithContents)));
@@ -48,15 +52,15 @@ class FindInPageManagerTest : public WebTestWithWebState {
     GetFindInPageManager()->SetDelegate(&delegate_);
   }
 
-  // Returns the FindInPageManager associated with |web_state()|.
+  // Returns the FindInPageManager associated with `web_state()`.
   FindInPageManager* GetFindInPageManager() {
     return web::FindInPageManager::FromWebState(web_state());
   }
 
-  // Waits until the delegate receives |index| from
-  // DidSelectMatch(). Returns False if delegate never receives |index| within
+  // Waits until the delegate receives `index` from
+  // DidSelectMatch(). Returns False if delegate never receives `index` within
   // time.
-  WARN_UNUSED_RESULT bool WaitForSelectedMatchAtIndex(int index) {
+  [[nodiscard]] bool WaitForSelectedMatchAtIndex(int index) {
     return WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^bool {
       base::RunLoop().RunUntilIdle();
       return delegate_.state() && delegate_.state()->index == index;
@@ -73,8 +77,9 @@ class FindInPageManagerTest : public WebTestWithWebState {
 TEST_F(FindInPageManagerTest, FindMatchInMainFrame) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
+
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
   }));
@@ -94,7 +99,7 @@ TEST_F(FindInPageManagerTest, FindMatchInMainFrame) {
 TEST_F(FindInPageManagerTest, FindMatchInMainFrameAndIFrame) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
@@ -114,7 +119,7 @@ TEST_F(FindInPageManagerTest, FindMatchInMainFrameAndIFrame) {
 TEST_F(FindInPageManagerTest, FindNoMatch) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
@@ -134,7 +139,7 @@ TEST_F(FindInPageManagerTest, FindNoMatch) {
 TEST_F(FindInPageManagerTest, FindForwardIterateThroughAllMatches) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
@@ -163,7 +168,7 @@ TEST_F(FindInPageManagerTest, FindForwardIterateThroughAllMatches) {
 TEST_F(FindInPageManagerTest, FindBackwardsIterateThroughAllMatches) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
@@ -191,7 +196,7 @@ TEST_F(FindInPageManagerTest, FindBackwardsIterateThroughAllMatches) {
 TEST_F(FindInPageManagerTest, FindIterateThroughIframeMatches) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;
@@ -216,7 +221,7 @@ TEST_F(FindInPageManagerTest, FindIterateThroughIframeMatches) {
 TEST_F(FindInPageManagerTest, FindIterationWithNullQuery) {
   std::string url_spec =
       kFindPageUrl +
-      net::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
+      base::EscapeQueryParamValue(kFindInPageIFrameUrl, /*use_plus=*/true);
   test::LoadUrl(web_state(), test_server_.GetURL(url_spec));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return web_state()->GetWebFramesManager()->GetAllWebFrames().size() == 2;

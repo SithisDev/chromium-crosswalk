@@ -1,12 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file provides common methods that can be shared by other JavaScripts.
 
-goog.provide('__crWeb.common');
-
-goog.require('__crWeb.base');
+// Requires functions from base.js.
 
 /** @typedef {HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement} */
 var FormControlElement;
@@ -22,9 +20,6 @@ __gCrWeb.common = {};
 // string, so it does not get renamed by closure compiler during the
 // minification.
 __gCrWeb['common'] = __gCrWeb.common;
-
-/* Beginning of anonymous object. */
-(function() {
 
 /**
  * JSON safe object to protect against custom implementation of Object.toJSON
@@ -67,30 +62,6 @@ __gCrWeb.stringify = function(value) {
     return stringifiedValue;
   }
   return __gCrWeb.common.JSONStringify(value);
-};
-
-/**
- * Tests an element's visiblity. This test is expensive so should be used
- * sparingly.
- * @param {Element} element A DOM element.
- * @return {boolean} true if the |element| is currently part of the visible
- * DOM.
- */
-__gCrWeb.common.isElementVisible = function(element) {
-  /** @type {Node} */
-  var node = element;
-  while (node && node !== document) {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      var style = window.getComputedStyle(/** @type {Element} */ (node));
-      if (style.display === 'none' || style.visibility === 'hidden') {
-        return false;
-      }
-    }
-    // Move up the tree and test again.
-    node = node.parentNode;
-  }
-  // Test reached the top of the DOM without finding a concealed ancestor.
-  return true;
 };
 
 /**
@@ -150,47 +121,6 @@ __gCrWeb.common.trim = function(str) {
 };
 
 /**
- * Acquires the specified DOM |attribute| from the DOM |element| and returns
- * its lower-case value, or null if not present.
- * @param {Element} element A DOM element.
- * @param {string} attribute An attribute name.
- * @return {?string} Lowercase value of DOM element or null if not present.
- */
-__gCrWeb.common.getLowerCaseAttribute = function(element, attribute) {
-  if (!element) {
-    return null;
-  }
-  var value = element.getAttribute(attribute);
-  if (value) {
-    return value.toLowerCase();
-  }
-  return null;
-};
-
-/**
- * Converts a relative URL into an absolute URL.
- * @param {Object} doc Document.
- * @param {string} relativeURL Relative URL.
- * @return {string} Absolute URL.
- */
-__gCrWeb.common.absoluteURL = function(doc, relativeURL) {
-  // In the case of data: URL-based pages, relativeURL === absoluteURL.
-  if (doc.location.protocol === 'data:') {
-    return doc.location.href;
-  }
-  var urlNormalizer = doc['__gCrWebURLNormalizer'];
-  if (!urlNormalizer) {
-    urlNormalizer = doc.createElement('a');
-    doc['__gCrWebURLNormalizer'] = urlNormalizer;
-  }
-
-  // Use the magical quality of the <a> element. It automatically converts
-  // relative URLs into absolute ones.
-  urlNormalizer.href = relativeURL;
-  return urlNormalizer.href;
-};
-
-/**
  * Extracts the webpage URL from the given URL by removing the query
  * and the reference (aka fragment) from the URL.
  * @param {string} url Web page URL.
@@ -205,43 +135,9 @@ __gCrWeb.common.removeQueryAndReferenceFromURL = function(url) {
 };
 
 /**
- * Retrieves favicon information.
- *
- * @return {Object} Object containing favicon data.
- */
-__gCrWeb.common.getFavicons = function() {
-  var favicons = [];
-  delete favicons.toJSON;  // Never inherit Array.prototype.toJSON.
-  var links = document.getElementsByTagName('link');
-  var linkCount = links.length;
-  for (var i = 0; i < linkCount; ++i) {
-    if (links[i].rel) {
-      var rel = links[i].rel.toLowerCase();
-      if (rel == 'shortcut icon' || rel == 'icon' ||
-          rel == 'apple-touch-icon' || rel == 'apple-touch-icon-precomposed') {
-        var favicon = {rel: links[i].rel.toLowerCase(), href: links[i].href};
-        if (links[i].sizes && links[i].sizes.value) {
-          favicon.sizes = links[i].sizes.value;
-        }
-        favicons.push(favicon);
-      }
-    }
-  }
-  return favicons;
-};
-
-/**
- * Checks whether the two URLs are from the same origin.
- * @param {string} url_one
- * @param {string} url_two
- * @return {boolean} Whether the two URLs have the same origin.
- */
-__gCrWeb.common.isSameOrigin = function(url_one, url_two) {
-  return new URL(url_one).origin == new URL(url_two).origin;
-};
-
-/**
  * Posts |message| to the webkit message handler specified by |handlerName|.
+ * DEPRECATED: This function will be removed soon. Instead, use the
+ * implementation at //ios/web/public/js_messaging/resources/utils.ts
  *
  * @param {string} handlerName The name of the webkit message handler.
  * @param {Object} message The message to post to the handler.
@@ -255,5 +151,3 @@ __gCrWeb.common.sendWebKitMessage = function(handlerName, message) {
   window.webkit.messageHandlers[handlerName].postMessage(message);
   window.webkit = oldWebkit;
 };
-
-}());  // End of anonymous object

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,20 +18,14 @@
 // Exposes view and methods to drive the doodle.
 - (void)setLogoVendor:(id<LogoVendor>)logoVendor;
 
-// The number of tabs to show in the NTP fake toolbar.
-- (void)setTabCount:(int)tabCount;
-
-// |YES| if the NTP toolbar can show the forward arrow.
-- (void)setCanGoForward:(BOOL)canGoForward;
-
-// |YES| if the NTP toolbar can show the back arrow.
-- (void)setCanGoBack:(BOOL)canGoBack;
-
 // The location bar has lost focus.
 - (void)locationBarResignsFirstResponder;
 
 // Tell location bar has taken focus.
 - (void)locationBarBecomesFirstResponder;
+
+// Sets whether voice search is currently enabled.
+- (void)setVoiceSearchIsEnabled:(BOOL)voiceSearchIsEnabled;
 
 @end
 

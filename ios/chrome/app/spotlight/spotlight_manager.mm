@@ -1,14 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/app/spotlight/spotlight_manager.h"
 
-#include "base/logging.h"
-#include "ios/chrome/app/spotlight/actions_spotlight_manager.h"
-#include "ios/chrome/app/spotlight/bookmarks_spotlight_manager.h"
-#include "ios/chrome/app/spotlight/topsites_spotlight_manager.h"
-#include "ios/chrome/browser/system_flags.h"
+#import "base/check.h"
+#import "ios/chrome/app/spotlight/actions_spotlight_manager.h"
+#import "ios/chrome/app/spotlight/bookmarks_spotlight_manager.h"
+#import "ios/chrome/app/spotlight/topsites_spotlight_manager.h"
+#import "ios/chrome/browser/flags/system_flags.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -21,7 +21,7 @@
   ActionsSpotlightManager* _actionsManager;
 }
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 
 @end
@@ -29,14 +29,14 @@
 @implementation SpotlightManager
 
 + (SpotlightManager*)spotlightManagerWithBrowserState:
-    (ios::ChromeBrowserState*)browserState {
+    (ChromeBrowserState*)browserState {
   if (spotlight::IsSpotlightAvailable()) {
     return [[SpotlightManager alloc] initWithBrowserState:browserState];
   }
   return nil;
 }
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState {
   DCHECK(browserState);
   DCHECK(spotlight::IsSpotlightAvailable());
   self = [super init];

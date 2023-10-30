@@ -1,23 +1,57 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/open_in/open_in_tab_helper.h"
 
-#include "base/strings/sys_string_conversions.h"
-#include "ios/chrome/grit/ios_strings.h"
+#import "base/memory/ptr_util.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/web/public/navigation/navigation_context.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "net/base/filename_util.h"
-#include "net/http/http_response_headers.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "url/gurl.h"
+#import "ios/web/public/web_state.h"
+#import "net/base/filename_util.h"
+#import "net/http/http_response_headers.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+namespace content_type {
+
+const char kMimeTypeMicrosoftPowerPointOpenXML[] =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+const char kMimeTypeMicrosoftWordOpenXML[] =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+const char kMimeTypeMicrosoftExcelOpenXML[] =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const char kMimeTypePDF[] = "application/pdf";
+
+const char kMimeTypeMicrosoftWord[] = "application/msword";
+
+const char kMimeTypeJPEG[] = "image/jpeg";
+
+const char kMimeTypePNG[] = "image/png";
+
+const char kMimeTypeMicrosoftPowerPoint[] = "application/vnd.ms-powerpoint";
+
+const char kMimeTypeRTF[] = "application/rtf";
+
+const char kMimeTypeSVG[] = "image/svg+xml";
+
+const char kMimeTypeMicrosoftExcel[] = "application/vnd.ms-excel";
+
+}  // namespace content_type
 
 // static
 void OpenInTabHelper::CreateForWebState(web::WebState* web_state) {
@@ -36,17 +70,49 @@ OpenInTabHelper::~OpenInTabHelper() {
   // In case that the destructor is called before WebStateDestroyed. stop
   // observing the WebState.
   if (web_state_) {
+    [delegate_ destroyOpenInForWebState:web_state_];
     web_state_->RemoveObserver(this);
     web_state_ = nullptr;
   }
 }
 
+OpenInMimeType OpenInTabHelper::GetUmaResult(
+    const std::string& mime_type) const {
+  if (mime_type == content_type::kMimeTypePDF)
+    return OpenInMimeType::kMimeTypePDF;
+  if (mime_type == content_type::kMimeTypeMicrosoftWord)
+    return OpenInMimeType::kMimeTypeMicrosoftWord;
+  if (mime_type == content_type::kMimeTypeMicrosoftWordOpenXML)
+    return OpenInMimeType::kMimeTypeMicrosoftWordOpenXML;
+  if (mime_type == content_type::kMimeTypeJPEG)
+    return OpenInMimeType::kMimeTypeJPEG;
+  if (mime_type == content_type::kMimeTypePNG)
+    return OpenInMimeType::kMimeTypePNG;
+  if (mime_type == content_type::kMimeTypeMicrosoftPowerPoint)
+    return OpenInMimeType::kMimeTypeMicrosoftPowerPoint;
+  if (mime_type == content_type::kMimeTypeMicrosoftPowerPointOpenXML)
+    return OpenInMimeType::kMimeTypeMicrosoftPowerPointOpenXML;
+  if (mime_type == content_type::kMimeTypeRTF)
+    return OpenInMimeType::kMimeTypeRTF;
+  if (mime_type == content_type::kMimeTypeSVG)
+    return OpenInMimeType::kMimeTypeSVG;
+  if (mime_type == content_type::kMimeTypeMicrosoftExcel)
+    return OpenInMimeType::kMimeTypeMicrosoftExcel;
+  if (mime_type == content_type::kMimeTypeMicrosoftExcelOpenXML)
+    return OpenInMimeType::kMimeTypeMicrosoftExcelOpenXML;
+  return OpenInMimeType::kMimeTypeNotHandled;
+}
+
 void OpenInTabHelper::HandleExportableFile() {
-  // Only "application/pdf" is supported for now.
-  if (web_state_->GetContentsMimeType() != "application/pdf")
+  OpenInMimeType mime_type = GetUmaResult(web_state_->GetContentsMimeType());
+  if (mime_type == OpenInMimeType::kMimeTypeNotHandled)
     return;
 
-  // Try to generate a filename by first looking at |content_disposition_|, then
+  DCHECK_NE(mime_type, OpenInMimeType::kMimeTypeNotHandled);
+  base::UmaHistogramEnumeration("IOS.OpenIn.MimeType", mime_type);
+  base::RecordAction(base::UserMetricsAction("IOS.OpenIn.Presented"));
+
+  // Try to generate a filename by first looking at `content_disposition_`, then
   // at the last component of WebState's last committed URL and if both of these
   // fail use the default filename "document".
   std::string content_disposition;
@@ -58,11 +124,11 @@ void OpenInTabHelper::HandleExportableFile() {
   web::NavigationItem* item =
       web_state_->GetNavigationManager()->GetLastCommittedItem();
   const GURL& last_committed_url = item ? item->GetURL() : GURL::EmptyGURL();
-  base::string16 file_name =
+  std::u16string file_name =
       net::GetSuggestedFilename(last_committed_url, content_disposition,
-                                "",                 // referrer-charset
-                                "",                 // suggested-name
-                                "application/pdf",  // mime-type
+                                "",  // referrer-charset
+                                "",  // suggested-name
+                                web_state_->GetContentsMimeType(),  // mime-type
                                 default_file_name);
   [delegate_ enableOpenInForWebState:web_state_
                      withDocumentURL:last_committed_url

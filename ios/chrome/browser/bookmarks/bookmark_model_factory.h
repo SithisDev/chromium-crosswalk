@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,27 +7,31 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
+
+class ChromeBrowserState;
 
 namespace bookmarks {
 class BookmarkModel;
 }
 
 namespace ios {
-
-class ChromeBrowserState;
-
 // Singleton that owns all BookmarkModels and associates them with
-// ios::ChromeBrowserState.
+// ChromeBrowserState.
 class BookmarkModelFactory : public BrowserStateKeyedServiceFactory {
  public:
   static bookmarks::BookmarkModel* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
   static bookmarks::BookmarkModel* GetForBrowserStateIfExists(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
   static BookmarkModelFactory* GetInstance();
+
+  BookmarkModelFactory(const BookmarkModelFactory&) = delete;
+  BookmarkModelFactory& operator=(const BookmarkModelFactory&) = delete;
+
+  // Returns the default factory, useful in tests where it's null by default.
+  static TestingFactory GetDefaultFactory();
 
  private:
   friend class base::NoDestructor<BookmarkModelFactory>;
@@ -43,8 +47,6 @@ class BookmarkModelFactory : public BrowserStateKeyedServiceFactory {
   web::BrowserState* GetBrowserStateToUse(
       web::BrowserState* context) const override;
   bool ServiceIsNULLWhileTesting() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkModelFactory);
 };
 
 }  // namespace ios

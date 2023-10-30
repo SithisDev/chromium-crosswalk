@@ -1,17 +1,18 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/installation_notifier.h"
 
-#include <stdint.h>
-#import <UIKit/UIKit.h>
+#import "base/task/current_thread.h"
 
-#include "base/ios/block_types.h"
-#include "base/message_loop/message_loop.h"
-#include "ios/web/public/test/test_web_thread.h"
-#include "net/base/backoff_entry.h"
-#include "testing/platform_test.h"
+#import <UIKit/UIKit.h>
+#import <stdint.h>
+
+#import "base/ios/block_types.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "net/base/backoff_entry.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -65,15 +66,15 @@
 @end
 
 @implementation MockNotificationReceiver {
-  int notificationCount_;
+  int _notificationCount;
 }
 
 - (int)notificationCount {
-  return notificationCount_;
+  return _notificationCount;
 }
 
 - (void)receivedNotification {
-  notificationCount_++;
+  _notificationCount++;
 }
 
 @end
@@ -92,9 +93,6 @@
 namespace {
 
 class InstallationNotifierTest : public PlatformTest {
- public:
-  InstallationNotifierTest() : ui_thread_(web::WebThread::UI, &message_loop_) {}
-
  protected:
   void SetUp() override {
     installationNotifier_ = [InstallationNotifier sharedInstance];
@@ -125,8 +123,7 @@ class InstallationNotifierTest : public PlatformTest {
                 50 + jitter * expectedDelayInMSec);
   }
 
-  base::MessageLoopForUI message_loop_;
-  web::TestWebThread ui_thread_;
+  web::WebTaskEnvironment task_environment_;
   __weak InstallationNotifier* installationNotifier_;
   __weak FakeDispatcher* dispatcher_;
   MockNotificationReceiver* notificationReceiver1_;
@@ -203,7 +200,7 @@ TEST_F(InstallationNotifierTest, RegisterAndThenUnregister) {
 
 TEST_F(InstallationNotifierTest, TestExponentialBackoff) {
   OCMStub([application_ canOpenURL:[OCMArg any]]).andReturn(NO);
-  // Making sure that delay is multiplied by |multiplyFactor| every time.
+  // Making sure that delay is multiplied by `multiplyFactor` every time.
   [dispatcher_ executeAfter:0
                       block:^{
                         VerifyDelay(0);

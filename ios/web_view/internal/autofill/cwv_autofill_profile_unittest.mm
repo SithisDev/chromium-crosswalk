@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ TEST_F(CWVAutofillProfileTest, Initialization) {
   autofill::AutofillProfile profile = autofill::test::GetFullProfile();
   CWVAutofillProfile* cwv_profile =
       [[CWVAutofillProfile alloc] initWithProfile:profile];
-  EXPECT_EQ(profile, *cwv_profile.internalProfile);
+  EXPECT_EQ(profile, *[cwv_profile internalProfile]);
 }
 
 // Tests CWVAutofillProfile updates properties.

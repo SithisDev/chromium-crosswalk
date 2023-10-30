@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# Copyright 2019 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,6 +19,9 @@ def GetIosDir():
 
 sys.path.append(os.path.join(GetIosDir(), 'build', 'bots', 'scripts'))
 
+import constants
+import iossim_util
+import test_apps
 import xcodebuild_runner
 
 def GetDefaultBuildDir():
@@ -32,21 +35,23 @@ parser.add_argument('--build-dir', default=GetDefaultBuildDir(),
     help='Chrome build directory')
 parser.add_argument('--out-dir', default='/tmp/cwt_chromedriver',
     help='Output directory for CWTChromeDriver\'s dummy test case')
-parser.add_argument('--os', default='12.2', help='iOS version')
-parser.add_argument('--device', default='iPhone 8', help='Device type')
+parser.add_argument('--os', default='15.5', help='iOS version')
+parser.add_argument('--device', default='iPhone 11 Pro', help='Device type')
+parser.add_argument('--asan-build', help='Use ASan-related libraries',
+    dest='asan_build', action='store_true')
+parser.set_defaults(asan_build=False)
+parser.add_argument('--enable-chrome-logs', action='store_true',
+    help='No-op, recognized as an argument for compatiblity with ChromeDriver')
+parser.add_argument('--verbose', action='store_true',
+    help='No-op, recognized as an argument for compatiblity with ChromeDriver')
+parser.add_argument('--log-path',
+    help='No-op, recognized as an argument for compatiblity with ChromeDriver')
 args=parser.parse_args()
 
 test_app = os.path.join(
     args.build_dir, 'ios_cwt_chromedriver_tests_module-Runner.app')
 host_app = os.path.join(args.build_dir, 'ios_cwt_chromedriver_tests.app')
-destination = 'platform=iOS Simulator,OS=%s,name=%s' % (args.os, args.device)
-
-# Shutdown running simulators. This is needed since a running simulator may
-# be in a hung state.
-# TODO(crbug.com/673423): Change this logic to only shut down the simulator that
-# will be used for this run, when adding support for running multiple instances
-# of CWTChromeDriver.
-subprocess.check_call(['xcrun', 'simctl', 'shutdown', 'booted'])
+destination = iossim_util.get_simulator(args.device, args.os)
 
 if not os.path.exists(args.out_dir):
   os.mkdir(args.out_dir)
@@ -56,11 +61,17 @@ if not os.path.exists(args.out_dir):
 # skipped, meaning that CWTChromeDriver's http server won't get launched.
 output_directory = os.path.join(args.out_dir, 'run%d' %  int(time.time()))
 
-egtests_app = xcodebuild_runner.EgtestsApp(
+inserted_libs = []
+if args.asan_build:
+  inserted_libs = [os.path.join(args.build_dir,
+      'libclang_rt.asan_iossim_dynamic.dylib')]
+
+egtests_app = test_apps.EgtestsApp(
     egtests_app=test_app, test_args=['--port %s' % args.port],
-    host_app_path=host_app)
+    host_app_path=host_app, inserted_libs=inserted_libs)
 
 launch_command = xcodebuild_runner.LaunchCommand(egtests_app, destination,
-    shards=1, retries=1, out_dir=output_directory)
+    shards=1, retries=1, readline_timeout=constants.READLINE_TIMEOUT,
+    out_dir=output_directory)
 
 launch_command.launch()

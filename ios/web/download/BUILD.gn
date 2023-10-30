@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,8 @@ source_set("download") {
   deps = [
     ":download_cookies",
     "//base",
+    "//ios/net",
+    "//ios/web/common:user_agent",
     "//ios/web/net/cookies",
     "//ios/web/public",
     "//ios/web/public/download",
@@ -16,13 +18,25 @@ source_set("download") {
   ]
 
   sources = [
+    "crw_web_view_download.h",
+    "crw_web_view_download.mm",
+    "data_url_download_task.h",
+    "data_url_download_task.mm",
     "download_controller_impl.h",
     "download_controller_impl.mm",
+    "download_native_task_bridge.h",
+    "download_native_task_bridge.mm",
+    "download_native_task_impl.h",
+    "download_native_task_impl.mm",
+    "download_result.h",
+    "download_result.mm",
+    "download_session_task_impl.h",
+    "download_session_task_impl.mm",
     "download_task_impl.h",
     "download_task_impl.mm",
   ]
 
-  libs = [ "UIKit.framework" ]
+  frameworks = [ "UIKit.framework" ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
 }
@@ -31,6 +45,7 @@ source_set("download_cookies") {
   visibility = [ ":*" ]
 
   deps = [
+    "//base",
     "//ios/net",
     "//net",
   ]
@@ -40,7 +55,7 @@ source_set("download_cookies") {
     "download_session_cookie_storage.mm",
   ]
 
-  libs = [ "Foundation.framework" ]
+  frameworks = [ "Foundation.framework" ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
 }
@@ -57,6 +72,9 @@ source_set("download_unittests") {
     "//ios/web/net/cookies",
     "//ios/web/public/download",
     "//ios/web/public/test",
+    "//ios/web/public/test:download_test_utils",
+    "//ios/web/public/test:test_fixture",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//ios/web/test/fakes",
     "//net",
@@ -65,8 +83,11 @@ source_set("download_unittests") {
   ]
 
   sources = [
+    "data_url_download_task_unittest.mm",
     "download_controller_impl_unittest.mm",
+    "download_native_task_impl_unittest.mm",
     "download_session_cookie_storage_unittest.mm",
+    "download_session_task_impl_unittest.mm",
     "download_task_impl_unittest.mm",
   ]
 }
@@ -79,11 +100,11 @@ source_set("download_inttests") {
     "//ios/web/public",
     "//ios/web/public/download",
     "//ios/web/public/test",
+    "//ios/web/public/test:download_test_utils",
+    "//ios/web/public/test:test_fixture",
     "//ios/web/public/test/fakes",
     "//net:test_support",
   ]
 
-  sources = [
-    "download_inttest.mm",
-  ]
+  sources = [ "download_inttest.mm" ]
 }

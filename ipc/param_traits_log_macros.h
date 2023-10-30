@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,10 @@
 #undef IPC_STRUCT_TRAITS_MEMBER
 #undef IPC_STRUCT_TRAITS_PARENT
 #undef IPC_STRUCT_TRAITS_END
-#define IPC_STRUCT_TRAITS_BEGIN(struct_name) \
+#define IPC_STRUCT_TRAITS_BEGIN(struct_name)                                \
   void ParamTraits<struct_name>::Log(const param_type& p, std::string* l) { \
-    bool needs_comma = false; \
+    bool needs_comma = false;                                               \
+    (void)needs_comma;                                                      \
     l->append("(");
 #define IPC_STRUCT_TRAITS_MEMBER(name) \
     if (needs_comma) \
@@ -39,7 +40,7 @@
       ParamTraits<type>::Log(p, l); \
       needs_comma = true;
 #define IPC_STRUCT_TRAITS_END() \
-    l->append(")"); \
+  l->append(")");               \
   }
 
 #undef IPC_ENUM_TRAITS_VALIDATE

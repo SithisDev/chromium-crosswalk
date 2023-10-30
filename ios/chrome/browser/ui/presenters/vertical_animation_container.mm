@@ -1,12 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/presenters/vertical_animation_container.h"
 
-#include "base/logging.h"
+#import "base/check.h"
 #import "ios/chrome/browser/ui/presenters/contained_presenter_delegate.h"
-#include "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -87,7 +87,10 @@ NSTimeInterval kAnimationDuration = 0.2;
     [self.baseViewController.view layoutIfNeeded];
   };
   auto completion = ^(BOOL finished) {
-    [self.delegate containedPresenterDidPresent:self];
+    if ([self.delegate
+            respondsToSelector:@selector(containedPresenterDidPresent:)]) {
+      [self.delegate containedPresenterDidPresent:self];
+    }
   };
 
   if (animated) {
@@ -116,7 +119,10 @@ NSTimeInterval kAnimationDuration = 0.2;
   };
   auto completion = ^(BOOL finished) {
     [self cleanUpAfterDismissal];
-    [self.delegate containedPresenterDidDismiss:self];
+    if ([self.delegate
+            respondsToSelector:@selector(containedPresenterDidDismiss:)]) {
+      [self.delegate containedPresenterDidDismiss:self];
+    }
   };
 
   if (animated) {
@@ -129,11 +135,11 @@ NSTimeInterval kAnimationDuration = 0.2;
                      completion:completion];
   } else {
     // Just execute the completion block synchronously if the dismissal isn't
-    // animated. |animations| isn't called because (a) -cleanupAfterDismissal
+    // animated. `animations` isn't called because (a) -cleanupAfterDismissal
     // removes the presented view controller from the view hierarchy, and (b)
     // in some contexts a non-animated dismissal may occur when the base view
     // controller is no longer on screen, and the constraint activation in
-    // |animations| will crash.
+    // `animations` will crash.
     completion(YES);
   }
 }

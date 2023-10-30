@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,55 +7,61 @@
 
 #import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 
-namespace ios {
-class ChromeBrowserState;
+namespace web {
+class WebState;
 }
 
-@protocol ApplicationCommands;
-@protocol BrowserCommands;
-@class ContentSuggestionsHeaderViewController;
+@class ContentSuggestionsViewController;
+@protocol FeedDelegate;
 @protocol NewTabPageControllerDelegate;
-@protocol OmniboxFocuser;
-@protocol FakeboxFocuser;
-@protocol SnackbarCommands;
-class WebStateList;
+@protocol NewTabPageDelegate;
+@class NTPHomeMediator;
+@protocol ThumbStripSupporting;
+@class ViewRevealingVerticalPanHandler;
 
 // Coordinator to manage the Suggestions UI via a
 // ContentSuggestionsViewController.
 @interface ContentSuggestionsCoordinator : ChromeCoordinator
 
-// BrowserState used to create the ContentSuggestionFactory.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-// URLLoader used to open pages.
-@property(nonatomic, assign) WebStateList* webStateList;
+// Webstate associated with this coordinator.
+@property(nonatomic, assign) web::WebState* webState;
+
 @property(nonatomic, weak) id<NewTabPageControllerDelegate> toolbarDelegate;
-@property(nonatomic, weak) id<ApplicationCommands,
-                              BrowserCommands,
-                              OmniboxFocuser,
-                              FakeboxFocuser,
-                              SnackbarCommands>
-    dispatcher;
-// Whether the Suggestions UI is displayed. If this is true, start is a no-op.
-@property(nonatomic, readonly) BOOL visible;
 
+// YES if the coordinator has started. If YES, start is a no-op.
+@property(nonatomic, readonly) BOOL started;
+
+// The ViewController that this coordinator managers.
 @property(nonatomic, strong, readonly)
-    ContentSuggestionsHeaderViewController* headerController;
+    ContentSuggestionsViewController* viewController;
 
-@property(nonatomic, strong, readonly)
-    UICollectionViewController* viewController;
+// Allows for the in-flight enabling/disabling of the thumb strip.
+@property(nonatomic, weak, readonly) id<ThumbStripSupporting>
+    thumbStripSupporting;
 
-// Dismisses all modals owned by the NTP mediator.
-- (void)dismissModals;
+// NTP Mediator used by this Coordinator.
+// TODO(crbug.com/1114792): Move all usage of this mediator to NTPCoordinator.
+// It might also be necessary to split it and create a ContentSuggestions
+// mediator for non NTP logic.
+@property(nonatomic, strong) NTPHomeMediator* ntpMediator;
 
-// Called when a snapshot of the content will be taken.
-- (void)willUpdateSnapshot;
+// Delegate for NTP related actions.
+@property(nonatomic, weak) id<NewTabPageDelegate> ntpDelegate;
 
-// The content inset and offset of the scroll view.
-- (UIEdgeInsets)contentInset;
-- (CGPoint)contentOffset;
+// Delegate used to communicate to communicate events to the feed.
+@property(nonatomic, weak) id<FeedDelegate> feedDelegate;
 
-// The current NTP view.
-- (UIView*)view;
+// Reloads the suggestions.
+- (void)reload;
+
+// The location bar has lost focus.
+- (void)locationBarDidResignFirstResponder;
+
+// Tell location bar has taken focus.
+- (void)locationBarDidBecomeFirstResponder;
+
+// Configure Content Suggestions if showing the Start Surface.
+- (void)configureStartSurfaceIfNeeded;
 
 @end
 

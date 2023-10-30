@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 namespace language {
 class LanguageModelManager;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
 }
 
 // Manages the language model for each profile. The particular language model
@@ -30,7 +23,11 @@ class LanguageModelManagerFactory : public BrowserStateKeyedServiceFactory {
  public:
   static LanguageModelManagerFactory* GetInstance();
   static language::LanguageModelManager* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
+
+  LanguageModelManagerFactory(const LanguageModelManagerFactory&) = delete;
+  LanguageModelManagerFactory& operator=(const LanguageModelManagerFactory&) =
+      delete;
 
  private:
   friend class base::NoDestructor<LanguageModelManagerFactory>;
@@ -43,10 +40,6 @@ class LanguageModelManagerFactory : public BrowserStateKeyedServiceFactory {
       web::BrowserState* context) const override;
   web::BrowserState* GetBrowserStateToUse(
       web::BrowserState* state) const override;
-  void RegisterBrowserStatePrefs(
-      user_prefs::PrefRegistrySyncable* registry) override;
-
-  DISALLOW_COPY_AND_ASSIGN(LanguageModelManagerFactory);
 };
 
 #endif  // IOS_CHROME_BROWSER_LANGUAGE_LANGUAGE_MODEL_MANAGER_FACTORY_H_

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,47 +8,63 @@
 #include <unordered_map>
 #include <utility>
 
+#import <WebKit/WebKit.h>
+
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
-#import "components/autofill/ios/browser/js_autofill_manager.h"
-#import "components/autofill/ios/browser/js_suggestion_manager.h"
+#include "components/autofill/ios/form_util/unique_id_data_tab_helper.h"
 #include "components/language/ios/browser/ios_language_detection_tab_helper.h"
+#include "components/password_manager/core/browser/password_manager.h"
+#import "components/password_manager/ios/password_controller_driver_helper.h"
+#import "components/password_manager/ios/shared_password_controller.h"
+#import "components/safe_browsing/ios/browser/safe_browsing_url_allow_list.h"
 #include "components/url_formatter/elide_url.h"
 #include "google_apis/google_api_keys.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_container.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_tab_allow_list.h"
+#import "ios/components/security_interstitials/lookalikes/lookalike_url_tab_helper.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_client.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_query_manager.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_tab_helper.h"
+#import "ios/components/security_interstitials/safe_browsing/safe_browsing_unsafe_resource_container.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #include "ios/web/public/favicon/favicon_url.h"
 #include "ios/web/public/js_messaging/web_frame.h"
+#import "ios/web/public/js_messaging/web_frame_util.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/navigation/navigation_context.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/navigation/referrer.h"
 #include "ios/web/public/navigation/reload_type.h"
+#import "ios/web/public/ui/context_menu_params.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/context_menu_params.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_delegate_bridge.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
-#include "ios/web_view/cwv_web_view_buildflags.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_view_only/wk_web_view_configuration_util.h"
+#include "ios/web_view/internal/app/application_context.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_controller_internal.h"
+#import "ios/web_view/internal/autofill/web_view_autofill_client_ios.h"
+#import "ios/web_view/internal/cwv_back_forward_list_internal.h"
 #import "ios/web_view/internal/cwv_favicon_internal.h"
 #import "ios/web_view/internal/cwv_html_element_internal.h"
 #import "ios/web_view/internal/cwv_navigation_action_internal.h"
 #import "ios/web_view/internal/cwv_script_command_internal.h"
-#import "ios/web_view/internal/cwv_scroll_view_internal.h"
 #import "ios/web_view/internal/cwv_ssl_status_internal.h"
 #import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #import "ios/web_view/internal/language/web_view_url_language_histogram_factory.h"
+#import "ios/web_view/internal/passwords/web_view_password_manager_client.h"
+#import "ios/web_view/internal/safe_browsing/web_view_safe_browsing_client_factory.h"
 #import "ios/web_view/internal/translate/cwv_translation_controller_internal.h"
 #import "ios/web_view/internal/translate/web_view_translate_client.h"
 #include "ios/web_view/internal/web_view_browser_state.h"
 #include "ios/web_view/internal/web_view_global_state_util.h"
 #import "ios/web_view/internal/web_view_java_script_dialog_presenter.h"
+#import "ios/web_view/internal/web_view_message_handler_java_script_feature.h"
 #import "ios/web_view/internal/web_view_web_state_policy_decider.h"
 #import "ios/web_view/public/cwv_navigation_delegate.h"
 #import "ios/web_view/public/cwv_preview_element_info.h"
@@ -66,20 +82,69 @@ namespace {
 // A key used in NSCoder to store the session storage object.
 NSString* const kSessionStorageKey = @"sessionStorage";
 
-// Converts base::DictionaryValue to NSDictionary.
-NSDictionary* NSDictionaryFromDictionaryValue(
-    const base::DictionaryValue& value) {
+// Converts base::Value expected to be a dictionary or list to NSDictionary or
+// NSArray, respectively.
+id NSObjectFromCollectionValue(const base::Value* value) {
+  DCHECK(value->is_dict() || value->is_list())
+      << "Incorrect value type: " << value->type();
+
   std::string json;
-  if (!base::JSONWriter::Write(value, &json)) {
-    NOTREACHED() << "Failed to convert base::DictionaryValue to JSON";
-    return nil;
-  }
+  const bool success = base::JSONWriter::Write(*value, &json);
+  DCHECK(success) << "Failed to convert base::Value to JSON";
 
   NSData* json_data = [NSData dataWithBytes:json.c_str() length:json.length()];
-  NSDictionary* ns_dictionary =
+  id ns_object = [NSJSONSerialization JSONObjectWithData:json_data
+                                                 options:kNilOptions
+                                                   error:nil];
+  DCHECK(ns_object) << "Failed to convert JSON to Collection";
+  return ns_object;
+}
+
+// Converts base::Value to an appropriate Obj-C object.
+// |value| must not be null.
+id NSObjectFromValue(const base::Value* value) {
+  switch (value->type()) {
+    case base::Value::Type::NONE:
+      return nil;
+    case base::Value::Type::BOOLEAN:
+      return @(value->GetBool());
+    case base::Value::Type::INTEGER:
+      return @(value->GetInt());
+    case base::Value::Type::DOUBLE:
+      return @(value->GetDouble());
+    case base::Value::Type::STRING:
+      return base::SysUTF8ToNSString(value->GetString());
+    case base::Value::Type::BINARY:
+      // Unsupported.
+      return nil;
+    case base::Value::Type::DICT:
+    case base::Value::Type::LIST:
+      return NSObjectFromCollectionValue(value);
+  }
+  return nil;
+}
+
+// Converts base::Value expected to be a dictionary to NSDictionary.
+NSDictionary* NSDictionaryFromDictionaryValue(const base::Value& value) {
+  DCHECK(value.is_dict()) << "Incorrect value type: " << value.type();
+
+  NSDictionary* ns_dictionary = base::mac::ObjCCastStrict<NSDictionary>(
+      NSObjectFromCollectionValue(&value));
+  DCHECK(ns_dictionary) << "Failed to convert JSON to NSDictionary";
+  return ns_dictionary;
+}
+
+// Converts base::Value::Dict to NSDictionary.
+NSDictionary* NSDictionaryFromDictValue(const base::Value::Dict& value) {
+  std::string json;
+  const bool success = base::JSONWriter::Write(value, &json);
+  DCHECK(success) << "Failed to convert base::Value to JSON";
+
+  NSData* json_data = [NSData dataWithBytes:json.c_str() length:json.length()];
+  NSDictionary* ns_dictionary = base::mac::ObjCCastStrict<NSDictionary>(
       [NSJSONSerialization JSONObjectWithData:json_data
                                       options:kNilOptions
-                                        error:nil];
+                                        error:nil]);
   DCHECK(ns_dictionary) << "Failed to convert JSON to NSDictionary";
   return ns_dictionary;
 }
@@ -101,7 +166,7 @@ class WebViewHolder : public web::WebStateUserData<WebViewHolder> {
 WEB_STATE_USER_DATA_KEY_IMPL(WebViewHolder)
 }  // namespace
 
-@interface CWVWebView ()<CRWWebStateDelegate, CRWWebStateObserver> {
+@interface CWVWebView () {
   CWVWebViewConfiguration* _configuration;
   std::unique_ptr<web::WebState> _webState;
   std::unique_ptr<web::WebStateDelegateBridge> _webStateDelegate;
@@ -113,10 +178,9 @@ WEB_STATE_USER_DATA_KEY_IMPL(WebViewHolder)
   std::unique_ptr<ios_web_view::WebViewJavaScriptDialogPresenter>
       _javaScriptDialogPresenter;
   // Stores the script command callbacks with subscriptions.
-  std::unordered_map<
-      std::string,
-      std::pair<web::WebState::ScriptCommandCallback,
-                std::unique_ptr<web::WebState::ScriptCommandSubscription>>>
+  std::unordered_map<std::string,
+                     std::pair<web::WebState::ScriptCommandCallback,
+                               base::CallbackListSubscription>>
       _scriptCommandCallbacks;
   CRWSessionStorage* _cachedSessionStorage;
 }
@@ -132,21 +196,16 @@ WEB_STATE_USER_DATA_KEY_IMPL(WebViewHolder)
 @property(nonatomic, readwrite) NSURL* visibleURL;
 @property(nonatomic, readwrite) NSString* visibleLocationString;
 @property(nonatomic, readwrite) CWVSSLStatus* visibleSSLStatus;
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
-@property(nonatomic, readonly) CWVAutofillController* autofillController;
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 
 // Updates the availability of the back/forward navigation properties exposed
-// through |canGoBack| and |canGoForward|.
+// through |canGoBack| and |canGoForward|, and also updates |backForwardList|.
 - (void)updateNavigationAvailability;
 // Updates the URLs exposed through |lastCommittedURL| and |visibleURL|.
 - (void)updateCurrentURLs;
 // Updates |title| property.
 - (void)updateTitle;
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 // Returns a new CWVAutofillController created from |_webState|.
 - (CWVAutofillController*)newAutofillController;
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 // Returns a new CWVTranslationController created from |_webState|.
 - (CWVTranslationController*)newTranslationController;
 // Updates |_webState| visiblity.
@@ -154,13 +213,16 @@ WEB_STATE_USER_DATA_KEY_IMPL(WebViewHolder)
 
 @end
 
-static NSString* gUserAgentProduct = nil;
+namespace {
+NSString* gCustomUserAgent = nil;
+NSString* gUserAgentProduct = nil;
+BOOL gChromeContextMenuEnabled = NO;
+}  // namespace
 
 @implementation CWVWebView
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 @synthesize autofillController = _autofillController;
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
+@synthesize backForwardList = _backForwardList;
 @synthesize canGoBack = _canGoBack;
 @synthesize canGoForward = _canGoForward;
 @synthesize configuration = _configuration;
@@ -171,7 +233,6 @@ static NSString* gUserAgentProduct = nil;
 @synthesize title = _title;
 @synthesize translationController = _translationController;
 @synthesize UIDelegate = _UIDelegate;
-@synthesize scrollView = _scrollView;
 @synthesize visibleURL = _visibleURL;
 @synthesize visibleSSLStatus = _visibleSSLStatus;
 
@@ -181,6 +242,22 @@ static NSString* gUserAgentProduct = nil;
   }
 
   ios_web_view::InitializeGlobalState();
+}
+
++ (BOOL)chromeContextMenuEnabled {
+  return gChromeContextMenuEnabled;
+}
+
++ (void)setChromeContextMenuEnabled:(BOOL)newValue {
+  gChromeContextMenuEnabled = newValue;
+}
+
++ (NSString*)customUserAgent {
+  return gCustomUserAgent;
+}
+
++ (void)setCustomUserAgent:(NSString*)customUserAgent {
+  gCustomUserAgent = [customUserAgent copy];
 }
 
 + (NSString*)userAgentProduct {
@@ -215,14 +292,30 @@ static NSString* gUserAgentProduct = nil;
 
 - (instancetype)initWithFrame:(CGRect)frame
                 configuration:(CWVWebViewConfiguration*)configuration {
+  return [self initWithFrame:frame
+               configuration:configuration
+             WKConfiguration:nil
+            createdWKWebView:nil];
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+                configuration:(CWVWebViewConfiguration*)configuration
+              WKConfiguration:(WKWebViewConfiguration*)wkConfiguration
+             createdWKWebView:(WKWebView**)createdWebView {
   self = [super initWithFrame:frame];
   if (self) {
     _configuration = configuration;
     [_configuration registerWebView:self];
-    _scrollView = [[CWVScrollView alloc] init];
-    [self resetWebStateWithSessionStorage:nil];
+
+    [self resetWebStateWithSessionStorage:nil
+                          WKConfiguration:wkConfiguration
+                         createdWKWebView:createdWebView];
   }
   return self;
+}
+
+- (UIScrollView*)scrollView {
+  return [_webState->GetWebViewProxy().scrollViewProxy asUIScrollView];
 }
 
 - (BOOL)allowsBackForwardNavigationGestures {
@@ -255,6 +348,26 @@ static NSString* gUserAgentProduct = nil;
     _webState->GetNavigationManager()->GoForward();
 }
 
+- (BOOL)goToBackForwardListItem:(CWVBackForwardListItem*)item {
+  if (!_backForwardList) {
+    return NO;  // Do nothing if |_backForwardList| is not generated yet.
+  }
+
+  if ([item isEqual:_backForwardList.currentItem]) {
+    return NO;
+  }
+
+  int index = [_backForwardList internalIndexOfItem:item];
+  if (index == -1) {
+    return NO;
+  }
+
+  DCHECK(_webState);
+  web::NavigationManager* navigationManager = _webState->GetNavigationManager();
+  navigationManager->GoToIndex(index);
+  return YES;
+}
+
 - (void)reload {
   // |check_for_repost| is false because CWVWebView does not support repost form
   // dialogs.
@@ -284,10 +397,54 @@ static NSString* gUserAgentProduct = nil;
                                        completionHandler:completionHandler];
 }
 
+- (void)evaluateJavaScript:(NSString*)javaScriptString
+                completion:(void (^)(id, NSError*))completion {
+  web::WebFrame* mainFrame = web::GetMainFrame(_webState.get());
+  if (!mainFrame) {
+    if (completion) {
+      completion(nil, [NSError errorWithDomain:@"org.chromium.chromewebview"
+                                          code:0
+                                      userInfo:nil]);
+    }
+    return;
+  }
+
+  if (!completion) {
+    mainFrame->ExecuteJavaScript(base::SysNSStringToUTF16(javaScriptString));
+    return;
+  }
+
+  mainFrame->ExecuteJavaScript(
+      base::SysNSStringToUTF16(javaScriptString),
+      base::BindOnce(^(const base::Value* result, NSError* error) {
+        id jsResult = nil;
+        if (!error && result) {
+          jsResult = NSObjectFromValue(result);
+        }
+        completion(jsResult, error);
+      }));
+}
+
 - (void)setUIDelegate:(id<CWVUIDelegate>)UIDelegate {
   _UIDelegate = UIDelegate;
 
   _javaScriptDialogPresenter->SetUIDelegate(_UIDelegate);
+}
+
+- (void)setNavigationDelegate:(id<CWVNavigationDelegate>)navigationDelegate {
+  _navigationDelegate = navigationDelegate;
+
+  [self attachSecurityInterstitialHelpersToWebStateIfNecessary];
+}
+
+#pragma mark - UIResponder
+
+- (BOOL)becomeFirstResponder {
+  if (_webState) {
+    return [_webState->GetWebViewProxy() becomeFirstResponder];
+  } else {
+    return [super becomeFirstResponder];
+  }
 }
 
 #pragma mark - UIView
@@ -306,16 +463,18 @@ static NSString* gUserAgentProduct = nil;
 }
 
 - (void)webState:(web::WebState*)webState
-    navigationItemsPruned:(size_t)pruned_item_count {
-  [self updateCurrentURLs];
-}
-
-- (void)webState:(web::WebState*)webState
     didStartNavigation:(web::NavigationContext*)navigation {
   [self updateNavigationAvailability];
-  SEL selector = @selector(webViewDidStartProvisionalNavigation:);
-  if ([_navigationDelegate respondsToSelector:selector]) {
-    [_navigationDelegate webViewDidStartProvisionalNavigation:self];
+
+  if (!navigation->IsSameDocument()) {
+    SEL oldSelector = @selector(webViewDidStartProvisionalNavigation:);
+    if ([_navigationDelegate respondsToSelector:oldSelector]) {
+      [_navigationDelegate webViewDidStartProvisionalNavigation:self];
+    }
+    SEL newSelector = @selector(webViewDidStartNavigation:);
+    if ([_navigationDelegate respondsToSelector:newSelector]) {
+      [_navigationDelegate webViewDidStartNavigation:self];
+    }
   }
 }
 
@@ -327,7 +486,7 @@ static NSString* gUserAgentProduct = nil;
   // TODO(crbug.com/898357): Remove this once crbug.com/898357 is fixed.
   [self updateVisibleSSLStatus];
 
-  if (navigation->HasCommitted() &&
+  if (navigation->HasCommitted() && !navigation->IsSameDocument() &&
       [_navigationDelegate
           respondsToSelector:@selector(webViewDidCommitNavigation:)]) {
     [_navigationDelegate webViewDidCommitNavigation:self];
@@ -346,6 +505,10 @@ static NSString* gUserAgentProduct = nil;
     // Failure callbacks will be handled inside |webState:didFinishNavigation:|.
     return;
   }
+
+  // TODO(crbug.com/1374071): Fragment navigations currently skip calling
+  // `webViewDidStartNavigation:` and `webViewDidCommitNavigation:`, and instead
+  // only calls `webViewDidFinishNavigation:` below. Fix this inconsistency.
   SEL selector = @selector(webViewDidFinishNavigation:);
   if ([_navigationDelegate respondsToSelector:selector]) {
     [_navigationDelegate webViewDidFinishNavigation:self];
@@ -384,25 +547,7 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
-- (void)webState:(web::WebState*)webState
-    handleContextMenu:(const web::ContextMenuParams&)params {
-  SEL selector = @selector(webView:runContextMenuWithTitle:forHTMLElement:inView
-                                  :userGestureLocation:);
-  if (![_UIDelegate respondsToSelector:selector]) {
-    return;
-  }
-  NSURL* hyperlink = net::NSURLWithGURL(params.link_url);
-  NSURL* mediaSource = net::NSURLWithGURL(params.src_url);
-  CWVHTMLElement* HTMLElement =
-      [[CWVHTMLElement alloc] initWithHyperlink:hyperlink
-                                    mediaSource:mediaSource
-                                           text:params.link_text];
-  [_UIDelegate webView:self
-      runContextMenuWithTitle:params.menu_title
-               forHTMLElement:HTMLElement
-                       inView:params.view
-          userGestureLocation:params.location];
-}
+#pragma mark - CRWWebStateDelegate
 
 - (web::WebState*)webState:(web::WebState*)webState
     createNewWebStateForURL:(const GURL&)URL
@@ -437,40 +582,51 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
+- (web::WebState*)webState:(web::WebState*)webState
+         openURLWithParams:(const web::WebState::OpenURLParams&)params {
+  web::NavigationManager::WebLoadParams load_params(params.url);
+  load_params.referrer = params.referrer;
+  load_params.transition_type = params.transition;
+  load_params.is_renderer_initiated = params.is_renderer_initiated;
+  load_params.virtual_url = params.virtual_url;
+  _webState->GetNavigationManager()->LoadURLWithParams(load_params);
+  [self updateCurrentURLs];
+  return _webState.get();
+}
+
 - (web::JavaScriptDialogPresenter*)javaScriptDialogPresenterForWebState:
     (web::WebState*)webState {
   return _javaScriptDialogPresenter.get();
 }
 
-- (BOOL)webState:(web::WebState*)webState
-    shouldPreviewLinkWithURL:(const GURL&)linkURL {
-  SEL selector = @selector(webView:shouldPreviewElement:);
+- (void)webState:(web::WebState*)webState
+    contextMenuConfigurationForParams:(const web::ContextMenuParams&)params
+                    completionHandler:(void (^)(UIContextMenuConfiguration*))
+                                          completionHandler {
+  SEL selector = @selector(webView:
+      contextMenuConfigurationForElement:completionHandler:);
   if ([_UIDelegate respondsToSelector:selector]) {
-    CWVPreviewElementInfo* elementInfo = [[CWVPreviewElementInfo alloc]
-        initWithLinkURL:net::NSURLWithGURL(linkURL)];
-    return [_UIDelegate webView:self shouldPreviewElement:elementInfo];
-  }
-  return NO;
-}
+    NSURL* hyperlink = net::NSURLWithGURL(params.link_url);
+    NSURL* mediaSource = net::NSURLWithGURL(params.src_url);
+    CWVHTMLElement* HTMLElement =
+        [[CWVHTMLElement alloc] initWithHyperlink:hyperlink
+                                      mediaSource:mediaSource
+                                             text:params.text];
 
-- (UIViewController*)webState:(web::WebState*)webState
-    previewingViewControllerForLinkWithURL:(const GURL&)linkURL {
-  SEL selector = @selector(webView:previewingViewControllerForElement:);
-  if ([_UIDelegate respondsToSelector:selector]) {
-    CWVPreviewElementInfo* elementInfo = [[CWVPreviewElementInfo alloc]
-        initWithLinkURL:net::NSURLWithGURL(linkURL)];
-    return [_UIDelegate webView:self
-        previewingViewControllerForElement:elementInfo];
+    [_UIDelegate webView:self
+        contextMenuConfigurationForElement:HTMLElement
+                         completionHandler:completionHandler];
+  } else {
+    completionHandler(nil);
   }
-  return nil;
 }
 
 - (void)webState:(web::WebState*)webState
-    commitPreviewingViewController:(UIViewController*)previewingViewController {
-  SEL selector = @selector(webView:commitPreviewingViewController:);
+    contextMenuWillCommitWithAnimator:
+        (id<UIContextMenuInteractionCommitAnimating>)animator {
+  SEL selector = @selector(webView:contextMenuWillCommitWithAnimator:);
   if ([_UIDelegate respondsToSelector:selector]) {
-    [_UIDelegate webView:self
-        commitPreviewingViewController:previewingViewController];
+    [_UIDelegate webView:self contextMenuWillCommitWithAnimator:animator];
   }
 }
 
@@ -483,11 +639,20 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
+- (id<CRWResponderInputView>)webStateInputViewProvider:
+    (web::WebState*)webState {
+  if (self.inputAccessoryView != nil) {
+    return self;
+  } else {
+    return nil;
+  }
+}
+
 - (void)addScriptCommandHandler:(id<CWVScriptCommandHandler>)handler
                   commandPrefix:(NSString*)commandPrefix {
   CWVWebView* __weak weakSelf = self;
   const web::WebState::ScriptCommandCallback callback = base::BindRepeating(
-      ^(const base::DictionaryValue& content, const GURL& mainDocumentURL,
+      ^(const base::Value& content, const GURL& mainDocumentURL,
         bool userInteracting, web::WebFrame* senderFrame) {
         NSDictionary* nsContent = NSDictionaryFromDictionaryValue(content);
         CWVScriptCommand* command = [[CWVScriptCommand alloc]
@@ -511,6 +676,22 @@ static NSString* gUserAgentProduct = nil;
   _scriptCommandCallbacks.erase(stdCommandPrefix);
 }
 
+- (void)addMessageHandler:(void (^)(NSDictionary* payload))handler
+               forCommand:(NSString*)nsCommand {
+  DCHECK(handler);
+  std::string command = base::SysNSStringToUTF8(nsCommand);
+  WebViewMessageHandlerJavaScriptFeature::GetInstance()->RegisterHandler(
+      command, base::BindRepeating(^(const base::Value::Dict& payload) {
+        handler(NSDictionaryFromDictValue(payload));
+      }));
+}
+
+- (void)removeMessageHandlerForCommand:(NSString*)nsCommand {
+  std::string command = base::SysNSStringToUTF8(nsCommand);
+  WebViewMessageHandlerJavaScriptFeature::GetInstance()->UnregisterHandler(
+      command);
+}
+
 #pragma mark - Translation
 
 - (CWVTranslationController*)translationController {
@@ -521,19 +702,20 @@ static NSString* gUserAgentProduct = nil;
 }
 
 - (CWVTranslationController*)newTranslationController {
+  ios_web_view::WebViewBrowserState* browserState =
+      ios_web_view::WebViewBrowserState::FromBrowserState(
+          _webState->GetBrowserState());
   language::IOSLanguageDetectionTabHelper::CreateForWebState(
       _webState.get(),
       ios_web_view::WebViewUrlLanguageHistogramFactory::GetForBrowserState(
-          ios_web_view::WebViewBrowserState::FromBrowserState(
-              _webState->GetBrowserState())));
-  ios_web_view::WebViewTranslateClient::CreateForWebState(_webState.get());
-  ios_web_view::WebViewTranslateClient* translateClient =
-      ios_web_view::WebViewTranslateClient::FromWebState(_webState.get());
+          browserState));
+  auto translateClient = ios_web_view::WebViewTranslateClient::Create(
+      browserState, _webState.get());
   return [[CWVTranslationController alloc]
-      initWithTranslateClient:translateClient];
+      initWithWebState:_webState.get()
+       translateClient:std::move(translateClient)];
 }
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 #pragma mark - Autofill
 
 - (CWVAutofillController*)autofillController {
@@ -544,25 +726,43 @@ static NSString* gUserAgentProduct = nil;
 }
 
 - (CWVAutofillController*)newAutofillController {
+  UniqueIDDataTabHelper::CreateForWebState(_webState.get());
+
+  auto autofillClient = autofill::WebViewAutofillClientIOS::Create(
+      _webState.get(), _configuration.browserState);
   AutofillAgent* autofillAgent = [[AutofillAgent alloc]
       initWithPrefService:_configuration.browserState->GetPrefs()
                  webState:_webState.get()];
-  JsAutofillManager* JSAutofillManager =
-      base::mac::ObjCCastStrict<JsAutofillManager>(
-          [_webState->GetJSInjectionReceiver()
-              instanceOfClass:[JsAutofillManager class]]);
-  JsSuggestionManager* JSSuggestionManager =
-      base::mac::ObjCCastStrict<JsSuggestionManager>(
-          [_webState->GetJSInjectionReceiver()
-              instanceOfClass:[JsSuggestionManager class]]);
-  [JSSuggestionManager setWebFramesManager:_webState->GetWebFramesManager()];
-  return [[CWVAutofillController alloc] initWithWebState:_webState.get()
-                                           autofillAgent:autofillAgent
-                                       JSAutofillManager:JSAutofillManager
-                                     JSSuggestionManager:JSSuggestionManager];
-}
 
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
+  auto passwordManagerClient =
+      ios_web_view::WebViewPasswordManagerClient::Create(
+          _webState.get(), _configuration.browserState);
+  auto passwordManager = std::make_unique<password_manager::PasswordManager>(
+      passwordManagerClient.get());
+
+  PasswordFormHelper* formHelper =
+      [[PasswordFormHelper alloc] initWithWebState:_webState.get()];
+  PasswordSuggestionHelper* suggestionHelper =
+      [[PasswordSuggestionHelper alloc] initWithWebState:_webState.get()];
+  PasswordControllerDriverHelper* driverHelper =
+      [[PasswordControllerDriverHelper alloc] initWithWebState:_webState.get()];
+  SharedPasswordController* passwordController =
+      [[SharedPasswordController alloc] initWithWebState:_webState.get()
+                                                 manager:passwordManager.get()
+                                              formHelper:formHelper
+                                        suggestionHelper:suggestionHelper
+                                            driverHelper:driverHelper];
+
+  return [[CWVAutofillController alloc]
+           initWithWebState:_webState.get()
+             autofillClient:std::move(autofillClient)
+              autofillAgent:autofillAgent
+            passwordManager:std::move(passwordManager)
+      passwordManagerClient:std::move(passwordManagerClient)
+         passwordController:passwordController
+          applicationLocale:ios_web_view::ApplicationContext::GetInstance()
+                                ->GetApplicationLocale()];
+}
 
 #pragma mark - Preserving and Restoring State
 
@@ -586,12 +786,17 @@ static NSString* gUserAgentProduct = nil;
   [super decodeRestorableStateWithCoder:coder];
   CRWSessionStorage* sessionStorage =
       [coder decodeObjectForKey:kSessionStorageKey];
-  [self resetWebStateWithSessionStorage:sessionStorage];
+  [self resetWebStateWithSessionStorage:sessionStorage
+                        WKConfiguration:nil
+                       createdWKWebView:nil];
 }
 
 #pragma mark - Private methods
 
 - (void)updateWebStateVisibility {
+  if (_webState == nullptr) {
+    return;
+  }
   if (self.superview) {
     _webState->WasShown();
   } else {
@@ -602,8 +807,15 @@ static NSString* gUserAgentProduct = nil;
 // Creates a WebState instance and assigns it to |_webState|.
 // It replaces the old |_webState| if any.
 // The WebState is restored from |sessionStorage| if provided.
-- (void)resetWebStateWithSessionStorage:
-    (nullable CRWSessionStorage*)sessionStorage {
+//
+// If |wkConfiguration| is provided, the underlying WKWebView is
+// initialized with |wkConfiguration|, and assigned to
+// |*createdWKWebView| if |createdWKWebView| is not nil.
+// |*createdWKWebView| will be provided only if |wkConfiguration| is provided,
+// otherwise it will always be reset to nil.
+- (void)resetWebStateWithSessionStorage:(CRWSessionStorage*)sessionStorage
+                        WKConfiguration:(WKWebViewConfiguration*)wkConfiguration
+                       createdWKWebView:(WKWebView**)createdWebView {
   if (_webState) {
     if (_webStateObserver) {
       _webState->RemoveObserver(_webStateObserver.get());
@@ -629,6 +841,31 @@ static NSString* gUserAgentProduct = nil;
     _webState = web::WebState::Create(webStateCreateParams);
   }
 
+  // WARNING: NOTHING should be here between |web::WebState::Create()| and
+  // |web::EnsureWebViewCreatedWithConfiguration()|, as this is the requirement
+  // of |web::EnsureWebViewCreatedWithConfiguration()|
+
+  WKWebView* webView = nil;
+  if (wkConfiguration) {
+    // When |wkConfiguration| is nil, |self| could be a newly opened web view
+    // e.g., triggered by JavaScript "window.open()" function. In that case, if
+    // |self| is not created by the WKWebViewConfiguration provided by WebKit's
+    // delegate method
+    // (https://cs.chromium.org/chromium/src/ios/web/web_state/ui/crw_wk_ui_handler.mm?q=crw_wk_ui_handler&sq=package:chromium&dr=C&l=61)
+    // then calling |web::EnsureWebViewCreatedWithConfiguration()| here would
+    // result in a crash (https://crbug.com/1054276). Now, we lazily create the
+    // WKWebView inside |_webState| when |wkConfiguration| is not nil, and the
+    // correct WKWebViewConfiguration will be passed inside //ios/web.
+    webView = web::EnsureWebViewCreatedWithConfiguration(_webState.get(),
+                                                         wkConfiguration);
+  }
+
+  if (createdWebView) {
+    // If the created webView is needed, returns it by the out variable way.
+    *createdWebView = webView;
+  }
+
+  [self attachSecurityInterstitialHelpersToWebStateIfNecessary];
   WebViewHolder::CreateForWebState(_webState.get());
   WebViewHolder::FromWebState(_webState.get())->set_web_view(self);
 
@@ -637,6 +874,9 @@ static NSString* gUserAgentProduct = nil;
   }
   _webState->AddObserver(_webStateObserver.get());
 
+  if (_backForwardList) {
+    _backForwardList.navigationManager = _webState->GetNavigationManager();
+  }
   [self updateWebStateVisibility];
 
   _webStateDelegate = std::make_unique<web::WebStateDelegateBridge>(self);
@@ -658,8 +898,6 @@ static NSString* gUserAgentProduct = nil;
   _webState->GetWebViewProxy().allowsBackForwardNavigationGestures =
       allowsBackForwardNavigationGestures;
 
-  _scrollView.proxy = _webState.get()->GetWebViewProxy().scrollViewProxy;
-
   if (_translationController) {
     id<CWVTranslationControllerDelegate> delegate =
         _translationController.delegate;
@@ -667,14 +905,12 @@ static NSString* gUserAgentProduct = nil;
     _translationController.delegate = delegate;
   }
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
   // Recreate and restore the delegate only if previously lazily loaded.
   if (_autofillController) {
     id<CWVAutofillControllerDelegate> delegate = _autofillController.delegate;
     _autofillController = [self newAutofillController];
     _autofillController.delegate = delegate;
   }
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 
   [self addInternalWebViewAsSubview];
 
@@ -687,7 +923,7 @@ static NSString* gUserAgentProduct = nil;
 
   // TODO(crbug.com/873729): The session will not be restored until
   // LoadIfNecessary call. Fix the bug and remove extra call.
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled() && sessionStorage) {
+  if (sessionStorage) {
     _webState->GetNavigationManager()->LoadIfNecessary();
   }
 }
@@ -704,10 +940,20 @@ static NSString* gUserAgentProduct = nil;
   [self addSubview:subview];
 }
 
+- (CWVBackForwardList*)backForwardList {
+  if (!_backForwardList) {
+    _backForwardList = [[CWVBackForwardList alloc]
+        initWithNavigationManager:_webState->GetNavigationManager()];
+  }
+  return _backForwardList;
+}
+
 - (void)updateNavigationAvailability {
   self.canGoBack = _webState && _webState->GetNavigationManager()->CanGoBack();
   self.canGoForward =
       _webState && _webState->GetNavigationManager()->CanGoForward();
+
+  self.backForwardList.navigationManager = _webState->GetNavigationManager();
 }
 
 - (void)updateCurrentURLs {
@@ -732,14 +978,56 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
+- (void)attachSecurityInterstitialHelpersToWebStateIfNecessary {
+  if (!_webState) {
+    return;
+  }
+
+  // Lookalike URLs should only be intercepted if handled by the delegate.
+  if ([_navigationDelegate respondsToSelector:@selector
+                           (webView:handleLookalikeURLWithHandler:)]) {
+    LookalikeUrlTabHelper::CreateForWebState(_webState.get());
+    LookalikeUrlTabAllowList::CreateForWebState(_webState.get());
+    LookalikeUrlContainer::CreateForWebState(_webState.get());
+  } else {
+    LookalikeUrlTabHelper::RemoveFromWebState(_webState.get());
+    LookalikeUrlTabAllowList::RemoveFromWebState(_webState.get());
+    LookalikeUrlContainer::RemoveFromWebState(_webState.get());
+  }
+
+  // Unsafe URLs should only be intercepted if handled by the delegate.
+  if ([_navigationDelegate
+          respondsToSelector:@selector(webView:handleUnsafeURLWithHandler:)]) {
+    SafeBrowsingClient* client =
+        ios_web_view::WebViewSafeBrowsingClientFactory::GetForBrowserState(
+            _webState->GetBrowserState());
+    SafeBrowsingQueryManager::CreateForWebState(_webState.get(), client);
+    SafeBrowsingTabHelper::CreateForWebState(_webState.get(), client);
+    SafeBrowsingUrlAllowList::CreateForWebState(_webState.get());
+    SafeBrowsingUnsafeResourceContainer::CreateForWebState(_webState.get());
+  } else {
+    SafeBrowsingQueryManager::RemoveFromWebState(_webState.get());
+    SafeBrowsingTabHelper::RemoveFromWebState(_webState.get());
+    SafeBrowsingUrlAllowList::RemoveFromWebState(_webState.get());
+    SafeBrowsingUnsafeResourceContainer::RemoveFromWebState(_webState.get());
+  }
+}
+
 #pragma mark - Internal Methods
 
 - (void)shutDown {
-  // To handle the case where -[CWVWebView encodeRestorableStateWithCoder:] is
-  // called after this method, precompute the session storage so it may be used
-  // during encoding later.
-  _cachedSessionStorage = _webState->BuildSessionStorage();
-  _webState.reset();
+  if (_webState) {
+    // To handle the case where -[CWVWebView encodeRestorableStateWithCoder:] is
+    // called after this method, precompute the session storage so it may be
+    // used during encoding later.
+    _cachedSessionStorage = _webState->BuildSessionStorage();
+    if (_webStateObserver) {
+      _webState->RemoveObserver(_webStateObserver.get());
+      _webStateObserver.reset();
+    }
+    WebViewHolder::RemoveFromWebState(_webState.get());
+    _webState.reset();
+  }
 }
 
 @end

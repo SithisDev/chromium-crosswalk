@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include <utility>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc.mojom.h"
 #include "ipc/ipc_test_base.h"
 #include "mojo/core/test/multiprocess_test_helper.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
 
 namespace {
 
@@ -26,19 +26,27 @@ class Connection {
   explicit Connection(std::unique_ptr<IPC::MojoBootstrap> bootstrap,
                       int32_t sender_id)
       : bootstrap_(std::move(bootstrap)) {
-    bootstrap_->Connect(&sender_, &receiver_);
+    mojo::PendingAssociatedRemote<IPC::mojom::Channel> sender;
+    bootstrap_->Connect(&sender, &receiver_);
+    sender_.Bind(std::move(sender));
     sender_->SetPeerPid(sender_id);
+
+    // It's OK to start receiving right away even though `receiver_` isn't
+    // bound, because all of these tests are single-threaded and it will be
+    // bound before any incoming messages can be scheduled for processing.
+    bootstrap_->StartReceiving();
   }
 
-  void TakeReceiver(IPC::mojom::ChannelAssociatedRequest* receiver) {
+  void TakeReceiver(
+      mojo::PendingAssociatedReceiver<IPC::mojom::Channel>* receiver) {
     *receiver = std::move(receiver_);
   }
 
-  IPC::mojom::ChannelAssociatedPtr& GetSender() { return sender_; }
+  mojo::AssociatedRemote<IPC::mojom::Channel>& GetSender() { return sender_; }
 
  private:
-  IPC::mojom::ChannelAssociatedPtr sender_;
-  IPC::mojom::ChannelAssociatedRequest receiver_;
+  mojo::AssociatedRemote<IPC::mojom::Channel> sender_;
+  mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver_;
   std::unique_ptr<IPC::MojoBootstrap> bootstrap_;
 };
 
@@ -51,14 +59,17 @@ class PeerPidReceiver : public IPC::mojom::Channel {
   };
 
   PeerPidReceiver(
-      IPC::mojom::ChannelAssociatedRequest request,
-      const base::Closure& on_peer_pid_set,
+      mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver,
+      base::OnceClosure on_peer_pid_set,
       MessageExpectation message_expectation = MessageExpectation::kNotExpected)
-      : binding_(this, std::move(request)),
-        on_peer_pid_set_(on_peer_pid_set),
+      : receiver_(this, std::move(receiver)),
+        on_peer_pid_set_(std::move(on_peer_pid_set)),
         message_expectation_(message_expectation) {
-    binding_.set_connection_error_handler(disconnect_run_loop_.QuitClosure());
+    receiver_.set_disconnect_handler(disconnect_run_loop_.QuitClosure());
   }
+
+  PeerPidReceiver(const PeerPidReceiver&) = delete;
+  PeerPidReceiver& operator=(const PeerPidReceiver&) = delete;
 
   ~PeerPidReceiver() override {
     bool expected_message =
@@ -69,36 +80,35 @@ class PeerPidReceiver : public IPC::mojom::Channel {
   // mojom::Channel:
   void SetPeerPid(int32_t pid) override {
     peer_pid_ = pid;
-    on_peer_pid_set_.Run();
+    std::move(on_peer_pid_set_).Run();
   }
 
   void Receive(IPC::MessageView message_view) override {
     ASSERT_NE(MessageExpectation::kNotExpected, message_expectation_);
     received_message_ = true;
 
-    IPC::Message message(message_view.data(), message_view.size());
+    IPC::Message message(
+        reinterpret_cast<const char*>(message_view.bytes().data()),
+        message_view.bytes().size());
     bool expected_valid =
         message_expectation_ == MessageExpectation::kExpectedValid;
     EXPECT_EQ(expected_valid, message.IsValid());
   }
 
   void GetAssociatedInterface(
-      const std::string& name,
-      IPC::mojom::GenericInterfaceAssociatedRequest request) override {}
+      mojo::GenericPendingAssociatedReceiver receiver) override {}
 
   int32_t peer_pid() const { return peer_pid_; }
 
   void RunUntilDisconnect() { disconnect_run_loop_.Run(); }
 
  private:
-  mojo::AssociatedBinding<IPC::mojom::Channel> binding_;
-  const base::Closure on_peer_pid_set_;
+  mojo::AssociatedReceiver<IPC::mojom::Channel> receiver_;
+  base::OnceClosure on_peer_pid_set_;
   MessageExpectation message_expectation_;
   int32_t peer_pid_ = -1;
   bool received_message_ = false;
   base::RunLoop disconnect_run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(PeerPidReceiver);
 };
 
 class IPCMojoBootstrapTest : public testing::Test {
@@ -107,15 +117,15 @@ class IPCMojoBootstrapTest : public testing::Test {
 };
 
 TEST_F(IPCMojoBootstrapTest, Connect) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   Connection connection(
       IPC::MojoBootstrap::Create(
           helper_.StartChild("IPCMojoBootstrapTestClient"),
           IPC::Channel::MODE_SERVER, base::ThreadTaskRunnerHandle::Get(),
-          base::ThreadTaskRunnerHandle::Get()),
+          base::ThreadTaskRunnerHandle::Get(), nullptr),
       kTestServerPid);
 
-  IPC::mojom::ChannelAssociatedRequest receiver;
+  mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver;
   connection.TakeReceiver(&receiver);
 
   base::RunLoop run_loop;
@@ -132,15 +142,15 @@ TEST_F(IPCMojoBootstrapTest, Connect) {
 MULTIPROCESS_TEST_MAIN_WITH_SETUP(
     IPCMojoBootstrapTestClientTestChildMain,
     ::mojo::core::test::MultiprocessTestHelper::ChildSetup) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   Connection connection(
       IPC::MojoBootstrap::Create(
           std::move(mojo::core::test::MultiprocessTestHelper::primordial_pipe),
           IPC::Channel::MODE_CLIENT, base::ThreadTaskRunnerHandle::Get(),
-          base::ThreadTaskRunnerHandle::Get()),
+          base::ThreadTaskRunnerHandle::Get(), nullptr),
       kTestClientPid);
 
-  IPC::mojom::ChannelAssociatedRequest receiver;
+  mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver;
   connection.TakeReceiver(&receiver);
 
   base::RunLoop run_loop;
@@ -153,15 +163,15 @@ MULTIPROCESS_TEST_MAIN_WITH_SETUP(
 }
 
 TEST_F(IPCMojoBootstrapTest, ReceiveEmptyMessage) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   Connection connection(
       IPC::MojoBootstrap::Create(
           helper_.StartChild("IPCMojoBootstrapTestEmptyMessage"),
           IPC::Channel::MODE_SERVER, base::ThreadTaskRunnerHandle::Get(),
-          base::ThreadTaskRunnerHandle::Get()),
+          base::ThreadTaskRunnerHandle::Get(), nullptr),
       kTestServerPid);
 
-  IPC::mojom::ChannelAssociatedRequest receiver;
+  mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver;
   connection.TakeReceiver(&receiver);
 
   base::RunLoop run_loop;
@@ -180,22 +190,21 @@ TEST_F(IPCMojoBootstrapTest, ReceiveEmptyMessage) {
 MULTIPROCESS_TEST_MAIN_WITH_SETUP(
     IPCMojoBootstrapTestEmptyMessageTestChildMain,
     ::mojo::core::test::MultiprocessTestHelper::ChildSetup) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   Connection connection(
       IPC::MojoBootstrap::Create(
           std::move(mojo::core::test::MultiprocessTestHelper::primordial_pipe),
           IPC::Channel::MODE_CLIENT, base::ThreadTaskRunnerHandle::Get(),
-          base::ThreadTaskRunnerHandle::Get()),
+          base::ThreadTaskRunnerHandle::Get(), nullptr),
       kTestClientPid);
 
-  IPC::mojom::ChannelAssociatedRequest receiver;
+  mojo::PendingAssociatedReceiver<IPC::mojom::Channel> receiver;
   connection.TakeReceiver(&receiver);
   auto& sender = connection.GetSender();
 
   uint8_t data = 0;
   sender->Receive(
-      IPC::MessageView(mojo_base::BigBufferView(base::make_span(&data, 0)),
-                       base::nullopt /* handles */));
+      IPC::MessageView(base::make_span(&data, 0), absl::nullopt /* handles */));
 
   base::RunLoop run_loop;
   PeerPidReceiver impl(std::move(receiver), run_loop.QuitClosure());

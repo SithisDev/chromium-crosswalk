@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,14 @@
 #include <type_traits>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "base/tuple.h"
 #include "build/build_config.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_utils.h"
+#include "ipc/ipc_sync_message.h"
 
 namespace IPC {
 
@@ -92,15 +94,8 @@ struct Routing {
 // We want to restrict MessageT's constructors so that a routing_id is always
 // provided for ROUTED messages and never provided for CONTROL messages, so
 // use the SFINAE technique from N4387's "Implementation Hint" section.
-#if defined(COMPILER_MSVC)
-// MSVC 2013 doesn't support default arguments for template member functions
-// of templated classes, so there we have to rely on the DCHECKs instead.
-// TODO(mdempsky): Reevaluate once MSVC 2015.
-#define IPC_MESSAGET_SFINAE(x)
-#else
 #define IPC_MESSAGET_SFINAE(x) \
   template <bool X = (x), typename std::enable_if<X, bool>::type = false>
-#endif
 
 // MessageT is the common template used for all user-defined message types.
 // It's intended to be used via the macros defined in ipc_message_macros.h.

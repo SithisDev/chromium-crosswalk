@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,6 @@
 // A coordinator that creates a container UIViewController that displays the
 // web contents of the browser view.
 @interface BrowserContainerCoordinator : ChromeCoordinator
-
-// The BrowserContainerCoordinator must be constructed with a Browser, so the
-// ChromeBrowserState initializer is unavailable.
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_UNAVAILABLE;
 
 // The view controller managing the container view.
 @property(nonatomic, strong, readonly)

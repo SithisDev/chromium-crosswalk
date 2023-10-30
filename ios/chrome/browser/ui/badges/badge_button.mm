@@ -1,11 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/badges/badge_button.h"
 
+#import <ostream>
+
+#import "base/notreached.h"
+#import "ios/chrome/browser/ui/badges/badge_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -14,18 +19,16 @@
 namespace {
 // Duration of button animations, in seconds.
 const CGFloat kButtonAnimationDuration = 0.2;
-// Edge insets of button.
-const CGFloat kButtonEdgeInset = 6;
 // To achieve a circular corner radius, divide length of a side by 2.
 const CGFloat kButtonCircularCornerRadiusDivisor = 2.0;
-// Alpha value of button in an inactive state.
-const CGFloat kButtonInactiveAlpha = 0.38;
 }  // namespace
 
 @interface BadgeButton ()
 
 // Read/Write override.
 @property(nonatomic, assign, readwrite) BadgeType badgeType;
+// Read/Write override.
+@property(nonatomic, assign, readwrite) BOOL accepted;
 
 @end
 
@@ -34,14 +37,9 @@ const CGFloat kButtonInactiveAlpha = 0.38;
 + (instancetype)badgeButtonWithType:(BadgeType)badgeType {
   BadgeButton* button = [self buttonWithType:UIButtonTypeSystem];
   button.badgeType = badgeType;
-
+  button.pointerInteractionEnabled = YES;
+  button.pointerStyleProvider = CreateDefaultEffectCirclePointerStyleProvider();
   return button;
-}
-
-- (void)willMoveToSuperview:(UIView*)newSuperview {
-  self.imageEdgeInsets = UIEdgeInsetsMake(kButtonEdgeInset, kButtonEdgeInset,
-                                          kButtonEdgeInset, kButtonEdgeInset);
-  [super willMoveToSuperview:newSuperview];
 }
 
 - (void)layoutSubviews {
@@ -51,16 +49,86 @@ const CGFloat kButtonInactiveAlpha = 0.38;
 }
 
 - (void)setAccepted:(BOOL)accepted animated:(BOOL)animated {
+  self.accepted = accepted;
   void (^changeTintColor)() = ^{
-    self.tintColor = accepted ? [UIColor colorNamed:kTintColor]
-                              : [UIColor colorWithWhite:0
-                                                  alpha:kButtonInactiveAlpha];
+    self.tintColor = accepted ? nil : [UIColor colorNamed:kToolbarButtonColor];
+    self.accessibilityIdentifier =
+        [self accessibilityIdentifierForAcceptedState:accepted];
   };
   if (animated) {
     [UIView animateWithDuration:kButtonAnimationDuration
                      animations:changeTintColor];
   } else {
     changeTintColor();
+  }
+}
+
+- (void)setFullScreenOn:(BOOL)fullScreenOn {
+  if (_fullScreenOn == fullScreenOn) {
+    return;
+  }
+  _fullScreenOn = fullScreenOn;
+  [self configureImage];
+}
+
+#pragma mark - Setters
+
+- (void)setImage:(UIImage*)image {
+  _image = image;
+  if (!self.fullScreenOn) {
+    [self configureImage];
+  }
+}
+
+#pragma mark - Private
+
+- (NSString*)accessibilityIdentifierForAcceptedState:(BOOL)accepted {
+  switch (self.badgeType) {
+    case kBadgeTypeNone:
+      NOTREACHED() << "A badge should not have kBadgeTypeNone";
+      return nil;
+    case kBadgeTypePasswordSave:
+      return accepted ? kBadgeButtonSavePasswordAcceptedAccessibilityIdentifier
+                      : kBadgeButtonSavePasswordAccessibilityIdentifier;
+    case kBadgeTypePasswordUpdate:
+      return accepted
+                 ? kBadgeButtonUpdatePasswordAccpetedAccessibilityIdentifier
+                 : kBadgeButtonUpdatePasswordAccessibilityIdentifier;
+    case kBadgeTypeIncognito:
+      return kBadgeButtonIncognitoAccessibilityIdentifier;
+    case kBadgeTypeOverflow:
+      return kBadgeButtonOverflowAccessibilityIdentifier;
+    case kBadgeTypeSaveCard:
+      return accepted ? kBadgeButtonSaveCardAcceptedAccessibilityIdentifier
+                      : kBadgeButtonSaveCardAccessibilityIdentifier;
+    case kBadgeTypeSaveAddressProfile:
+      return accepted
+                 ? kBadgeButtonSaveAddressProfileAcceptedAccessibilityIdentifier
+                 : kBadgeButtonSaveAddressProfileAccessibilityIdentifier;
+    case kBadgeTypeTranslate:
+      return accepted ? kBadgeButtonTranslateAcceptedAccessibilityIdentifier
+                      : kBadgeButtonTranslateAccessibilityIdentifier;
+    case kBadgeTypeAddToReadingList:
+      return accepted ? kBadgeButtonReadingListAcceptedAccessibilityIdentifier
+                      : kBadgeButtonReadingListAccessibilityIdentifier;
+    case kBadgeTypePermissionsCamera:
+      return accepted
+                 ? kBadgeButtonPermissionsCameraAcceptedAccessibilityIdentifier
+                 : kBadgeButtonPermissionsCameraAccessibilityIdentifier;
+    case kBadgeTypePermissionsMicrophone:
+      return accepted
+                 ? kBadgeButtonPermissionsMicrophoneAcceptedAccessibilityIdentifier
+                 : kBadgeButtonPermissionsMicrophoneAccessibilityIdentifier;
+  }
+}
+
+- (void)configureImage {
+  if (self.fullScreenOn && self.fullScreenImage) {
+    [self setImage:self.fullScreenImage forState:UIControlStateNormal];
+    [self setImage:self.fullScreenImage forState:UIControlStateDisabled];
+  } else {
+    [self setImage:self.image forState:UIControlStateNormal];
+    [self setImage:self.image forState:UIControlStateDisabled];
   }
 }
 

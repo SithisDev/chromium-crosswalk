@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,25 +23,39 @@
   _selectedAction = action;
 }
 
-- (BOOL)shouldAllowOverscrollActions {
+- (BOOL)shouldAllowOverscrollActionsForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
   return YES;
 }
 
-- (UIView*)toolbarSnapshotView {
+- (UIView*)toolbarSnapshotViewForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
   return nil;
 }
 
-- (UIView*)headerView {
+- (UIView*)headerViewForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
   return _headerView;
 }
 
-- (CGFloat)overscrollActionsControllerHeaderInset:
+- (CGFloat)headerInsetForOverscrollActionsController:
     (OverscrollActionsController*)controller {
   return 0;
 }
 
-- (CGFloat)overscrollHeaderHeight {
+- (CGFloat)headerHeightForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
   return 0;
+}
+
+- (CGFloat)initialContentOffsetForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
+  return 0;
+}
+
+- (FullscreenController*)fullscreenControllerForOverscrollActionsController:
+    (OverscrollActionsController*)controller {
+  return nullptr;
 }
 
 @end

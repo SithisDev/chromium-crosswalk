@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,4 +16,5 @@ NSString* const kConfirmInfobarButton1AccessibilityIdentifier =
 NSString* const kConfirmInfobarButton2AccessibilityIdentifier =
     @"confirmInfobarButton2AXID";
 
-const NSTimeInterval kInfobarBannerPresentationDurationInSeconds = 8.0;
+const NSTimeInterval kInfobarBannerDefaultPresentationDurationInSeconds = 8.0;
+const NSTimeInterval kInfobarBannerLongPresentationDurationInSeconds = 15.0;

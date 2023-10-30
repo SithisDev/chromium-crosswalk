@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/memory/ptr_util.h"
+#import "base/memory/ptr_util.h"
+#import "ios/web/common/features.h"
 #import "ios/web/navigation/navigation_item_impl.h"
-#include "net/http/http_response_headers.h"
+#import "net/http/http_response_headers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -130,6 +131,14 @@ void NavigationContextImpl::SetResponseHeaders(
   response_headers_ = response_headers;
 }
 
+HttpsUpgradeType NavigationContextImpl::GetFailedHttpsUpgradeType() const {
+  return failed_https_upgrade_type_;
+}
+
+void NavigationContextImpl::SetFailedHttpsUpgradeType(HttpsUpgradeType type) {
+  failed_https_upgrade_type_ = type;
+}
+
 int NavigationContextImpl::GetNavigationItemUniqueID() const {
   return navigation_item_unique_id_;
 }
@@ -163,23 +172,6 @@ void NavigationContextImpl::SetLoadingHtmlString(bool is_loading_html_string) {
   is_loading_html_string_ = is_loading_html_string;
 }
 
-bool NavigationContextImpl::IsNativeContentPresented() const {
-  return is_native_content_presented_;
-}
-
-void NavigationContextImpl::SetIsNativeContentPresented(
-    bool is_native_content_presented) {
-  is_native_content_presented_ = is_native_content_presented;
-}
-
-bool NavigationContextImpl::IsPlaceholderNavigation() const {
-  return is_placeholder_navigation_;
-}
-
-void NavigationContextImpl::SetPlaceholderNavigation(bool flag) {
-  is_placeholder_navigation_ = flag;
-}
-
 void NavigationContextImpl::SetMimeType(NSString* mime_type) {
   mime_type_ = mime_type;
 }
@@ -199,12 +191,16 @@ std::unique_ptr<NavigationItemImpl> NavigationContextImpl::ReleaseItem() {
 void NavigationContextImpl::SetItem(std::unique_ptr<NavigationItemImpl> item) {
   DCHECK(!item_);
   if (item) {
-    // |item| can be null for same-docuemnt navigations and reloads, where
+    // `item` can be null for same-docuemnt navigations and reloads, where
     // navigation item is committed and should not be stored in
     // NavigationContext.
     DCHECK_EQ(GetNavigationItemUniqueID(), item->GetUniqueID());
   }
   item_ = std::move(item);
+}
+
+base::TimeDelta NavigationContextImpl::GetElapsedTimeSinceCreation() const {
+  return elapsed_timer_.Elapsed();
 }
 
 NavigationContextImpl::NavigationContextImpl(WebState* web_state,
@@ -220,7 +216,8 @@ NavigationContextImpl::NavigationContextImpl(WebState* web_state,
       is_same_document_(false),
       error_(nil),
       response_headers_(nullptr),
-      is_renderer_initiated_(is_renderer_initiated) {}
+      is_renderer_initiated_(is_renderer_initiated),
+      elapsed_timer_(base::ElapsedTimer()) {}
 
 NavigationContextImpl::~NavigationContextImpl() = default;
 

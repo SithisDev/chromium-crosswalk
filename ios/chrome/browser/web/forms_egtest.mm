@@ -1,48 +1,49 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
-#include <memory>
+#import <memory>
 
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
+#import "base/ios/ios_util.h"
+#import "base/strings/stringprintf.h"
+#import "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "components/strings/grit/components_strings.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/url_formatter/url_formatter.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/app/tab_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
-#import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/chrome/test/earl_grey/web_http_server_chrome_test_case.h"
 #import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
 #import "ios/testing/earl_grey/matchers.h"
-#import "ios/web/public/test/earl_grey/web_view_actions.h"
-#import "ios/web/public/test/earl_grey/web_view_matchers.h"
-#include "ios/web/public/test/element_selector.h"
-#include "ios/web/public/test/http_server/data_response_provider.h"
+#import "ios/web/public/test/element_selector.h"
+#import "ios/web/public/test/http_server/data_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
-#include "ios/web/public/test/http_server/http_server_util.h"
-#include "ios/web/public/test/url_test_util.h"
-#import "ios/web/public/web_client.h"
+#import "ios/web/public/test/http_server/http_server_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
+using base::test::ios::kWaitForActionTimeout;
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::OmniboxText;
+using chrome_test_util::TapWebElement;
+using chrome_test_util::WebViewMatcher;
+
 using testing::ElementToDismissAlert;
 
 namespace {
 
-// Response shown on the page of |GetDestinationUrl|.
+// Response shown on the page of `GetDestinationUrl`.
 const char kDestinationText[] = "bar!";
 
-// Response shown on the page of |GetGenericUrl|.
+// Response shown on the page of `GetGenericUrl`.
 const char kGenericText[] = "A generic page";
 
 // Label for the button in the form.
@@ -60,29 +61,29 @@ const GURL GetGenericUrl() {
   return web::test::HttpServer::MakeUrl("http://generic");
 }
 
-// GURL of a page with a form that posts data to |GetDestinationUrl|.
+// GURL of a page with a form that posts data to `GetDestinationUrl`.
 const GURL GetFormUrl() {
   return web::test::HttpServer::MakeUrl("http://form");
 }
 
-// GURL of a page with a form that posts data to |GetDestinationUrl|.
+// GURL of a page with a form that posts data to `GetDestinationUrl`.
 const GURL GetFormPostOnSamePageUrl() {
   return web::test::HttpServer::MakeUrl("http://form");
 }
 
-// GURL of the page to which the |GetFormUrl| posts data to.
+// GURL of the page to which the `GetFormUrl` posts data to.
 const GURL GetDestinationUrl() {
   return web::test::HttpServer::MakeUrl("http://destination");
 }
 
 #pragma mark - TestFormResponseProvider
 
-// URL that redirects to |GetDestinationUrl| with a 302.
+// URL that redirects to `GetDestinationUrl` with a 302.
 const GURL GetRedirectUrl() {
   return web::test::HttpServer::MakeUrl("http://redirect");
 }
 
-// URL to return a page that posts to |GetRedirectUrl|.
+// URL to return a page that posts to `GetRedirectUrl`.
 const GURL GetRedirectFormUrl() {
   return web::test::HttpServer::MakeUrl("http://formRedirect");
 }
@@ -144,10 +145,20 @@ void TestFormResponseProvider::GetResponseHeadersAndBody(
   NOTREACHED();
 }
 
+// Waits for the keyboard to appear. Returns NO on timeout.
+BOOL WaitForKeyboardToAppear() {
+  GREYCondition* waitForKeyboard = [GREYCondition
+      conditionWithName:@"Wait for keyboard"
+                  block:^BOOL {
+                    return [EarlGrey isKeyboardShownWithError:nil];
+                  }];
+  return [waitForKeyboard waitWithTimeout:kWaitForActionTimeout];
+}
+
 }  // namespace
 
 // Tests submition of HTTP forms POST data including cases involving navigation.
-@interface FormsTestCase : ChromeTestCase
+@interface FormsTestCase : WebHttpServerChromeTestCase
 @end
 
 @implementation FormsTestCase
@@ -194,7 +205,7 @@ id<GREYMatcher> ResendPostButtonMatcher() {
 }
 
 // Sets up a basic simple http server for form test with a form located at
-// |GetFormUrl|, and posts data to |GetDestinationUrl| upon submission.
+// `GetFormUrl`, and posts data to `GetDestinationUrl` upon submission.
 - (void)setUpFormTestSimpleHttpServer {
   std::map<GURL, std::string> responses;
   responses[GetGenericUrl()] = kGenericText;
@@ -215,28 +226,22 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
-  // WKBasedNavigationManager presents repost confirmation dialog before loading
-  // stops.
-  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-  } else {
-    // Legacy navigation manager presents repost confirmation dialog after
-    // loading stops.
-    [ChromeEarlGrey reload];
-  }
+  // Repost confirmation dialog is presented before loading stops so do not wait
+  // for load to complete because it never will.
+  [ChromeEarlGrey reloadAndWaitForCompletion:NO];
 
   {
-    // When slim navigation manager is enabled, synchronization must be disabled
-    // until after the repost confirmation is dismissed because it is presented
-    // during the load. It is always disabled, but immediately re-enabled if
-    // slim navigation manger is not enabled. This is necessary in order to keep
-    // the correct scope of ScopedSynchronizationDisabler which ensures
-    // synchronization is not left disabled if the test fails.
+    // Synchronization must be disabled until after the repost confirmation is
+    // dismissed because it is presented during the load. It is always disabled,
+    // but immediately re-enabled if slim navigation manger is not enabled. This
+    // is necessary in order to keep the correct scope of
+    // ScopedSynchronizationDisabler which ensures synchronization is not left
+    // disabled if the test fails.
     std::unique_ptr<ScopedSynchronizationDisabler> disabler =
         std::make_unique<ScopedSynchronizationDisabler>();
-    if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-      disabler.reset();
-    }
+    // TODO(crbug.com/989615): Investigate why this is necessary even with a
+    // visible check below.
+    base::test::ios::SpinRunLoopWithMinDelay(base::Seconds(0.5));
 
     [ChromeEarlGrey
         waitForSufficientlyVisibleElementWithMatcher:ResendPostButtonMatcher()];
@@ -264,26 +269,23 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [ChromeEarlGrey loadURL:GetGenericUrl()];
   [ChromeEarlGrey goBack];
 
-  // WKBasedNavigationManager doesn't triggere repost on |goForward| due to
-  // WKWebView's back-forward cache. Force reload to trigger repost. Not using
-  // [ChromeEarlGrey reload] because WKBasedNavigationManager presents repost
-  // confirmation dialog before loading stops.
-  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-  }
+  // NavigationManager doesn't trigger repost on `goForward` due to WKWebView's
+  // back-forward cache. Force reload to trigger repost. Not waiting because
+  // NavigationManager presents repost confirmation dialog before loading stops.
+  [ChromeEarlGrey reloadAndWaitForCompletion:NO];
 
   {
-    // When slim navigation manager is enabled, synchronization must be disabled
-    // until after the repost confirmation is dismissed because it is presented
-    // during the load. It is always disabled, but immediately re-enabled if
-    // slim navigation manger is not enabled. This is necessary in order to keep
-    // the correct scope of ScopedSynchronizationDisabler which ensures
-    // synchronization is not left disabled if the test fails.
+    // Synchronization must be disabled until after the repost confirmation is
+    // dismissed because it is presented during the load. It is always disabled,
+    // but immediately re-enabled if slim navigation manger is not enabled. This
+    // is necessary in order to keep the correct scope of
+    // ScopedSynchronizationDisabler which ensures synchronization is not left
+    // disabled if the test fails.
     std::unique_ptr<ScopedSynchronizationDisabler> disabler =
         std::make_unique<ScopedSynchronizationDisabler>();
-    if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-      disabler.reset();
-    }
+      // TODO(crbug.com/989615): Investigate why this is necessary even with a
+      // visible check below.
+    base::test::ios::SpinRunLoopWithMinDelay(base::Seconds(0.5));
 
     [ChromeEarlGrey
         waitForSufficientlyVisibleElementWithMatcher:ResendPostButtonMatcher()];
@@ -310,26 +312,23 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [ChromeEarlGrey goBack];
   [ChromeEarlGrey goForward];
 
-  // WKBasedNavigationManager doesn't triggere repost on |goForward| due to
-  // WKWebView's back-forward cache. Force reload to trigger repost. Not using
-  // [ChromeEarlGrey reload] because WKBasedNavigationManager presents repost
-  // confirmation dialog before loading stops.
-  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-  }
+  // NavigationManager doesn't trigger repost on `goForward` due to WKWebView's
+  // back-forward cache. Force reload to trigger repost. Not waiting because
+  // NavigationManager presents repost confirmation dialog before loading stops.
+  [ChromeEarlGrey reloadAndWaitForCompletion:NO];
 
   {
-    // When slim navigation manager is enabled, synchronization must be disabled
-    // until after the repost confirmation is dismissed because it is presented
-    // during the load. It is always disabled, but immediately re-enabled if
-    // slim navigation manger is not enabled. This is necessary in order to keep
-    // the correct scope of ScopedSynchronizationDisabler which ensures
-    // synchronization is not left disabled if the test fails.
+    // Synchronization must be disabled until after the repost confirmation is
+    // dismissed because it is presented during the load. It is always disabled,
+    // but immediately re-enabled if slim navigation manger is not enabled. This
+    // is necessary in order to keep the correct scope of
+    // ScopedSynchronizationDisabler which ensures synchronization is not left
+    // disabled if the test fails.
     std::unique_ptr<ScopedSynchronizationDisabler> disabler =
         std::make_unique<ScopedSynchronizationDisabler>();
-    if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-      disabler.reset();
-    }
+      // TODO(crbug.com/989615): Investigate why this is necessary even with a
+      // visible check below.
+    base::test::ios::SpinRunLoopWithMinDelay(base::Seconds(0.5));
 
     [ChromeEarlGrey
         waitForSufficientlyVisibleElementWithMatcher:ResendPostButtonMatcher()];
@@ -357,19 +356,16 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [ChromeEarlGrey loadURL:GetGenericUrl()];
   [self openBackHistory];
   [self waitForTabHistoryView];
-  id<GREYMatcher> historyItem = grey_text(
-      base::SysUTF16ToNSString(web::GetDisplayTitleForUrl(destinationURL)));
+
+  // Mimic `web::GetDisplayTitleForUrl` behavior which uses FormatUrl
+  // internally. It can't be called directly from the EarlGrey 2 test process.
+  std::u16string title = url_formatter::FormatUrl(destinationURL);
+  id<GREYMatcher> historyItem = grey_text(base::SysUTF16ToNSString(title));
   [[EarlGrey selectElementWithMatcher:historyItem] performAction:grey_tap()];
   [ChromeEarlGrey waitForPageToFinishLoading];
 
-  // Back-forward navigation with WKBasedNavigationManager is served from
-  // WKWebView's app-cache, so it won't trigger repost warning.
-  if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [ChromeEarlGrey
-        waitForSufficientlyVisibleElementWithMatcher:ResendPostButtonMatcher()];
-    [self confirmResendWarning];
-  }
-
+  // Back-forward navigation is served from WKWebView's app-cache, so it won't
+  // trigger repost warning.
   [ChromeEarlGrey waitForWebStateContainingText:kDestinationText];
   [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
       assertWithMatcher:grey_notNil()];
@@ -389,26 +385,20 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [ChromeEarlGrey goBack];
   [ChromeEarlGrey goForward];
 
-  // WKBasedNavigationManager doesn't triggere repost on |goForward| due to
-  // WKWebView's back-forward cache. Force reload to trigger repost. Not using
-  // [ChromeEarlGrey reload] because WKBasedNavigationManager presents repost
-  // confirmation dialog before loading stops.
-  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-  }
+  // NavigationManager doesn't trigger repost on `goForward` due to WKWebView's
+  // back-forward cache. Force reload to trigger repost. Not waiting because
+  // NavigationManager presents repost confirmation dialog before loading stops.
+  [ChromeEarlGrey reloadAndWaitForCompletion:NO];
 
   {
-    // When slim navigation manager is enabled, synchronization must be disabled
-    // until after the repost confirmation is dismissed because it is presented
-    // during the load. It is always disabled, but immediately re-enabled if
-    // slim navigation manger is not enabled. This is necessary in order to keep
-    // the correct scope of ScopedSynchronizationDisabler which ensures
-    // synchronization is not left disabled if the test fails.
+    // Synchronization must be disabled until after the repost confirmation is
+    // dismissed because it is presented during the load. It is always disabled,
+    // but immediately re-enabled if slim navigation manger is not enabled. This
+    // is necessary in order to keep the correct scope of
+    // ScopedSynchronizationDisabler which ensures synchronization is not left
+    // disabled if the test fails.
     std::unique_ptr<ScopedSynchronizationDisabler> disabler =
         std::make_unique<ScopedSynchronizationDisabler>();
-    if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-      disabler.reset();
-    }
 
     [ChromeEarlGrey
         waitForSufficientlyVisibleElementWithMatcher:ResendPostButtonMatcher()];
@@ -418,27 +408,13 @@ id<GREYMatcher> ResendPostButtonMatcher() {
 
   [ChromeEarlGrey waitForPageToFinishLoading];
 
-  // Expected behavior is different between the two navigation manager
-  // implementations.
-  if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    // LegacyNavigationManager displays repost on |goBack|. So after cancelling,
-    // web view should show form URL.
-    [ChromeEarlGrey waitForWebStateContainingText:(base::SysNSStringToUTF8(
-                                                      kSubmitButtonLabel))];
-    [[EarlGrey selectElementWithMatcher:OmniboxText(GetFormUrl().GetContent())]
-        assertWithMatcher:grey_notNil()];
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::ForwardButton()]
-        assertWithMatcher:grey_interactable()];
-  } else {
-    // WKBasedNavigationManager displays repost on |reload|. So after
-    // cancelling, web view should show |destinationURL|.
-    [ChromeEarlGrey waitForWebStateContainingText:kDestinationText];
-    [[EarlGrey
-        selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
-        assertWithMatcher:grey_notNil()];
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
-        assertWithMatcher:grey_interactable()];
-  }
+  // NavigationManagerImpl displays repost on `reload`. So after
+  // cancelling, web view should show `destinationURL`.
+  [ChromeEarlGrey waitForWebStateContainingText:kDestinationText];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
+      assertWithMatcher:grey_interactable()];
 }
 
 // A new navigation dismisses the repost dialog.
@@ -452,28 +428,19 @@ id<GREYMatcher> ResendPostButtonMatcher() {
   [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
-  // WKBasedNavigationManager presents repost confirmation dialog before loading
-  // stops.
-  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-    [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
-  } else {
-    // Legacy navigation manager presents repost confirmation dialog after
-    // loading stops.
-    [ChromeEarlGrey reload];
-  }
+  // Repost confirmation dialog is presented before loading stops so do not wait
+  // for load to complete because it never will.
+  [ChromeEarlGrey reloadAndWaitForCompletion:NO];
 
   {
-    // When slim navigation manager is enabled, synchronization must be disabled
-    // until after the repost confirmation is dismissed because it is presented
-    // during the load. It is always disabled, but immediately re-enabled if
-    // slim navigation manger is not enabled. This is necessary in order to keep
-    // the correct scope of ScopedSynchronizationDisabler which ensures
-    // synchronization is not left disabled if the test fails.
+    // Synchronization must be disabled until after the repost confirmation is
+    // dismissed because it is presented during the load. It is always disabled,
+    // but immediately re-enabled if slim navigation manger is not enabled. This
+    // is necessary in order to keep the correct scope of
+    // ScopedSynchronizationDisabler which ensures synchronization is not left
+    // disabled if the test fails.
     std::unique_ptr<ScopedSynchronizationDisabler> disabler =
         std::make_unique<ScopedSynchronizationDisabler>();
-    if (![ChromeEarlGrey isSlimNavigationManagerEnabled]) {
-      disabler.reset();
-    }
 
     // Repost confirmation box should be visible.
     [ChromeEarlGrey
@@ -539,13 +506,7 @@ id<GREYMatcher> ResendPostButtonMatcher() {
 // Tests that pressing the button on a POST-based form with same-page action
 // does not change the page URL and that the back button works as expected
 // afterwards.
-// TODO(crbug.com/714303): Re-enable this test on devices.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_testPostFormToSamePage testPostFormToSamePage
-#else
-#define MAYBE_testPostFormToSamePage FLAKY_testPostFormToSamePage
-#endif
-- (void)MAYBE_testPostFormToSamePage {
+- (void)testPostFormToSamePage {
   web::test::SetUpHttpServer(std::make_unique<TestFormResponseProvider>());
   const GURL formURL = GetFormPostOnSamePageUrl();
 
@@ -574,7 +535,13 @@ id<GREYMatcher> ResendPostButtonMatcher() {
 // Tests that submitting a POST-based form by tapping the 'Go' button on the
 // keyboard navigates to the correct URL and the back button works as expected
 // afterwards.
-- (void)testPostFormEntryWithKeyboard {
+// TODO:(crbug.com/1147654): re-enable after figuring out why it is failing.
+- (void)DISABLE_testPostFormEntryWithKeyboard {
+  // Test fails on iPad Air 2 13.4 crbug.com/1102608.
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_DISABLED(@"Fails in iOS 13 on iPads.");
+  }
+
   [self setUpFormTestSimpleHttpServer];
   const GURL destinationURL = GetDestinationUrl();
 
@@ -592,58 +559,44 @@ id<GREYMatcher> ResendPostButtonMatcher() {
       assertWithMatcher:grey_notNil()];
 }
 
-// Tap the text field indicated by |ID| to open the keyboard, and then
+// Tap the text field indicated by `ID` to open the keyboard, and then
 // press the keyboard's "Go" button to submit the form.
 - (void)submitFormUsingKeyboardGoButtonWithInputID:(const std::string&)ID {
   // Disable EarlGrey's synchronization since it is blocked by opening the
   // keyboard from a web view.
-  [[GREYConfiguration sharedInstance]
-          setValue:@NO
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+  {
+    ScopedSynchronizationDisabler disabler;
 
-  // Wait for web view to be interactable before tapping.
-  GREYCondition* interactableCondition = [GREYCondition
-      conditionWithName:@"Wait for web view to be interactable."
-                  block:^BOOL {
-                    NSError* error = nil;
-                    id<GREYMatcher> webViewMatcher = WebViewInWebState(
-                        chrome_test_util::GetCurrentWebState());
-                    [[EarlGrey selectElementWithMatcher:webViewMatcher]
-                        assertWithMatcher:grey_interactable()
-                                    error:&error];
-                    return !error;
-                  }];
-  GREYAssert([interactableCondition
-                 waitWithTimeout:base::test::ios::kWaitForUIElementTimeout],
-             @"Web view did not become interactable.");
+    // Wait for web view to be interactable before tapping.
+    GREYCondition* interactableCondition = [GREYCondition
+        conditionWithName:@"Wait for web view to be interactable."
+                    block:^BOOL {
+                      NSError* error = nil;
+                      [[EarlGrey selectElementWithMatcher:WebViewMatcher()]
+                          assertWithMatcher:grey_interactable()
+                                      error:&error];
+                      return !error;
+                    }];
+    GREYAssert([interactableCondition
+                   waitWithTimeout:base::test::ios::kWaitForUIElementTimeout],
+               @"Web view did not become interactable.");
 
-  web::WebState* currentWebState = chrome_test_util::GetCurrentWebState();
-  [[EarlGrey selectElementWithMatcher:web::WebViewInWebState(currentWebState)]
-      performAction:web::WebViewTapElement(
-                        currentWebState,
-                        [ElementSelector selectorWithElementID:ID])];
+    [[EarlGrey selectElementWithMatcher:WebViewMatcher()]
+        performAction:TapWebElement(
+                          [ElementSelector selectorWithElementID:ID])];
 
-  // Wait until the keyboard shows up before tapping.
-  GREYCondition* condition = [GREYCondition
-      conditionWithName:@"Wait for the keyboard to show up."
-                  block:^BOOL {
-                    NSError* error = nil;
-                    [[EarlGrey selectElementWithMatcher:GoButtonMatcher()]
-                        assertWithMatcher:grey_notNil()
-                                    error:&error];
-                    return (error == nil);
-                  }];
-  GREYAssert(
-      [condition waitWithTimeout:base::test::ios::kWaitForUIElementTimeout],
-      @"No keyboard with 'Go' button showed up.");
+    // Wait for the accessory icon to appear.
+    GREYAssert(WaitForKeyboardToAppear(), @"Keyboard didn't appear.");
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
-      performAction:grey_tap()];
-
-  // Reenable synchronization now that the keyboard has been closed.
-  [[GREYConfiguration sharedInstance]
-          setValue:@YES
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+    if (@available(iOS 16, *)) {
+      // TODO(crbug.com/1331347): Move this logic into EG.
+      XCUIApplication* app = [[XCUIApplication alloc] init];
+      [[[app keyboards] buttons][@"go"] tap];
+    } else {
+      [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
+          performAction:grey_tap()];
+    }
+  }
 }
 
 @end

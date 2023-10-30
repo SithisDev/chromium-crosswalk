@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,13 @@ NSString* const kBookmarkFolderCreateViewContainerIdentifier =
 NSString* const kBookmarkFolderPickerViewContainerIdentifier =
     @"kBookmarkFolderPickerViewContainerIdentifier";
 
+NSString* const kBookmarkHomeTableViewIdentifier =
+    @"kBookmarkHomeTableViewIdentifier";
+NSString* const kBookmarkHomeContextMenuIdentifier =
+    @"kBookmarkHomeContextMenuIdentifier";
+
+NSString* const kBookmarkNavigationBarIdentifier =
+    @"kBookmarkNavigationBarIdentifier";
 NSString* const kBookmarkHomeNavigationBarDoneButtonIdentifier =
     @"kBookmarkHomeNavigationBarDoneButtonIdentifier";
 NSString* const kBookmarkEditNavigationBarDoneButtonIdentifier =

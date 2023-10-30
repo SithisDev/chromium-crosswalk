@@ -1,20 +1,24 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_animator.h"
 
-#include <math.h>
-#include <algorithm>
-#include <memory>
+#import <math.h>
+#import <algorithm>
+#import <memory>
 
-#include "base/logging.h"
+#import "base/check_op.h"
 #import "ios/chrome/common/material_timing.h"
-#include "ui/gfx/geometry/cubic_bezier.h"
+#import "ui/gfx/geometry/cubic_bezier.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+CGFloat GetFinalFullscreenProgressForAnimation(FullscreenAnimatorStyle style) {
+  return style == FullscreenAnimatorStyle::ENTER_FULLSCREEN ? 0.0 : 1.0;
+}
 
 @interface FullscreenAnimator () {
   // The bezier backing the timing curve.
@@ -37,15 +41,14 @@
               controlPoint2:CGPointMake(0.2, 0.1)];
   DCHECK_GE(startProgress, 0.0);
   DCHECK_LE(startProgress, 1.0);
-  self = [super initWithDuration:ios::material::kDuration1
+  self = [super initWithDuration:kMaterialDuration1
                 timingParameters:timingParams];
   if (self) {
     DCHECK_GE(startProgress, 0.0);
     DCHECK_LE(startProgress, 1.0);
     _style = style;
     _startProgress = startProgress;
-    _finalProgress =
-        _style == FullscreenAnimatorStyle::ENTER_FULLSCREEN ? 0.0 : 1.0;
+    _finalProgress = GetFinalFullscreenProgressForAnimation(_style);
     _bezier = std::make_unique<gfx::CubicBezier>(
         timingParams.controlPoint1.x, timingParams.controlPoint1.y,
         timingParams.controlPoint2.x, timingParams.controlPoint2.y);
@@ -80,8 +83,8 @@
 
 - (void)stopAnimation:(BOOL)withoutFinishing {
   // Record the progress value when transitioning from the active to stopped
-  // state.  This allows |currentProgress| to return the correct value after
-  // stopping, as |fractionComplete| is reset to 0.0 for stopped animators.
+  // state.  This allows `currentProgress` to return the correct value after
+  // stopping, as `fractionComplete` is reset to 0.0 for stopped animators.
   if (self.state == UIViewAnimatingStateActive)
     _progressUponStopping = self.currentProgress;
   if (_progressUponStopping == _startProgress)

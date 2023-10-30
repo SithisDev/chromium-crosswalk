@@ -1,12 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ios/chrome/browser/ui/webui/ntp_tiles_internals_ui.h"
 
 #include <memory>
+#include <vector>
 
-#include "components/grit/components_resources.h"
+#include "components/grit/dev_ui_components_resources.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/webui/ntp_tiles_internals_message_handler.h"
@@ -28,10 +29,15 @@ class IOSNTPTilesInternalsMessageHandlerBridge
     : public web::WebUIIOSMessageHandler,
       public ntp_tiles::NTPTilesInternalsMessageHandlerClient {
  public:
-  // |favicon_service| must not be null and must outlive this object.
+  // `favicon_service` must not be null and must outlive this object.
   explicit IOSNTPTilesInternalsMessageHandlerBridge(
       favicon::FaviconService* favicon_service)
       : handler_(favicon_service) {}
+
+  IOSNTPTilesInternalsMessageHandlerBridge(
+      const IOSNTPTilesInternalsMessageHandlerBridge&) = delete;
+  IOSNTPTilesInternalsMessageHandlerBridge& operator=(
+      const IOSNTPTilesInternalsMessageHandlerBridge&) = delete;
 
  private:
   // web::WebUIIOSMessageHandler:
@@ -42,17 +48,15 @@ class IOSNTPTilesInternalsMessageHandlerBridge
   bool DoesSourceExist(ntp_tiles::TileSource source) override;
   std::unique_ptr<ntp_tiles::MostVisitedSites> MakeMostVisitedSites() override;
   PrefService* GetPrefs() override;
-  void RegisterMessageCallback(
-      const std::string& message,
-      const base::RepeatingCallback<void(const base::ListValue*)>& callback)
-      override;
-  void CallJavascriptFunctionVector(
-      const std::string& name,
-      const std::vector<const base::Value*>& values) override;
+  using MessageCallback =
+      base::RepeatingCallback<void(const base::Value::List&)>;
+  void RegisterMessageCallback(base::StringPiece message,
+                               MessageCallback callback) override;
+  void CallJavascriptFunctionSpan(
+      base::StringPiece name,
+      base::span<const base::ValueView> values) override;
 
   ntp_tiles::NTPTilesInternalsMessageHandler handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(IOSNTPTilesInternalsMessageHandlerBridge);
 };
 
 void IOSNTPTilesInternalsMessageHandlerBridge::RegisterMessages() {
@@ -60,20 +64,19 @@ void IOSNTPTilesInternalsMessageHandlerBridge::RegisterMessages() {
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::SupportsNTPTiles() {
-  return !ios::ChromeBrowserState::FromWebUIIOS(web_ui())->IsOffTheRecord();
+  return !ChromeBrowserState::FromWebUIIOS(web_ui())->IsOffTheRecord();
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::DoesSourceExist(
     ntp_tiles::TileSource source) {
   switch (source) {
     case ntp_tiles::TileSource::TOP_SITES:
-    case ntp_tiles::TileSource::SUGGESTIONS_SERVICE:
     case ntp_tiles::TileSource::POPULAR:
     case ntp_tiles::TileSource::POPULAR_BAKED_IN:
     case ntp_tiles::TileSource::HOMEPAGE:
       return true;
     case ntp_tiles::TileSource::CUSTOM_LINKS:
-    case ntp_tiles::TileSource::WHITELIST:
+    case ntp_tiles::TileSource::ALLOWLIST:
     case ntp_tiles::TileSource::EXPLORE:
       return false;
   }
@@ -84,22 +87,22 @@ bool IOSNTPTilesInternalsMessageHandlerBridge::DoesSourceExist(
 std::unique_ptr<ntp_tiles::MostVisitedSites>
 IOSNTPTilesInternalsMessageHandlerBridge::MakeMostVisitedSites() {
   return IOSMostVisitedSitesFactory::NewForBrowserState(
-      ios::ChromeBrowserState::FromWebUIIOS(web_ui()));
+      ChromeBrowserState::FromWebUIIOS(web_ui()));
 }
 
 PrefService* IOSNTPTilesInternalsMessageHandlerBridge::GetPrefs() {
-  return ios::ChromeBrowserState::FromWebUIIOS(web_ui())->GetPrefs();
+  return ChromeBrowserState::FromWebUIIOS(web_ui())->GetPrefs();
 }
 
 void IOSNTPTilesInternalsMessageHandlerBridge::RegisterMessageCallback(
-    const std::string& message,
-    const base::RepeatingCallback<void(const base::ListValue*)>& callback) {
-  web_ui()->RegisterMessageCallback(message, callback);
+    base::StringPiece message,
+    MessageCallback callback) {
+  web_ui()->RegisterMessageCallback(message, std::move(callback));
 }
 
-void IOSNTPTilesInternalsMessageHandlerBridge::CallJavascriptFunctionVector(
-    const std::string& name,
-    const std::vector<const base::Value*>& values) {
+void IOSNTPTilesInternalsMessageHandlerBridge::CallJavascriptFunctionSpan(
+    base::StringPiece name,
+    base::span<const base::ValueView> values) {
   web_ui()->CallJavascriptFunction(name, values);
 }
 
@@ -116,10 +119,10 @@ web::WebUIIOSDataSource* CreateNTPTilesInternalsHTMLSource() {
 
 }  // namespace
 
-NTPTilesInternalsUI::NTPTilesInternalsUI(web::WebUIIOS* web_ui)
-    : web::WebUIIOSController(web_ui) {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromWebUIIOS(web_ui);
+NTPTilesInternalsUI::NTPTilesInternalsUI(web::WebUIIOS* web_ui,
+                                         const std::string& host)
+    : web::WebUIIOSController(web_ui, host) {
+  ChromeBrowserState* browser_state = ChromeBrowserState::FromWebUIIOS(web_ui);
   web::WebUIIOSDataSource::Add(browser_state,
                                CreateNTPTilesInternalsHTMLSource());
   web_ui->AddMessageHandler(

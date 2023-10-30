@@ -1,46 +1,38 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/autofill/automation/automation_action.h"
 
-#import <EarlGrey/EarlGrey.h>
-
-#include "base/guid.h"
-#include "base/mac/foundation_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#import "base/mac/foundation_util.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "components/autofill/core/browser/autofill_manager.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/ios/browser/autofill_driver_ios.h"
-#import "ios/chrome/browser/autofill/form_suggestion_label.h"
+#import "base/values.h"
+#import "ios/chrome/browser/autofill/form_suggestion_constants.h"
 #import "ios/chrome/browser/ui/infobars/infobar_constants.h"
-#import "ios/chrome/test/app/tab_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
-#import "ios/web/public/js_messaging/web_frames_manager.h"
-#import "ios/web/public/test/earl_grey/web_view_actions.h"
-#import "ios/web/public/test/earl_grey/web_view_matchers.h"
-#include "ios/web/public/test/element_selector.h"
+#import "ios/chrome/test/earl_grey/chrome_matchers.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#import "ios/web/public/test/element_selector.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 @interface AutomationAction () {
-  std::unique_ptr<const base::DictionaryValue> actionDictionary_;
+  base::Value::Dict _actionDictionary;
 }
 
-@property(nonatomic, readonly)
-    const std::unique_ptr<const base::DictionaryValue>& actionDictionary;
+@property(nonatomic, readonly) const base::Value::Dict& actionDictionary;
 
 // Selects the proper subclass in the class cluster for the given type. Called
 // from the class method creating the actions.
 + (Class)classForType:(NSString*)type;
 
-- (instancetype)initWithValueDictionary:
-    (const base::DictionaryValue&)actionDictionary NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithValueDict:(base::Value::Dict)actionDictionary
+    NS_DESIGNATED_INITIALIZER;
 @end
 
 // An action that always fails.
@@ -148,17 +140,13 @@
 
 @implementation AutomationAction
 
-+ (instancetype)actionWithValueDictionary:
-    (const base::DictionaryValue&)actionDictionary {
-  const base::Value* typeValue =
-      actionDictionary.FindKeyOfType("type", base::Value::Type::STRING);
-  GREYAssert(typeValue, @"Type is missing in action.");
++ (instancetype)actionWithValueDict:(base::Value::Dict)actionDictionary {
+  const std::string* type = actionDictionary.FindString("type");
+  GREYAssert(type, @"Type is missing in action.");
+  GREYAssert(!type->empty(), @"Type is an empty value.");
 
-  const std::string type(typeValue->GetString());
-  GREYAssert(!type.empty(), @"Type is an empty value.");
-
-  return [[[self classForType:base::SysUTF8ToNSString(type)] alloc]
-      initWithValueDictionary:actionDictionary];
+  return [[[self classForType:base::SysUTF8ToNSString(*type)] alloc]
+      initWithValueDict:std::move(actionDictionary)];
 }
 
 + (Class)classForType:(NSString*)type {
@@ -178,11 +166,10 @@
   return classForType[type] ?: [AutomationActionUnrecognized class];
 }
 
-- (instancetype)initWithValueDictionary:
-    (const base::DictionaryValue&)actionDictionary {
+- (instancetype)initWithValueDict:(base::Value::Dict)actionDictionary {
   self = [super init];
   if (self) {
-    actionDictionary_ = actionDictionary.DeepCopyWithoutEmptyChildren();
+    _actionDictionary = std::move(actionDictionary);
   }
   return self;
 }
@@ -191,39 +178,38 @@
   GREYAssert(NO, @"Should not be called!");
 }
 
-- (const std::unique_ptr<const base::DictionaryValue>&)actionDictionary {
-  return actionDictionary_;
+- (const base::Value::Dict&)actionDictionary {
+  return _actionDictionary;
 }
 
 // A shared flow across many actions, this waits for the target element to be
 // visible, scrolls it into view, then taps on it.
 - (void)tapOnTarget:(ElementSelector*)selector {
-  web::WebState* web_state = chrome_test_util::GetCurrentWebState();
 
   // Wait for the element to be visible on the page.
   [ChromeEarlGrey waitForWebStateContainingElement:selector];
 
   // Potentially scroll into view if below the fold.
-  [[EarlGrey selectElementWithMatcher:web::WebViewInWebState(web_state)]
-      performAction:WebViewScrollElementToVisible(web_state, selector)];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::ScrollElementToVisible(selector)];
 
   // Calling WebViewTapElement right after WebViewScrollElement caused flaky
   // issues with the wrong location being provided for the tap target,
   // seemingly caused by the screen not redrawing in-between these two actions.
-  // We force a brief wait here to avoid this issue.
-  [[GREYCondition conditionWithName:@"forced wait to allow for redraw"
-                              block:^BOOL {
-                                return false;
-                              }] waitWithTimeout:0.1];
-
+  // We force a brief wait here to avoid this issue. `waitWithTimeout` requires
+  // its result to be used. Void the result as it's always false.
+  (void)[[GREYCondition conditionWithName:@"forced wait to allow for redraw"
+                                    block:^BOOL {
+                                      return false;
+                                    }] waitWithTimeout:0.1];
   // Tap on the element.
-  [[EarlGrey selectElementWithMatcher:web::WebViewInWebState(web_state)]
-      performAction:web::WebViewTapElement(web_state, selector)];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElement(selector)];
 }
 
 // Creates a selector targeting the element specified in the action.
 - (ElementSelector*)selectorForTarget {
-  const std::string xpath = [self getStringFromDictionaryWithKey:"selector"];
+  const std::string xpath = [self stringFromDictionaryWithKey:"selector"];
 
   // Creates a selector from the action dictionary.
   ElementSelector* selector = [ElementSelector selectorWithXPathQuery:xpath];
@@ -233,34 +219,30 @@
 // Returns a std::string corrensponding to the given key in the action
 // dictionary. Will raise a test failure if the key is missing or the value is
 // empty.
-- (std::string)getStringFromDictionaryWithKey:(std::string)key {
-  const base::Value* expectedTypeValue(
-      self.actionDictionary->FindKeyOfType(key, base::Value::Type::STRING));
-  GREYAssert(expectedTypeValue, @"%s is missing in action.", key.c_str());
+- (std::string)stringFromDictionaryWithKey:(const std::string&)key {
+  const std::string* expectedType = self.actionDictionary.FindString(key);
+  GREYAssert(expectedType, @"%s is missing in action.", key.c_str());
+  GREYAssert(!expectedType->empty(), @"%s is an empty value", key.c_str());
 
-  const std::string expectedType(expectedTypeValue->GetString());
-  GREYAssert(!expectedType.empty(), @"%s is an empty value", key.c_str());
-
-  return expectedType;
+  return *expectedType;
 }
 
 // Returns an int corrensponding to the given key in the action
 // dictionary. Will raise a test failure if the key is missing or the value is
 // empty.
-- (int)getIntFromDictionaryWithKey:(std::string)key {
-  const base::Value* expectedTypeValue(
-      self.actionDictionary->FindKeyOfType(key, base::Value::Type::INTEGER));
+- (int)intFromDictionaryWithKey:(const std::string&)key {
+  absl::optional<int> expectedTypeValue = self.actionDictionary.FindInt(key);
   GREYAssert(expectedTypeValue, @"%s is missing in action.", key.c_str());
 
-  return expectedTypeValue->GetInt();
+  return *expectedTypeValue;
 }
 
 // Runs the JS code passed in against the target element specified by the
 // selector passed in. The target element is passed in to the JS function
 // by the name "target", so example JS code is like:
 // return target.value
-- (id)executeJavaScript:(std::string)function
-               onTarget:(ElementSelector*)selector {
+- (base::Value)executeJavaScript:(std::string)function
+                        onTarget:(ElementSelector*)selector {
   NSString* javaScript = [NSString
       stringWithFormat:@"    (function() {"
                         "      try {"
@@ -272,7 +254,7 @@
                        base::SysUTF8ToNSString(function),
                        selector.selectorScript];
 
-  return [ChromeEarlGrey executeJavaScript:javaScript];
+  return [ChromeEarlGrey evaluateJavaScript:javaScript];
 }
 
 @end
@@ -297,16 +279,14 @@
 @implementation AutomationActionWaitFor
 
 - (void)execute {
-  const base::Value* assertionsValue(self.actionDictionary->FindKeyOfType(
-      "assertions", base::Value::Type::LIST));
-  GREYAssert(assertionsValue, @"Assertions key is missing in action.");
-
-  const base::Value::ListStorage& assertionsValues(assertionsValue->GetList());
-  GREYAssert(assertionsValues.size(), @"Assertions list is empty.");
+  const base::Value::List* assertionsValues =
+      self.actionDictionary.FindList("assertions");
+  GREYAssert(assertionsValues, @"Assertions key is missing in action.");
+  GREYAssert(assertionsValues->size(), @"Assertions list is empty.");
 
   std::vector<std::string> state_assertions;
 
-  for (auto const& assertionValue : assertionsValues) {
+  for (auto const& assertionValue : *assertionsValues) {
     const std::string assertionString(assertionValue.GetString());
     GREYAssert(!assertionString.empty(), @"assertionString is an empty value.");
     state_assertions.push_back(assertionString);
@@ -341,10 +321,10 @@
                                                        "    })();",
                                                       assertionString];
 
-    NSNumber* result = base::mac::ObjCCastStrict<NSNumber>(
-        [ChromeEarlGrey executeJavaScript:javascript]);
+    base::Value result = [ChromeEarlGrey evaluateJavaScript:javascript];
+    GREYAssertTrue(result.is_bool(), @"The result is not a boolean.");
 
-    if (![result boolValue]) {
+    if (!result.GetBool()) {
       return assertionString;
     }
   }
@@ -380,16 +360,18 @@
   [ChromeEarlGrey waitForWebStateContainingElement:selector];
 
   NSString* expectedType = base::SysUTF8ToNSString(
-      [self getStringFromDictionaryWithKey:"expectedAutofillType"]);
+      [self stringFromDictionaryWithKey:"expectedAutofillType"]);
   NSString* expectedValue = base::SysUTF8ToNSString(
-      [self getStringFromDictionaryWithKey:"expectedValue"]);
+      [self stringFromDictionaryWithKey:"expectedValue"]);
 
-  NSString* predictionType = base::mac::ObjCCastStrict<NSString>([self
-      executeJavaScript:"return target.placeholder;"
-               onTarget:[self selectorForTarget]]);
+  base::Value result = [self executeJavaScript:"return target.placeholder;"
+                                      onTarget:[self selectorForTarget]];
+  GREYAssertTrue(result.is_string(), @"The result is not a string.");
+  NSString* predictionType = base::SysUTF8ToNSString(result.GetString());
 
-  NSString* autofilledValue = base::mac::ObjCCastStrict<NSString>(
-      [self executeJavaScript:"return target.value;" onTarget:selector]);
+  result = [self executeJavaScript:"return target.value;" onTarget:selector];
+  GREYAssertTrue(result.is_string(), @"The result is not a string.");
+  NSString* autofilledValue = base::SysUTF8ToNSString(result.GetString());
 
   GREYAssertEqualObjects(predictionType, expectedType,
                          @"Expected prediction type %@ but got %@",
@@ -409,7 +391,7 @@
   // Wait for the element to be visible on the page.
   [ChromeEarlGrey waitForWebStateContainingElement:selector];
 
-  int selectedIndex = [self getIntFromDictionaryWithKey:"index"];
+  int selectedIndex = [self intFromDictionaryWithKey:"index"];
   [self executeJavaScript:
             base::SysNSStringToUTF8([NSString
                 stringWithFormat:@"target.options.selectedIndex = %d; "
@@ -423,11 +405,9 @@
 @implementation AutomationActionUnrecognized
 
 - (void)execute {
-  const base::Value* typeValue =
-      self.actionDictionary->FindKeyOfType("type", base::Value::Type::STRING);
-  const std::string type(typeValue->GetString());
-
-  GREYAssert(NO, @"Unknown action of type %s", type.c_str());
+  const std::string* type = self.actionDictionary.FindString("type");
+  GREYAssert(type, @"Unknown action; missing type string");
+  GREYAssert(NO, @"Unknown action of type %s", type->c_str());
 }
 
 @end
@@ -436,7 +416,7 @@
 
 - (void)execute {
   ElementSelector* selector = [self selectorForTarget];
-  std::string value = [self getStringFromDictionaryWithKey:"value"];
+  std::string value = [self stringFromDictionaryWithKey:"value"];
   [self executeJavaScript:
             base::SysNSStringToUTF8([NSString
                 stringWithFormat:

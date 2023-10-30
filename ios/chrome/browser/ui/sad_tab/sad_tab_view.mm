@@ -1,36 +1,35 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/sad_tab/sad_tab_view.h"
 
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/grit/components_scaled_resources.h"
-#include "components/strings/grit/components_strings.h"
-#include "components/ui_metrics/sadtab_metrics_types.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import <MaterialComponents/MaterialButtons.h>
+
+#import "base/metrics/histogram_macros.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/grit/components_scaled_resources.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/ui_metrics/sadtab_metrics_types.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
-#import "ios/chrome/browser/ui/util/label_link_controller.h"
-#include "ios/chrome/browser/ui/util/rtl_geometry.h"
+#import "ios/chrome/browser/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#include "ios/web/public/browser_state.h"
-#include "ios/web/public/navigation/navigation_manager.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "url/gurl.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
+#import "ios/chrome/common/ui/util/text_view_util.h"
+#import "ios/web/public/browser_state.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "net/base/mac/url_conversions.h"
+#import "ui/base/device_form_factor.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Color constants.
-const CGFloat kBackgroundColorBrightness = 247.0f / 255.0f;
-const CGFloat kTitleLabelTextColorBrightness = 22.0f / 255.0f;
-const CGFloat kGeneralTextColorBrightness = 80.0f / 255.0f;
 // Layout constants.
 const UIEdgeInsets kLayoutInsets = {24.0f, 24.0f, 24.0f, 24.0f};
 const CGFloat kLayoutBoundsMaxWidth = 600.0f;
@@ -55,7 +54,7 @@ NSString* const kMessageTextViewBulletSuffix = @"\n";
 NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 }  // namespace
 
-@interface SadTabView () {
+@interface SadTabView () <UITextViewDelegate> {
   UITextView* _messageTextView;
   MDCFlatButton* _actionButton;
 }
@@ -69,11 +68,8 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 // Displays the Sad Tab title.
 @property(nonatomic, readonly, strong) UILabel* titleLabel;
 // Displays the Sad Tab footer message (including a link to more help).
-@property(nonatomic, readonly, strong) UILabel* footerLabel;
-// Provides Link functionality to the footerLabel.
-@property(nonatomic, readonly, strong)
-    LabelLinkController* footerLabelLinkController;
-// The bounds of |containerView|, with a height updated to CGFLOAT_MAX to allow
+@property(nonatomic, readonly, strong) UITextView* footerLabel;
+// The bounds of `containerView`, with a height updated to CGFLOAT_MAX to allow
 // text to be laid out using as many lines as necessary.
 @property(nonatomic, readonly) CGRect containerBounds;
 
@@ -106,12 +102,7 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 // Returns the string to be used for the main action button.
 - (nonnull NSString*)buttonText;
 
-// Attaches a link controller to |label|, finding the |linkString|
-// within the |label| text to use as the link.
-- (void)attachLinkControllerToLabel:(nonnull UILabel*)label
-                        forLinkText:(nonnull NSString*)linkText;
-
-// The action selector for |_actionButton|.
+// The action selector for `_actionButton`.
 - (void)handleActionButtonTapped;
 
 // Returns the desired background color.
@@ -123,14 +114,10 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 
 @implementation SadTabView
 
-@synthesize offTheRecord = _offTheRecord;
 @synthesize imageView = _imageView;
 @synthesize containerView = _containerView;
 @synthesize titleLabel = _titleLabel;
 @synthesize footerLabel = _footerLabel;
-@synthesize footerLabelLinkController = _footerLabelLinkController;
-@synthesize mode = _mode;
-@synthesize delegate = _delegate;
 
 - (instancetype)initWithMode:(SadTabViewMode)mode
                 offTheRecord:(BOOL)offTheRecord {
@@ -249,7 +236,7 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
   NSString* label = nil;
   switch (self.mode) {
     case SadTabViewMode::RELOAD: {
-      base::string16 footerLinkText(
+      std::u16string footerLinkText(
           l10n_util::GetStringUTF16(IDS_SAD_TAB_HELP_LINK));
       label = base::SysUTF16ToNSString(
           l10n_util::GetStringFUTF16(IDS_SAD_TAB_HELP_MESSAGE, footerLinkText));
@@ -266,7 +253,7 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
   NSString* label = nil;
   switch (self.mode) {
     case SadTabViewMode::RELOAD: {
-      base::string16 footerLinkText(
+      std::u16string footerLinkText(
           l10n_util::GetStringUTF16(IDS_SAD_TAB_HELP_LINK));
       label = base::SysUTF16ToNSString(footerLinkText);
     } break;
@@ -292,26 +279,6 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
   return label;
 }
 
-- (void)attachLinkControllerToLabel:(nonnull UILabel*)label
-                        forLinkText:(nonnull NSString*)linkText {
-  __weak __typeof(self) weakSelf = self;
-  _footerLabelLinkController = [[LabelLinkController alloc]
-      initWithLabel:label
-             action:^(const GURL& URL) {
-               [weakSelf.delegate sadTabView:weakSelf
-                   showSuggestionsPageWithURL:URL];
-             }];
-
-  _footerLabelLinkController.linkFont =
-      [[MDCTypography fontLoader] boldFontOfSize:kFooterLabelFontSize];
-  _footerLabelLinkController.linkUnderlineStyle = NSUnderlineStyleSingle;
-  NSRange linkRange = [label.text rangeOfString:linkText];
-  DCHECK(linkRange.location != NSNotFound);
-  DCHECK(linkRange.length > 0);
-  [_footerLabelLinkController addLinkWithRange:linkRange
-                                           url:GURL(kCrashReasonURL)];
-}
-
 #pragma mark Accessors
 
 - (UIView*)containerView {
@@ -324,8 +291,10 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 
 - (UIImageView*)imageView {
   if (!_imageView) {
-    _imageView =
-        [[UIImageView alloc] initWithImage:NativeImage(IDR_CRASH_SAD_TAB)];
+    UIImage* sadTabImage = [NativeImage(IDR_CRASH_SAD_TAB)
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    _imageView = [[UIImageView alloc] initWithImage:sadTabImage];
+    _imageView.tintColor = [UIColor colorNamed:kTextSecondaryColor];
     [_imageView setBackgroundColor:self.backgroundColor];
   }
   return _imageView;
@@ -338,29 +307,41 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
     [_titleLabel setText:[self titleLabelText]];
     [_titleLabel setLineBreakMode:NSLineBreakByWordWrapping];
     [_titleLabel setNumberOfLines:0];
-    [_titleLabel
-        setTextColor:[UIColor colorWithWhite:kTitleLabelTextColorBrightness
-                                       alpha:1.0]];
-    [_titleLabel setFont:[[MDCTypography fontLoader]
-                             regularFontOfSize:kTitleLabelFontSize]];
+    [_titleLabel setTextColor:[UIColor colorNamed:kTextPrimaryColor]];
+    [_titleLabel setFont:[UIFont systemFontOfSize:kTitleLabelFontSize
+                                           weight:UIFontWeightRegular]];
   }
   return _titleLabel;
 }
 
-- (UILabel*)footerLabel {
+- (UITextView*)footerLabel {
   if (!_footerLabel) {
-    _footerLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    [_footerLabel setBackgroundColor:self.backgroundColor];
-    [_footerLabel setNumberOfLines:0];
-    [_footerLabel setFont:[[MDCTypography fontLoader]
-                              regularFontOfSize:kFooterLabelFontSize]];
-    [_footerLabel
-        setTextColor:[UIColor colorWithWhite:kGeneralTextColorBrightness
-                                       alpha:1.0]];
+    _footerLabel = CreateUITextViewWithTextKit1();
+    _footerLabel.backgroundColor = self.backgroundColor;
+    _footerLabel.delegate = self;
 
-    [_footerLabel setText:[self footerLabelText]];
-    [self attachLinkControllerToLabel:_footerLabel
-                          forLinkText:[self footerLinkText]];
+    // Set base text styling for footer.
+    NSDictionary<NSAttributedStringKey, id>* footerAttributes = @{
+      NSFontAttributeName : [UIFont systemFontOfSize:kFooterLabelFontSize
+                                              weight:UIFontWeightRegular],
+      NSForegroundColorAttributeName : [UIColor colorNamed:kTextSecondaryColor],
+    };
+    NSMutableAttributedString* footerText =
+        [[NSMutableAttributedString alloc] initWithString:[self footerLabelText]
+                                               attributes:footerAttributes];
+
+    // Add link to footer.
+    NSURL* linkURL = net::NSURLWithGURL(GURL(kCrashReasonURL));
+    NSDictionary<NSAttributedStringKey, id>* linkAttributes = @{
+      NSForegroundColorAttributeName : [UIColor colorNamed:kBlueColor],
+      NSLinkAttributeName : linkURL,
+    };
+    NSRange linkRange = [footerText.string rangeOfString:[self footerLinkText]];
+    DCHECK(linkRange.location != NSNotFound);
+    DCHECK(linkRange.length > 0);
+    [footerText addAttributes:linkAttributes range:linkRange];
+
+    _footerLabel.attributedText = footerText;
   }
   return _footerLabel;
 }
@@ -448,8 +429,8 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 
 - (void)layoutActionButton {
   CGRect containerBounds = self.containerBounds;
-  BOOL isIPadIdiom = IsIPadIdiom();
-  BOOL isPortrait = IsPortrait();
+  BOOL isIPadIdiom = ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET;
+  BOOL isPortrait = IsPortrait(self.window);
   BOOL shouldAddActionButtonToContainer = isIPadIdiom || !isPortrait;
   LayoutRect actionButtonLayout = LayoutRectZero;
   actionButtonLayout.size =
@@ -488,11 +469,11 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
   CGFloat containerOriginX =
       (CGRectGetWidth(self.bounds) - containerSize.width) / 2.0f;
   CGFloat containerOriginY = 0.0f;
-  if (IsIPadIdiom()) {
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
     // Center the containerView on iPads.
     containerOriginY =
         (CGRectGetHeight(self.bounds) - containerSize.height) / 2.0f;
-  } else if (IsPortrait()) {
+  } else if (IsPortrait(self.window)) {
     // Align containerView to a quarter of the view height on portrait iPhones.
     containerOriginY =
         (CGRectGetHeight(self.bounds) - containerSize.height) / 4.0f;
@@ -526,7 +507,22 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 }
 
 + (UIColor*)sadTabBackgroundColor {
-  return [UIColor colorWithWhite:kBackgroundColorBrightness alpha:1.0];
+  return [UIColor colorNamed:kBackgroundColor];
+}
+
+#pragma mark - UITextViewDelegate
+
+- (BOOL)textView:(UITextView*)textView
+    shouldInteractWithURL:(NSURL*)URL
+                  inRange:(NSRange)characterRange
+              interaction:(UITextItemInteraction)interaction {
+  DCHECK(self.footerLabel == textView);
+  DCHECK(URL);
+
+  [self.delegate sadTabView:self
+      showSuggestionsPageWithURL:net::GURLWithNSURL(URL)];
+  // Returns NO as the app is handling the opening of the URL.
+  return NO;
 }
 
 @end
@@ -537,15 +533,13 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 
 - (UITextView*)messageTextView {
   if (!_messageTextView) {
-    _messageTextView = [[UITextView alloc] initWithFrame:CGRectZero];
+    _messageTextView = CreateUITextViewWithTextKit1();
     [_messageTextView setBackgroundColor:self.backgroundColor];
     [_messageTextView setAttributedText:[self messageTextViewAttributedText]];
     _messageTextView.textContainer.lineFragmentPadding = 0.0f;
-    [_messageTextView
-        setTextColor:[UIColor colorWithWhite:kGeneralTextColorBrightness
-                                       alpha:1.0]];
-    [_messageTextView setFont:[[MDCTypography fontLoader]
-                                  regularFontOfSize:kMessageTextViewFontSize]];
+    [_messageTextView setTextColor:[UIColor colorNamed:kTextSecondaryColor]];
+    [_messageTextView setFont:[UIFont systemFontOfSize:kMessageTextViewFontSize
+                                                weight:UIFontWeightRegular]];
     [_messageTextView setUserInteractionEnabled:NO];
   }
   return _messageTextView;
@@ -554,21 +548,22 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
 - (UIButton*)actionButton {
   if (!_actionButton) {
     _actionButton = [[MDCFlatButton alloc] init];
-    [_actionButton setBackgroundColor:[[MDCPalette cr_bluePalette] tint500]
+    [_actionButton setBackgroundColor:[UIColor colorNamed:kBlueColor]
                              forState:UIControlStateNormal];
-    [_actionButton setBackgroundColor:[[MDCPalette greyPalette] tint500]
+    [_actionButton setBackgroundColor:[UIColor colorNamed:kDisabledTintColor]
                              forState:UIControlStateDisabled];
-    [_actionButton setTitleColor:[UIColor whiteColor]
+    [_actionButton setTitleColor:[UIColor colorNamed:kSolidButtonTextColor]
                         forState:UIControlStateNormal];
-    [_actionButton setUnderlyingColorHint:[UIColor blackColor]];
-    [_actionButton setInkColor:[UIColor colorWithWhite:1 alpha:0.2f]];
+    [_actionButton setUnderlyingColorHint:self.backgroundColor];
+    [_actionButton setInkColor:[UIColor colorNamed:kMDCInkColor]];
 
     [_actionButton setTitle:[self buttonText] forState:UIControlStateNormal];
-    [_actionButton setTitleColor:[UIColor whiteColor]
-                        forState:UIControlStateNormal];
     [_actionButton addTarget:self
                       action:@selector(handleActionButtonTapped)
             forControlEvents:UIControlEventTouchUpInside];
+    _actionButton.pointerInteractionEnabled = YES;
+    _actionButton.pointerStyleProvider =
+        CreateOpaqueButtonPointerStyleProvider();
   }
   return _actionButton;
 }

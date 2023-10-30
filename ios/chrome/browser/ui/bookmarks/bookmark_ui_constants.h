@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,14 @@ extern NSString* const kBookmarkFolderEditViewContainerIdentifier;
 extern NSString* const kBookmarkFolderCreateViewContainerIdentifier;
 // Accessibility identifier of the Bookmark Folder Picker View container.
 extern NSString* const kBookmarkFolderPickerViewContainerIdentifier;
+// Accessibility identifier of the Bookmark Home TableView.
+extern NSString* const kBookmarkHomeTableViewIdentifier;
+// Accessibility identifier of the Bookmark Home context menu.
+extern NSString* const kBookmarkHomeContextMenuIdentifier;
 
 // UINavigationBar accessibility constants:
+// Accessibility identifier of the Bookmark navigation bar.
+extern NSString* const kBookmarkNavigationBarIdentifier;
 // Accessibility identifier of the BookmarkHome VC navigation bar done button.
 extern NSString* const kBookmarkHomeNavigationBarDoneButtonIdentifier;
 // Accessibility identifier of the BookmarkEdit VC navigation bar done button.

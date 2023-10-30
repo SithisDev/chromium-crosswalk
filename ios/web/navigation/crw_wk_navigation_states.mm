@@ -1,11 +1,15 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/navigation/crw_wk_navigation_states.h"
 
-#include "base/logging.h"
+#import "base/check.h"
+#import "base/feature_list.h"
+#import "base/metrics/histogram_macros.h"
+#import "ios/web/common/features.h"
 #import "ios/web/navigation/navigation_context_impl.h"
+#import "ios/web/public/web_client.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -13,7 +17,7 @@
 
 // Holds a pair of state and creation order index.
 @interface CRWWKNavigationsStateRecord : NSObject {
-  // Backs up |context| property.
+  // Backs up `context` property.
   std::unique_ptr<web::NavigationContextImpl> _context;
 }
 // Navigation state.
@@ -138,13 +142,40 @@
            // didFinishNavigation can be called before didCommitNvigation.
            (record.state == web::WKNavigationState::FINISHED &&
             state == web::WKNavigationState::COMMITTED) ||
-           // |navigation| can be nil for same-document navigations.
+           // `navigation` can be nil for same-document navigations.
            !navigation);
     record.state = state;
   }
   if (state == web::WKNavigationState::COMMITTED) {
     record.committed = YES;
   }
+
+  // Workaround for a WKWebView bug where WKNavigation's can leak, leaving a
+  // permanent pending URL, thus breaking the omnibox.  While it is possible
+  // for navigations to finish out-of-order, it's an edge case that should be
+  // handled gracefully, as last committed will appear in the omnibox instead
+  // of the pending URL.  See crbug.com/1010765 for details and a reproducible
+  // example.
+  if (state == web::WKNavigationState::FINISHED &&
+      base::FeatureList::IsEnabled(
+          web::features::kClearOldNavigationRecordsWorkaround)) {
+    NSUInteger finishedIndex = record.index;
+    NSMutableSet* navigationsToRemove = [NSMutableSet set];
+    for (id recordKey in _records) {
+      CRWWKNavigationsStateRecord* recordObject =
+          [_records objectForKey:recordKey];
+      if (recordObject.index < finishedIndex) {
+        [navigationsToRemove addObject:recordKey];
+      }
+    }
+    for (id recordKey in navigationsToRemove) {
+      [_records removeObjectForKey:recordKey];
+    }
+
+    UMA_HISTOGRAM_BOOLEAN("IOS.CRWWKNavigationStatesRemoveOldPending",
+                          navigationsToRemove.count > 0);
+  }
+
   [_records setObject:record forKey:key];
 }
 
@@ -242,7 +273,7 @@
   }
 
   if (*outNavigation == _nullNavigation) {
-    // |_nullNavigation| is a key for storing null navigations.
+    // `_nullNavigation` is a key for storing null navigations.
     *outNavigation = nil;
   }
 }

@@ -1,17 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/net/retryable_url_fetcher.h"
 
-#include "base/message_loop/message_loop.h"
 #import "base/strings/sys_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
-#include "ios/web/public/test/test_web_thread.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
-#include "services/network/test/test_url_loader_factory.h"
+#import "base/test/task_environment.h"
+#import "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#import "services/network/test/test_url_loader_factory.h"
 #import "testing/gtest_mac.h"
-#include "testing/platform_test.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -79,7 +77,7 @@ class RetryableURLFetcherTest : public PlatformTest {
     test_delegate_ = [[TestRetryableURLFetcherDelegate alloc] init];
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory>
       test_shared_url_loader_factory_;
@@ -98,7 +96,7 @@ TEST_F(RetryableURLFetcherTest, TestResponse200) {
       url, base::SysNSStringToUTF8(kFakeResponseString), net::HTTP_OK);
 
   [retryableFetcher startFetch];
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(1U, [test_delegate_ responsesProcessed]);
 }
@@ -114,7 +112,7 @@ TEST_F(RetryableURLFetcherTest, TestResponse404) {
   test_url_loader_factory_.AddResponse(url, "", net::HTTP_NOT_FOUND);
 
   [retryableFetcher startFetch];
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(0U, [test_delegate_ responsesProcessed]);
 }
@@ -132,7 +130,7 @@ TEST_F(RetryableURLFetcherTest, TestFailingURLNoRetry) {
   [failing_delegate setResponsesProcessed:0U];
 
   [retryableFetcher startFetch];
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Verify that a response has been received, even if the failing delegate
   // received a nil in processSuccessResponse to indicate the failure.

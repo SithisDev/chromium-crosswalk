@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,8 @@ const CGFloat kSeparatorMargin = 12;
   if (self) {
     UIView* separator = [[UIView alloc] init];
     separator.translatesAutoresizingMaskIntoConstraints = NO;
-    separator.backgroundColor = [UIColor colorWithWhite:0 alpha:0.05];
+    separator.backgroundColor =
+        [UIColor colorNamed:@"popup_menu_separator_color"];
     [self.contentView addSubview:separator];
     [NSLayoutConstraint activateConstraints:@[
       [separator.heightAnchor constraintEqualToConstant:kSeparatorHeight],

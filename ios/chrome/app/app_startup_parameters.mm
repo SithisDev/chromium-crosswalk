@@ -1,15 +1,15 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/app/app_startup_parameters.h"
 
-#include "base/stl_util.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/payments/payment_request_constants.h"
+#import "base/feature_list.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "net/base/mac/url_conversions.h"
-#include "net/base/url_util.h"
-#include "url/gurl.h"
+#import "net/base/url_util.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -18,11 +18,13 @@
 @implementation AppStartupParameters {
   GURL _externalURL;
   GURL _completeURL;
+  std::vector<GURL> _URLs;
 }
 
 @synthesize externalURLParams = _externalURLParams;
 @synthesize postOpeningAction = _postOpeningAction;
-@synthesize launchInIncognito = _launchInIncognito;
+@synthesize applicationMode = _applicationMode;
+// TODO(crbug.com/1021752): Remove this stub.
 @synthesize completePaymentRequest = _completePaymentRequest;
 @synthesize textQuery = _textQuery;
 
@@ -35,39 +37,32 @@
 }
 
 - (instancetype)initWithExternalURL:(const GURL&)externalURL
-                        completeURL:(const GURL&)completeURL {
+                        completeURL:(const GURL&)completeURL
+                    applicationMode:(ApplicationModeForTabOpening)mode {
   self = [super init];
   if (self) {
     _externalURL = externalURL;
     _completeURL = completeURL;
+    _applicationMode = mode;
   }
   return self;
 }
 
-- (instancetype)initWithUniversalLink:(const GURL&)universalLink {
-  // If a new tab with |_externalURL| needs to be opened after the App
-  // was launched as the result of a Universal Link navigation, the only
-  // supported possibility at this time is the New Tab Page.
-  self = [self initWithExternalURL:GURL(kChromeUINewTabURL)
-                       completeURL:GURL(kChromeUINewTabURL)];
-
-  if (self) {
-    std::map<std::string, std::string> parameters;
-    net::QueryIterator query_iterator(universalLink);
-    while (!query_iterator.IsAtEnd()) {
-      parameters.insert(std::make_pair(query_iterator.GetKey(),
-                                       query_iterator.GetUnescapedValue()));
-      query_iterator.Advance();
-    }
-
-    // Currently only Payment Request parameters are supported.
-    if (base::Contains(parameters, payments::kPaymentRequestIDExternal) &&
-        base::Contains(parameters, payments::kPaymentRequestDataExternal)) {
-      _externalURLParams = parameters;
-      _completePaymentRequest = YES;
-    }
+- (instancetype)initWithURLs:(const std::vector<GURL>&)URLs
+             applicationMode:(ApplicationModeForTabOpening)mode {
+  if (URLs.empty()) {
+    self = [self initWithExternalURL:GURL(kChromeUINewTabURL)
+                         completeURL:GURL(kChromeUINewTabURL)
+                     applicationMode:mode];
+  } else {
+    self = [self initWithExternalURL:URLs.front()
+                         completeURL:URLs.front()
+                     applicationMode:mode];
   }
 
+  if (self) {
+    _URLs = URLs;
+  }
   return self;
 }
 
@@ -75,7 +70,7 @@
   NSMutableString* description =
       [NSMutableString stringWithFormat:@"AppStartupParameters: %s",
                                         _externalURL.spec().c_str()];
-  if (self.launchInIncognito) {
+  if (self.applicationMode == ApplicationModeForTabOpening::INCOGNITO) {
     [description appendString:@", should launch in incognito"];
   }
 
@@ -98,6 +93,13 @@
   }
 
   return description;
+}
+
+- (void)setPostOpeningAction:(TabOpeningPostOpeningAction)action {
+  // Only NO_ACTION or SHOW_DEFAULT_BROWSER_SETTINGS are allowed on non NTP.
+  DCHECK(action == NO_ACTION || action == SHOW_DEFAULT_BROWSER_SETTINGS ||
+         _externalURL == GURL(kChromeUINewTabURL));
+  _postOpeningAction = action;
 }
 
 @end

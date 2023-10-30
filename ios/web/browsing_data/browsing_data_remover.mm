@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 #import <WebKit/WebKit.h>
 
 #import "base/ios/block_types.h"
-#include "base/task/post_task.h"
+#import "base/memory/ptr_util.h"
 #import "ios/web/browsing_data/browsing_data_remover_observer.h"
+#import "ios/web/common/uikit_ui_util.h"
 #import "ios/web/public/browser_state.h"
 #import "ios/web/public/thread/web_thread.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
@@ -79,7 +80,7 @@ void BrowsingDataRemover::ClearBrowsingData(ClearBrowsingDataMask types,
   }
 
   if (![data_types_to_remove count]) {
-    base::PostTask(FROM_HERE, base::BindOnce(std::move(block_closure)));
+    std::move(block_closure).Run();
     return;
   }
 
@@ -120,7 +121,7 @@ void BrowsingDataRemover::ClearBrowsingData(ClearBrowsingDataMask types,
     };
   }
 
-  // TODO(crbug.com/661630): |dummy_web_view_| is created to allow
+  // TODO(crbug.com/661630): `dummy_web_view_` is created to allow
   // the -[WKWebsiteDataStore removeDataOfTypes:] API to access the cookiestore
   // and clear cookies. This is a workaround for
   // https://bugs.webkit.org/show_bug.cgi?id=149078. Remove this
@@ -135,8 +136,7 @@ void BrowsingDataRemover::ClearBrowsingData(ClearBrowsingDataMask types,
       // remove/check the cookies which indicates that we might have the same
       // issue with cookies. Adding the web view to the view hierarchy as a safe
       // guard.
-      [[UIApplication sharedApplication].keyWindow insertSubview:dummy_web_view_
-                                                         atIndex:0];
+      [GetAnyKeyWindow() insertSubview:dummy_web_view_ atIndex:0];
     }
   }
 

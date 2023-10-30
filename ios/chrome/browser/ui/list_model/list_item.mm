@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/list_model/list_item.h"
 
-#include "base/logging.h"
 #import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)

@@ -1,22 +1,23 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_manager.h"
 
-#include "base/logging.h"
+#import "base/check.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
+#import "ios/chrome/browser/ui/reading_list/reading_list_constants.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_commands.h"
-#import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_identifiers.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
-
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Returns the title to use for the "Mark" button for |state|.
+// Returns the title to use for the "Mark" button for `state`.
 NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   switch (state) {
     case ReadingListSelectionState::NONE:
@@ -36,14 +37,14 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   NSMutableArray<UIBarButtonItem*>* _buttonItems;
 }
 
-// The possible button items that may be returned by the |-buttonItems|.
+// The possible button items that may be returned by the `-buttonItems`.
 @property(nonatomic, strong, readonly) UIBarButtonItem* editButton;
 @property(nonatomic, strong, readonly) UIBarButtonItem* deleteButton;
 @property(nonatomic, strong, readonly) UIBarButtonItem* deleteAllReadButton;
 @property(nonatomic, strong, readonly) UIBarButtonItem* cancelButton;
 @property(nonatomic, strong, readonly) UIBarButtonItem* markButton;
 
-// Whether the corresponding button items should be returned in |-buttonItems|.
+// Whether the corresponding button items should be returned in `-buttonItems`.
 @property(nonatomic, readonly) BOOL shouldShowEditButton;
 @property(nonatomic, readonly) BOOL shouldShowDeleteButton;
 @property(nonatomic, readonly) BOOL shouldShowDeleteAllReadButton;
@@ -80,7 +81,7 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
                target:nil
                action:@selector(deleteSelectedReadingListItems)];
     _deleteButton.accessibilityIdentifier = kReadingListToolbarDeleteButtonID;
-    _deleteButton.tintColor = [UIColor redColor];
+    _deleteButton.tintColor = [UIColor colorNamed:kRedColor];
 
     _deleteAllReadButton = [[UIBarButtonItem alloc]
         initWithTitle:l10n_util::GetNSString(
@@ -90,7 +91,7 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
                action:@selector(deleteAllReadReadingListItems)];
     _deleteAllReadButton.accessibilityIdentifier =
         kReadingListToolbarDeleteAllReadButtonID;
-    _deleteAllReadButton.tintColor = [UIColor redColor];
+    _deleteAllReadButton.tintColor = [UIColor colorNamed:kRedColor];
 
     _cancelButton = [[UIBarButtonItem alloc]
         initWithTitle:l10n_util::GetNSString(IDS_IOS_READING_LIST_CANCEL_BUTTON)
@@ -151,8 +152,8 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
 
 - (BOOL)buttonItemsUpdated {
   // When the changes to the values of this class's public properties require
-  // an updated buttons array, |_buttonItems| will be reset to nil.  Subsequent
-  // calls to |-buttonItems| will regenerate the correct button item array.
+  // an updated buttons array, `_buttonItems` will be reset to nil.  Subsequent
+  // calls to `-buttonItems` will regenerate the correct button item array.
   return !_buttonItems;
 }
 
@@ -215,10 +216,13 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   return _buttonItems;
 }
 
-- (ActionSheetCoordinator*)markButtonConfirmationWithBaseViewController:
-    (UIViewController*)viewController {
+- (ActionSheetCoordinator*)
+    markButtonConfirmationWithBaseViewController:
+        (UIViewController*)viewController
+                                         browser:(Browser*)browser {
   return [[ActionSheetCoordinator alloc]
       initWithBaseViewController:viewController
+                         browser:browser
                            title:nil
                          message:nil
                    barButtonItem:self.markButton];
@@ -244,7 +248,7 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   }
 }
 
-// Inserts spacer button items between the items in |items|, right aligning the
+// Inserts spacer button items between the items in `items`, right aligning the
 // buttons if they appear alone.
 - (void)addSpacersToItems:(NSMutableArray<UIBarButtonItem*>*)items {
   NSMutableArray<UIBarButtonItem*>* spacers = [NSMutableArray array];

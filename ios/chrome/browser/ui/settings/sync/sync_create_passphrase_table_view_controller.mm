@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,22 +6,23 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/logging.h"
 #import "base/mac/foundation_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/strings/grit/components_strings.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/settings/cells/byo_textfield_item.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-using namespace sync_encryption_passphrase;
+using sync_encryption_passphrase::ItemTypeConfirmPassphrase;
+using sync_encryption_passphrase::ItemTypeEnterPassphrase;
+using sync_encryption_passphrase::SectionIdentifierPassphrase;
 
 @interface SyncCreatePassphraseTableViewController () {
-  UITextField* confirmPassphrase_;
+  UITextField* _confirmPassphrase;
 }
 // Returns a confirm passphrase item.
 - (TableViewItem*)confirmPassphraseItem;
@@ -29,8 +30,8 @@ using namespace sync_encryption_passphrase;
 
 @implementation SyncCreatePassphraseTableViewController
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
-  self = [super initWithBrowserState:browserState];
+- (instancetype)initWithBrowser:(Browser*)browser {
+  self = [super initWithBrowser:browser];
   if (self) {
     self.title =
         l10n_util::GetNSString(IDS_IOS_SYNC_ENCRYPTION_CREATE_PASSPHRASE);
@@ -52,7 +53,7 @@ using namespace sync_encryption_passphrase;
 - (void)didReceiveMemoryWarning {
   [super didReceiveMemoryWarning];
   if (![self isViewLoaded]) {
-    confirmPassphrase_ = nil;
+    _confirmPassphrase = nil;
   }
 }
 
@@ -81,22 +82,22 @@ using namespace sync_encryption_passphrase;
 #pragma mark - Items
 
 - (TableViewItem*)confirmPassphraseItem {
-  if (!confirmPassphrase_) {
-    confirmPassphrase_ = [[UITextField alloc] init];
-    confirmPassphrase_.secureTextEntry = YES;
-    confirmPassphrase_.backgroundColor = UIColor.clearColor;
-    confirmPassphrase_.autocorrectionType = UITextAutocorrectionTypeNo;
-    confirmPassphrase_.font =
+  if (!_confirmPassphrase) {
+    _confirmPassphrase = [[UITextField alloc] init];
+    _confirmPassphrase.secureTextEntry = YES;
+    _confirmPassphrase.backgroundColor = UIColor.clearColor;
+    _confirmPassphrase.autocorrectionType = UITextAutocorrectionTypeNo;
+    _confirmPassphrase.font =
         [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    confirmPassphrase_.adjustsFontForContentSizeCategory = YES;
-    confirmPassphrase_.placeholder =
+    _confirmPassphrase.adjustsFontForContentSizeCategory = YES;
+    _confirmPassphrase.placeholder =
         l10n_util::GetNSString(IDS_IOS_SYNC_CONFIRM_PASSPHRASE_LABEL);
-    [self registerTextField:confirmPassphrase_];
+    [self registerTextField:_confirmPassphrase];
   }
 
   BYOTextFieldItem* item =
       [[BYOTextFieldItem alloc] initWithType:ItemTypeConfirmPassphrase];
-  item.textField = confirmPassphrase_;
+  item.textField = _confirmPassphrase;
   return item;
 }
 
@@ -107,7 +108,7 @@ using namespace sync_encryption_passphrase;
   [super tableView:tableView didSelectRowAtIndexPath:indexPath];
   NSInteger itemType = [self.tableViewModel itemTypeForIndexPath:indexPath];
   if (itemType == ItemTypeConfirmPassphrase) {
-    [confirmPassphrase_ becomeFirstResponder];
+    [_confirmPassphrase becomeFirstResponder];
   }
 }
 
@@ -119,7 +120,7 @@ using namespace sync_encryption_passphrase;
 
 - (void)signInPressed {
   NSString* passphraseText = [self.passphrase text];
-  NSString* confirmPassphraseText = [confirmPassphrase_ text];
+  NSString* confirmPassphraseText = [_confirmPassphrase text];
   if (![self areAllFieldsFilled]) {
     [self clearFieldsOnError:l10n_util::GetNSString(
                                  IDS_SYNC_EMPTY_PASSPHRASE_ERROR)];
@@ -148,7 +149,7 @@ using namespace sync_encryption_passphrase;
 
 - (void)textFieldDidEndEditing:(id)sender {
   if (sender == self.passphrase) {
-    [confirmPassphrase_ becomeFirstResponder];
+    [_confirmPassphrase becomeFirstResponder];
   } else if (sender == self.confirmPassphrase) {
     if ([self areAllFieldsFilled]) {
       // The right nav bar button is disabled when either of the text fields is
@@ -168,7 +169,7 @@ using namespace sync_encryption_passphrase;
 @implementation SyncCreatePassphraseTableViewController (UsedForTesting)
 
 - (UITextField*)confirmPassphrase {
-  return confirmPassphrase_;
+  return _confirmPassphrase;
 }
 
 @end

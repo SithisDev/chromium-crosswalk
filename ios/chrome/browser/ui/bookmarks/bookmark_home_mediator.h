@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,9 @@
 
 #import <Foundation/Foundation.h>
 
+class ChromeBrowserState;
 @protocol BookmarkHomeConsumer;
 @class BookmarkHomeSharedState;
-
-namespace ios {
-class ChromeBrowserState;
-}
 
 // BookmarkHomeMediator manages model interactions for the
 // BookmarkHomeViewController.
@@ -21,7 +18,7 @@ class ChromeBrowserState;
 @property(nonatomic, weak) id<BookmarkHomeConsumer> consumer;
 
 - (instancetype)initWithSharedState:(BookmarkHomeSharedState*)sharedState
-                       browserState:(ios::ChromeBrowserState*)browserState
+                       browserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -38,7 +35,7 @@ class ChromeBrowserState;
 
 // Rebuilds the table view model data for the bookmarks matching the given text.
 // Deletes any existing data first.  If no items found, an entry with
-// |noResults' message is added to the table.
+// `noResults' message is added to the table.
 - (void)computeBookmarkTableViewDataMatching:(NSString*)searchText
                   orShowMessageWhenNoResults:(NSString*)noResults;
 

@@ -1,13 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/toolbar_container/toolbar_container_coordinator.h"
 
-#include <memory>
+#import <memory>
 
+#import "base/mac/foundation_util.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_ui_updater.h"
 #import "ios/chrome/browser/ui/toolbar_container/toolbar_container_view_controller.h"
 #import "ios/chrome/browser/ui/toolbar_container/toolbar_height_range.h"
@@ -18,7 +19,7 @@
 
 @interface ToolbarContainerCoordinator () {
   // The updater for the container view controller.
-  std::unique_ptr<FullscreenUIUpdater> _fullscreenUpdater;
+  std::unique_ptr<FullscreenUIUpdater> _fullscreenUIUpdater;
 }
 // The container view controller.
 @property(nonatomic, strong)
@@ -35,9 +36,9 @@
 @synthesize type = _type;
 @synthesize started = _started;
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                                type:(ToolbarContainerType)type {
-  if (self = [super initWithBaseViewController:nil browserState:browserState]) {
+- (instancetype)initWithBrowser:(Browser*)browser
+                           type:(ToolbarContainerType)type {
+  if (self = [super initWithBaseViewController:nil browser:browser]) {
     _type = type;
   }
   return self;
@@ -86,11 +87,9 @@
   self.containerViewController.collapsesSafeArea = !isPrimary;
   [self startToolbarCoordinators];
   // Start observing fullscreen events.
-  _fullscreenUpdater =
-      std::make_unique<FullscreenUIUpdater>(self.containerViewController);
-  FullscreenControllerFactory::GetInstance()
-      ->GetForBrowserState(self.browserState)
-      ->AddObserver(_fullscreenUpdater.get());
+    _fullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
+        FullscreenController::FromBrowser(self.browser),
+        self.containerViewController);
   self.started = YES;
 }
 
@@ -103,10 +102,7 @@
   [self.containerViewController removeFromParentViewController];
   self.containerViewController = nil;
   [self stopToolbarCoordinators];
-  FullscreenControllerFactory::GetInstance()
-      ->GetForBrowserState(self.browserState)
-      ->RemoveObserver(_fullscreenUpdater.get());
-  _fullscreenUpdater = nullptr;
+  _fullscreenUIUpdater = nullptr;
   self.started = NO;
 }
 
@@ -118,8 +114,16 @@
       [[NSMutableArray alloc] init];
   for (ChromeCoordinator* coordinator in _toolbarCoordinators) {
     if ([coordinator respondsToSelector:@selector(viewController)]) {
+      // Since the selector is defined in a sub-class, the compiler does not
+      // accept calling it on `coordinator` directly. It is possible to call
+      // any defined selector on a object of type `id`. Though in that case,
+      // the compiler does not know which selector to call and the return
+      // type may be incorrect if the selector is overloaded. Add a checked
+      // cast to ensure at runtime that the returned type is correct.
       id toolbarCoordinator = coordinator;
-      [toolbarViewControllers addObject:[toolbarCoordinator viewController]];
+      [toolbarViewControllers
+          addObject:base::mac::ObjCCastStrict<UIViewController>(
+                        [toolbarCoordinator viewController])];
     }
   }
   return toolbarViewControllers;

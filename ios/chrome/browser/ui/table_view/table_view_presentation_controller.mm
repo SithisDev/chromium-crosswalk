@@ -1,15 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/table_view/table_view_presentation_controller.h"
 
-#include <algorithm>
+#import <algorithm>
 
 #import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/table_view/table_view_presentation_controller_delegate.h"
-#include "ios/chrome/browser/ui/util/rtl_geometry.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/browser/ui/util/rtl_geometry.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -19,17 +19,17 @@ namespace {
 // The rounded corner radius for the bubble container, in Regular widths.
 const CGFloat kContainerCornerRadius = 13.0;
 
-// The size of the margin around |tableViewContainer| in which the shadow is
+// The size of the margin around `tableViewContainer` in which the shadow is
 // drawn.
 const CGFloat kShadowMargin = 196.0;
 
-// The minimum margin between |tableViewContainer| and any screen edge.
+// The minimum margin between `tableViewContainer` and any screen edge.
 const CGFloat kTableViewEdgeMargin = 15.0;
 
-// The top margin for |tableViewContainer|.
+// The top margin for `tableViewContainer`.
 const CGFloat kTableViewTopMargin = 35.0;
 
-// The maximum allowed width for |tableViewContainer|.
+// The maximum allowed width for `tableViewContainer`.
 const CGFloat kTableViewMaxWidth = 414.0;
 
 }  // namespace
@@ -37,15 +37,15 @@ const CGFloat kTableViewMaxWidth = 414.0;
 @interface TableViewPresentationController ()
 
 // A view which prevents touches from reaching views below this controller's
-// |containerView|.  This view is normally clear and dismisses the presented
+// `containerView`.  This view is normally clear and dismisses the presented
 // view controller when tapped, but can optionally act as a dimming view and
 // ignore touches.
 @property(nonatomic, readwrite, strong) UIView* dimmingShield;
 
-// A container view for |tableViewContainer| and |shadowImage|.
+// A container view for `tableViewContainer` and `shadowImage`.
 @property(nonatomic, readwrite, strong) UIView* shadowContainer;
 
-// Draws a shadow to visually separate the contents of |tableViewContainer| from
+// Draws a shadow to visually separate the contents of `tableViewContainer` from
 // the views below.
 @property(nonatomic, readwrite, strong) UIImageView* shadowImage;
 
@@ -76,8 +76,8 @@ const CGFloat kTableViewMaxWidth = 414.0;
 
   // The space between the bubble and the edge of the screen is equal to the
   // width of the safe area, on the position edge, plus the table view edge
-  // margin. When |self.position| is TablePresentationPositionLeading, the
-  // leading edge of the bubble is equal to that spacing. And if |self.position|
+  // margin. When `self.position` is TablePresentationPositionLeading, the
+  // leading edge of the bubble is equal to that spacing. And if `self.position`
   // is TablePresentationPositionTrailing, the leading edge of the margin is
   // equal to the containerView's bounds minus that spacing minus the width of
   // the table view itself.
@@ -96,7 +96,7 @@ const CGFloat kTableViewMaxWidth = 414.0;
       safeAreaHeight - kTableViewTopMargin - kTableViewEdgeMargin;
 
   // The tableview container should be pinned to the top, bottom, and either
-  // trailing or leading edges of the safe area, depending on |self.position|.
+  // trailing or leading edges of the safe area, depending on `self.position`.
   // It will also have a fixed margin on those sides.
   LayoutRect tableLayoutRect = LayoutRectMake(
       tableLeadingX, containerWidth, tableOriginY, tableWidth, tableHeight);
@@ -195,6 +195,11 @@ const CGFloat kTableViewMaxWidth = 414.0;
   self.dimmingShield.frame = self.containerView.bounds;
   self.shadowContainer.frame = [self frameOfPresentedViewInContainerView];
 
+  // The TableView will be presented modally, make sure the container A11y is
+  // marked as so in order to prevent voice over focusing the presenter VC
+  // instead of the presented VC (TableView).
+  self.containerView.accessibilityViewIsModal = YES;
+
   // Force the presented VC's view to fill the tableViewContainer.  Otherwise
   // there are cases (switching size classes while another VC is presented over
   // the tableView) where autoresizing does not properly size the presented VC's
@@ -234,8 +239,8 @@ const CGFloat kTableViewMaxWidth = 414.0;
   self.dimmingShield = nil;
 }
 
-// Updates |self.shadowImage.alpha| and |self.dimmingShield.backgroundColor| as
-// appropriate for the given |modal| mode.  This method will animate the changes
+// Updates `self.shadowImage.alpha` and `self.dimmingShield.backgroundColor` as
+// appropriate for the given `modal` mode.  This method will animate the changes
 // if it is called from within an animation block.
 - (void)updateDimmingShieldForModal:(BOOL)modal {
   if (modal) {

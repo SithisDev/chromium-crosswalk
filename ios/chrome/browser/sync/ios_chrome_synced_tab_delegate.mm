@@ -1,22 +1,25 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/sync/ios_chrome_synced_tab_delegate.h"
+#import "ios/chrome/browser/sync/ios_chrome_synced_tab_delegate.h"
 
-#include "base/memory/ref_counted.h"
-#include "components/sessions/ios/ios_serialized_navigation_builder.h"
-#include "components/sync_sessions/sync_sessions_client.h"
-#include "components/sync_sessions/synced_window_delegate.h"
-#include "components/sync_sessions/synced_window_delegates_getter.h"
-#include "components/sync_sessions/tab_node_pool.h"
+#import "base/memory/ref_counted.h"
+#import "components/sessions/ios/ios_serialized_navigation_builder.h"
+#import "components/sync_sessions/sync_sessions_client.h"
+#import "components/sync_sessions/synced_window_delegate.h"
+#import "components/sync_sessions/synced_window_delegates_getter.h"
+#import "components/sync_sessions/tab_node_pool.h"
 #import "ios/chrome/browser/complex_tasks/ios_task_tab_helper.h"
-#include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
-#include "ios/web/public/favicon/favicon_status.h"
-#include "ios/web/public/navigation/navigation_item.h"
+#import "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
+#import "ios/web/public/favicon/favicon_status.h"
+#import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ui/base/page_transition_types.h"
+#import "ios/web/public/session/crw_navigation_item_storage.h"
+#import "ios/web/public/session/crw_session_storage.h"
+#import "ios/web/public/web_client.h"
+#import "ios/web/public/web_state.h"
+#import "ui/base/page_transition_types.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -39,7 +42,9 @@ NavigationItem* GetPossiblyPendingItemAtIndex(web::WebState* web_state, int i) {
 }  // namespace
 
 IOSChromeSyncedTabDelegate::IOSChromeSyncedTabDelegate(web::WebState* web_state)
-    : web_state_(web_state) {}
+    : web_state_(web_state) {
+  DCHECK(web_state);
+}
 
 IOSChromeSyncedTabDelegate::~IOSChromeSyncedTabDelegate() {}
 
@@ -55,46 +60,55 @@ bool IOSChromeSyncedTabDelegate::IsBeingDestroyed() const {
   return web_state_->IsBeingDestroyed();
 }
 
-// todo(pnoland): add logic to store and return the source tab id on ios.
-// http://crbug/695241
-SessionID IOSChromeSyncedTabDelegate::GetSourceTabID() const {
-  return SessionID::InvalidValue();
-}
-
 std::string IOSChromeSyncedTabDelegate::GetExtensionAppId() const {
   return std::string();
 }
 
 bool IOSChromeSyncedTabDelegate::IsInitialBlankNavigation() const {
-  return web_state_->GetNavigationManager()->GetItemCount() == 0;
+  if (GetSessionStorageIfNeeded()) {
+    return session_storage_.itemStorages.count == 0;
+  }
+  return web_state_->GetNavigationItemCount() == 0;
 }
 
 int IOSChromeSyncedTabDelegate::GetCurrentEntryIndex() const {
+  if (GetSessionStorageIfNeeded()) {
+    NSInteger lastCommittedIndex = session_storage_.lastCommittedItemIndex;
+    if (lastCommittedIndex < 0 ||
+        lastCommittedIndex >=
+            static_cast<NSInteger>(session_storage_.itemStorages.count)) {
+      // It has been observed that lastCommittedIndex can be invalid (see
+      // crbug.com/1060553). Returning an invalid index will cause a crash.
+      // If lastCommittedIndex is invalid, consider the last index as the
+      // current one.
+      // As GetSessionStorageIfNeeded just returned true,
+      // session_storage_.itemStorages.count is not 0 and
+      // session_storage_.itemStorages.count - 1 is valid.
+      return session_storage_.itemStorages.count - 1;
+    }
+    return session_storage_.lastCommittedItemIndex;
+  }
   return web_state_->GetNavigationManager()->GetLastCommittedItemIndex();
 }
 
 int IOSChromeSyncedTabDelegate::GetEntryCount() const {
-  return web_state_->GetNavigationManager()->GetItemCount();
+  if (GetSessionStorageIfNeeded()) {
+    return static_cast<int>(session_storage_.itemStorages.count);
+  }
+  return web_state_->GetNavigationItemCount();
 }
 
 GURL IOSChromeSyncedTabDelegate::GetVirtualURLAtIndex(int i) const {
+  if (GetSessionStorageIfNeeded()) {
+    DCHECK_GE(i, 0);
+    NSArray<CRWNavigationItemStorage*>* item_storages =
+        session_storage_.itemStorages;
+    DCHECK_LT(i, static_cast<int>(item_storages.count));
+    CRWNavigationItemStorage* item = item_storages[i];
+    return item.virtualURL;
+  }
   NavigationItem* item = GetPossiblyPendingItemAtIndex(web_state_, i);
   return item ? item->GetVirtualURL() : GURL();
-}
-
-GURL IOSChromeSyncedTabDelegate::GetFaviconURLAtIndex(int i) const {
-  DCHECK_GE(i, 0);
-  NavigationItem* item = GetPossiblyPendingItemAtIndex(web_state_, i);
-  return (item && item->GetFavicon().valid ? item->GetFavicon().url : GURL());
-}
-
-ui::PageTransition IOSChromeSyncedTabDelegate::GetTransitionAtIndex(
-    int i) const {
-  NavigationItem* item = GetPossiblyPendingItemAtIndex(web_state_, i);
-  // If no item exists, there's no coherent PageTransition to be supplied.
-  // There's also no ui::PAGE_TRANSITION_UNKNOWN, so let's use the default,
-  // which is PAGE_TRANSITION_LINK.
-  return item ? item->GetTransitionType() : ui::PAGE_TRANSITION_LINK;
 }
 
 std::string IOSChromeSyncedTabDelegate::GetPageLanguageAtIndex(int i) const {
@@ -105,6 +119,17 @@ std::string IOSChromeSyncedTabDelegate::GetPageLanguageAtIndex(int i) const {
 void IOSChromeSyncedTabDelegate::GetSerializedNavigationAtIndex(
     int i,
     sessions::SerializedNavigationEntry* serialized_entry) const {
+  if (GetSessionStorageIfNeeded()) {
+    NSArray<CRWNavigationItemStorage*>* item_storages =
+        session_storage_.itemStorages;
+    DCHECK_GE(i, 0);
+    DCHECK_LT(i, static_cast<int>(item_storages.count));
+    CRWNavigationItemStorage* item = item_storages[i];
+    *serialized_entry =
+        sessions::IOSSerializedNavigationBuilder::FromNavigationStorageItem(
+            i, item);
+    return;
+  }
   NavigationItem* item = GetPossiblyPendingItemAtIndex(web_state_, i);
   if (item) {
     *serialized_entry =
@@ -112,7 +137,7 @@ void IOSChromeSyncedTabDelegate::GetSerializedNavigationAtIndex(
   }
 }
 
-bool IOSChromeSyncedTabDelegate::ProfileIsSupervised() const {
+bool IOSChromeSyncedTabDelegate::ProfileHasChildAccount() const {
   return false;
 }
 
@@ -123,6 +148,8 @@ IOSChromeSyncedTabDelegate::GetBlockedNavigations() const {
 }
 
 bool IOSChromeSyncedTabDelegate::IsPlaceholderTab() const {
+  // GetSessionId is not restored so the tab get a new session ID.
+  // Placeholder tabs cannot be used.
   return false;
 }
 
@@ -182,6 +209,37 @@ const IOSTaskTabHelper* IOSChromeSyncedTabDelegate::ios_task_tab_helper()
   if (web_state_ == nullptr)
     return nullptr;
   return IOSTaskTabHelper::FromWebState(web_state_);
+}
+
+bool IOSChromeSyncedTabDelegate::GetSessionStorageIfNeeded() const {
+  // Unrealized web states should always use session storage, regardless of
+  // navigation items.
+  if (!web_state_->IsRealized()) {
+    if (!session_storage_) {
+      session_storage_ = web_state_->BuildSessionStorage();
+    }
+    return true;
+  }
+
+  // With slim navigation, the navigation manager is only restored when the tab
+  // is displayed. Before restoration, the session storage must be used.
+  bool should_use_storage =
+      web_state_->GetNavigationManager()->IsRestoreSessionInProgress();
+  bool storage_has_navigation_items = false;
+  if (should_use_storage) {
+    if (!session_storage_) {
+      session_storage_ = web_state_->BuildSessionStorage();
+    }
+    storage_has_navigation_items = session_storage_.itemStorages.count != 0;
+#if DCHECK_IS_ON()
+    if (storage_has_navigation_items) {
+      DCHECK_GE(session_storage_.lastCommittedItemIndex, 0);
+      DCHECK_LT(session_storage_.lastCommittedItemIndex,
+                static_cast<int>(session_storage_.itemStorages.count));
+    }
+#endif
+  }
+  return should_use_storage && storage_has_navigation_items;
 }
 
 WEB_STATE_USER_DATA_KEY_IMPL(IOSChromeSyncedTabDelegate)

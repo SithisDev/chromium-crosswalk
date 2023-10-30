@@ -1,17 +1,18 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/memory/memory_debugger.h"
 
-#include <stdint.h>
+#import <stdint.h>
 
-#include <memory>
+#import <memory>
 
 #import "build/branding_buildflags.h"
 #import "ios/chrome/browser/memory/memory_metrics.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/util/device_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -91,7 +92,7 @@ const CGFloat kPadding = 10;
 #pragma mark initialization helpers
 
 - (void)addSubviews {
-  // |index| is used to calculate the vertical position of each element in
+  // `index` is used to calculate the vertical position of each element in
   // the debugger view.
   NSUInteger index = 0;
 
@@ -192,7 +193,7 @@ const CGFloat kPadding = 10;
 }
 
 // Adds subviews for the specified metric, the value of which will be displayed
-// in |label|.
+// in `label`.
 - (void)addMetricWithName:(NSString*)name
                   atIndex:(NSUInteger)index
                usingLabel:(UILabel*)label {
@@ -239,7 +240,7 @@ const CGFloat kPadding = 10;
 // -------------------------
 //
 // The inputTarget/inputAction will be invoked when the user finishes editing
-// in |input|.
+// in `input`.
 - (void)addLabelWithText:(NSString*)labelText
                    input:(UITextField*)input
              inputTarget:(id)inputTarget
@@ -262,7 +263,7 @@ const CGFloat kPadding = 10;
 // -------------------------------------
 //
 // The inputTarget/inputAction will be invoked when the user finishes editing
-// in |input|.
+// in `input`.
 - (void)addLabelWithText:(NSString*)labelText
                    input:(UITextField*)input
              inputTarget:(id)inputTarget
@@ -311,7 +312,7 @@ const CGFloat kPadding = 10;
   }
 }
 
-// Returns the CGPoint of the origin of the subview at |index|.
+// Returns the CGPoint of the origin of the subview at `index`.
 - (CGPoint)originForSubviewAtIndex:(NSUInteger)index {
   return CGPointMake(kPadding,
                      (index + 1) * kPadding + index * [_font lineHeight]);
@@ -400,17 +401,19 @@ const CGFloat kPadding = 10;
   // convert the UIKeyboardAnimationCurveUserInfoKey's value from a
   // UIViewAnimationCurve to a UIViewAnimationOption. Awesome!
   NSDictionary* userInfo = [notification userInfo];
-  [UIView beginAnimations:nil context:nullptr];
-  [UIView setAnimationDuration:
-              [userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue]];
-  NSInteger animationCurveKeyValue =
-      [userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
-  UIViewAnimationCurve animationCurve =
-      (UIViewAnimationCurve)animationCurveKeyValue;
-  [UIView setAnimationCurve:animationCurve];
-  [UIView setAnimationBeginsFromCurrentState:YES];
-  self.frame = CGRectOffset(self.frame, offset.x, offset.y);
-  [UIView commitAnimations];
+  NSTimeInterval duration =
+      [userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+
+  // The keyboard notification contains a UIViewAnimationCurve, but there is no
+  // function to convert that to UIViewAnimationOptions. Use the default
+  // instead, even if it doesn't exactly match the keyboard's curve.
+  [UIView animateWithDuration:duration
+                        delay:0
+                      options:UIViewAnimationOptionBeginFromCurrentState
+                   animations:^{
+                     self.frame = CGRectOffset(self.frame, offset.x, offset.y);
+                   }
+                   completion:nil];
 }
 
 #pragma mark Artificial memory bloat methods
@@ -536,7 +539,7 @@ const CGFloat kPadding = 10;
 
 #pragma mark Error handling
 
-// Shows an alert with the given |errorMessage|.
+// Shows an alert with the given `errorMessage`.
 - (void)alert:(NSString*)errorMessage {
   UIAlertController* alert =
       [UIAlertController alertControllerWithTitle:@"Error"
@@ -545,10 +548,9 @@ const CGFloat kPadding = 10;
   [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                             style:UIAlertActionStyleDefault
                                           handler:nil]];
-  [[[[UIApplication sharedApplication] keyWindow] rootViewController]
-      presentViewController:alert
-                   animated:YES
-                 completion:nil];
+  [[self.window rootViewController] presentViewController:alert
+                                                 animated:YES
+                                               completion:nil];
 }
 
 @end

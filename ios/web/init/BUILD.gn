@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,7 +21,6 @@ source_set("init") {
     "//ios/web/net",
     "//ios/web/public",
     "//ios/web/public/init",
-    "//ios/web/service",
     "//ios/web/webui",
     "//mojo/core/embedder",
     "//net",
@@ -30,16 +29,14 @@ source_set("init") {
     "//ui/gfx/geometry",
   ]
 
-  libs = [
+  frameworks = [
     "Foundation.framework",
     "UIKit.framework",
   ]
 }
 
 source_set("global_state") {
-  sources = [
-    "ios_global_state.mm",
-  ]
+  sources = [ "ios_global_state.mm" ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
 

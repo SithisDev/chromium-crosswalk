@@ -11,12 +11,14 @@
     },
     {
       "app": "ios_chrome_web_egtests",
+      "xcode parallelization": true,
       "xctest": true
     },
     {
       "app": "ios_chrome_settings_egtests",
       "xcode parallelization": true,
-      "shards": 3
+      "shards": 1,
+      "swarming tasks": 3
     },
     {
       "app": "ios_chrome_translate_egtests",
@@ -25,6 +27,7 @@
     },
     {
       "app": "ios_chrome_reading_list_egtests",
+      "xcode parallelization": true,
       "xctest": true
     },
     {

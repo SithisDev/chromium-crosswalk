@@ -1,19 +1,19 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/installation_notifier.h"
 
 #import <UIKit/UIKit.h>
-#include <stdint.h>
+#import <stdint.h>
 
-#include <memory>
+#import <memory>
 
-#include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
-#include "ios/web/public/thread/web_thread.h"
-#include "net/base/backoff_entry.h"
-#include "url/gurl.h"
+#import "base/check_op.h"
+#import "base/metrics/histogram_macros.h"
+#import "ios/web/public/thread/web_thread.h"
+#import "net/base/backoff_entry.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -43,15 +43,15 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
 
 @interface InstallationNotifier ()
 // Registers for a notification and gives the option to not immediately start
-// polling. |scheme| must not be nil nor an empty string.
+// polling.
 - (void)registerForInstallationNotifications:(id)observer
                                 withSelector:(SEL)notificationSelector
                                    forScheme:(NSString*)scheme
                                 startPolling:(BOOL)poll;
 // Dispatches a block with an exponentially increasing delay.
 - (void)dispatchInstallationNotifierBlock;
-// Dispatched blocks cannot be cancelled. Instead, each block has a |blockId|.
-// If |blockId| is different from |lastCreatedBlockId_|, then the block does
+// Dispatched blocks cannot be cancelled. Instead, each block has a `blockId`.
+// If `blockId` is different from `lastCreatedBlockId_`, then the block does
 // not execute anything.
 @property(nonatomic, readonly) int lastCreatedBlockId;
 @end
@@ -69,10 +69,10 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
   __weak NSNotificationCenter* _notificationCenter;
 
   // This object can be a fake application in unittests.
-  __weak UIApplication* sharedApplication_;
+  __weak UIApplication* _sharedApplication;
 }
 
-@synthesize lastCreatedBlockId = lastCreatedBlockId_;
+@synthesize lastCreatedBlockId = _lastCreatedBlockId;
 
 + (InstallationNotifier*)sharedInstance {
   static InstallationNotifier* instance = [[InstallationNotifier alloc] init];
@@ -82,7 +82,7 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
 - (instancetype)init {
   self = [super init];
   if (self) {
-    lastCreatedBlockId_ = 0;
+    _lastCreatedBlockId = 0;
     _dispatcher = [[DefaultDispatcher alloc] init];
     _installedAppObservers = [[NSMutableDictionary alloc] init];
     _notificationCenter = [NSNotificationCenter defaultCenter];
@@ -104,7 +104,7 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
                                 withSelector:(SEL)notificationSelector
                                    forScheme:(NSString*)scheme
                                 startPolling:(BOOL)poll {
-  // Workaround a crash caused by calls to this function with a nil |scheme|.
+  // Workaround a crash caused by calls to this function with a nil `scheme`.
   if (![scheme length])
     return;
   DCHECK([observer respondsToSelector:notificationSelector]);
@@ -152,16 +152,22 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
   [self pollForTheInstallationOfApps];
 }
 
+- (void)stopPolling {
+  // Increment the queued block ID, making it higher than the block ID of any
+  // currently queued block, which will prevent them from running (and from
+  // queueing any new blocks).
+  ++_lastCreatedBlockId;
+}
+
 - (void)dispatchInstallationNotifierBlock {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  int blockId = ++lastCreatedBlockId_;
+  int blockId = ++_lastCreatedBlockId;
   _backoffEntry->InformOfRequest(false);
   int64_t delayInNSec =
       _backoffEntry->GetTimeUntilRelease().InMicroseconds() * NSEC_PER_USEC;
   __weak InstallationNotifier* weakSelf = self;
   [_dispatcher dispatchAfter:delayInNSec
                    withBlock:^{
-                     DCHECK_CURRENTLY_ON(web::WebThread::UI);
                      InstallationNotifier* strongSelf = weakSelf;
                      if (blockId == [strongSelf lastCreatedBlockId]) {
                        [strongSelf pollForTheInstallationOfApps];

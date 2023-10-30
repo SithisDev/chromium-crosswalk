@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <Foundation/Foundation.h>
 
-#include <string>
 
 @class LanguageItem;
 @protocol LanguageSettingsConsumer;
@@ -24,6 +23,9 @@
 
 // Returns whether or not Translate is enabled.
 - (BOOL)translateEnabled;
+
+// Returns whether or not Translate is managed by enterprise policy.
+- (BOOL)translateManaged;
 
 // Stops observing the model. This is required during the shutdown.
 - (void)stopObservingModel;

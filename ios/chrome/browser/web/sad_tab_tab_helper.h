@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,11 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/macros.h"
 #include "base/timer/elapsed_timer.h"
-#import "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 @protocol SadTabTabHelperDelegate;
-class ScopedFullscreenDisabler;
 
 // SadTabTabHelper listens to RenderProcessGone events and presents a
 // SadTabView view appropriately.
@@ -25,15 +23,18 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   static void CreateForWebState(web::WebState* web_state);
 
   // Creates a SadTabTabHelper and attaches it to a specific web_state object,
-  // |repeat_failure_interval| sets the corresponding instance variable used for
+  // `repeat_failure_interval` sets the corresponding instance variable used for
   // determining repeat failures.
   static void CreateForWebState(web::WebState* web_state,
                                 double repeat_failure_interval);
 
+  SadTabTabHelper(const SadTabTabHelper&) = delete;
+  SadTabTabHelper& operator=(const SadTabTabHelper&) = delete;
+
   ~SadTabTabHelper() override;
 
-  // Sets the SadTabHelper delegate. |delegate| will be in charge of presenting
-  // the SadTabView. |delegate| is not retained by TabHelper.
+  // Sets the SadTabHelper delegate. `delegate` will be in charge of presenting
+  // the SadTabView. `delegate` is not retained by TabHelper.
   void SetDelegate(id<SadTabTabHelperDelegate> delegate);
 
   // true if Sad Tab has currently being shown.
@@ -46,14 +47,18 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   // default repeat_failure_interval will be used.
   explicit SadTabTabHelper(web::WebState* web_state);
 
-  // Constructs a SadTabTabHelper allowing an optional |repeat_failure_interval|
+  // Constructs a SadTabTabHelper allowing an optional `repeat_failure_interval`
   // value to be passed in, representing a timeout period in seconds during
   // which a second failure will be considered a 'repeated' crash rather than an
   // initial event.
   SadTabTabHelper(web::WebState* web_state, double repeat_failure_interval);
 
+  // Registers that a visible crash occurred for `url_causing_failure`. Updates
+  // `repeated_failure_`.
+  void OnVisibleCrash(const GURL& url_causing_failure);
+
   // Presents a new SadTabView via the web_state object.
-  void PresentSadTab(const GURL& url_causing_failure);
+  void PresentSadTab();
 
   // Called when the Sad Tab is added or removed from the WebState's content
   // area.
@@ -72,10 +77,6 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   void AddApplicationDidBecomeActiveObserver();
   // Removes UIApplicationDidBecomeActiveNotification observer.
   void RemoveApplicationDidBecomeActiveObserver();
-
-  // Creates or resets the fullscreen disabler depending on whether the sad tab
-  // is currently visible.
-  void UpdateFullscreenDisabler();
 
   // WebStateObserver:
   void WasShown(web::WebState* web_state) override;
@@ -103,14 +104,11 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   // used to determine time window for repeated crashes.
   std::unique_ptr<base::ElapsedTimer> last_failed_timer_;
 
-  // Whether a Sad Tab is being shown over |web_state_|'s content area.
+  // Whether a Sad Tab is being shown over `web_state_`'s content area.
   bool showing_sad_tab_ = false;
 
   // true if Sad Tab is presented and presented for repeated load failure.
   bool repeated_failure_ = false;
-
-  // The fullscreen disabler for when the sad tab is visible.
-  std::unique_ptr<ScopedFullscreenDisabler> fullscreen_disabler_;
 
   // Stores the interval window in seconds during which a second
   // RenderProcessGone failure will be considered a repeat failure.
@@ -129,8 +127,6 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   __strong id<NSObject> application_did_become_active_observer_ = nil;
 
   WEB_STATE_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(SadTabTabHelper);
 };
 
 #endif  // IOS_CHROME_BROWSER_WEB_SAD_TAB_TAB_HELPER_H_

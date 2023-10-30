@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef NS_ENUM(NSInteger, CWVStopSyncReason) {
-  // When sync is stopped explicitly via |stopSyncAndClearIdentity|.
-  CWVStopSyncReasonClient = 0,
-  // When sync was reset from another device.
-  CWVStopSyncReasonServer = 1
-};
-
 @class CWVSyncController;
 
 // Delegate of CWVSyncController.
@@ -23,18 +16,25 @@ typedef NS_ENUM(NSInteger, CWVStopSyncReason) {
 
 @optional
 
-// Called when sync has been started. Check |syncController|'s |needsPassphrase|
+// Called when sync has started. Check |syncController|'s |passphraseNeeded|
 // property to see if |unlockWithPassphrase:| is necessary.
+// Deprecated: Use |syncControllerDidUpdateSyncState:| instead.
 - (void)syncControllerDidStartSync:(CWVSyncController*)syncController;
 
-// Called when sync fails. |error|'s code is a CWVSyncError.
+// Called when sync fails. |error| details are described in cwv_sync_errors.h.
 // May need to call |stopSyncAndClearIdentity| and try starting again later.
 - (void)syncController:(CWVSyncController*)syncController
       didFailWithError:(NSError*)error;
 
-// Called after sync was stopped. |reason| Indicates why sync was stopped.
-- (void)syncController:(CWVSyncController*)syncController
-    didStopSyncWithReason:(CWVStopSyncReason)reason;
+// Called after sync has stopped.
+// Deprecated: Use |syncControllerDidUpdateSyncState:| instead.
+- (void)syncControllerDidStopSync:(CWVSyncController*)syncController;
+
+// Called whenever the state of sync internals updates.
+// Specifically, CWVSyncController properties like |syncing|, |currentIdentity|,
+// |passphraseNeeded|, |trustedVaultKeysRequired|, and
+// |trustedVaultRecoverabilityDegraded| may have changed.
+- (void)syncControllerDidUpdateState:(CWVSyncController*)syncController;
 
 @end
 

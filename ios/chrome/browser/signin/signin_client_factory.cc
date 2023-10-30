@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 // static
 SigninClient* SigninClientFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<SigninClient*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -37,8 +37,8 @@ SigninClientFactory::~SigninClientFactory() {}
 
 std::unique_ptr<KeyedService> SigninClientFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* chrome_browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* chrome_browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   return std::make_unique<IOSChromeSigninClient>(
       chrome_browser_state,
       ios::CookieSettingsFactory::GetForBrowserState(chrome_browser_state),

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@ TabParentingGlobalObserver* TabParentingGlobalObserver::GetInstance() {
   return instance.get();
 }
 
-std::unique_ptr<base::CallbackList<void(web::WebState*)>::Subscription>
-TabParentingGlobalObserver::RegisterCallback(const OnTabParentedCallback& cb) {
+base::CallbackListSubscription TabParentingGlobalObserver::RegisterCallback(
+    const OnTabParentedCallback& cb) {
   return on_tab_parented_callback_list_.Add(cb);
 }
 

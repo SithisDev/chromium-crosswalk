@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,6 +117,24 @@ function replaceStatePath() {
   window.history.replaceState('replaceStatePath', 'Replace path', 'replace');
   updateStatusText('replaceStatePath');
 };
+
+function replaceStateThenPushState() {
+  clearOnloadDivText();
+  window.history.replaceState('firstReplaceState', 'First replaceState',
+      '#firstReplaceState');
+  window.history.pushState('replaceStateThenPushState',
+      'Replace state then push state', '#replaceStateThenPushState');
+  updateStatusText('replaceStateThenPushState');
+}
+
+function pushStateThenReplaceState() {
+  clearOnloadDivText();
+  window.history.pushState('firstPushState', 'First pushState',
+      '#firstPushState');
+  window.history.replaceState('pushStateThenReplaceState',
+      'Push state then replace state', '#pushStateThenReplaceState');
+  updateStatusText('pushStateThenReplaceState');
+}
 
 function goBack() {
   clearOnloadDivText();

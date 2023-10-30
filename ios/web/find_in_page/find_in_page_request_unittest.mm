@@ -1,43 +1,30 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/find_in_page/find_in_page_request.h"
 
-#include "ios/web/public/test/fakes/fake_web_frame.h"
-#include "ios/web/public/test/web_test.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#import "ios/web/public/test/fakes/fake_web_frame.h"
+#import "ios/web/public/test/web_test.h"
+#import "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-namespace {
-const char kOneMatchFrameId[] = "frame_with_one_match";
-const char kTwoMatchesFrameId[] = "frame_with_two_matches";
-}  // namespace
-
 namespace web {
 
 class FindInPageRequestTest : public WebTest {
  protected:
-  // Returns a FakeWebFrame with id |frame_id|.
-  std::unique_ptr<FakeWebFrame> CreateWebFrame(const std::string& frame_id,
-                                               bool is_main_frame) {
-    return std::make_unique<FakeWebFrame>(frame_id, is_main_frame,
-                                          GURL::EmptyGURL());
-  }
-
   FindInPageRequestTest() {
-    auto main_frame = CreateWebFrame(kOneMatchFrameId,
-                                     /*is_main_frame=*/true);
+    auto main_frame = FakeWebFrame::CreateMainWebFrame(GURL::EmptyGURL());
     request_.AddFrame(main_frame.get());
     auto frame_with_two_matches =
-        CreateWebFrame(kTwoMatchesFrameId, /*is_main_frame=*/false);
+        FakeWebFrame::CreateChildWebFrame(GURL::EmptyGURL());
     request_.AddFrame(frame_with_two_matches.get());
     request_.Reset(@"foo", 2);
-    request_.SetMatchCountForFrame(1, kOneMatchFrameId);
-    request_.SetMatchCountForFrame(2, kTwoMatchesFrameId);
+    request_.SetMatchCountForFrame(1, kMainFakeFrameId);
+    request_.SetMatchCountForFrame(2, kChildFakeFrameId);
   }
   FindInPageRequest request_;
 };
@@ -62,7 +49,7 @@ TEST_F(FindInPageRequestTest, Reset) {
   EXPECT_EQ(-1, request_.GetMatchCountForSelectedFrame());
 }
 
-// Tests that FindinPageRequest properly decrements |pending_frame_call_count_|
+// Tests that FindinPageRequest properly decrements `pending_frame_call_count_`
 // properly.
 TEST_F(FindInPageRequestTest, AllFindResponsesReturned) {
   request_.DidReceiveFindResponseFromOneFrame();
@@ -144,7 +131,7 @@ TEST_F(FindInPageRequestTest, RemoveFrame) {
   EXPECT_EQ(3, request_.GetTotalMatchCount());
   EXPECT_EQ(1, request_.GetMatchCountForSelectedFrame());
 
-  request_.RemoveFrame(kOneMatchFrameId);
+  request_.RemoveFrame(kMainFakeFrameId);
 
   EXPECT_EQ(2, request_.GetTotalMatchCount());
 
@@ -186,7 +173,7 @@ TEST_F(FindInPageRequestTest, SetMatchCountForFrame) {
   EXPECT_EQ(3, request_.GetTotalMatchCount());
   EXPECT_EQ(1, request_.GetMatchCountForSelectedFrame());
 
-  request_.SetMatchCountForFrame(5, kTwoMatchesFrameId);
+  request_.SetMatchCountForFrame(5, kChildFakeFrameId);
 
   EXPECT_EQ(6, request_.GetTotalMatchCount());
   EXPECT_EQ(1, request_.GetMatchCountForSelectedFrame());

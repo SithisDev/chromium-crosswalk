@@ -1,20 +1,19 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller_test.h"
 
-#include "base/logging.h"
+#import "base/check.h"
 #import "base/mac/foundation_util.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_account_item.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_switch_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 
-#include "testing/gtest_mac.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "testing/gtest_mac.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -88,7 +87,7 @@ void CollectionViewControllerTest::CheckTitleWithId(int expected_title_id) {
 void CollectionViewControllerTest::CheckSectionHeader(NSString* expected_title,
                                                       int section) {
   CollectionViewItem* header =
-      [[controller_ collectionViewModel] headerForSection:section];
+      [[controller_ collectionViewModel] headerForSectionIndex:section];
   ASSERT_TRUE([header respondsToSelector:@selector(text)]);
   EXPECT_NSEQ(expected_title, [(id)header text]);
 }
@@ -97,21 +96,6 @@ void CollectionViewControllerTest::CheckSectionHeaderWithId(
     int expected_title_id,
     int section) {
   CheckSectionHeader(l10n_util::GetNSString(expected_title_id), section);
-}
-
-void CollectionViewControllerTest::CheckSectionFooter(NSString* expected_text,
-                                                      int section) {
-  ASSERT_EQ(1, NumberOfItemsInSection(section));
-  CollectionViewFooterItem* footer_item =
-      base::mac::ObjCCastStrict<CollectionViewFooterItem>(
-          GetCollectionViewItem(section, 0));
-  EXPECT_NSEQ(expected_text, footer_item.text);
-}
-
-void CollectionViewControllerTest::CheckSectionFooterWithId(
-    int expected_text_id,
-    int section) {
-  return CheckSectionFooter(l10n_util::GetNSString(expected_text_id), section);
 }
 
 void CollectionViewControllerTest::CheckTextCellText(NSString* expected_text,

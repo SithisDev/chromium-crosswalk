@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,27 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/callback.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "components/autofill/core/browser/form_data_importer.h"
+#include "components/autofill/core/browser/logging/log_router.h"
 #include "components/autofill/core/browser/payments/payments_client.h"
 #include "components/autofill/core/common/autofill_prefs.h"
+#import "components/autofill/ios/browser/autofill_driver_ios.h"
 #include "components/autofill/ios/browser/autofill_util.h"
+#include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/security_state/ios/security_state_utils.h"
+#include "ios/web/public/browser_state.h"
+#import "ios/web/public/web_state.h"
 #include "ios/web_view/internal/app/application_context.h"
-#include "ios/web_view/internal/web_view_browser_state.h"
+#include "ios/web_view/internal/autofill/web_view_autocomplete_history_manager_factory.h"
+#import "ios/web_view/internal/autofill/web_view_autofill_log_router_factory.h"
+#include "ios/web_view/internal/autofill/web_view_personal_data_manager_factory.h"
+#include "ios/web_view/internal/autofill/web_view_strike_database_factory.h"
+#include "ios/web_view/internal/signin/web_view_identity_manager_factory.h"
+#import "ios/web_view/internal/sync/web_view_sync_service_factory.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 
@@ -24,21 +37,47 @@
 
 namespace autofill {
 
+// static
+std::unique_ptr<WebViewAutofillClientIOS> WebViewAutofillClientIOS::Create(
+    web::WebState* web_state,
+    ios_web_view::WebViewBrowserState* browser_state) {
+  return std::make_unique<autofill::WebViewAutofillClientIOS>(
+      ios_web_view::ApplicationContext::GetInstance()->GetApplicationLocale(),
+      browser_state->GetPrefs(),
+      ios_web_view::WebViewPersonalDataManagerFactory::GetForBrowserState(
+          browser_state->GetRecordingBrowserState()),
+      ios_web_view::WebViewAutocompleteHistoryManagerFactory::
+          GetForBrowserState(browser_state),
+      web_state,
+      ios_web_view::WebViewIdentityManagerFactory::GetForBrowserState(
+          browser_state->GetRecordingBrowserState()),
+      ios_web_view::WebViewStrikeDatabaseFactory::GetForBrowserState(
+          browser_state->GetRecordingBrowserState()),
+      ios_web_view::WebViewSyncServiceFactory::GetForBrowserState(
+          browser_state),
+      // TODO(crbug.com/928595): Replace the closure with a callback to the
+      // renderer that indicates if log messages should be sent from the
+      // renderer.
+      LogManager::Create(
+          autofill::WebViewAutofillLogRouterFactory::GetForBrowserState(
+              browser_state),
+          base::RepeatingClosure()));
+}
+
 WebViewAutofillClientIOS::WebViewAutofillClientIOS(
+    const std::string& locale,
     PrefService* pref_service,
     PersonalDataManager* personal_data_manager,
     AutocompleteHistoryManager* autocomplete_history_manager,
     web::WebState* web_state,
-    id<CWVAutofillClientIOSBridge> bridge,
     signin::IdentityManager* identity_manager,
     StrikeDatabase* strike_database,
-    scoped_refptr<AutofillWebDataService> autofill_web_data_service,
-    syncer::SyncService* sync_service)
+    syncer::SyncService* sync_service,
+    std::unique_ptr<autofill::LogManager> log_manager)
     : pref_service_(pref_service),
       personal_data_manager_(personal_data_manager),
       autocomplete_history_manager_(autocomplete_history_manager),
       web_state_(web_state),
-      bridge_(bridge),
       identity_manager_(identity_manager),
       payments_client_(std::make_unique<payments::PaymentsClient>(
           base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
@@ -46,18 +85,17 @@ WebViewAutofillClientIOS::WebViewAutofillClientIOS(
           identity_manager_,
           personal_data_manager_,
           web_state_->GetBrowserState()->IsOffTheRecord())),
-      form_data_importer_(std::make_unique<FormDataImporter>(
-          this,
-          payments_client_.get(),
-          personal_data_manager_,
-          ios_web_view::ApplicationContext::GetInstance()
-              ->GetApplicationLocale())),
+      form_data_importer_(
+          std::make_unique<FormDataImporter>(this,
+                                             payments_client_.get(),
+                                             personal_data_manager_,
+                                             locale)),
       strike_database_(strike_database),
-      autofill_web_data_service_(autofill_web_data_service),
-      sync_service_(sync_service) {}
+      sync_service_(sync_service),
+      log_manager_(std::move(log_manager)) {}
 
 WebViewAutofillClientIOS::~WebViewAutofillClientIOS() {
-  HideAutofillPopup();
+  HideAutofillPopup(PopupHidingReason::kTabGone);
 }
 
 PersonalDataManager* WebViewAutofillClientIOS::GetPersonalDataManager() {
@@ -70,6 +108,10 @@ WebViewAutofillClientIOS::GetAutocompleteHistoryManager() {
 }
 
 PrefService* WebViewAutofillClientIOS::GetPrefs() {
+  return const_cast<PrefService*>(base::as_const(*this).GetPrefs());
+}
+
+const PrefService* WebViewAutofillClientIOS::GetPrefs() const {
   return pref_service_;
 }
 
@@ -107,11 +149,21 @@ AddressNormalizer* WebViewAutofillClientIOS::GetAddressNormalizer() {
   return nullptr;
 }
 
+const GURL& WebViewAutofillClientIOS::GetLastCommittedURL() const {
+  return web_state_->GetLastCommittedURL();
+}
+
 security_state::SecurityLevel
 WebViewAutofillClientIOS::GetSecurityLevelForUmaHistograms() {
-  // The metrics are not recorded for iOS webview, so return the count value
-  // which will not be recorded.
-  return security_state::SecurityLevel::SECURITY_LEVEL_COUNT;
+  return security_state::GetSecurityLevelForWebState(web_state_);
+}
+
+const translate::LanguageState* WebViewAutofillClientIOS::GetLanguageState() {
+  return nullptr;
+}
+
+translate::TranslateDriver* WebViewAutofillClientIOS::GetTranslateDriver() {
+  return nullptr;
 }
 
 void WebViewAutofillClientIOS::ShowAutofillSettings(
@@ -131,103 +183,160 @@ void WebViewAutofillClientIOS::OnUnmaskVerificationResult(
   [bridge_ didReceiveUnmaskVerificationResult:result];
 }
 
-void WebViewAutofillClientIOS::ShowLocalCardMigrationDialog(
-    base::OnceClosure show_migration_dialog_closure) {
-  NOTIMPLEMENTED();
+void WebViewAutofillClientIOS::ConfirmAccountNameFixFlow(
+    base::OnceCallback<void(const std::u16string&)> callback) {
+  NOTREACHED();
 }
 
-void WebViewAutofillClientIOS::ConfirmMigrateLocalCardToCloud(
-    std::unique_ptr<base::DictionaryValue> legal_message,
-    const std::string& user_email,
-    const std::vector<MigratableCreditCard>& migratable_credit_cards,
-    LocalCardMigrationCallback start_migrating_cards_callback) {
-  NOTIMPLEMENTED();
-}
-
-void WebViewAutofillClientIOS::ShowLocalCardMigrationResults(
-    const bool has_server_error,
-    const base::string16& tip_message,
-    const std::vector<MigratableCreditCard>& migratable_credit_cards,
-    MigrationDeleteCardCallback delete_local_card_callback) {
-  NOTIMPLEMENTED();
-}
-
-void WebViewAutofillClientIOS::ConfirmSaveAutofillProfile(
-    const AutofillProfile& profile,
-    base::OnceClosure callback) {
-  // Since there is no confirmation needed to save an Autofill Profile,
-  // running |callback| will proceed with saving |profile|.
-  std::move(callback).Run();
+void WebViewAutofillClientIOS::ConfirmExpirationDateFixFlow(
+    const CreditCard& card,
+    base::OnceCallback<void(const std::u16string&, const std::u16string&)>
+        callback) {
+  NOTREACHED();
 }
 
 void WebViewAutofillClientIOS::ConfirmSaveCreditCardLocally(
     const CreditCard& card,
     SaveCreditCardOptions options,
     LocalSaveCardPromptCallback callback) {
-  DCHECK(options.show_prompt);
-  [bridge_ confirmSaveCreditCardLocally:card callback:std::move(callback)];
+  // No op. ios/web_view does not support local saves of autofill data.
 }
 
 void WebViewAutofillClientIOS::ConfirmSaveCreditCardToCloud(
     const CreditCard& card,
-    std::unique_ptr<base::DictionaryValue> legal_message,
+    const LegalMessageLines& legal_message_lines,
     SaveCreditCardOptions options,
     UploadSaveCardPromptCallback callback) {
   DCHECK(options.show_prompt);
+  [bridge_ confirmSaveCreditCardToCloud:card
+                      legalMessageLines:legal_message_lines
+                  saveCreditCardOptions:options
+                               callback:std::move(callback)];
 }
 
 void WebViewAutofillClientIOS::CreditCardUploadCompleted(bool card_saved) {
-  NOTIMPLEMENTED();
+  [bridge_ handleCreditCardUploadCompleted:card_saved];
 }
 
 void WebViewAutofillClientIOS::ConfirmCreditCardFillAssist(
     const CreditCard& card,
     base::OnceClosure callback) {}
 
+void WebViewAutofillClientIOS::ConfirmSaveAddressProfile(
+    const AutofillProfile& profile,
+    const AutofillProfile* original_profile,
+    SaveAddressProfilePromptOptions options,
+    AddressProfileSavePromptCallback callback) {
+  // TODO(crbug.com/1167062): Respect SaveAddressProfilePromptOptions.
+  [bridge_ confirmSaveAddressProfile:profile
+                     originalProfile:original_profile
+                            callback:std::move(callback)];
+}
+
 bool WebViewAutofillClientIOS::HasCreditCardScanFeature() {
   return false;
 }
 
-void WebViewAutofillClientIOS::ScanCreditCard(
-    const CreditCardScanCallback& callback) {
+void WebViewAutofillClientIOS::ScanCreditCard(CreditCardScanCallback callback) {
+  NOTREACHED();
+}
+
+bool WebViewAutofillClientIOS::IsFastCheckoutSupported() {
+  return false;
+}
+
+bool WebViewAutofillClientIOS::IsFastCheckoutTriggerForm(
+    const FormData& form,
+    const FormFieldData& field) {
+  return false;
+}
+
+bool WebViewAutofillClientIOS::ShowFastCheckout(
+    base::WeakPtr<FastCheckoutDelegate> delegate) {
+  NOTREACHED();
+  return false;
+}
+
+void WebViewAutofillClientIOS::HideFastCheckout() {
+  NOTREACHED();
+}
+
+bool WebViewAutofillClientIOS::IsTouchToFillCreditCardSupported() {
+  return false;
+}
+
+bool WebViewAutofillClientIOS::ShowTouchToFillCreditCard(
+    base::WeakPtr<TouchToFillDelegate> delegate) {
+  NOTREACHED();
+  return false;
+}
+
+void WebViewAutofillClientIOS::HideTouchToFillCreditCard() {
   NOTREACHED();
 }
 
 void WebViewAutofillClientIOS::ShowAutofillPopup(
-    const gfx::RectF& element_bounds,
-    base::i18n::TextDirection text_direction,
-    const std::vector<Suggestion>& suggestions,
-    bool /*unused_autoselect_first_suggestion*/,
-    PopupType popup_type,
+    const AutofillClient::PopupOpenArgs& open_args,
     base::WeakPtr<AutofillPopupDelegate> delegate) {
-  [bridge_ showAutofillPopup:suggestions popupDelegate:delegate];
+  [bridge_ showAutofillPopup:open_args.suggestions popupDelegate:delegate];
 }
 
 void WebViewAutofillClientIOS::UpdateAutofillPopupDataListValues(
-    const std::vector<base::string16>& values,
-    const std::vector<base::string16>& labels) {
-  NOTREACHED();
+    const std::vector<std::u16string>& values,
+    const std::vector<std::u16string>& labels) {
+  // No op. ios/web_view does not support display datalist.
 }
 
-void WebViewAutofillClientIOS::HideAutofillPopup() {
+base::span<const Suggestion> WebViewAutofillClientIOS::GetPopupSuggestions()
+    const {
+  NOTIMPLEMENTED();
+  return base::span<const Suggestion>();
+}
+
+void WebViewAutofillClientIOS::PinPopupView() {
+  NOTIMPLEMENTED();
+}
+
+AutofillClient::PopupOpenArgs WebViewAutofillClientIOS::GetReopenPopupArgs()
+    const {
+  NOTIMPLEMENTED();
+  return {};
+}
+
+void WebViewAutofillClientIOS::UpdatePopup(
+    const std::vector<Suggestion>& suggestions,
+    PopupType popup_type) {
+  NOTIMPLEMENTED();
+}
+
+void WebViewAutofillClientIOS::HideAutofillPopup(PopupHidingReason reason) {
   [bridge_ hideAutofillPopup];
 }
 
 bool WebViewAutofillClientIOS::IsAutocompleteEnabled() {
-  return prefs::IsAutocompleteEnabled(GetPrefs());
+  return false;
+}
+
+bool WebViewAutofillClientIOS::IsPasswordManagerEnabled() {
+  return GetPrefs()->GetBoolean(
+      password_manager::prefs::kCredentialsEnableService);
 }
 
 void WebViewAutofillClientIOS::PropagateAutofillPredictions(
-    content::RenderFrameHost* rfh,
+    AutofillDriver* driver,
     const std::vector<FormStructure*>& forms) {
-  [bridge_ propagateAutofillPredictionsForForms:forms];
+  [bridge_
+      propagateAutofillPredictionsForForms:forms
+                                   inFrame:(static_cast<AutofillDriverIOS*>(
+                                                driver))
+                                               ->web_frame()];
 }
 
 void WebViewAutofillClientIOS::DidFillOrPreviewField(
-    const base::string16& autofilled_value,
-    const base::string16& profile_full_name) {}
+    const std::u16string& autofilled_value,
+    const std::u16string& profile_full_name) {}
 
-bool WebViewAutofillClientIOS::IsContextSecure() {
+bool WebViewAutofillClientIOS::IsContextSecure() const {
   return IsContextSecureForWebState(web_state_);
 }
 
@@ -235,7 +344,7 @@ bool WebViewAutofillClientIOS::ShouldShowSigninPromo() {
   return false;
 }
 
-bool WebViewAutofillClientIOS::AreServerCardsSupported() {
+bool WebViewAutofillClientIOS::AreServerCardsSupported() const {
   return true;
 }
 
@@ -243,9 +352,24 @@ void WebViewAutofillClientIOS::ExecuteCommand(int id) {
   NOTIMPLEMENTED();
 }
 
+void WebViewAutofillClientIOS::OpenPromoCodeOfferDetailsURL(const GURL& url) {
+  web_state_->OpenURL(web::WebState::OpenURLParams(
+      url, web::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui::PageTransition::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      /*is_renderer_initiated=*/false));
+}
+
 void WebViewAutofillClientIOS::LoadRiskData(
     base::OnceCallback<void(const std::string&)> callback) {
   [bridge_ loadRiskData:std::move(callback)];
+}
+
+LogManager* WebViewAutofillClientIOS::GetLogManager() const {
+  return log_manager_.get();
+}
+
+bool WebViewAutofillClientIOS::IsQueryIDRelevant(int query_id) {
+  return [bridge_ isQueryIDRelevant:query_id];
 }
 
 }  // namespace autofill

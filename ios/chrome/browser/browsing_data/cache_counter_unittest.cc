@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,15 +14,16 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/prefs/testing_pref_service.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
+#include "net/base/io_buffer.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_transaction_factory.h"
@@ -43,7 +44,7 @@ class CacheCounterTest : public PlatformTest {
 
   ~CacheCounterTest() override {}
 
-  ios::ChromeBrowserState* browser_state() { return browser_state_.get(); }
+  ChromeBrowserState* browser_state() { return browser_state_.get(); }
 
   PrefService* prefs() { return browser_state_->GetPrefs(); }
 
@@ -61,10 +62,9 @@ class CacheCounterTest : public PlatformTest {
     current_operation_ = OPERATION_ADD_ENTRY;
     next_step_ = STEP_GET_BACKEND;
 
-    base::PostTaskWithTraits(
-        FROM_HERE, {web::WebThread::IO},
-        base::BindOnce(&CacheCounterTest::CacheOperationStep,
-                       base::Unretained(this), net::OK));
+    web::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&CacheCounterTest::CacheOperationStep,
+                                  base::Unretained(this), net::OK));
     WaitForIOThread();
   }
 
@@ -73,10 +73,9 @@ class CacheCounterTest : public PlatformTest {
     current_operation_ = OPERATION_CLEAR_CACHE;
     next_step_ = STEP_GET_BACKEND;
 
-    base::PostTaskWithTraits(
-        FROM_HERE, {web::WebThread::IO},
-        base::BindOnce(&CacheCounterTest::CacheOperationStep,
-                       base::Unretained(this), net::OK));
+    web::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&CacheCounterTest::CacheOperationStep,
+                                  base::Unretained(this), net::OK));
     WaitForIOThread();
   }
 
@@ -167,11 +166,13 @@ class CacheCounterTest : public PlatformTest {
           next_step_ = STEP_WRITE_DATA;
 
           DCHECK(backend_);
-          rv = backend_->CreateEntry(
-              "entry_key", net::HIGHEST, &entry_,
-              base::BindRepeating(&CacheCounterTest::CacheOperationStep,
-                                  base::Unretained(this)));
-
+          disk_cache::EntryResult result = backend_->CreateEntry(
+              "entry_key", net::HIGHEST,
+              base::BindOnce(&CacheCounterTest::SaveEntryAndStep,
+                             base::Unretained(this)));
+          rv = result.net_error();
+          if (rv != net::ERR_IO_PENDING)
+            entry_ = result.ReleaseEntry();
           break;
         }
 
@@ -196,9 +197,9 @@ class CacheCounterTest : public PlatformTest {
           if (current_operation_ == OPERATION_ADD_ENTRY)
             entry_->Close();
 
-          base::PostTaskWithTraits(FROM_HERE, {web::WebThread::UI},
-                                   base::BindOnce(&CacheCounterTest::Callback,
-                                                  base::Unretained(this)));
+          web::GetUIThreadTaskRunner({})->PostTask(
+              FROM_HERE, base::BindOnce(&CacheCounterTest::Callback,
+                                        base::Unretained(this)));
 
           break;
         }
@@ -210,6 +211,12 @@ class CacheCounterTest : public PlatformTest {
     }
   }
 
+  void SaveEntryAndStep(disk_cache::EntryResult result) {
+    int rv = result.net_error();
+    entry_ = result.ReleaseEntry();
+    CacheOperationStep(rv);
+  }
+
   // General completion callback.
   void Callback() {
     DCHECK_CURRENTLY_ON(web::WebThread::UI);
@@ -217,9 +224,9 @@ class CacheCounterTest : public PlatformTest {
       run_loop_->Quit();
   }
 
-  web::TestWebThreadBundle bundle_;
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<base::RunLoop> run_loop_;
-  std::unique_ptr<ios::ChromeBrowserState> browser_state_;
+  std::unique_ptr<ChromeBrowserState> browser_state_;
 
   CacheOperation current_operation_;
   CacheEntryCreationStep next_step_;

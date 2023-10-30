@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,24 +6,20 @@
 #define IOS_CHROME_BROWSER_UI_BUBBLE_BUBBLE_PRESENTER_H_
 
 #import <UIKit/UIKit.h>
-
-namespace ios {
-class ChromeBrowserState;
-}
+#import "ios/chrome/browser/ui/commands/help_commands.h"
 
 @protocol BubblePresenterDelegate;
 @class BubbleViewControllerPresenter;
+class ChromeBrowserState;
 @protocol ToolbarCommands;
 
 // Object handling the presentation of the different bubbles tips. The class is
 // holding all the bubble presenters.
-@interface BubblePresenter : NSObject
+@interface BubblePresenter : NSObject <HelpCommands>
 
 // Initializes a BubblePresenter whose bubbles are presented on the
-// |rootViewController|.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                            delegate:(id<BubblePresenterDelegate>)delegate
-                  rootViewController:(UIViewController*)rootViewController
+// `rootViewController`.
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -32,26 +28,30 @@ class ChromeBrowserState;
 @property(nonatomic, strong, readonly)
     BubbleViewControllerPresenter* incognitoTabTipBubblePresenter;
 
-@property(nonatomic, weak) id<ToolbarCommands> dispatcher;
+@property(nonatomic, weak) id<BubblePresenterDelegate> delegate;
+@property(nonatomic, weak) UIViewController* rootViewController;
+@property(nonatomic, weak) id<ToolbarCommands> toolbarHandler;
 
-// Presents either in-product help bubbles if the the user is in a valid state
-// to see one of them. At most one bubble will be shown. If the feature
-// engagement tracker determines it is not valid to see one of the bubbles, that
-// bubble will not be shown.
-- (void)presentBubblesIfEligible;
-
-// Presents the in-product help for the LongPress help if the feature engagement
-// and the application states determine that it is possible to present it.
-- (void)presentLongPressBubbleIfEligible;
-
-// Dismisses all bubbles.
-- (void)dismissBubbles;
+- (void)stop;
 
 // Notifies the presenter that the user entered the tab switcher.
 - (void)userEnteredTabSwitcher;
 
 // Notifies the presenter that the tools menu has been displayed.
 - (void)toolsMenuDisplayed;
+
+// Presents a bubble associated with the Discover feed header's menu button.
+- (void)presentDiscoverFeedHeaderTipBubble;
+
+// Shows a relevant Reading List help bubble, if applicable.
+- (void)presentReadingListBottomToolbarTipBubble;
+
+// Shows a relevant Follow help bubble while browsing a site, if applicable.
+- (void)presentFollowWhileBrowsingTipBubble;
+
+// Shows a help bubble to let the user know that they can change the default
+// mode (Desktop/Mobile) of the websites.
+- (void)presentDefaultSiteViewTipBubble;
 
 @end
 

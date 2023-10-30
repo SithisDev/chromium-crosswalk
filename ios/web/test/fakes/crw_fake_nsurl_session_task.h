@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Fake NSURLSessionDataTask class which can be used for testing. |cancel| and
-// |resume| methods only change the |state| of this task without actually
+// Fake NSURLSessionDataTask class which can be used for testing. `cancel` and
+// `resume` methods only change the `state` of this task without actually
 // starting or stopping the download.
 @interface CRWFakeNSURLSessionTask : NSURLSessionDataTask
 
@@ -20,8 +20,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) NSURLSessionTaskState state;
 @property(nonatomic, nullable, copy) NSURLResponse* response;
 
-- (nullable instancetype)initWithURL:(NSURL*)URL NS_DESIGNATED_INITIALIZER;
-- (nonnull instancetype)init NS_UNAVAILABLE;
+- (nullable instancetype)initWithURL:(NSURL*)URL;  // NS_DESIGNATED_INITIALIZER;
+// - (nonnull instancetype)init NS_UNAVAILABLE;
 
 @end
 

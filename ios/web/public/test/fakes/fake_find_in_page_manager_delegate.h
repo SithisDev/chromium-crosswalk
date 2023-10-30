@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,13 +18,20 @@ class WebState;
 class FakeFindInPageManagerDelegate : public FindInPageManagerDelegate {
  public:
   FakeFindInPageManagerDelegate();
+
+  FakeFindInPageManagerDelegate(const FakeFindInPageManagerDelegate&) = delete;
+  FakeFindInPageManagerDelegate& operator=(
+      const FakeFindInPageManagerDelegate&) = delete;
+
   ~FakeFindInPageManagerDelegate() override;
 
   // FindInPageManagerDelegate override
   void DidHighlightMatches(WebState* web_state,
                            int match_count,
                            NSString* query) override;
-  void DidSelectMatch(WebState* web_state, int index) override;
+  void DidSelectMatch(WebState* web_state,
+                      int index,
+                      NSString* context_string) override;
 
   // Holds the state passed to DidHighlightMatches and DidSelectMatch.
   struct State {
@@ -34,6 +41,7 @@ class FakeFindInPageManagerDelegate : public FindInPageManagerDelegate {
     int match_count = -1;
     NSString* query;
     int index = -1;
+    NSString* context_string;
   };
 
   // Returns the current State.
@@ -44,7 +52,6 @@ class FakeFindInPageManagerDelegate : public FindInPageManagerDelegate {
 
  private:
   std::unique_ptr<State> delegate_state_;
-  DISALLOW_COPY_AND_ASSIGN(FakeFindInPageManagerDelegate);
 };
 
 }  // namespace web

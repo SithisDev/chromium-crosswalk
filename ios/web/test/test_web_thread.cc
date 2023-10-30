@@ -1,11 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ios/web/public/test/test_web_thread.h"
 
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "ios/web/web_sub_thread.h"
 #include "ios/web/web_thread_impl.h"
 
@@ -23,21 +22,17 @@ TestWebThread::TestWebThread(
     : identifier_(identifier),
       fake_thread_(new WebThreadImpl(identifier_, thread_runner)) {}
 
-TestWebThread::TestWebThread(WebThread::ID identifier,
-                             base::MessageLoop* message_loop)
-    : TestWebThread(identifier, message_loop->task_runner()) {}
-
 TestWebThread::~TestWebThread() {
   // The upcoming WebThreadImpl::ResetGlobalsForTesting() call requires that
-  // |identifier_| completed its shutdown phase.
+  // `identifier_` completed its shutdown phase.
   real_thread_.reset();
   fake_thread_.reset();
 
-  // Resets WebThreadImpl's globals so that |identifier_| is no longer
+  // Resets WebThreadImpl's globals so that `identifier_` is no longer
   // bound. This is fine since the underlying MessageLoop has already been
   // flushed and deleted above. In the case of an externally provided
   // MessageLoop however, this means that TaskRunners obtained through
-  // |WebThreadImpl::GetTaskRunnerForThread(identifier_)| will no longer
+  // `WebThreadImpl::GetTaskRunnerForThread(identifier_)` will no longer
   // recognize their WebThreadImpl for RunsTasksInCurrentSequence(). This
   // happens most often when such verifications are made from
   // MessageLoop::DestructionObservers. Callers that care to work around that
@@ -45,7 +40,7 @@ TestWebThread::~TestWebThread() {
   //   1) TestWebThread::Stop()
   //   2) ~MessageLoop()
   //   3) ~TestWebThread()
-  // (~TestWebThreadBundle() does this).
+  // (~WebTaskEnvironment() does this).
   WebThreadImpl::ResetGlobalsForTesting(identifier_);
 }
 
@@ -61,8 +56,8 @@ void TestWebThread::StartIOThread() {
 
 void TestWebThread::StartIOThreadUnregistered() {
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
-  CHECK(real_thread_->StartWithOptions(options));
+  options.message_pump_type = base::MessagePumpType::IO;
+  CHECK(real_thread_->StartWithOptions(std::move(options)));
 }
 
 void TestWebThread::RegisterAsWebThread() {

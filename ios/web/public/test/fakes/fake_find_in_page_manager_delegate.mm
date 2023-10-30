@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,14 @@ void FakeFindInPageManagerDelegate::DidHighlightMatches(WebState* web_state,
 }
 
 void FakeFindInPageManagerDelegate::DidSelectMatch(WebState* web_state,
-                                                   int index) {
+                                                   int index,
+                                                   NSString* context_string) {
   if (!delegate_state_) {
     delegate_state_ = std::make_unique<State>();
   }
   delegate_state_->web_state = web_state;
   delegate_state_->index = index;
+  delegate_state_->context_string = context_string;
 }
 
 }  // namespace web

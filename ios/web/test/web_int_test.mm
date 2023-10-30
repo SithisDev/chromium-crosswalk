@@ -1,24 +1,29 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/test/web_int_test.h"
 
-#include "base/base_paths.h"
 #import "base/ios/block_types.h"
-#include "base/memory/ptr_util.h"
-#include "base/path_service.h"
-#include "base/scoped_observer.h"
+#import "base/memory/ptr_util.h"
+#import "base/scoped_observation.h"
+#import "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#import "ios/web/common/uikit_ui_util.h"
 #import "ios/web/common/web_view_creation_util.h"
-#import "ios/web/public/test/http_server/http_server.h"
 #import "ios/web/public/test/js_test_util.h"
-#include "ios/web/public/web_state/web_state_observer.h"
+#import "ios/web/public/test/web_view_interaction_test_util.h"
+#import "ios/web/public/web_state_observer.h"
+
+#if DCHECK_IS_ON()
+#import "ui/display/screen_base.h"
+#endif
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
+using base::test::ios::kWaitForClearBrowsingDataTimeout;
 using base::test::ios::kWaitForPageLoadTimeout;
 using base::test::ios::WaitUntilConditionOrTimeout;
 
@@ -29,18 +34,19 @@ namespace web {
 // WebStateObserver class that is used to track when page loads finish.
 class IntTestWebStateObserver : public WebStateObserver {
  public:
-  // Instructs the observer to listen for page loads for |url|.
+  // Instructs the observer to listen for page loads for `url`.
   explicit IntTestWebStateObserver(const GURL& url) : expected_url_(url) {}
 
-  // Whether |expected_url_| has been loaded successfully.
+  IntTestWebStateObserver(const IntTestWebStateObserver&) = delete;
+  IntTestWebStateObserver& operator=(const IntTestWebStateObserver&) = delete;
+
+  // Whether `expected_url_` has been loaded successfully.
   bool IsExpectedPageLoaded() { return page_loaded_; }
 
   // WebStateObserver methods:
   void PageLoaded(
       web::WebState* web_state,
       web::PageLoadCompletionStatus load_completion_status) override {
-    ASSERT_EQ(load_completion_status == web::PageLoadCompletionStatus::SUCCESS,
-              expected_url_.is_valid());
     page_loaded_ = true;
   }
 
@@ -49,8 +55,6 @@ class IntTestWebStateObserver : public WebStateObserver {
  private:
   GURL expected_url_;
   bool page_loaded_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(IntTestWebStateObserver);
 };
 
 #pragma mark - WebIntTest
@@ -61,14 +65,6 @@ WebIntTest::~WebIntTest() {}
 void WebIntTest::SetUp() {
   WebTest::SetUp();
 
-  // Start the http server.
-  web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
-  ASSERT_FALSE(server.IsRunning());
-
-  base::FilePath test_data_dir;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
-  server.StartOrDie(test_data_dir.Append("."));
-
   // Remove any previously existing WKWebView data.
   RemoveWKWebViewCreatedData([WKWebsiteDataStore defaultDataStore],
                              [WKWebsiteDataStore allWebsiteDataTypes]);
@@ -78,8 +74,7 @@ void WebIntTest::SetUp() {
   web_state_ = web::WebState::Create(web_state_create_params);
 
   // Resize the webview so that pages can be properly rendered.
-  web_state()->GetView().frame =
-      [UIApplication sharedApplication].keyWindow.bounds;
+  web_state()->GetView().frame = GetAnyKeyWindow().bounds;
 
   web_state()->SetDelegate(&web_state_delegate_);
   web_state()->SetKeepRenderProcessAlive(true);
@@ -89,16 +84,16 @@ void WebIntTest::TearDown() {
   RemoveWKWebViewCreatedData([WKWebsiteDataStore defaultDataStore],
                              [WKWebsiteDataStore allWebsiteDataTypes]);
 
-  web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
-  server.Stop();
-  EXPECT_FALSE(server.IsRunning());
-
   WebTest::TearDown();
-}
 
-id WebIntTest::ExecuteJavaScript(NSString* script) {
-  return web::test::ExecuteJavaScript(web_state()->GetJSInjectionReceiver(),
-                                      script);
+#if DCHECK_IS_ON()
+  // The same screen object is shared across multiple test runs on IOS build.
+  // Make sure that all display observers are removed at the end of each
+  // test.
+  display::ScreenBase* screen =
+      static_cast<display::ScreenBase*>(display::Screen::GetScreen());
+  DCHECK(!screen->HasDisplayObservers());
+#endif
 }
 
 bool WebIntTest::ExecuteBlockAndWaitForLoad(const GURL& url,
@@ -106,12 +101,13 @@ bool WebIntTest::ExecuteBlockAndWaitForLoad(const GURL& url,
   DCHECK(block);
 
   IntTestWebStateObserver observer(url);
-  ScopedObserver<WebState, WebStateObserver> scoped_observer(&observer);
-  scoped_observer.Add(web_state());
+  base::ScopedObservation<WebState, WebStateObserver> scoped_observer(
+      &observer);
+  scoped_observer.Observe(web_state());
 
   block();
 
-  // Need to use a pointer to |observer| as the block wants to capture it by
+  // Need to use a pointer to `observer` as the block wants to capture it by
   // value (even if marked with __block) which would not work.
   IntTestWebStateObserver* observer_ptr = &observer;
   return WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
@@ -149,7 +145,7 @@ void WebIntTest::RemoveWKWebViewCreatedData(WKWebsiteDataStore* data_store,
     // TODO(crbug.com/554225): This approach of creating a WKWebView and
     // executing JS to clear cookies is a workaround for
     // https://bugs.webkit.org/show_bug.cgi?id=149078.
-    // Remove this, when that bug is fixed. The |marker_web_view| will be
+    // Remove this, when that bug is fixed. The `marker_web_view` will be
     // released when cookies have been cleared.
     WKWebView* marker_web_view =
         web::BuildWKWebView(CGRectZero, GetBrowserState());
@@ -162,9 +158,10 @@ void WebIntTest::RemoveWKWebViewCreatedData(WKWebsiteDataStore* data_store,
     remove_data();
   }
 
-  base::test::ios::WaitUntilCondition(^bool {
-    return data_removed;
-  });
+  EXPECT_TRUE(
+      WaitUntilConditionOrTimeout(kWaitForClearBrowsingDataTimeout * 2, ^{
+        return data_removed;
+      }));
 }
 
 NSInteger WebIntTest::GetIndexOfNavigationItem(

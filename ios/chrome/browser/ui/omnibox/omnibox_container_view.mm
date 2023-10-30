@@ -1,22 +1,24 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/omnibox/omnibox_container_view.h"
 
+#import "ios/chrome/browser/ui/omnibox/omnibox_text_field_experimental.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_text_field_legacy.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/animation_util.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
-#include "ios/chrome/browser/ui/util/rtl_geometry.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/rtl_geometry.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ios/chrome/grit/ios_theme_resources.h"
-#include "skia/ext/skia_utils_ios.h"
-#include "ui/gfx/color_palette.h"
-#include "ui/gfx/image/image.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/grit/ios_theme_resources.h"
+#import "skia/ext/skia_utils_ios.h"
+#import "ui/gfx/color_palette.h"
+#import "ui/gfx/image/image.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -40,13 +42,9 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
 #pragma mark - OmniboxContainerView
 
 @interface OmniboxContainerView ()
-// Constraints the leading textfield side to the leading of |self|.
-// Active when the |leadingView| is nil or hidden.
+// Constraints the leading textfield side to the leading of `self`.
+// Active when the `leadingView` is nil or hidden.
 @property(nonatomic, strong) NSLayoutConstraint* leadingTextfieldConstraint;
-// When the |leadingImageView| is not hidden, this is a constraint that links
-// the leading edge of the button to self leading edge. Used for animations.
-@property(nonatomic, strong)
-    NSLayoutConstraint* leadingImageViewLeadingConstraint;
 // The leading image view. Used for autocomplete icons.
 @property(nonatomic, strong) UIImageView* leadingImageView;
 // Redefined as readwrite.
@@ -59,8 +57,6 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
 @synthesize leadingImageView = _leadingImageView;
 @synthesize leadingTextfieldConstraint = _leadingTextfieldConstraint;
 @synthesize incognito = _incognito;
-@synthesize leadingImageViewLeadingConstraint =
-    _leadingImageViewLeadingConstraint;
 
 #pragma mark - Public methods
 
@@ -70,9 +66,16 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
                      iconTint:(UIColor*)iconTint {
   self = [super initWithFrame:frame];
   if (self) {
-    _textField = [[OmniboxTextFieldIOS alloc] initWithFrame:frame
-                                                  textColor:textColor
-                                                  tintColor:textFieldTint];
+    if (base::FeatureList::IsEnabled(kIOSNewOmniboxImplementation)) {
+      _textField =
+          [[OmniboxTextFieldExperimental alloc] initWithFrame:frame
+                                                    textColor:textColor
+                                                    tintColor:textFieldTint];
+    } else {
+      _textField = [[OmniboxTextFieldLegacy alloc] initWithFrame:frame
+                                                       textColor:textColor
+                                                       tintColor:textFieldTint];
+    }
     [self addSubview:_textField];
 
     _leadingTextfieldConstraint = [_textField.leadingAnchor
@@ -94,8 +97,7 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
                                         forAxis:
                                             UILayoutConstraintAxisHorizontal];
 
-    [self createLeadingImageView];
-    _leadingImageView.tintColor = iconTint;
+    [self setupLeadingImageViewWithTint:iconTint];
   }
   return self;
 }
@@ -112,31 +114,6 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
   }
 }
 
-- (void)setLeadingImageHidden:(BOOL)hidden {
-  if (hidden) {
-    [_leadingImageView removeFromSuperview];
-    self.leadingTextfieldConstraint.active = YES;
-  } else {
-    [self addSubview:_leadingImageView];
-    self.leadingTextfieldConstraint.active = NO;
-    self.leadingImageViewLeadingConstraint = [self.leadingAnchor
-        constraintEqualToAnchor:self.leadingImageView.leadingAnchor
-                       constant:-kleadingImageViewEdgeOffset];
-
-    NSLayoutConstraint* leadingImageViewToTextField = nil;
-    leadingImageViewToTextField = [self.leadingImageView.trailingAnchor
-        constraintEqualToAnchor:self.textField.leadingAnchor
-                       constant:-kTextFieldLeadingOffsetImage];
-
-    [NSLayoutConstraint activateConstraints:@[
-      [_leadingImageView.centerYAnchor
-          constraintEqualToAnchor:self.centerYAnchor],
-      self.leadingImageViewLeadingConstraint,
-      leadingImageViewToTextField,
-    ]];
-  }
-}
-
 - (void)setLeadingImage:(UIImage*)image {
   [self.leadingImageView setImage:image];
 }
@@ -150,50 +127,41 @@ const CGFloat kTextFieldClearButtonTrailingOffset = 4;
   self.leadingImageView.alpha = alpha;
 }
 
+- (void)setLeadingImageScale:(CGFloat)scaleValue {
+  self.leadingImageView.transform =
+      CGAffineTransformMakeScale(scaleValue, scaleValue);
+}
 #pragma mark - private
 
-- (void)createLeadingImageView {
+- (void)setupLeadingImageViewWithTint:(UIColor*)iconTint {
   _leadingImageView = [[UIImageView alloc] init];
   _leadingImageView.translatesAutoresizingMaskIntoConstraints = NO;
   _leadingImageView.contentMode = UIViewContentModeCenter;
 
-  // When the flag is enabled, the image view is always shown. Its width should
-  // also be constant.
-  if (base::FeatureList::IsEnabled(kNewOmniboxPopupLayout)) {
-    [NSLayoutConstraint activateConstraints:@[
-      [_leadingImageView.widthAnchor
-          constraintEqualToConstant:kLeadingImageSize],
-      [_leadingImageView.heightAnchor
-          constraintEqualToAnchor:_leadingImageView.widthAnchor],
-    ]];
-  } else {
-    [_leadingImageView
-        setContentCompressionResistancePriority:UILayoutPriorityRequired
-                                        forAxis:
-                                            UILayoutConstraintAxisHorizontal];
-    [_leadingImageView
-        setContentCompressionResistancePriority:UILayoutPriorityRequired
-                                        forAxis:UILayoutConstraintAxisVertical];
-    [_leadingImageView
-        setContentHuggingPriority:UILayoutPriorityDefaultLow
-                          forAxis:UILayoutConstraintAxisHorizontal];
-    [_leadingImageView
-        setContentHuggingPriority:UILayoutPriorityRequired
-                          forAxis:UILayoutConstraintAxisVertical];
+  // The image view is always shown. Its width should be constant.
+  [NSLayoutConstraint activateConstraints:@[
+    [_leadingImageView.widthAnchor constraintEqualToConstant:kLeadingImageSize],
+    [_leadingImageView.heightAnchor
+        constraintEqualToAnchor:_leadingImageView.widthAnchor],
+  ]];
 
-    // Sometimes the image view is not hidden and has no image. Then it doesn't
-    // have an intrinsic size. In this case the omnibox should appear the same
-    // as with hidden image view. Add a placeholder width constraint.
-    CGFloat placeholderSize = kTextFieldLeadingOffsetNoImage -
-                              kleadingImageViewEdgeOffset -
-                              kTextFieldLeadingOffsetImage;
-    NSLayoutConstraint* placeholderWidthConstraint =
-        [_leadingImageView.widthAnchor
-            constraintEqualToConstant:placeholderSize];
-    // The priority must be higher than content hugging.
-    placeholderWidthConstraint.priority = UILayoutPriorityDefaultLow + 1;
-    placeholderWidthConstraint.active = YES;
-  }
+  _leadingImageView.tintColor = iconTint;
+  [self addSubview:_leadingImageView];
+  self.leadingTextfieldConstraint.active = NO;
+
+  NSLayoutConstraint* leadingImageViewToTextField =
+      [self.leadingImageView.trailingAnchor
+          constraintEqualToAnchor:self.textField.leadingAnchor
+                         constant:-kTextFieldLeadingOffsetImage];
+
+  [NSLayoutConstraint activateConstraints:@[
+    [_leadingImageView.centerYAnchor
+        constraintEqualToAnchor:self.centerYAnchor],
+    [self.leadingAnchor
+        constraintEqualToAnchor:self.leadingImageView.leadingAnchor
+                       constant:-kleadingImageViewEdgeOffset],
+    leadingImageViewToTextField,
+  ]];
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,8 @@
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
 // The containted omnibox textfield.
+// Depending on kIOSNewOmniboxImplementation flag, it's either a legacy or a new
+// implementation.
 @property(nonatomic, strong, readonly) OmniboxTextFieldIOS* textField;
 
 // Incognito status of the location bar changes the appearance, such as text
@@ -34,11 +36,11 @@
 // Sets the leading button's image.
 - (void)setLeadingImage:(UIImage*)image;
 
-// Shows or hides the leading button.
-- (void)setLeadingImageHidden:(BOOL)hidden;
-
 // Sets the alpha level of the leading image view.
 - (void)setLeadingImageAlpha:(CGFloat)alpha;
+
+// Sets the scale of the leading image view.
+- (void)setLeadingImageScale:(CGFloat)scaleValue;
 
 // Asks the container view to attch any layout guides to its views.
 - (void)attachLayoutGuides;

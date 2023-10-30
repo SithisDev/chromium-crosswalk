@@ -1,20 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
-#import "components/handoff/handoff_manager.h"
-#import "ios/chrome/browser/device_sharing/device_sharing_manager.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
+#import "ios/chrome/browser/device_sharing/handoff_manager_app_interface.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "ios/web/public/test/http_server/http_server.h"
-#include "ios/web/public/test/http_server/http_server_util.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
 #import "net/base/mac/url_conversions.h"
-#include "url/gurl.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -22,18 +18,15 @@
 
 namespace {
 
-// Checks that Handoff will report the specified |gurl|.
+// Checks that Handoff will report the specified `gurl`.
 void AssertHandoffURL(const GURL& gurl) {
-  HandoffManager* manager =
-      [chrome_test_util::GetDeviceSharingManager() handoffManager];
-  GREYAssertTrue(manager != nil, @"Handoff Manager should not be nil");
+  NSURL* handoffURL =
+      [HandoffManagerAppInterface currentUserActivityWebPageURL];
   if (gurl.is_valid()) {
     NSURL* URL = net::NSURLWithGURL(gurl);
-    GREYAssertTrue([manager.userActivityWebpageURL isEqual:URL],
-                   @"Incorrect Handoff URL.");
+    GREYAssertTrue([handoffURL isEqual:URL], @"Incorrect Handoff URL.");
   } else {
-    GREYAssertTrue(manager.userActivityWebpageURL == nil,
-                   @"Handoff URL is not nil.");
+    GREYAssertTrue(handoffURL == nil, @"Handoff URL is not nil.");
   }
 }
 
@@ -46,11 +39,9 @@ void AssertHandoffURL(const GURL& gurl) {
 
 @implementation HandoffManagerTestCase
 
-#pragma mark - Overrides base class
-
 - (void)setUp {
   [super setUp];
-  web::test::SetUpFileBasedHttpServer();
+  GREYAssertTrue(self.testServer->Start(), @"Server did not start.");
 }
 
 #pragma mark - Tests
@@ -62,8 +53,7 @@ void AssertHandoffURL(const GURL& gurl) {
 
 // Tests that the simple case of Handoff URL for a single page.
 - (void)testTypicalURL {
-  const GURL destinationUrl = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/destination.html");
+  const GURL destinationUrl = self.testServer->GetURL("/destination.html");
   [ChromeEarlGrey loadURL:destinationUrl];
   AssertHandoffURL(destinationUrl);
 }
@@ -71,8 +61,7 @@ void AssertHandoffURL(const GURL& gurl) {
 // Tests Handoff URL for a new tab.
 - (void)testTypicalURLInNewTab {
   [ChromeEarlGrey openNewTab];
-  const GURL destinationUrl = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/pony.html");
+  const GURL destinationUrl = self.testServer->GetURL("/pony.html");
   [ChromeEarlGrey loadURL:destinationUrl];
   AssertHandoffURL(destinationUrl);
 }
@@ -81,15 +70,13 @@ void AssertHandoffURL(const GURL& gurl) {
 - (void)testTypicalURLInNewIncognitoTab {
   // Opens an incognito tab and loads a web page. Check that Handoff URL is nil.
   [ChromeEarlGrey openNewIncognitoTab];
-  const GURL destinationUrl = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/destination.html");
+  const GURL destinationUrl = self.testServer->GetURL("/destination.html");
   [ChromeEarlGrey loadURL:destinationUrl];
   AssertHandoffURL(GURL());
 
   // Loads a second URL on the same incognito tab. Handoff URL should still be
   // nil.
-  const GURL destinationUrl2 = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/pony.html");
+  const GURL destinationUrl2 = self.testServer->GetURL("/pony.html");
   [ChromeEarlGrey loadURL:destinationUrl2];
   AssertHandoffURL(GURL());
 }
@@ -97,12 +84,9 @@ void AssertHandoffURL(const GURL& gurl) {
 // Tests the state for Handoff URL when creating, closing tab, and switching
 // tab.
 - (void)testMultipleSwitchingTabs {
-  const GURL tab1URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/destination.html");
-  const GURL tab2URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/pony.html");
-  const GURL tab3URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/chromium_logo_page.html");
+  const GURL tab1URL = self.testServer->GetURL("/destination.html");
+  const GURL tab2URL = self.testServer->GetURL("/pony.html");
+  const GURL tab3URL = self.testServer->GetURL("/chromium_logo_page.html");
 
   // Sets up the state for 3 tabs.
   [ChromeEarlGrey loadURL:tab1URL];
@@ -124,12 +108,9 @@ void AssertHandoffURL(const GURL& gurl) {
 // Tests the state for Handoff URL when switching between normal tabs and
 // incognito tabs.
 - (void)testSwitchBetweenNormalAndIncognitoTabs {
-  const GURL tab1URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/destination.html");
-  const GURL tab2URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/pony.html");
-  const GURL tab3URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/chromium_logo_page.html");
+  const GURL tab1URL = self.testServer->GetURL("/destination.html");
+  const GURL tab2URL = self.testServer->GetURL("/pony.html");
+  const GURL tab3URL = self.testServer->GetURL("/chromium_logo_page.html");
 
   // Loads one page.
   [ChromeEarlGrey loadURL:tab1URL];

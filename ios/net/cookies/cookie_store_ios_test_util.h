@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "ios/net/cookies/cookie_store_ios_client.h"
 #include "net/cookies/cookie_change_dispatcher.h"
 #include "net/cookies/cookie_monster.h"
@@ -76,8 +75,7 @@ class ScopedTestingCookieStoreIOSClient {
 
 void RecordCookieChanges(std::vector<net::CanonicalCookie>* out_cookies,
                          std::vector<bool>* out_removes,
-                         const net::CanonicalCookie& cookie,
-                         net::CookieChangeCause cause);
+                         const net::CookieChangeInfo& change);
 
 // Sets a cookie.
 void SetCookie(const std::string& cookie_line,

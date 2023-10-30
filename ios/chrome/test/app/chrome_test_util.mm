@@ -1,35 +1,43 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/test/app/chrome_test_util.h"
 
-#include "base/logging.h"
-#include "base/mac/foundation_util.h"
+#import "base/check.h"
+#import "base/ios/ios_util.h"
+#import "base/mac/foundation_util.h"
 #import "base/test/ios/wait_util.h"
-#include "components/metrics/metrics_pref_names.h"
-#include "components/metrics/metrics_service.h"
+#import "components/metrics/metrics_pref_names.h"
+#import "components/metrics/metrics_service.h"
+#import "components/previous_session_info/previous_session_info.h"
+#import "components/previous_session_info/previous_session_info_private.h"
+#import "ios/chrome/app/application_delegate/app_state.h"
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
 #import "ios/chrome/app/application_delegate/metrics_mediator_testing.h"
 #import "ios/chrome/app/chrome_overlay_window.h"
 #import "ios/chrome/app/main_application_delegate_testing.h"
 #import "ios/chrome/app/main_controller.h"
 #import "ios/chrome/app/main_controller_private.h"
-#include "ios/chrome/browser/application_context.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
-#include "ios/chrome/browser/infobars/infobar_manager_impl.h"
-#import "ios/chrome/browser/metrics/previous_session_info.h"
-#import "ios/chrome/browser/metrics/previous_session_info_private.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
+#import "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/main/browser_list.h"
+#import "ios/chrome/browser/main/browser_list_factory.h"
 #import "ios/chrome/browser/ui/browser_view/browser_view_controller.h"
 #import "ios/chrome/browser/ui/main/bvc_container_view_controller.h"
-#import "ios/chrome/browser/ui/tab_grid/view_controller_swapping.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/main/scene_controller.h"
+#import "ios/chrome/browser/ui/main/scene_controller_testing.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/web/public/navigation/navigation_context.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#include "ios/web/public/test/fakes/test_web_state_observer.h"
-#import "ios/web/public/test/native_controller_test_util.h"
+#import "ios/web/public/test/fakes/fake_web_state_observer.h"
+#import "net/base/mac/url_conversions.h"
 #import "third_party/breakpad/breakpad/src/client/ios/BreakpadController.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -54,17 +62,31 @@
 }
 @end
 
+// A subclass to pass instances of UIOpenURLContext to scene delegate during
+// testing. UIOpenURLContext has no init available, so this can only be
+// allocated. It uses obscuring properties for URL and options.
+// TODO(crbug.com/1115018) Explore improving this which can become brittle.
+@interface FakeUIOpenURLContext : UIOpenURLContext
+@property(nonatomic, copy) NSURL* URL;
+@property(nonatomic, strong) UISceneOpenURLOptions* options;
+@end
+
+@implementation FakeUIOpenURLContext
+@synthesize URL = _URL;
+@synthesize options = _options;
+@end
+
 namespace {
-// Returns the original ChromeBrowserState if |incognito| is false. If
-// |ingonito| is true, returns an off-the-record ChromeBrowserState.
-ios::ChromeBrowserState* GetBrowserState(bool incognito) {
-  std::vector<ios::ChromeBrowserState*> browser_states =
+// Returns the original ChromeBrowserState if `incognito` is false. If
+// `incognito` is true, returns an off-the-record ChromeBrowserState.
+ChromeBrowserState* GetBrowserState(bool incognito) {
+  std::vector<ChromeBrowserState*> browser_states =
       GetApplicationContext()
           ->GetChromeBrowserStateManager()
           ->GetLoadedBrowserStates();
   DCHECK(!browser_states.empty());
 
-  ios::ChromeBrowserState* browser_state = browser_states.front();
+  ChromeBrowserState* browser_state = browser_states.front();
   DCHECK(!browser_state->IsOffTheRecord());
 
   return incognito ? browser_state->GetOffTheRecordChromeBrowserState()
@@ -79,41 +101,38 @@ MainController* GetMainController() {
   return [MainApplicationDelegate sharedMainController];
 }
 
-DeviceSharingManager* GetDeviceSharingManager() {
-  return [GetMainController() deviceSharingManager];
+SceneState* GetForegroundActiveScene() {
+  return MainApplicationDelegate.sharedAppState.foregroundActiveScene;
 }
 
-ios::ChromeBrowserState* GetOriginalBrowserState() {
+SceneController* GetForegroundActiveSceneController() {
+  return MainApplicationDelegate.sharedAppState.foregroundActiveScene
+      .controller;
+}
+
+NSUInteger RegularBrowserCount() {
+  return static_cast<NSUInteger>(
+      BrowserListFactory::GetForBrowserState(GetOriginalBrowserState())
+          ->AllRegularBrowsers()
+          .size());
+}
+
+ChromeBrowserState* GetOriginalBrowserState() {
   return GetBrowserState(false);
 }
 
-ios::ChromeBrowserState* GetCurrentIncognitoBrowserState() {
+ChromeBrowserState* GetCurrentIncognitoBrowserState() {
   return GetBrowserState(true);
 }
 
-NSUInteger GetRegisteredKeyCommandsCount() {
-  UIViewController* mainViewController =
-      GetMainController().interfaceProvider.mainInterface.viewController;
-  return mainViewController.keyCommands.count;
-}
-
-id<BrowserCommands> BrowserCommandDispatcherForMainBVC() {
-  BrowserViewController* mainBVC =
-      GetMainController().interfaceProvider.mainInterface.bvc;
-  return mainBVC.dispatcher;
+Browser* GetMainBrowser() {
+  return GetMainController().interfaceProvider.mainInterface.browser;
 }
 
 UIViewController* GetActiveViewController() {
-  UIWindow* main_window = [[UIApplication sharedApplication] keyWindow];
+  UIWindow* main_window = GetAnyKeyWindow();
   DCHECK([main_window isKindOfClass:[ChromeOverlayWindow class]]);
   UIViewController* main_view_controller = main_window.rootViewController;
-  if ([main_view_controller
-          conformsToProtocol:@protocol(ViewControllerSwapping)]) {
-    // This is either the stack_view or the iPad tab_switcher, in which case it
-    // is best to call |-activeViewController|.
-    return [static_cast<id<ViewControllerSwapping>>(main_view_controller)
-        activeViewController];
-  }
 
   // The active view controller is either the TabGridViewController or its
   // presented BVC. The BVC is itself contained inside of a
@@ -132,11 +151,11 @@ UIViewController* GetActiveViewController() {
   return active_view_controller;
 }
 
-id<ApplicationCommands, BrowserCommands>
-DispatcherForActiveBrowserViewController() {
-  UIViewController* vc = GetActiveViewController();
-  BrowserViewController* bvc = base::mac::ObjCCast<BrowserViewController>(vc);
-  return bvc.dispatcher;
+id<ApplicationCommands, BrowserCommands, BrowserCoordinatorCommands>
+HandlerForActiveBrowser() {
+  return static_cast<
+      id<ApplicationCommands, BrowserCommands, BrowserCoordinatorCommands>>(
+      GetMainBrowser()->GetCommandDispatcher());
 }
 
 void RemoveAllInfoBars() {
@@ -150,9 +169,10 @@ void RemoveAllInfoBars() {
   }
 }
 
-void ClearPresentedState() {
-  [GetMainController() dismissModalDialogsWithCompletion:nil
-                                          dismissOmnibox:YES];
+void ClearPresentedState(ProceduralBlock completion) {
+  [GetForegroundActiveSceneController()
+      dismissModalDialogsWithCompletion:completion
+                         dismissOmnibox:YES];
 }
 
 void SetBooleanLocalStatePref(const char* pref_name, bool value) {
@@ -163,7 +183,7 @@ void SetBooleanLocalStatePref(const char* pref_name, bool value) {
   pref.SetValue(value);
 }
 
-void SetBooleanUserPref(ios::ChromeBrowserState* browser_state,
+void SetBooleanUserPref(ChromeBrowserState* browser_state,
                         const char* pref_name,
                         bool value) {
   DCHECK(browser_state);
@@ -173,12 +193,14 @@ void SetBooleanUserPref(ios::ChromeBrowserState* browser_state,
   pref.SetValue(value);
 }
 
-void SetWWANStateTo(bool value) {
-  MainController* mainController = chrome_test_util::GetMainController();
-  net::NetworkChangeNotifier::ConnectionType connectionType =
-      value ? net::NetworkChangeNotifier::CONNECTION_4G
-            : net::NetworkChangeNotifier::CONNECTION_WIFI;
-  [mainController.metricsMediator connectionTypeChanged:connectionType];
+void SetIntegerUserPref(ChromeBrowserState* browser_state,
+                        const char* pref_name,
+                        int value) {
+  DCHECK(browser_state);
+  DCHECK(browser_state->GetPrefs());
+  IntegerPrefMember pref;
+  pref.Init(pref_name, browser_state->GetPrefs());
+  pref.SetValue(value);
 }
 
 void SetFirstLaunchStateTo(bool value) {
@@ -216,12 +238,20 @@ void WaitForBreakpadQueue() {
 }
 
 void OpenChromeFromExternalApp(const GURL& url) {
-  [[[UIApplication sharedApplication] delegate]
-      applicationWillResignActive:[UIApplication sharedApplication]];
-  [GetMainController() setStartupParametersWithURL:url];
+  UIScene* scene =
+      [[UIApplication sharedApplication].connectedScenes anyObject];
+  [scene.delegate sceneWillResignActive:scene];
 
-  [[[UIApplication sharedApplication] delegate]
-      applicationDidBecomeActive:[UIApplication sharedApplication]];
+  // FakeUIOpenURLContext cannot be instanciated, but it is just needed
+  // for carrying the properties over to the scene delegate.
+  FakeUIOpenURLContext* context = [FakeUIOpenURLContext alloc];
+  context.URL = net::NSURLWithGURL(url);
+
+  NSSet<UIOpenURLContext*>* URLContexts =
+      [[NSSet alloc] initWithArray:@[ context ]];
+
+  [scene.delegate scene:scene openURLContexts:URLContexts];
+  [scene.delegate sceneDidBecomeActive:scene];
 }
 
 bool PurgeCachedWebViewPages() {
@@ -231,8 +261,8 @@ bool PurgeCachedWebViewPages() {
   web_state->SetWebUsageEnabled(false);
   web_state->SetWebUsageEnabled(true);
 
-  auto observer = std::make_unique<web::TestWebStateObserver>(web_state);
-  web::TestWebStateObserver* observer_ptr = observer.get();
+  auto observer = std::make_unique<web::FakeWebStateObserver>(web_state);
+  web::FakeWebStateObserver* observer_ptr = observer.get();
 
   web_state->GetNavigationManager()->LoadIfNecessary();
 

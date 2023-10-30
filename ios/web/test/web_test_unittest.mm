@@ -1,13 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <WebKit/WebKit.h>
 
-#import "ios/web/public/test/fakes/test_web_view_content_view.h"
+#import "ios/web/public/test/fakes/crw_fake_web_view_content_view.h"
 #import "ios/web/test/web_test_with_web_controller.h"
 #import "ios/web/test/wk_web_view_crash_utils.h"
-#include "testing/gtest/include/gtest/gtest-spi.h"
+#import "testing/gtest/include/gtest/gtest-spi.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -22,8 +22,8 @@ class WebTestFixtureTest : public web::WebTestWithWebController {
   void SetUp() override {
     web::WebTestWithWebController::SetUp();
     web_view_ = web::BuildTerminatedWKWebView();
-    TestWebViewContentView* web_view_content_view =
-        [[TestWebViewContentView alloc]
+    CRWFakeWebViewContentView* web_view_content_view =
+        [[CRWFakeWebViewContentView alloc]
             initWithMockWebView:web_view_
                      scrollView:[web_view_ scrollView]];
     [web_controller() injectWebViewContentView:web_view_content_view];
@@ -43,7 +43,7 @@ TEST_F(WebTestFixtureTest, FailsOnRenderCrash) {
                        "Renderer process died unexpectedly");
 }
 
-// Tests that |SetIgnoreRenderProcessCrashesDuringTesting()| properly ignores
+// Tests that `SetIgnoreRenderProcessCrashesDuringTesting()` properly ignores
 // intentional render process crashes.
 TEST_F(WebTestFixtureTest, SucceedsOnRenderCrash) {
   SetIgnoreRenderProcessCrashesDuringTesting(true);

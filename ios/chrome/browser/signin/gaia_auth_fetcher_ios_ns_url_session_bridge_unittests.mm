@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,20 +6,29 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/test/scoped_feature_list.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/signin/feature_flags.h"
-#include "ios/chrome/browser/signin/gaia_auth_fetcher_ios_bridge.h"
-#import "ios/chrome/browser/web/chrome_web_test.h"
-#include "ios/net/cookies/system_cookie_util.h"
-#include "ios/web/common/features.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#include "net/cookies/cookie_store.h"
-#include "testing/platform_test.h"
+#import "base/bind.h"
+#import "base/callback_helpers.h"
+#import "base/ios/ios_util.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/test/bind.h"
+#import "base/test/ios/wait_util.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/signin/gaia_auth_fetcher_ios_bridge.h"
+#import "ios/net/cookies/system_cookie_util.h"
+#import "ios/web/common/features.h"
+#import "ios/web/public/test/scoped_testing_web_client.h"
+#import "ios/web/public/test/web_state_test_util.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "net/base/mac/url_conversions.h"
+#import "net/base/net_errors.h"
+#import "net/cookies/cookie_access_result.h"
+#import "net/cookies/cookie_store.h"
+#import "net/cookies/cookie_util.h"
+#import "testing/gtest/include/gtest/gtest.h"
+#import "testing/gtest_mac.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -59,41 +68,41 @@ class FakeGaiaAuthFetcherIOSBridgeDelegate
   // GaiaAuthFetcherIOSBridge::GaiaAuthFetcherIOSBridgeDelegate.
   void OnFetchComplete(const GURL& url,
                        const std::string& data,
-                       const net::URLRequestStatus& status,
+                       net::Error net_error,
                        int response_code) override {
     EXPECT_FALSE(fetch_complete_called_);
     fetch_complete_called_ = true;
     url_ = url;
     data_ = data;
-    status_ = status;
+    net_error_ = net_error;
     response_code_ = response_code;
   }
 
   // Returns true if has been called().
-  bool GetFetchCompleteCalled() { return fetch_complete_called_; }
+  bool GetFetchCompleteCalled() const { return fetch_complete_called_; }
 
-  // Returns |url| from FetchComplete().
-  const GURL& GetURL() { return url_; }
+  // Returns `url` from FetchComplete().
+  const GURL& GetURL() const { return url_; }
 
-  // Returns |data| from FetchComplete().
-  const std::string& GetData() { return data_; }
+  // Returns `data` from FetchComplete().
+  const std::string& GetData() const { return data_; }
 
-  // Returns |status| from FetchComplete().
-  net::URLRequestStatus GetStatus() { return status_; }
+  // Returns `net_error` from FetchComplete().
+  net::Error GetNetError() const { return net_error_; }
 
-  // Returns |response_code| from FetchComplete().
-  int GetResponseCode() { return response_code_; }
+  // Returns `response_code` from FetchComplete().
+  int GetResponseCode() const { return response_code_; }
 
  private:
   // true if has been called().
   bool fetch_complete_called_;
-  // |url| from FetchComplete().
+  // `url` from FetchComplete().
   GURL url_;
-  // |data| from FetchComplete().
+  // `data` from FetchComplete().
   std::string data_;
-  // |status| from FetchComplete().
-  net::URLRequestStatus status_;
-  // |response_code| from FetchComplete().
+  // `net_error` from FetchComplete().
+  net::Error net_error_;
+  // `response_code` from FetchComplete().
   int response_code_;
 };
 
@@ -115,9 +124,8 @@ class TestGaiaAuthFetcherIOSNSURLSessionBridge
 
 }  // namespace
 
-class GaiaAuthFetcherIOSNSURLSessionBridgeTest : public ChromeWebTest {
+class GaiaAuthFetcherIOSNSURLSessionBridgeTest : public PlatformTest {
  protected:
-  // ChromeWebTest.
   void SetUp() override;
   void TearDown() override;
 
@@ -127,12 +135,16 @@ class GaiaAuthFetcherIOSNSURLSessionBridgeTest : public ChromeWebTest {
 
   void ExpectCookies(NSArray<NSHTTPCookie*>* cookies);
 
-  void AllCookies(const std::vector<net::CanonicalCookie>& all_cookies);
+  std::vector<net::CanonicalCookie> GetCookiesInCookieJar();
 
-  void AddCookiesToCookieManager(NSArray<NSHTTPCookie*>* cookies);
+  bool AddAllCookiesInCookieManager(
+      network::mojom::CookieManager* cookie_manager,
+      const net::CanonicalCookie& cookie);
+
+  bool SetCookiesInCookieManager(NSArray<NSHTTPCookie*>* cookies);
 
   std::string GetCookieDomain() { return std::string("example.com"); }
-  GURL GetFetchGURL() { return GURL("http://www." + GetCookieDomain()); }
+  GURL GetFetchGURL() { return GURL("https://www." + GetCookieDomain()); }
 
   NSHTTPCookie* GetCookie1();
 
@@ -143,28 +155,30 @@ class GaiaAuthFetcherIOSNSURLSessionBridgeTest : public ChromeWebTest {
 
   NSDictionary* GetHeaderFieldsWithCookies(NSArray<NSHTTPCookie*>* cookies);
 
+  bool FetchURL(const GURL& url);
+
   friend TestGaiaAuthFetcherIOSNSURLSessionBridge;
 
-  // kWKHTTPSystemCookieStore and kUseNSURLSessionForGaiaSigninRequests should
-  // be enabled.
-  base::test::ScopedFeatureList scoped_feature_list;
-  // Browser state for the tests.
-  std::unique_ptr<ios::ChromeBrowserState> browser_state_;
+  web::WebState* web_state() { return web_state_.get(); }
+
+  web::WebTaskEnvironment task_environment_;
+  std::unique_ptr<TestChromeBrowserState> browser_state_;
+  std::unique_ptr<web::WebState> web_state_;
   // Instance used for the tests.
   std::unique_ptr<TestGaiaAuthFetcherIOSNSURLSessionBridge>
       ns_url_session_bridge_;
-  // Fake delegate for |ns_url_session_bridge_|.
+  // Fake delegate for `ns_url_session_bridge_`.
   std::unique_ptr<FakeGaiaAuthFetcherIOSBridgeDelegate> delegate_;
-  // Cookies returned by the cookie manager.
-  std::vector<net::CanonicalCookie> all_cookies_;
-  // Delegate for |url_session_mock_|, provided by |ns_url_session_bridge_|.
+  // Delegate for `url_session_mock_`, provided by `ns_url_session_bridge_`.
   id<NSURLSessionTaskDelegate> url_session_delegate_;
 
-  NSHTTPCookieStorage* http_cookie_storage_mock_;
   NSURLSession* url_session_mock_;
-  NSURLSessionDataTask* url_session_data_task_mock_;
-  NSURLSessionConfiguration* url_session_configuration_mock_;
+  NSURLSessionDataTask* url_session_data_task_;
+  NSURLSessionConfiguration* url_session_configuration_;
   DataTaskWithRequestCompletionHandler completion_handler_;
+
+ private:
+  __block base::OnceClosure quit_closure_;
 };
 
 #pragma mark - TestGaiaAuthFetcherIOSNSURLSessionBridge
@@ -185,34 +199,39 @@ NSURLSession* TestGaiaAuthFetcherIOSNSURLSessionBridge::CreateNSURLSession(
 #pragma mark - GaiaAuthFetcherIOSNSURLSessionBridgeTest
 
 void GaiaAuthFetcherIOSNSURLSessionBridgeTest::SetUp() {
-  std::vector<base::Feature> enabled_features;
-  std::vector<base::Feature> disabled_features;
-  enabled_features.push_back(web::features::kWKHTTPSystemCookieStore);
-  enabled_features.push_back(kUseNSURLSessionForGaiaSigninRequests);
-  scoped_feature_list.InitWithFeatures(enabled_features, disabled_features);
-  delegate_.reset(new FakeGaiaAuthFetcherIOSBridgeDelegate());
+  PlatformTest::SetUp();
+
   browser_state_ = TestChromeBrowserState::Builder().Build();
+
+  web::WebState::CreateParams params(browser_state_.get());
+  web_state_ = web::WebState::Create(params);
+  web_state_->GetView();
+  web_state_->SetKeepRenderProcessAlive(true);
+
+  delegate_.reset(new FakeGaiaAuthFetcherIOSBridgeDelegate());
   ns_url_session_bridge_.reset(new TestGaiaAuthFetcherIOSNSURLSessionBridge(
       delegate_.get(), browser_state_.get(), this));
-  http_cookie_storage_mock_ = OCMStrictClassMock([NSHTTPCookieStorage class]);
-  url_session_configuration_mock_ =
-      OCMStrictClassMock(NSClassFromString(@"__NSCFURLSessionConfiguration"));
-  OCMStub([url_session_configuration_mock_ HTTPCookieStorage])
-      .andReturn(http_cookie_storage_mock_);
+  url_session_configuration_ =
+      NSURLSessionConfiguration.ephemeralSessionConfiguration;
+  url_session_configuration_.HTTPShouldSetCookies = YES;
+
   url_session_mock_ = OCMStrictClassMock([NSURLSession class]);
   OCMStub([url_session_mock_ configuration])
-      .andReturn(url_session_configuration_mock_);
-  url_session_data_task_mock_ =
-      OCMStrictClassMock([NSURLSessionDataTask class]);
-  OCMExpect([url_session_data_task_mock_ resume]);
+      .andReturn(url_session_configuration_);
+  url_session_data_task_ = [[NSURLSession sharedSession]
+        dataTaskWithURL:net::NSURLWithGURL(GetFetchGURL())
+      completionHandler:^(NSData* data, NSURLResponse* response,
+                          NSError* error) {
+        // Asynchronously returns from FetchURL() call after
+        // NSURLSessionDataTask:resume.
+        std::move(quit_closure_).Run();
+      }];
   completion_handler_ = nil;
 }
 
 void GaiaAuthFetcherIOSNSURLSessionBridgeTest::TearDown() {
-  ASSERT_OCMOCK_VERIFY((id)http_cookie_storage_mock_);
   ASSERT_OCMOCK_VERIFY((id)url_session_mock_);
-  ASSERT_OCMOCK_VERIFY((id)url_session_data_task_mock_);
-  ASSERT_OCMOCK_VERIFY((id)url_session_configuration_mock_);
+  web_state_.reset();
 }
 
 NSURLSession* GaiaAuthFetcherIOSNSURLSessionBridgeTest::CreateNSURLSession(
@@ -226,48 +245,85 @@ NSURLSession* GaiaAuthFetcherIOSNSURLSessionBridgeTest::CreateNSURLSession(
   OCMExpect([url_session_mock_
                 dataTaskWithRequest:ns_url_session_bridge_->GetNSURLRequest()
                   completionHandler:completion_handler])
-      .andReturn(url_session_data_task_mock_);
+      .andReturn(url_session_data_task_);
   return url_session_mock_;
+}
+
+std::vector<net::CanonicalCookie>
+GaiaAuthFetcherIOSNSURLSessionBridgeTest::GetCookiesInCookieJar() {
+  std::vector<net::CanonicalCookie> cookies_out;
+  base::RunLoop run_loop;
+  network::mojom::CookieManager* cookie_manager =
+      browser_state_->GetCookieManager();
+  cookie_manager->GetAllCookies(base::BindLambdaForTesting(
+      [&run_loop,
+       &cookies_out](const std::vector<net::CanonicalCookie>& cookies) {
+        cookies_out = cookies;
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+
+  return cookies_out;
 }
 
 void GaiaAuthFetcherIOSNSURLSessionBridgeTest::ExpectCookies(
     NSArray<NSHTTPCookie*>* expected_cookies) {
-  network::mojom::CookieManager* cookie_manager =
-      browser_state_->GetCookieManager();
-  cookie_manager->GetAllCookies(
-      base::BindOnce(&GaiaAuthFetcherIOSNSURLSessionBridgeTest::AllCookies,
-                     base::Unretained(this)));
-  WaitForBackgroundTasks();
+  std::vector<net::CanonicalCookie> actual_cookies = GetCookiesInCookieJar();
+
   NSMutableSet<NSString*>* expected_cookies_set = [NSMutableSet set];
   for (NSHTTPCookie* cookie in expected_cookies) {
     [expected_cookies_set addObject:GetStringWithNSHTTPCookie(cookie)];
   }
-  NSMutableSet<NSString*>* cookies_set = [NSMutableSet set];
-  for (net::CanonicalCookie cookie : all_cookies_) {
-    [cookies_set addObject:GetStringWithCanonicalCookie(cookie)];
+  NSMutableSet<NSString*>* actual_cookies_set = [NSMutableSet set];
+  for (net::CanonicalCookie cookie : actual_cookies) {
+    [actual_cookies_set addObject:GetStringWithCanonicalCookie(cookie)];
   }
-  EXPECT_TRUE([expected_cookies_set isEqualToSet:cookies_set]);
+  EXPECT_TRUE([expected_cookies_set isEqualToSet:actual_cookies_set])
+      << base::SysNSStringToUTF8(
+             [NSString stringWithFormat:@"expected = %@", expected_cookies_set])
+      << base::SysNSStringToUTF8(
+             [NSString stringWithFormat:@"\nactual = %@", actual_cookies_set]);
 }
 
-void GaiaAuthFetcherIOSNSURLSessionBridgeTest::AllCookies(
-    const std::vector<net::CanonicalCookie>& all_cookies) {
-  all_cookies_ = all_cookies;
+bool GaiaAuthFetcherIOSNSURLSessionBridgeTest::AddAllCookiesInCookieManager(
+    network::mojom::CookieManager* cookie_manager,
+    const net::CanonicalCookie& cookie) {
+  base::RunLoop run_loop;
+  net::CookieAccessResult result_out;
+  net::CookieOptions options;
+  options.set_same_site_cookie_context(
+      net::CookieOptions::SameSiteCookieContext::MakeInclusiveForSet());
+  options.set_include_httponly();
+  cookie_manager->SetCanonicalCookie(
+      cookie, net::cookie_util::SimulatedCookieSource(cookie, "https"), options,
+      base::BindLambdaForTesting(
+          [&run_loop, &result_out](net::CookieAccessResult result) {
+            result_out = result;
+            run_loop.Quit();
+          }));
+
+  run_loop.Run();
+
+  if (!result_out.status.IsInclude())
+    LOG(ERROR) << "Failed to set cookie in cookie jar: " << result_out.status;
+
+  return result_out.status.IsInclude();
 }
 
-void GaiaAuthFetcherIOSNSURLSessionBridgeTest::AddCookiesToCookieManager(
+bool GaiaAuthFetcherIOSNSURLSessionBridgeTest::SetCookiesInCookieManager(
     NSArray<NSHTTPCookie*>* cookies) {
   network::mojom::CookieManager* cookie_manager =
       browser_state_->GetCookieManager();
   for (NSHTTPCookie* cookie in cookies) {
-    net::CookieOptions options;
-    options.set_include_httponly();
-    options.set_same_site_cookie_context(
-        net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
-    cookie_manager->SetCanonicalCookie(
-        net::CanonicalCookieFromSystemCookie(cookie, base::Time::Now()),
-        "https", options, base::DoNothing());
+    std::unique_ptr<net::CanonicalCookie> canonical_cookie =
+        net::CanonicalCookieFromSystemCookie(cookie, base::Time::Now());
+    if (!canonical_cookie)
+      continue;
+    if (!AddAllCookiesInCookieManager(cookie_manager,
+                                      *std::move(canonical_cookie)))
+      return false;
   }
-  WaitForBackgroundTasks();
+  return true;
 }
 
 NSHTTPCookie* GaiaAuthFetcherIOSNSURLSessionBridgeTest::GetCookie1() {
@@ -297,7 +353,7 @@ GaiaAuthFetcherIOSNSURLSessionBridgeTest::CreateHTTPURLResponse(
     int status_code,
     NSArray<NSHTTPCookie*>* cookies) {
   NSString* url_string =
-      [NSString stringWithFormat:@"http://www.%s/", GetCookieDomain().c_str()];
+      [NSString stringWithFormat:@"https://www.%s/", GetCookieDomain().c_str()];
   NSURL* url = [NSURL URLWithString:url_string];
   return [[NSHTTPURLResponse alloc]
        initWithURL:url
@@ -318,24 +374,31 @@ GaiaAuthFetcherIOSNSURLSessionBridgeTest::GetHeaderFieldsWithCookies(
   return @{@"Set-Cookie" : cookie_string};
 }
 
+bool GaiaAuthFetcherIOSNSURLSessionBridgeTest::FetchURL(const GURL& url) {
+  DCHECK(url_session_data_task_);
+  __block base::RunLoop run_loop;
+  quit_closure_ = run_loop.QuitClosure();
+  ns_url_session_bridge_->Fetch(url, "", "", false);
+  run_loop.Run();
+  return true;
+}
+
 #pragma mark - Tests
 
 // Tests to send a request with no cookies set in the cookie store and receive
 // multiples cookies from the request.
 TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithEmptyCookieStore) {
-  ns_url_session_bridge_->Fetch(GetFetchGURL(), "", "", false);
-  OCMExpect([http_cookie_storage_mock_
-      storeCookies:@[]
-           forTask:url_session_data_task_mock_]);
-  WaitForBackgroundTasks();
-  EXPECT_NE(nullptr, completion_handler_);
+  ASSERT_FALSE(url_session_configuration_.HTTPCookieStorage.cookies.count);
+  ASSERT_TRUE(FetchURL(GetFetchGURL()));
+  ASSERT_TRUE(completion_handler_);
+
   NSHTTPURLResponse* http_url_reponse =
       CreateHTTPURLResponse(200, @[ GetCookie1(), GetCookie2() ]);
   completion_handler_([@"Test" dataUsingEncoding:NSUTF8StringEncoding],
                       http_url_reponse, nil);
   EXPECT_TRUE(delegate_->GetFetchCompleteCalled());
   EXPECT_EQ(delegate_->GetURL(), GetFetchGURL());
-  EXPECT_EQ(delegate_->GetStatus().status(), net::URLRequestStatus::SUCCESS);
+  EXPECT_EQ(delegate_->GetNetError(), net::OK);
   EXPECT_EQ(delegate_->GetResponseCode(), 200);
   EXPECT_EQ(delegate_->GetData(), std::string("Test"));
   ExpectCookies(@[ GetCookie1(), GetCookie2() ]);
@@ -345,19 +408,19 @@ TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithEmptyCookieStore) {
 // another cookies from the request.
 TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithCookieStore) {
   NSArray* cookies_to_send = @[ GetCookie1() ];
-  AddCookiesToCookieManager(cookies_to_send);
-  ns_url_session_bridge_->Fetch(GetFetchGURL(), "", "", false);
-  OCMExpect([http_cookie_storage_mock_
-      storeCookies:cookies_to_send
-           forTask:url_session_data_task_mock_]);
-  WaitForBackgroundTasks();
-  EXPECT_NE(nullptr, completion_handler_);
+  ASSERT_TRUE(SetCookiesInCookieManager(cookies_to_send));
+
+  ASSERT_TRUE(FetchURL(GetFetchGURL()));
+  ASSERT_NSEQ(url_session_configuration_.HTTPCookieStorage.cookies,
+              cookies_to_send);
+  ASSERT_TRUE(completion_handler_);
+
   NSHTTPURLResponse* http_url_reponse =
       CreateHTTPURLResponse(200, @[ GetCookie2() ]);
   completion_handler_(nil, http_url_reponse, nil);
   EXPECT_TRUE(delegate_->GetFetchCompleteCalled());
   EXPECT_EQ(delegate_->GetURL(), GetFetchGURL());
-  EXPECT_EQ(delegate_->GetStatus().status(), net::URLRequestStatus::SUCCESS);
+  EXPECT_EQ(delegate_->GetNetError(), net::OK);
   EXPECT_EQ(delegate_->GetResponseCode(), 200);
   EXPECT_EQ(delegate_->GetData(), std::string());
   ExpectCookies(@[ GetCookie1(), GetCookie2() ]);
@@ -366,12 +429,10 @@ TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithCookieStore) {
 // Tests to a request with a redirect. One cookie is received by the first
 // request, and a second one by the redirected request.
 TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithRedirect) {
-  ns_url_session_bridge_->Fetch(GetFetchGURL(), "", "", false);
-  OCMExpect([http_cookie_storage_mock_
-      storeCookies:@[]
-           forTask:url_session_data_task_mock_]);
-  WaitForBackgroundTasks();
-  EXPECT_NE(nullptr, completion_handler_);
+  ASSERT_TRUE(FetchURL(GetFetchGURL()));
+  ASSERT_FALSE(url_session_configuration_.HTTPCookieStorage.cookies.count);
+  ASSERT_TRUE(completion_handler_);
+
   NSURLRequest* redirected_url_request =
       OCMStrictClassMock([NSURLRequest class]);
   __block bool completion_handler_called = false;
@@ -382,7 +443,7 @@ TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithRedirect) {
   NSHTTPURLResponse* redirected_url_response =
       CreateHTTPURLResponse(301, @[ GetCookie1() ]);
   [url_session_delegate_ URLSession:url_session_mock_
-                               task:url_session_data_task_mock_
+                               task:url_session_data_task_
          willPerformHTTPRedirection:redirected_url_response
                          newRequest:redirected_url_request
                   completionHandler:completion_handler];
@@ -392,7 +453,7 @@ TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithRedirect) {
   completion_handler_(nil, http_url_reponse, nil);
   EXPECT_TRUE(delegate_->GetFetchCompleteCalled());
   EXPECT_EQ(delegate_->GetURL(), GetFetchGURL());
-  EXPECT_EQ(delegate_->GetStatus().status(), net::URLRequestStatus::SUCCESS);
+  EXPECT_EQ(delegate_->GetNetError(), net::OK);
   EXPECT_EQ(delegate_->GetResponseCode(), 200);
   EXPECT_EQ(delegate_->GetData(), std::string());
   ExpectCookies(@[ GetCookie1(), GetCookie2() ]);
@@ -401,37 +462,31 @@ TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithRedirect) {
 
 // Tests to cancel the request.
 TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithCancel) {
-  ns_url_session_bridge_->Fetch(GetFetchGURL(), "", "", false);
-  OCMExpect([http_cookie_storage_mock_
-      storeCookies:@[]
-           forTask:url_session_data_task_mock_]);
-  WaitForBackgroundTasks();
-  EXPECT_NE(nullptr, completion_handler_);
-  OCMExpect([url_session_data_task_mock_ cancel]);
+  ASSERT_TRUE(FetchURL(GetFetchGURL()));
+  ASSERT_FALSE(url_session_configuration_.HTTPCookieStorage.cookies.count);
+  ASSERT_TRUE(completion_handler_);
+
   ns_url_session_bridge_->Cancel();
-  WaitForBackgroundTasks();
   EXPECT_TRUE(delegate_->GetFetchCompleteCalled());
   EXPECT_EQ(delegate_->GetURL(), GetFetchGURL());
-  EXPECT_EQ(delegate_->GetStatus().status(), net::URLRequestStatus::CANCELED);
+  EXPECT_EQ(delegate_->GetNetError(), net::ERR_ABORTED);
   EXPECT_EQ(delegate_->GetResponseCode(), 0);
   EXPECT_EQ(delegate_->GetData(), std::string());
 }
 
 // Tests a request with error.
 TEST_F(GaiaAuthFetcherIOSNSURLSessionBridgeTest, FetchWithError) {
-  ns_url_session_bridge_->Fetch(GetFetchGURL(), "", "", false);
-  OCMExpect([http_cookie_storage_mock_
-      storeCookies:@[]
-           forTask:url_session_data_task_mock_]);
-  WaitForBackgroundTasks();
-  EXPECT_NE(nullptr, completion_handler_);
+  ASSERT_TRUE(FetchURL(GetFetchGURL()));
+  ASSERT_FALSE(url_session_configuration_.HTTPCookieStorage.cookies.count);
+  ASSERT_TRUE(completion_handler_);
+
   NSHTTPURLResponse* http_url_reponse =
       CreateHTTPURLResponse(501, @[ GetCookie1(), GetCookie2() ]);
   completion_handler_(nil, http_url_reponse,
                       [NSError errorWithDomain:@"test" code:1 userInfo:nil]);
   EXPECT_TRUE(delegate_->GetFetchCompleteCalled());
   EXPECT_EQ(delegate_->GetURL(), GetFetchGURL());
-  EXPECT_EQ(delegate_->GetStatus().status(), net::URLRequestStatus::FAILED);
+  EXPECT_EQ(delegate_->GetNetError(), net::ERR_FAILED);
   EXPECT_EQ(delegate_->GetResponseCode(), 501);
   EXPECT_EQ(delegate_->GetData(), std::string());
   ExpectCookies(@[]);

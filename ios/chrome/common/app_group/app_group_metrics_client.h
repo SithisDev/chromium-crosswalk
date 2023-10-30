@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/mac/scoped_block.h"
 #include "ios/chrome/common/app_group/app_group_constants.h"
 
 namespace app_group {

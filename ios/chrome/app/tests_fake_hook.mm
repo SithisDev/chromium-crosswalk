@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,13 @@ namespace tests_hook {
 bool DisableAppGroupAccess() {
   return false;
 }
+bool DisableClientSideFieldTrials() {
+  return false;
+}
 bool DisableContentSuggestions() {
+  return false;
+}
+bool DisableDiscoverFeed() {
   return false;
 }
 bool DisableFirstRun() {
@@ -22,11 +28,17 @@ bool DisableFirstRun() {
 bool DisableGeolocation() {
   return false;
 }
-bool DisableSigninRecallPromo() {
+bool DisableUpgradeSigninPromo() {
   return false;
 }
 bool DisableUpdateService() {
   return false;
+}
+bool DisableMainThreadFreezeDetection() {
+  return false;
+}
+policy::ConfigurationPolicyProvider* GetOverriddenPlatformPolicyProvider() {
+  return nullptr;
 }
 void SetUpTestsIfPresent() {}
 void RunTestsIfPresent() {}

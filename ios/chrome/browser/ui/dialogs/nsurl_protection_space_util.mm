@@ -1,16 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/dialogs/nsurl_protection_space_util.h"
 
-#include "base/numerics/safe_conversions.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/strings/grit/components_strings.h"
-#include "components/url_formatter/elide_url.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "url/gurl.h"
-#include "url/scheme_host_port.h"
+#import "base/numerics/safe_conversions.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/url_formatter/elide_url.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "url/gurl.h"
+#import "url/scheme_host_port.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,7 +53,7 @@ NSString* RequesterIdentity(NSURLProtectionSpace* protectionSpace) {
     return l10n_util::GetNSStringF(
         formatID, base::SysNSStringToUTF16(protectionSpace.host));
   }
-  base::string16 authority =
+  std::u16string authority =
       url_formatter::FormatUrlForSecurityDisplay(requesterOrigin);
 
   return l10n_util::GetNSStringF(formatID, authority);

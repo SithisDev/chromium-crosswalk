@@ -1,23 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_LOCATION_BAR_LOCATION_BAR_COORDINATOR_H_
 #define IOS_CHROME_BROWSER_UI_LOCATION_BAR_LOCATION_BAR_COORDINATOR_H_
 
-#import <UIKit/UIKit.h>
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 
+#import "ios/chrome/browser/ui/commands/omnibox_commands.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_url_loader.h"
 #import "ios/chrome/browser/ui/omnibox/location_bar_delegate.h"
-#import "ios/chrome/browser/ui/toolbar/public/omnibox_focuser.h"
 
-namespace ios {
-class ChromeBrowserState;
-}
-class WebStateList;
-@class CommandDispatcher;
-@protocol ApplicationCommands;
-@protocol BrowserCommands;
+@protocol BrowserCoordinatorCommands;
 @protocol EditViewAnimatee;
 @protocol LocationBarAnimatee;
 @protocol OmniboxPopupPresenterDelegate;
@@ -25,30 +19,17 @@ class WebStateList;
 
 // Location bar coordinator.
 @interface LocationBarCoordinator
-    : NSObject<LocationBarURLLoader, OmniboxFocuser>
+    : ChromeCoordinator <LocationBarURLLoader, OmniboxCommands>
 
-// Command dispatcher.
-@property(nonatomic, strong) CommandDispatcher* commandDispatcher;
 // View controller containing the omnibox.
 @property(nonatomic, strong, readonly)
     UIViewController* locationBarViewController;
-// Weak reference to ChromeBrowserState;
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-// The dispatcher for this view controller.
-@property(nonatomic, weak) CommandDispatcher* dispatcher;
 // Delegate for this coordinator.
 // TODO(crbug.com/799446): Change this.
 @property(nonatomic, weak) id<ToolbarCoordinatorDelegate> delegate;
-// The web state list this ToolbarCoordinator is handling.
-@property(nonatomic, assign) WebStateList* webStateList;
 
 @property(nonatomic, weak) id<OmniboxPopupPresenterDelegate>
     popupPresenterDelegate;
-
-// Start this coordinator.
-- (void)start;
-// Stop this coordinator.
-- (void)stop;
 
 // Indicates whether the popup has results to show or not.
 - (BOOL)omniboxPopupHasAutocompleteResults;
@@ -64,6 +45,9 @@ class WebStateList;
 
 // Returns the edit view animatee.
 - (id<EditViewAnimatee>)editViewAnimatee;
+
+// Target to forward omnibox-related scribble events to.
+- (UIResponder<UITextInput>*)omniboxScribbleForwardingTarget;
 
 @end
 

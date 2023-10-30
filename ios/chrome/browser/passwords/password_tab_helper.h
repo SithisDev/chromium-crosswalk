@@ -1,57 +1,74 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_TAB_HELPER_H_
 #define IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_TAB_HELPER_H_
 
-#include "base/macros.h"
-#import "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/navigation/web_state_policy_decider.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
-@protocol ApplicationCommands;
+@class CommandDispatcher;
 @protocol FormSuggestionProvider;
 @class PasswordController;
 @protocol PasswordControllerDelegate;
-@protocol PasswordFormFiller;
+@protocol PasswordGenerationProvider;
 @protocol PasswordsUiDelegate;
 @class UIViewController;
 
 namespace password_manager {
 class PasswordGenerationFrameHelper;
 class PasswordManager;
+class PasswordManagerClient;
 }
 
-// Class binding a PasswordController to a WebState.
+// Class binding a PasswordController to a WebState. This class also opens a
+// native Passwords UI on a specific link.
 class PasswordTabHelper : public web::WebStateObserver,
+                          public web::WebStatePolicyDecider,
                           public web::WebStateUserData<PasswordTabHelper> {
  public:
+  PasswordTabHelper(const PasswordTabHelper&) = delete;
+  PasswordTabHelper& operator=(const PasswordTabHelper&) = delete;
+
   ~PasswordTabHelper() override;
 
-  // Creates a PasswordTabHelper and attaches it to the given |web_state|.
+  // Creates a PasswordTabHelper and attaches it to the given `web_state`.
   static void CreateForWebState(web::WebState* web_state);
 
   // Sets the BaseViewController from which to present UI.
   void SetBaseViewController(UIViewController* baseViewController);
 
-  // Sets the PasswordController dispatcher.
-  void SetDispatcher(id<ApplicationCommands> dispatcher);
-
   // Sets the PasswordController delegate.
   void SetPasswordControllerDelegate(id<PasswordControllerDelegate> delegate);
+
+  // Sets the CommandDispatcher.
+  void SetDispatcher(CommandDispatcher* dispatcher);
 
   // Returns an object that can provide suggestions from the PasswordController.
   // May return nil.
   id<FormSuggestionProvider> GetSuggestionProvider();
-
-  // Returns the PasswordFormFiller from the PasswordController.
-  id<PasswordFormFiller> GetPasswordFormFiller();
 
   // Returns the PasswordGenerationFrameHelper owned by the PasswordController.
   password_manager::PasswordGenerationFrameHelper* GetGenerationHelper();
 
   // Returns the PasswordManager owned by the PasswordController.
   password_manager::PasswordManager* GetPasswordManager();
+
+  // Returns the PasswordManagerClient owned by the PasswordController.
+  password_manager::PasswordManagerClient* GetPasswordManagerClient();
+
+  // Returns an object that can provide password generation from the
+  // PasswordController. May return nil.
+  id<PasswordGenerationProvider> GetPasswordGenerationProvider();
+
+  // web::WebStatePolicyDecider:
+  void ShouldAllowRequest(
+      NSURLRequest* request,
+      web::WebStatePolicyDecider::RequestInfo request_info,
+      web::WebStatePolicyDecider::PolicyDecisionCallback callback) override;
+  void WebStateDestroyed() override;
 
  private:
   friend class web::WebStateUserData<PasswordTabHelper>;
@@ -65,8 +82,6 @@ class PasswordTabHelper : public web::WebStateObserver,
   __strong PasswordController* controller_;
 
   WEB_STATE_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordTabHelper);
 };
 
 #endif  // IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_TAB_HELPER_H_

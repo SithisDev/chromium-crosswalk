@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include "ios/web/common/user_agent.h"
 
 @protocol CRWWebViewNavigationProxy;
 @class WKBackForwardListItem;
@@ -23,10 +24,6 @@ class NavigationManagerDelegate {
  public:
   virtual ~NavigationManagerDelegate() {}
 
-  // Instructs the delegate to clear any transient content to prepare for new
-  // navigation.
-  virtual void ClearTransientContent() = 0;
-
   // Instructs the delegate to clear any presented dialogs to prepare for a new
   // navigation.
   virtual void ClearDialogs() = 0;
@@ -35,14 +32,6 @@ class NavigationManagerDelegate {
   // values, whatever can be harvested) from the current page into the
   // navigation item.
   virtual void RecordPageStateInNavigationItem() = 0;
-
-  // Informs the delegate that a go to index same-document navigation occured.
-  virtual void OnGoToIndexSameDocumentNavigation(NavigationInitiationType type,
-                                                 bool has_user_gesture) = 0;
-
-  // Instructs the delegate to perform book keeping in preparation for a new
-  // navigation using a different user agent type.
-  virtual void WillChangeUserAgentType() = 0;
 
   // Instructs the delegate to load the current navigation item.
   virtual void LoadCurrentItem(NavigationInitiationType type) = 0;
@@ -54,21 +43,21 @@ class NavigationManagerDelegate {
   // Instructs the delegate to reload.
   virtual void Reload() = 0;
 
-  // Informs the delegate that committed navigation items have been pruned.
-  virtual void OnNavigationItemsPruned(size_t pruned_item_count) = 0;
-
   // Informs the delegate that a navigation item has been committed.
   virtual void OnNavigationItemCommitted(NavigationItem* item) = 0;
 
   // Returns the WebState associated with this delegate.
   virtual WebState* GetWebState() = 0;
 
+  // Sets the UserAgent that should be used by the WebState.
+  virtual void SetWebStateUserAgent(UserAgentType user_agent_type) = 0;
+
   // Returns a CRWWebViewNavigationProxy protocol that can be used to access
   // navigation related functions on the main WKWebView.
   virtual id<CRWWebViewNavigationProxy> GetWebViewNavigationProxy() const = 0;
 
-  // Instructs WKWebView to navigate to the given navigation item. |wk_item| and
-  // |item| must point to the same navigation item. Calling this method may
+  // Instructs WKWebView to navigate to the given navigation item. `wk_item` and
+  // `item` must point to the same navigation item. Calling this method may
   // result in an iframe navigation.
   virtual void GoToBackForwardListItem(WKBackForwardListItem* wk_item,
                                        NavigationItem* item,

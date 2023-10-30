@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ class GURL;
 - (void)tabViewTapped:(TabView*)tabView;
 
 // Called when the TabView's close button was tapped.
-- (void)tabViewcloseButtonPressed:(TabView*)tabView;
+- (void)tabViewCloseButtonPressed:(TabView*)tabView;
 
 // Called when an item that can be interpreted as a URL is dropped on the tab
 // view.

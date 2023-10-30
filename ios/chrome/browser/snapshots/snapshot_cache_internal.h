@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@ class FilePath;
 @class NSString;
 
 @interface SnapshotCache (Internal)
-// Returns filepath to the color snapshot of |sessionID|.
-- (base::FilePath)imagePathForSessionID:(NSString*)sessionID;
-// Returns filepath to the greyscale snapshot of |sessionID|.
-- (base::FilePath)greyImagePathForSessionID:(NSString*)sessionID;
+// Returns filepath to the color snapshot of `snapshotID`.
+- (base::FilePath)imagePathForSnapshotID:(NSString*)snapshotID;
+// Returns filepath to the greyscale snapshot of `snapshotID`.
+- (base::FilePath)greyImagePathForSnapshotID:(NSString*)snapshotID;
 @end
 
 #endif  // IOS_CHROME_BROWSER_SNAPSHOTS_SNAPSHOT_CACHE_INTERNAL_H_

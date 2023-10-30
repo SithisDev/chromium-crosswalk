@@ -1,14 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/security/wk_web_view_security_util.h"
 
-#include "base/mac/scoped_cftyperef.h"
-#include "base/strings/sys_string_conversions.h"
-#include "net/cert/x509_certificate.h"
-#include "net/cert/x509_util_ios.h"
-#include "net/ssl/ssl_info.h"
+#import "base/mac/scoped_cftyperef.h"
+#import "base/notreached.h"
+#import "base/strings/sys_string_conversions.h"
+#import "net/cert/x509_certificate.h"
+#import "net/cert/x509_util_apple.h"
+#import "net/ssl/ssl_info.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -51,14 +52,16 @@ namespace web {
 scoped_refptr<net::X509Certificate> CreateCertFromChain(NSArray* certs) {
   if (certs.count == 0)
     return nullptr;
-  std::vector<SecCertificateRef> intermediates;
+  std::vector<base::ScopedCFTypeRef<SecCertificateRef>> intermediates;
   for (NSUInteger i = 1; i < certs.count; i++) {
-    SecCertificateRef cert = (__bridge SecCertificateRef)certs[i];
+    base::ScopedCFTypeRef<SecCertificateRef> cert(
+        (__bridge SecCertificateRef)certs[i], base::scoped_policy::RETAIN);
     intermediates.push_back(cert);
   }
-  SecCertificateRef root_cert = (__bridge SecCertificateRef)certs[0];
+  base::ScopedCFTypeRef<SecCertificateRef> root_cert(
+      (__bridge SecCertificateRef)certs[0], base::scoped_policy::RETAIN);
   return net::x509_util::CreateX509CertificateFromSecCertificate(
-      reinterpret_cast<SecCertificateRef>(root_cert), intermediates);
+      std::move(root_cert), intermediates);
 }
 
 scoped_refptr<net::X509Certificate> CreateCertFromTrust(SecTrustRef trust) {
@@ -71,12 +74,15 @@ scoped_refptr<net::X509Certificate> CreateCertFromTrust(SecTrustRef trust) {
     return nullptr;
   }
 
-  std::vector<SecCertificateRef> intermediates;
+  std::vector<base::ScopedCFTypeRef<SecCertificateRef>> intermediates;
   for (CFIndex i = 1; i < cert_count; i++) {
-    intermediates.push_back(SecTrustGetCertificateAtIndex(trust, i));
+    intermediates.emplace_back(SecTrustGetCertificateAtIndex(trust, i),
+                               base::scoped_policy::RETAIN);
   }
   return net::x509_util::CreateX509CertificateFromSecCertificate(
-      SecTrustGetCertificateAtIndex(trust, 0), intermediates);
+      base::ScopedCFTypeRef<SecCertificateRef>(
+          SecTrustGetCertificateAtIndex(trust, 0), base::scoped_policy::RETAIN),
+      intermediates);
 }
 
 base::ScopedCFTypeRef<SecTrustRef> CreateServerTrustFromChain(NSArray* certs,
@@ -145,14 +151,6 @@ SecurityStyle GetSecurityStyleFromTrustResult(SecTrustResultType result) {
     case kSecTrustResultFatalTrustFailure:
     case kSecTrustResultOtherError:
       return SECURITY_STYLE_AUTHENTICATION_BROKEN;
-
-    // TODO(crbug.com/619982): This default clause exists because
-    // kSecTrustResultConfirm was deprecated in iOS7, but leads to a compile
-    // error if used with newer SDKs.  Remove the default clause once this
-    // switch statement successfully compiles without kSecTrustResultConfirm.
-    default:
-      NOTREACHED();
-      return SECURITY_STYLE_UNKNOWN;
   }
 }
 

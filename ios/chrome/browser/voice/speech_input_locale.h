@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 
 namespace voice {
 
@@ -16,7 +15,7 @@ typedef struct {
   // The locale code in canonical form (e.g. "en-US", "fr-FR").
   std::string code;
   // The display name (e.g. "English U.S.", "Français (France)").
-  base::string16 display_name;
+  std::u16string display_name;
 } SpeechInputLocale;
 
 }  // namespace voice

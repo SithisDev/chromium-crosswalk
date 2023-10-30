@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,15 @@
 // tab has been opened in background.
 @interface BackgroundTabAnimationView : UIView
 
-// Starts an Open In New Tab animation in |parentView|, from |originPoint| with
-// a |completion| block. The named layout guide for the TabGrid button should be
-// accessible from |parentView|. |originPoint| should be in window coordinates.
+- (instancetype)initWithFrame:(CGRect)frame
+                    incognito:(BOOL)incognito NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;
+- (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
+
+// Starts an Open In New Tab animation in `parentView`, from `originPoint` with
+// a `completion` block. The named layout guide for the TabGrid button should be
+// accessible from `parentView`. `originPoint` should be in window coordinates.
 - (void)animateFrom:(CGPoint)originPoint
     toTabGridButtonWithCompletion:(void (^)())completion;
 

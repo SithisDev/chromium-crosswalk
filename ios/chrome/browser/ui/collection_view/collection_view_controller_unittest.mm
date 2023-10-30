@@ -1,15 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
 
+#import <MaterialComponents/MaterialCollectionCells.h>
+
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
-#import "ios/chrome/test/base/scoped_block_swizzler.h"
-#include "ios/chrome/test/block_cleanup_test.h"
-#import "ios/third_party/material_components_ios/src/components/CollectionCells/src/MaterialCollectionCells.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#import "ios/chrome/test/block_cleanup_test.h"
+#import "ios/testing/scoped_block_swizzler.h"
+#import "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -84,7 +85,7 @@ class CollectionViewControllerTest : public BlockCleanupTest {
         toSectionWithIdentifier:SectionIdentifierFoo];
 
     // The collection view is not visible on screen, so it has not created any
-    // of its cells.  Swizzle |cellsForItemAtIndexPath:| and inject an
+    // of its cells.  Swizzle `cellsForItemAtIndexPath:` and inject an
     // implementation for testing that always returns a non-nil cell.
     MDCCollectionViewCell* dummyCell = [[MDCCollectionViewCell alloc] init];
     {
@@ -112,20 +113,6 @@ class CollectionViewControllerTest : public BlockCleanupTest {
 };
 
 }  // namespace
-
-TEST_F(CollectionViewControllerTest, InitDefaultStyle) {
-  CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
-               style:CollectionViewControllerStyleDefault];
-  EXPECT_EQ(nil, controller.appBarViewController);
-}
-
-TEST_F(CollectionViewControllerTest, InitAppBarStyle) {
-  CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
-               style:CollectionViewControllerStyleAppBar];
-  EXPECT_NE(nil, controller.appBarViewController);
-}
 
 TEST_F(CollectionViewControllerTest, CellForItemAtIndexPath) {
   CollectionViewController* controller = [[CollectionViewController alloc]

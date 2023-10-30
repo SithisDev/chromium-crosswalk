@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,27 @@
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 #import "ios/chrome/browser/ui/list_model/list_model.h"
 
-namespace ios {
-class ChromeBrowserState;
-}
+class Browser;
 class BrowsingDataRemover;
 enum class BrowsingDataRemoveMask;
+class ChromeBrowserState;
 
 @class ActionSheetCoordinator;
 @class BrowsingDataCounterWrapperProducer;
 @protocol ClearBrowsingDataConsumer;
 @protocol CollectionViewFooterLinkDelegate;
 
-// Clear Browswing Data Section Identifiers.
+// Only used in this folder to offer the user to log out
+extern const char kCBDSignOutOfChromeURL[];
+
+// Clear Browsing Data Section Identifiers.
 enum ClearBrowsingDataSectionIdentifier {
   // Section holding types of data that can be cleared.
   SectionIdentifierDataTypes = kSectionIdentifierEnumZero,
-  // Section containing button to clear browsing data.
-  SectionIdentifierClearBrowsingDataButton,
   // Section for informational footnote about user's Google Account data.
   SectionIdentifierGoogleAccount,
-  // Section for footnote about synced data being cleared.
-  SectionIdentifierClearSyncAndSavedSiteData,
-  // Section for informational footnote about site settings remaining.
+  // Section for footnote about synced data being cleared & site settings
+  // remaining.
   SectionIdentifierSavedSiteData,
   // Section containing cell displaying time range to remove data.
   SectionIdentifierTimeRange,
@@ -47,8 +46,6 @@ enum ClearBrowsingDataItemType {
   ItemTypeDataTypeSavedPasswords,
   // Items representing autofill data.
   ItemTypeDataTypeAutofill,
-  // Clear data button.
-  ItemTypeClearBrowsingDataButton,
   // Footer noting account will not be signed out.
   ItemTypeFooterGoogleAccount,
   // Footer noting user will not be signed out of chrome and other forms of
@@ -62,13 +59,9 @@ enum ClearBrowsingDataItemType {
   // Item showing time range to remove data and allowing user to edit time
   // range.
   ItemTypeTimeRange,
-};
-
-// Differentiation between two types of view controllers that the
-// ClearBrowsingDataManager could be serving.
-enum class ClearBrowsingDataListType {
-  kListTypeTableView,
-  kListTypeCollectionView,
+  // Footer noting user will not be signed out of chrome and how to delete
+  // search history based on set default search engine (DSE).
+  ItemTypeFooterGoogleAccountDSEBased,
 };
 
 // Manager that serves as the bulk of the logic for
@@ -77,50 +70,46 @@ enum class ClearBrowsingDataListType {
 
 // The manager's consumer.
 @property(nonatomic, weak) id<ClearBrowsingDataConsumer> consumer;
-// Reference to the LinkDelegate for CollectionViewFooterItem.
-@property(nonatomic, weak) id<CollectionViewFooterLinkDelegate> linkDelegate;
 
-// Default init method. |browserState| can't be nil and
-// |listType| determines what kind of items to populate model with.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                            listType:(ClearBrowsingDataListType)listType;
+// Default init method. `browserState` can't be nil.
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState;
 
 // Designated initializer to allow dependency injection (in tests).
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                              listType:(ClearBrowsingDataListType)listType
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
                    browsingDataRemover:(BrowsingDataRemover*)remover
     browsingDataCounterWrapperProducer:
         (BrowsingDataCounterWrapperProducer*)producer NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 
-// Fills |model| with appropriate sections and items.
+// Call this method before actually using the data manager.
+- (void)prepare;
+
+// Call this method when data manager is not used anymore.
+- (void)disconnect;
+
+// Fills `model` with appropriate sections and items.
 - (void)loadModel:(ListModel*)model;
 
+// Update the footer depending on whether the user signed in or out.
+- (void)updateModel:(ListModel*)model withTableView:(UITableView*)tableView;
+
 // Restarts browsing data counters, which in turn updates UI, with those data
-// types specified by |mask|.
+// types specified by `mask`.
 - (void)restartCounters:(BrowsingDataRemoveMask)mask;
 
 // Returns a ActionSheetCoordinator that has action block to clear data of type
-// |dataTypeMaskToRemove|.
-// When action triggered by a UIButton.
+// `dataTypeMaskToRemove`.
 - (ActionSheetCoordinator*)
     actionSheetCoordinatorWithDataTypesToRemove:
         (BrowsingDataRemoveMask)dataTypeMaskToRemove
                              baseViewController:
                                  (UIViewController*)baseViewController
-                                     sourceRect:(CGRect)sourceRect
-                                     sourceView:(UIView*)sourceView;
-// When action triggered by a UIBarButtonItem.
-- (ActionSheetCoordinator*)
-    actionSheetCoordinatorWithDataTypesToRemove:
-        (BrowsingDataRemoveMask)dataTypeMaskToRemove
-                             baseViewController:
-                                 (UIViewController*)baseViewController
+                                        browser:(Browser*)browser
                             sourceBarButtonItem:
                                 (UIBarButtonItem*)sourceBarButtonItem;
 
-// Get the text to be displayed by a counter from the given |result|
+// Get the text to be displayed by a counter from the given `result`
 - (NSString*)counterTextFromResult:
     (const browsing_data::BrowsingDataCounter::Result&)result;
 

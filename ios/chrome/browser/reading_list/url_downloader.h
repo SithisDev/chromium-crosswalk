@@ -1,9 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_READING_LIST_URL_DOWNLOADER_H_
 #define IOS_CHROME_BROWSER_READING_LIST_URL_DOWNLOADER_H_
+
+#include <string>
 
 #include "base/callback.h"
 #include "base/containers/circular_deque.h"
@@ -29,7 +31,7 @@ class ReadingListDistillerPageFactory;
 }
 
 // This class downloads and deletes offline versions of URLs.
-// If the URL points to an HTML file, |URLDownloader| uses DOM distiller to
+// If the URL points to an HTML file, `URLDownloader` uses DOM distiller to
 // fetch the page and simplify it.
 // If the URL points to a PDF file, the PDF is simply downloaded and saved to
 // the disk.
@@ -51,25 +53,28 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
     // The URL could not be downloaded because of an error. Client may want to
     // try again later.
     ERROR,
+    // The URL could not be downloaded because of an error. Client should not
+    // try again.
+    PERMANENT_ERROR,
   };
 
   // A completion callback that takes a GURL and a bool indicating the
   // outcome and returns void.
-  using SuccessCompletion = base::Callback<void(const GURL&, bool)>;
+  using SuccessCompletion = base::RepeatingCallback<void(const GURL&, bool)>;
 
   // A download completion callback that takes, in order, the GURL that was
   // downloaded, the GURL of the page that was downloaded after redirections, a
   // SuccessState indicating the outcome of the download, the path to the
-  // downloaded page (relative to |OfflineRootDirectoryPath()|, and the title of
+  // downloaded page (relative to `OfflineRootDirectoryPath()`, and the title of
   // the url, and returns void.
   // The path to downloaded file and title should not be used in case of
   // failure.
-  using DownloadCompletion = base::Callback<void(const GURL&,
-                                                 const GURL&,
-                                                 SuccessState,
-                                                 const base::FilePath&,
-                                                 int64_t size,
-                                                 const std::string&)>;
+  using DownloadCompletion = base::RepeatingCallback<void(const GURL&,
+                                                          const GURL&,
+                                                          SuccessState,
+                                                          const base::FilePath&,
+                                                          int64_t size,
+                                                          const std::string&)>;
 
   // Create a URL downloader with completion callbacks for downloads and
   // deletions. The completion callbacks will be called with the original url
@@ -83,6 +88,10 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const DownloadCompletion& download_completion,
       const SuccessCompletion& delete_completion);
+
+  URLDownloader(const URLDownloader&) = delete;
+  URLDownloader& operator=(const URLDownloader&) = delete;
+
   ~URLDownloader() override;
 
   // Asynchronously download an offline version of the URL.
@@ -105,10 +114,10 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
   enum TaskType { DELETE, DOWNLOAD };
   using Task = std::pair<TaskType, GURL>;
 
-  // Calls callback with true if an offline path exists. |path| must be
+  // Calls callback with true if an offline path exists. `path` must be
   // absolute.
   void OfflinePathExists(const base::FilePath& url,
-                         base::Callback<void(bool)> callback);
+                         base::OnceCallback<void(bool)> callback);
   // Handles the next task in the queue, if no task is currently being handled.
   void HandleNextTask();
   // Callback for completed (or failed) download, handles calling
@@ -121,11 +130,11 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
   // deleteCompletion and starting the next task.
   void DeleteCompletionHandler(const GURL& url, bool success);
 
-  // Creates the offline directory for |url|. Returns true if successful or if
+  // Creates the offline directory for `url`. Returns true if successful or if
   // the directory already exists.
   bool CreateOfflineURLDirectory(const GURL& url);
 
-  // Downloads |url|, depending on |offlineURLExists| state.
+  // Downloads `url`, depending on `offlineURLExists` state.
   virtual void DownloadURL(const GURL& url, bool offlineURLExists);
 
   // ReadingListDistillerPageDelegate methods
@@ -136,22 +145,15 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
 
   // HTML processing methods.
 
-  // Saves the |data| for image at |imageURL| to disk, for main URL |url|;
-  // puts path of saved file in |path| and returns whether save was successful.
-  bool SaveImage(const GURL& url,
-                 const GURL& imageURL,
-                 const std::string& data,
-                 std::string* image_name);
-  // Saves images in |images| array to disk and replaces references in |html| to
-  // local path. Returns updated html.
-  // If some images could not be saved, returns an empty string. It is the
-  // responsibility of the caller to clean the partial processing.
-  std::string SaveAndReplaceImagesInHTML(
+  // Injects script to replace images in `images` array with a data-uri
+  // of their contents. If the data does not represent an image, it is
+  // skipped.
+  std::string ReplaceImagesInHTML(
       const GURL& url,
       const std::string& html,
       const std::vector<dom_distiller::DistillerViewerInterface::ImageInfo>&
           images);
-  // Saves |html| to disk in the correct location for |url|; returns success.
+  // Saves `html` to disk in the correct location for `url`; returns success.
   bool SaveHTMLForURL(std::string html, const GURL& url);
   // Saves distilled html to disk, including saving images and main file.
   SuccessState SaveDistilledHTML(
@@ -169,10 +171,10 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
 
   // PDF processing methods
 
-  // Starts fetching the PDF file. If |original_url_| triggered a redirection,
-  // directly save |distilled_url_|.
+  // Starts fetching the PDF file. If `original_url_` triggered a redirection,
+  // directly save `distilled_url_`.
   virtual void FetchPDFFile();
-  // Saves the file downloaded by |url_loader_|. Creates the directory if
+  // Saves the file downloaded by `url_loader_`. Creates the directory if
   // needed.
   SuccessState SavePDFFile(const base::FilePath& temporary_path);
 
@@ -196,8 +198,6 @@ class URLDownloader : reading_list::ReadingListDistillerPageDelegate {
   std::unique_ptr<dom_distiller::DistillerViewerInterface> distiller_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   base::CancelableTaskTracker task_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLDownloader);
 };
 
 #endif  // IOS_CHROME_BROWSER_READING_LIST_URL_DOWNLOADER_H_

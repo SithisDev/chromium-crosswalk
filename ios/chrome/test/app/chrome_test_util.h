@@ -1,5 +1,4 @@
-
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +7,15 @@
 
 #import "base/ios/block_types.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
-#import "ios/web/public/web_state/web_state.h"
-
-namespace ios {
-class ChromeBrowserState;
-}
+#import "ios/chrome/browser/ui/commands/browser_coordinator_commands.h"
 
 @protocol ApplicationCommands;
-@class DeviceSharingManager;
+class Browser;
+class ChromeBrowserState;
 @class MainController;
 @class NewTabPageController;
+@class SceneController;
+@class SceneState;
 @class UIViewController;
 
 namespace chrome_test_util {
@@ -25,50 +23,53 @@ namespace chrome_test_util {
 // Returns the main controller.
 MainController* GetMainController();
 
-// Returns the DeviceSharingManager object.
-DeviceSharingManager* GetDeviceSharingManager();
+// Returns the foreground, active scene.
+SceneState* GetForegroundActiveScene();
+
+// Returns the foreground, active scene controller.
+SceneController* GetForegroundActiveSceneController();
+
+// Returns the number of regular Browsers for the default profile.
+NSUInteger RegularBrowserCount();
 
 // Returns the current, non-incognito ChromeBrowserState.
-ios::ChromeBrowserState* GetOriginalBrowserState();
+ChromeBrowserState* GetOriginalBrowserState();
 
 // Returns the current incognito ChromeBrowserState
-ios::ChromeBrowserState* GetCurrentIncognitoBrowserState();
+ChromeBrowserState* GetCurrentIncognitoBrowserState();
 
-// Returns the number of key commands currently registered with the main BVC.
-NSUInteger GetRegisteredKeyCommandsCount();
-
-// Returns the dispatcher for the main BVC.
-// TODO(crbug.com/738881): Use DispatcherForActiveBrowserViewController()
-// instead.
-id<BrowserCommands> BrowserCommandDispatcherForMainBVC();
+// Returns the browser for the main interface.
+Browser* GetMainBrowser();
 
 // Returns the active view controller.
 // NOTE: It is preferred to not directly access the active view controller if
 // possible.
 UIViewController* GetActiveViewController();
 
-// Returns the dispatcher for the active BrowserViewController. If the
-// BrowserViewController isn't presented, returns nil.
-id<ApplicationCommands, BrowserCommands>
-DispatcherForActiveBrowserViewController();
+// Returns the dispatcher for the active Browser.
+id<ApplicationCommands, BrowserCommands, BrowserCoordinatorCommands>
+HandlerForActiveBrowser();
 
 // Removes all presented infobars.
 void RemoveAllInfoBars();
 
-// Dismisses all presented views and modal dialogs.
-void ClearPresentedState();
+// Dismisses all presented views and modal dialogs. `completion` is invoked when
+// all the views are dismissed.
+void ClearPresentedState(ProceduralBlock completion);
 
 // Sets the value of a boolean local state pref.
 // TODO(crbug.com/647022): Clean up other tests that use this helper function.
 void SetBooleanLocalStatePref(const char* pref_name, bool value);
 
 // Sets the value of a boolean user pref in the given browser state.
-void SetBooleanUserPref(ios::ChromeBrowserState* browser_state,
+void SetBooleanUserPref(ChromeBrowserState* browser_state,
                         const char* pref_name,
                         bool value);
 
-// Sets the state of using cellular network.
-void SetWWANStateTo(bool value);
+// Sets the value of an integer user pref in the given browser state.
+void SetIntegerUserPref(ChromeBrowserState* browser_state,
+                        const char* pref_name,
+                        int value);
 
 // Sets the state of first launch.
 void SetFirstLaunchStateTo(bool value);
@@ -98,7 +99,7 @@ void OpenChromeFromExternalApp(const GURL& url);
 // cached page. Browsers don't have to use fresh version for back forward
 // navigation for HTTP pages and may serve version from the cache even if
 // Cache-Control response header says otherwise.
-bool PurgeCachedWebViewPages() WARN_UNUSED_RESULT;
+[[nodiscard]] bool PurgeCachedWebViewPages();
 
 }  // namespace chrome_test_util
 

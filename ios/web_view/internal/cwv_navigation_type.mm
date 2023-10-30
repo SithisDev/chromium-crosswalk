@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web_view/public/cwv_navigation_type.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 #import "ios/web_view/internal/cwv_navigation_type_internal.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)

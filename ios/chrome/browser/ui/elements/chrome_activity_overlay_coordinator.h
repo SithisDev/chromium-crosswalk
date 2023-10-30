@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,14 @@
 
 // Text that will be shown above the UIActivityIndicatorView.
 @property(nonatomic, copy) NSString* messageText;
+
+// YES if the Coordinator is started. Meaning that the UIActivityIndicatorView
+// is currently being displayed.
+@property(nonatomic, assign) BOOL started;
+
+// YES if the coordinator should trgger blocking UI in all other windows as
+// long as it is active.
+@property(nonatomic, assign) BOOL blockAllWindows;
 
 @end
 

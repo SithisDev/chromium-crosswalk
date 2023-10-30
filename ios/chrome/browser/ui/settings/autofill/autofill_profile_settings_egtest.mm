@@ -1,26 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <XCTest/XCTest.h>
 
-#include "base/ios/ios_util.h"
+#import "base/ios/ios_util.h"
 #import "base/test/ios/wait_util.h"
-#include "components/autofill/core/browser/autofill_test_utils.h"
-#include "components/autofill/core/browser/data_model/autofill_profile.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
-#import "ios/chrome/browser/ui/settings/autofill/autofill_profile_edit_table_view_controller.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/ui/autofill/autofill_app_interface.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,6 +27,7 @@ using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::NavigationBarDoneButton;
 using chrome_test_util::SettingsDoneButton;
 using chrome_test_util::SettingsMenuBackButton;
+using chrome_test_util::TabGridEditButton;
 
 namespace {
 
@@ -49,6 +46,7 @@ const DisplayStringIDToExpectedResult kExpectedFields[] = {
     {IDS_IOS_AUTOFILL_CITY, @"Elysium"},
     {IDS_IOS_AUTOFILL_STATE, @"CA"},
     {IDS_IOS_AUTOFILL_ZIP, @"91111"},
+    {IDS_IOS_AUTOFILL_COUNTRY, @"United States"},
     {IDS_IOS_AUTOFILL_PHONE, @"16502111111"},
     {IDS_IOS_AUTOFILL_EMAIL, @"johndoe@hades.com"}};
 
@@ -62,7 +60,7 @@ struct UserTypedCountryExpectedResultPair {
 
 const UserTypedCountryExpectedResultPair kCountryTests[] = {
     {@"Brasil", @"Brazil"},
-    {@"China", @"China"},
+    {@"China", @"China mainland"},
     {@"DEUTSCHLAND", @"Germany"},
     {@"GREAT BRITAIN", @"United Kingdom"},
     {@"IN", @"India"},
@@ -89,6 +87,7 @@ NSString* GetTextFieldForID(int categoryId) {
 id<GREYMatcher> NavigationBarEditButton() {
   return grey_allOf(
       ButtonWithAccessibilityLabelId(IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON),
+      grey_not(TabGridEditButton()),
       grey_not(grey_accessibilityTrait(UIAccessibilityTraitNotEnabled)), nil);
 }
 
@@ -98,53 +97,26 @@ id<GREYMatcher> NavigationBarEditButton() {
 @interface AutofillProfileSettingsTestCase : ChromeTestCase
 @end
 
-@implementation AutofillProfileSettingsTestCase {
-  // The PersonalDataManager instance for the current browser state.
-  autofill::PersonalDataManager* _personalDataManager;
-}
+@implementation AutofillProfileSettingsTestCase
 
 - (void)setUp {
   [super setUp];
-
-  _personalDataManager =
-      autofill::PersonalDataManagerFactory::GetForBrowserState(
-          chrome_test_util::GetOriginalBrowserState());
-  _personalDataManager->SetSyncingForTest(true);
+  [AutofillAppInterface clearProfilesStore];
 }
 
 - (void)tearDown {
-  // Clear existing profiles.
-  for (const auto* profile : _personalDataManager->GetProfiles()) {
-    _personalDataManager->RemoveByGUID(profile->guid());
-  }
-
+  [AutofillAppInterface clearProfilesStore];
   [super tearDown];
-}
-
-- (autofill::AutofillProfile)addAutofillProfile {
-  autofill::AutofillProfile profile = autofill::test::GetFullProfile();
-  size_t profileCount = _personalDataManager->GetProfiles().size();
-  _personalDataManager->AddProfile(profile);
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(
-                 base::test::ios::kWaitForActionTimeout,
-                 ^bool() {
-                   return profileCount <
-                          _personalDataManager->GetProfiles().size();
-                 }),
-             @"Failed to add profile.");
-  return profile;
 }
 
 // Helper to open the settings page for Autofill profiles.
 - (void)openAutofillProfilesSettings {
   [ChromeEarlGreyUI openSettingsMenu];
-  id<GREYMatcher> addressesButton =
-      ButtonWithAccessibilityLabelId(IDS_AUTOFILL_ADDRESSES_SETTINGS_TITLE);
-  [[EarlGrey selectElementWithMatcher:addressesButton]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::AddressesAndMoreButton()];
 }
 
-// Helper to open the settings page for the Autofill profile with |label|.
+// Helper to open the settings page for the Autofill profile with `label`.
 - (void)openEditProfile:(NSString*)label {
   [self openAutofillProfilesSettings];
 
@@ -154,18 +126,17 @@ id<GREYMatcher> NavigationBarEditButton() {
 
 // Close the settings.
 - (void)exitSettingsMenu {
-  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton()]
+  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton(0)]
       performAction:grey_tap()];
   [[EarlGrey selectElementWithMatcher:SettingsDoneButton()]
       performAction:grey_tap()];
   // Wait for UI components to finish loading.
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
 }
 
 // Test that the page for viewing Autofill profile details is as expected.
-// TODO(crbug.com/922117): Reenable test.
-- (void)FLAKY_testAutofillProfileViewPage {
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+- (void)testAutofillProfileViewPage {
+  [AutofillAppInterface saveExampleProfile];
   [self openEditProfile:kProfileLabel];
 
   // Check that all fields and values match the expectations.
@@ -184,7 +155,7 @@ id<GREYMatcher> NavigationBarEditButton() {
   }
 
   // Go back to the list view page.
-  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton()]
+  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton(0)]
       performAction:grey_tap()];
 
   [self exitSettingsMenu];
@@ -193,11 +164,7 @@ id<GREYMatcher> NavigationBarEditButton() {
 // Test that editing country names is followed by validating the value and
 // replacing it with a canonical one.
 - (void)testAutofillProfileEditing {
-  // TODO (crbug.com/946891) Re-enable once fixed on iOS12.2
-  if (base::ios::IsRunningOnOrLater(12, 2, 0)) {
-    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 12,2.");
-  }
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+  [AutofillAppInterface saveExampleProfile];
   [self openEditProfile:kProfileLabel];
 
   // Keep editing the Country field and verify that validation works.
@@ -207,8 +174,11 @@ id<GREYMatcher> NavigationBarEditButton() {
         performAction:grey_tap()];
 
     // Replace the text field with the user-version of the country.
-    [[EarlGrey selectElementWithMatcher:grey_accessibilityID(GetTextFieldForID(
-                                            IDS_IOS_AUTOFILL_COUNTRY))]
+    [[EarlGrey
+        selectElementWithMatcher:grey_allOf(
+                                     grey_accessibilityID(GetTextFieldForID(
+                                         IDS_IOS_AUTOFILL_COUNTRY)),
+                                     grey_kindOfClassName(@"UITextField"), nil)]
         performAction:grey_replaceText(expectation.user_typed_country)];
 
     // Switch off edit mode.
@@ -226,7 +196,7 @@ id<GREYMatcher> NavigationBarEditButton() {
   }
 
   // Go back to the list view page.
-  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton()]
+  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton(0)]
       performAction:grey_tap()];
 
   [self exitSettingsMenu];
@@ -234,13 +204,13 @@ id<GREYMatcher> NavigationBarEditButton() {
 
 // Test that the page for viewing Autofill profile details is accessible.
 - (void)testAccessibilityOnAutofillProfileViewPage {
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+  [AutofillAppInterface saveExampleProfile];
   [self openEditProfile:kProfileLabel];
 
   [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
 
   // Go back to the list view page.
-  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton()]
+  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton(0)]
       performAction:grey_tap()];
 
   [self exitSettingsMenu];
@@ -248,7 +218,7 @@ id<GREYMatcher> NavigationBarEditButton() {
 
 // Test that the page for editing Autofill profile details is accessible.
 - (void)testAccessibilityOnAutofillProfileEditPage {
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+  [AutofillAppInterface saveExampleProfile];
   [self openEditProfile:kProfileLabel];
 
   // Switch on edit mode.
@@ -257,7 +227,7 @@ id<GREYMatcher> NavigationBarEditButton() {
   [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
 
   // Go back to the list view page.
-  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton()]
+  [[EarlGrey selectElementWithMatcher:SettingsMenuBackButton(0)]
       performAction:grey_tap()];
 
   [self exitSettingsMenu];
@@ -266,7 +236,7 @@ id<GREYMatcher> NavigationBarEditButton() {
 // Checks that the Autofill profiles list view is in edit mode and the Autofill
 // profiles switch is disabled.
 - (void)testListViewEditMode {
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+  [AutofillAppInterface saveExampleProfile];
 
   [self openAutofillProfilesSettings];
 
@@ -275,8 +245,10 @@ id<GREYMatcher> NavigationBarEditButton() {
       performAction:grey_tap()];
 
   // Check the Autofill profile switch is disabled.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::SettingsSwitchCell(
-                                          @"addressItem_switch", YES, NO)]
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::TableViewSwitchCell(
+                                   kAutofillAddressSwitchViewId,
+                                   /*is_toggled_on=*/YES, /*is_enabled=*/NO)]
       assertWithMatcher:grey_notNil()];
 
   [self exitSettingsMenu];
@@ -285,22 +257,26 @@ id<GREYMatcher> NavigationBarEditButton() {
 // Checks that the Autofill profile switch can be toggled on/off and the list of
 // Autofill profiles is not affected by it.
 - (void)testToggleAutofillProfileSwitch {
-  autofill::AutofillProfile profile = [self addAutofillProfile];
+  [AutofillAppInterface saveExampleProfile];
   [self openAutofillProfilesSettings];
 
   // Toggle the Autofill profiles switch off.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::SettingsSwitchCell(
-                                          @"addressItem_switch", YES, YES)]
-      performAction:chrome_test_util::TurnSettingsSwitchOn(NO)];
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::TableViewSwitchCell(
+                                   kAutofillAddressSwitchViewId,
+                                   /*is_toggled_on=*/YES, /*is_enabled=*/YES)]
+      performAction:chrome_test_util::TurnTableViewSwitchOn(NO)];
 
   // Expect Autofill profiles to remain visible.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(kProfileLabel)]
       assertWithMatcher:grey_notNil()];
 
   // Toggle the Autofill profiles switch back on.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::SettingsSwitchCell(
-                                          @"addressItem_switch", NO, YES)]
-      performAction:chrome_test_util::TurnSettingsSwitchOn(YES)];
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::TableViewSwitchCell(
+                                   kAutofillAddressSwitchViewId,
+                                   /*is_toggled_on=*/NO, /*is_enabled=*/YES)]
+      performAction:chrome_test_util::TurnTableViewSwitchOn(YES)];
 
   // Expect Autofill profiles to remain visible.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(kProfileLabel)]

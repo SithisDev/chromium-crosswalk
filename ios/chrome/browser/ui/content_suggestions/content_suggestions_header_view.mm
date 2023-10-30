@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,35 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/feature_list.h"
-#include "base/logging.h"
-#include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/signin/feature_flags.h"
+#import "base/check.h"
+#import "base/cxx17_backports.h"
+#import "base/feature_list.h"
+#import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_feature.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
+#import "ios/chrome/browser/ui/elements/extended_touch_target_button.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_delegate.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_constants.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_container_view.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_ui_features.h"
+#import "ios/chrome/browser/ui/start_surface/start_surface_features.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button_factory.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/util/dynamic_type_util.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/named_guide_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/elements/gradient_view.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/public/provider/chrome/browser/lens/lens_api.h"
+#import "ui/base/l10n/l10n_util.h"
 #import "ui/gfx/ios/NSString+CrStringDrawing.h"
 #import "ui/gfx/ios/uikit_util.h"
 
@@ -44,6 +53,21 @@ const CGFloat kFakeboxHighlightDuration = 0.4;
 // Fakebox highlight background alpha.
 const CGFloat kFakeboxHighlightAlpha = 0.06;
 
+// Height margin of the fake location bar.
+const CGFloat kFakeLocationBarHeightMargin = 2;
+
+// The constants for the constraints affecting the end button; either Lens or
+// Voice Search, depending on if Lens is enabled.
+const CGFloat kEndButtonFakeboxTrailingSpace = 12.0;
+const CGFloat kEndButtonOmniboxTrailingSpace = 7.0;
+
+// The constants for the constraints affecting the vertical separator that
+// appears between the Lens and Voice Search buttons.
+const CGFloat kLensButtonSeparatorWidth = 1;
+const CGFloat kLensButtonSeparatorHeight = 12;
+const CGFloat kLensButtonSeparatorLeftMargin = 8;
+const CGFloat kLensButtonSeparatorRightMargin = 13;
+
 // Returns the height of the toolbar based on the preferred content size of the
 // application.
 CGFloat ToolbarHeight() {
@@ -53,17 +77,18 @@ CGFloat ToolbarHeight() {
       [UIApplication sharedApplication].preferredContentSizeCategory);
 }
 
-// Returns the amount of vertical space to allow for the existence of a top
-// toolbar when iPhone is in landscape orientation.
-CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
-  return IsCompactHeight(environment) ? ToolbarHeight() : 0;
-}
-
 }  // namespace
 
 @interface ContentSuggestionsHeaderView ()
 
-@property(nonatomic, strong, readwrite) UIButton* voiceSearchButton;
+// The Lens button. May be null if Lens is not available.
+@property(nonatomic, strong, readwrite) ExtendedTouchTargetButton* lensButton;
+// The view that seperates the Lens and voice search buttons. May be null if
+// Lens is not available.
+@property(nonatomic, strong) UIView* lensButtonSeparator;
+
+@property(nonatomic, strong, readwrite)
+    ExtendedTouchTargetButton* voiceSearchButton;
 
 @property(nonatomic, strong) UIView* separator;
 
@@ -73,12 +98,22 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
     NSLayoutConstraint* fakeLocationBarHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint* fakeToolbarTopConstraint;
 @property(nonatomic, strong) NSLayoutConstraint* hintLabelLeadingConstraint;
-@property(nonatomic, strong) NSLayoutConstraint* voiceSearchTrailingConstraint;
-// Layout constraints for Identity Disc that need to be adjusted based on
-// device size class changes.
-@property(nonatomic, strong) NSLayoutConstraint* identityDiscTopConstraint;
+// The end button should always be at least inside the fake omnibox.
+// When the fake omnibox is shrunk, the position from the trailing side of
+// the search field should yield.
+@property(nonatomic, strong)
+    NSLayoutConstraint* endButtonTrailingMarginConstraint;
+// Constraint for positioning the end button away from the fake box rounded
+// rectangle.
+@property(nonatomic, strong) NSLayoutConstraint* endButtonTrailingConstraint;
+// Layout constraint for the invisible button that is where the omnibox should
+// be and that focuses the omnibox when tapped.
+@property(nonatomic, strong) NSLayoutConstraint* invisibleOmniboxConstraint;
 // View used to add on-touch highlight to the fake omnibox.
 @property(nonatomic, strong) UIView* fakeLocationBarHighlightView;
+// View used to simulate the top toolbar when the header is stuck to the top of
+// the NTP.
+@property(nonatomic, strong) UIView* fakeToolbar;
 
 @end
 
@@ -97,35 +132,33 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 - (void)addToolbarView:(UIView*)toolbarView {
   _toolBarView = toolbarView;
   [self addSubview:toolbarView];
-  id<LayoutGuideProvider> layoutGuide = self.safeAreaLayoutGuide;
+  self.invisibleOmniboxConstraint =
+      [toolbarView.topAnchor constraintEqualToAnchor:self.topAnchor
+                                            constant:self.safeAreaInsets.top];
   [NSLayoutConstraint activateConstraints:@[
     [toolbarView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
-    [toolbarView.topAnchor constraintEqualToAnchor:layoutGuide.topAnchor],
     [toolbarView.heightAnchor constraintEqualToConstant:ToolbarHeight()],
-    [toolbarView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor]
+    [toolbarView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+    self.invisibleOmniboxConstraint,
   ]];
 }
 
 - (void)setIdentityDiscView:(UIView*)identityDiscView {
   DCHECK(identityDiscView);
   _identityDiscView = identityDiscView;
-  [self addSubview:_identityDiscView];
+  [self.toolBarView addSubview:_identityDiscView];
 
-  // Sets the layout constraints for size of Identity Disc and the placement
-  // based on whether there is a top toolbar or not.
+  // Sets the layout constraints for size of Identity Disc and toolbar.
   self.identityDiscView.translatesAutoresizingMaskIntoConstraints = NO;
-  id<LayoutGuideProvider> layoutGuide = self.safeAreaLayoutGuide;
-  self.identityDiscTopConstraint = [self.identityDiscView.topAnchor
-      constraintEqualToAnchor:layoutGuide.topAnchor
-                     constant:IdentityDiscToolbarOffset(self)];
   CGFloat dimension =
       ntp_home::kIdentityAvatarDimension + 2 * ntp_home::kIdentityAvatarMargin;
   [NSLayoutConstraint activateConstraints:@[
     [self.identityDiscView.heightAnchor constraintEqualToConstant:dimension],
     [self.identityDiscView.widthAnchor constraintEqualToConstant:dimension],
     [self.identityDiscView.trailingAnchor
-        constraintEqualToAnchor:layoutGuide.trailingAnchor],
-    self.identityDiscTopConstraint
+        constraintEqualToAnchor:self.safeAreaLayoutGuide.trailingAnchor],
+    [self.identityDiscView.topAnchor
+        constraintEqualToAnchor:self.toolBarView.topAnchor],
   ]];
 }
 
@@ -133,19 +166,23 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // Fake Toolbar.
   ToolbarButtonFactory* buttonFactory =
       [[ToolbarButtonFactory alloc] initWithStyle:NORMAL];
-  UIView* fakeToolbar = [[UIView alloc] init];
-  fakeToolbar.backgroundColor =
-      buttonFactory.toolbarConfiguration.backgroundColor;
-  [searchField insertSubview:fakeToolbar atIndex:0];
-  fakeToolbar.translatesAutoresizingMaskIntoConstraints = NO;
+  self.fakeToolbar = [[UIView alloc] init];
+  self.fakeToolbar.backgroundColor =
+      IsContentSuggestionsUIModuleRefreshEnabled()
+          ? [UIColor clearColor]
+          : buttonFactory.toolbarConfiguration.backgroundColor;
+  [searchField insertSubview:self.fakeToolbar atIndex:0];
+  self.fakeToolbar.translatesAutoresizingMaskIntoConstraints = NO;
 
   // Fake location bar.
-  [fakeToolbar addSubview:self.fakeLocationBar];
+  [self.fakeToolbar addSubview:self.fakeLocationBar];
 
   // Omnibox, used for animations.
   // TODO(crbug.com/936811): See if it is possible to share some initialization
   // code with the real Omnibox.
-  UIColor* color = [UIColor colorNamed:kTextfieldPlaceholderColor];
+  UIColor* color = IsContentSuggestionsUIModuleRefreshEnabled()
+                       ? [UIColor colorNamed:kGrey700Color]
+                       : [UIColor colorNamed:kTextfieldPlaceholderColor];
   OmniboxContainerView* omnibox =
       [[OmniboxContainerView alloc] initWithFrame:CGRectZero
                                         textColor:color
@@ -179,6 +216,7 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   self.searchHintLabel = [[UILabel alloc] init];
   content_suggestions::configureSearchHintLabel(self.searchHintLabel,
                                                 searchField);
+  self.searchHintLabel.font = [self hintLabelFont];
   self.hintLabelLeadingConstraint = [self.searchHintLabel.leadingAnchor
       constraintGreaterThanOrEqualToAnchor:[searchField leadingAnchor]
                                   constant:ntp_header::kHintLabelSidePadding];
@@ -199,20 +237,40 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   self.searchHintLabel.isAccessibilityElement = NO;
 
   // Voice search.
-  self.voiceSearchButton = [[UIButton alloc] init];
+  self.voiceSearchButton =
+      [ExtendedTouchTargetButton buttonWithType:UIButtonTypeSystem];
   content_suggestions::configureVoiceSearchButton(self.voiceSearchButton,
                                                   searchField);
+  UIButton* endButton = self.voiceSearchButton;
+
+  // Lens.
+  const BOOL lensEnabled = ios::provider::IsLensSupported() &&
+                           base::FeatureList::IsEnabled(kEnableLensInNTP);
+  const BOOL useLens = lensEnabled && self.isGoogleDefaultSearchEngine;
+  if (useLens) {
+    self.lensButton =
+        [ExtendedTouchTargetButton buttonWithType:UIButtonTypeSystem];
+    content_suggestions::ConfigureLensButton(self.lensButton, searchField);
+    endButton = self.lensButton;
+
+    self.lensButtonSeparator = [[UIView alloc] init];
+    self.lensButtonSeparator.backgroundColor =
+        [UIColor colorNamed:kToolbarShadowColor];
+    self.lensButtonSeparator.translatesAutoresizingMaskIntoConstraints = NO;
+    [searchField addSubview:self.lensButtonSeparator];
+  }
 
   // Constraints.
-  self.fakeToolbarTopConstraint =
-      [fakeToolbar.topAnchor constraintEqualToAnchor:searchField.topAnchor];
+  self.fakeToolbarTopConstraint = [self.fakeToolbar.topAnchor
+      constraintEqualToAnchor:searchField.topAnchor];
   [NSLayoutConstraint activateConstraints:@[
-    [fakeToolbar.leadingAnchor
+    [self.fakeToolbar.leadingAnchor
         constraintEqualToAnchor:searchField.leadingAnchor],
-    [fakeToolbar.trailingAnchor
+    [self.fakeToolbar.trailingAnchor
         constraintEqualToAnchor:searchField.trailingAnchor],
     self.fakeToolbarTopConstraint,
-    [fakeToolbar.bottomAnchor constraintEqualToAnchor:searchField.bottomAnchor]
+    [self.fakeToolbar.bottomAnchor
+        constraintEqualToAnchor:searchField.bottomAnchor]
   ]];
 
   self.fakeLocationBarTopConstraint = [self.fakeLocationBar.topAnchor
@@ -230,21 +288,48 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
     self.fakeLocationBarHeightConstraint,
   ]];
 
-  // The voice search button should always be at least inside the fake omnibox.
-  // When the fake omnibox is shrinked, the position from the trailing side of
-  // the search field should yield.
-  self.voiceSearchTrailingConstraint = [self.voiceSearchButton.trailingAnchor
+  // If the Lens button was created, layout the header with the Lens button on
+  // the end.
+  if (self.lensButton) {
+    [NSLayoutConstraint activateConstraints:@[
+      // Separator constraints.
+      [self.lensButtonSeparator.leadingAnchor
+          constraintEqualToAnchor:self.voiceSearchButton.trailingAnchor
+                         constant:kLensButtonSeparatorLeftMargin],
+      [self.lensButtonSeparator.trailingAnchor
+          constraintEqualToAnchor:self.lensButton.leadingAnchor
+                         constant:-kLensButtonSeparatorRightMargin],
+      [self.lensButtonSeparator.centerYAnchor
+          constraintEqualToAnchor:self.fakeLocationBar.centerYAnchor],
+      [self.lensButtonSeparator.widthAnchor
+          constraintEqualToConstant:ui::AlignValueToUpperPixel(
+                                        kLensButtonSeparatorWidth)],
+      [self.lensButtonSeparator.heightAnchor
+          constraintEqualToConstant:ui::AlignValueToUpperPixel(
+                                        kLensButtonSeparatorHeight)],
+      // Lens button constraints.
+      [self.lensButton.centerYAnchor
+          constraintEqualToAnchor:self.fakeLocationBar.centerYAnchor],
+    ]];
+  }
+
+  self.endButtonTrailingMarginConstraint = [endButton.trailingAnchor
       constraintEqualToAnchor:[searchField trailingAnchor]];
-  self.voiceSearchTrailingConstraint.priority = UILayoutPriorityDefaultHigh + 1;
+  self.endButtonTrailingMarginConstraint.priority =
+      UILayoutPriorityDefaultHigh + 1;
+  self.endButtonTrailingConstraint = [endButton.trailingAnchor
+      constraintLessThanOrEqualToAnchor:self.fakeLocationBar.trailingAnchor
+                               constant:-kEndButtonFakeboxTrailingSpace];
 
   [NSLayoutConstraint activateConstraints:@[
     [self.voiceSearchButton.centerYAnchor
         constraintEqualToAnchor:self.fakeLocationBar.centerYAnchor],
+    // The voice search button is always on the left, even if the Lens button is
+    // visible.
     [self.searchHintLabel.trailingAnchor
         constraintLessThanOrEqualToAnchor:self.voiceSearchButton.leadingAnchor],
-    self.voiceSearchTrailingConstraint,
-    [self.voiceSearchButton.trailingAnchor
-        constraintLessThanOrEqualToAnchor:self.fakeLocationBar.trailingAnchor],
+    self.endButtonTrailingMarginConstraint,
+    self.endButtonTrailingConstraint,
   ]];
 }
 
@@ -252,8 +337,7 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   DCHECK(searchField.superview == self);
 
   self.separator = [[UIView alloc] init];
-  self.separator.backgroundColor =
-      [UIColor colorNamed:@"tab_toolbar_shadow_color"];
+  self.separator.backgroundColor = [UIColor colorNamed:kToolbarShadowColor];
   self.separator.alpha = 0;
   self.separator.translatesAutoresizingMaskIntoConstraints = NO;
   [searchField addSubview:self.separator];
@@ -273,9 +357,17 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   CGFloat maxScaleOffset = self.frame.size.height - ToolbarHeight() -
                            ntp_header::kFakeOmniboxScrolledToTopMargin -
                            safeAreaInsets.top;
-
-  // With RxR the search field should scroll under the toolbar.
-  if (IsRegularXRegularSizeClass(self)) {
+  // If the Shrunk logo for the Start Surface is being shown, the searchField
+  // expansion should start later so that its background does not cut off the
+  // logo. This mainly impacts notched devices that have a large top Safe Area
+  // inset. Instead of ensuring the expansion finishes by the time the omnibox
+  // reaches the bottom of the toolbar, wait until the logo is in the safe area
+  // before expanding so it is out of view.
+  if (ShouldShrinkLogoForStartSurface()) {
+    maxScaleOffset += safeAreaInsets.top;
+  }
+  // If it is not in SplitMode the search field should scroll under the toolbar.
+  if (!IsSplitToolbarMode(self)) {
     maxScaleOffset += ToolbarHeight();
   }
 
@@ -285,7 +377,15 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   CGFloat percent = 0;
   if (offset && offset > startScaleOffset) {
     CGFloat animatingOffset = offset - startScaleOffset;
-    percent = MIN(1, MAX(0, animatingOffset / ntp_header::kAnimationDistance));
+    percent = base::clamp<CGFloat>(
+        animatingOffset / ntp_header::kAnimationDistance, 0, 1);
+  }
+  if (IsContentSuggestionsUIModuleRefreshEnabled()) {
+    // Update background color of fake toolbar if stuck to top of NTP so that it
+    // has a non-clear background. Otherwise, return to clear background.
+    self.fakeToolbar.backgroundColor =
+        percent == 1.0f ? [UIColor colorNamed:kBackgroundColor]
+                        : [UIColor clearColor];
   }
   return percent;
 }
@@ -302,14 +402,24 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
     return;
 
   CGFloat searchFieldNormalWidth =
-      content_suggestions::searchFieldWidth(contentWidth);
+      content_suggestions::searchFieldWidth(contentWidth, self.traitCollection);
 
   CGFloat percent =
       [self searchFieldProgressForOffset:offset safeAreaInsets:safeAreaInsets];
+
+  CGFloat toolbarExpandedHeight = ToolbarHeight();
+
   if (!IsSplitToolbarMode(self)) {
-    self.alpha = 1 - percent;
+    // When Voiceover is running, if the header's alpha is set to 0, voiceover
+    // can't scroll back to it, and it will never come back into view. To
+    // prevent that, set the alpha to non-zero when the header is fully
+    // offscreen. It will still not be seen, but it will be accessible to
+    // Voiceover.
+    self.alpha = std::max(1 - percent, 0.01);
+
     widthConstraint.constant = searchFieldNormalWidth;
-    self.fakeLocationBarHeightConstraint.constant = ToolbarHeight();
+    self.fakeLocationBarHeightConstraint.constant =
+        toolbarExpandedHeight - kFakeLocationBarHeightMargin;
     self.fakeLocationBar.layer.cornerRadius =
         self.fakeLocationBarHeightConstraint.constant / 2;
     [self scaleHintLabelForPercent:percent];
@@ -318,6 +428,10 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
     self.fakeLocationBarLeadingConstraint.constant = 0;
     self.fakeLocationBarTrailingConstraint.constant = 0;
     self.fakeLocationBarTopConstraint.constant = 0;
+
+    self.hintLabelLeadingConstraint.constant =
+        ntp_header::kHintLabelSidePadding;
+    self.endButtonTrailingMarginConstraint.constant = 0;
 
     self.separator.alpha = 0;
 
@@ -330,8 +444,6 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // Grow the background to cover the safeArea top.
   self.fakeToolbarTopConstraint.constant = -safeAreaInsets.top * percent;
 
-  CGFloat toolbarExpandedHeight = ToolbarHeight();
-
   // Calculate the amount to grow the width and height of searchField so that
   // its frame covers the entire toolbar area.
   CGFloat maxXInset =
@@ -343,10 +455,12 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 
   // Calculate the amount to shrink the width and height of background so that
   // it's where the focused adapative toolbar focuses.
-  CGFloat inset = !IsSplitToolbarMode() ? kBackgroundLandscapeInset : 0;
+  CGFloat inset = !IsSplitToolbarMode(self) ? kBackgroundLandscapeInset : 0;
+  CGFloat leadingMargin = IsOmniboxActionsEnabled()
+                              ? kExpandedLocationBarLeadingMarginRefreshedPopup
+                              : kExpandedLocationBarHorizontalMargin;
   self.fakeLocationBarLeadingConstraint.constant =
-      (safeAreaInsets.left + kExpandedLocationBarHorizontalMargin + inset) *
-      percent;
+      (safeAreaInsets.left + leadingMargin + inset) * percent;
   self.fakeLocationBarTrailingConstraint.constant =
       -(safeAreaInsets.right + kExpandedLocationBarHorizontalMargin + inset) *
       percent;
@@ -357,9 +471,11 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // collection from times to times.
   CGFloat kLocationBarHeight = LocationBarHeight(
       [UIApplication sharedApplication].preferredContentSizeCategory);
-  CGFloat minHeightDiff = kLocationBarHeight - toolbarExpandedHeight;
-  self.fakeLocationBarHeightConstraint.constant =
-      toolbarExpandedHeight + minHeightDiff * percent;
+  CGFloat minHeightDiff =
+      kLocationBarHeight + kFakeLocationBarHeightMargin - toolbarExpandedHeight;
+  self.fakeLocationBarHeightConstraint.constant = toolbarExpandedHeight -
+                                                  kFakeLocationBarHeightMargin +
+                                                  minHeightDiff * percent;
   self.fakeLocationBar.layer.cornerRadius =
       self.fakeLocationBarHeightConstraint.constant / 2;
 
@@ -369,7 +485,14 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
   // Adjust the position of the search field's subviews by adjusting their
   // constraint constant value.
   CGFloat subviewsDiff = -maxXInset * percent;
-  self.voiceSearchTrailingConstraint.constant = -subviewsDiff;
+  self.endButtonTrailingMarginConstraint.constant = -subviewsDiff;
+  // The trailing space wanted is a linear scale between the two states of the
+  // fakebox: 1) when centered in the NTP and 2) when pinned to the top,
+  // emulating the the omnibox.
+  self.endButtonTrailingConstraint.constant =
+      -kEndButtonFakeboxTrailingSpace +
+      (kEndButtonFakeboxTrailingSpace - kEndButtonOmniboxTrailingSpace) *
+          percent;
   self.hintLabelLeadingConstraint.constant =
       subviewsDiff + ntp_header::kHintLabelSidePadding;
 }
@@ -388,23 +511,16 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 
 #pragma mark - UITraitEnvironment
 
-// Adjusts the autolayout constraints for |identityDiscView| when view changes
-// size. When an iPhone is rotated from portrait (no top toolbar) to landscape
-// (with top toolbar), the placement of Identity Disc has to be shifted down
-// below the top toolbar. Otherwise, the Identity Disc may be obscured by the
-// top toolbar in landscape mode.
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [super traitCollectionDidChange:previousTraitCollection];
-  // identityDiscView may not be set if feature is not enabled.
-  if (!self.identityDiscView)
-    return;
-  DCHECK(IsIdentityDiscFeatureEnabled());
-  if ((self.traitCollection.verticalSizeClass !=
-       previousTraitCollection.verticalSizeClass) ||
-      (self.traitCollection.horizontalSizeClass !=
-       previousTraitCollection.horizontalSizeClass)) {
-    self.identityDiscTopConstraint.constant = IdentityDiscToolbarOffset(self);
+  if (previousTraitCollection.preferredContentSizeCategory !=
+      self.traitCollection.preferredContentSizeCategory) {
+    self.searchHintLabel.font = [self hintLabelFont];
   }
+}
+
+- (void)updateForTopSafeAreaInset:(CGFloat)topSafeAreaInset {
+  self.invisibleOmniboxConstraint.constant = topSafeAreaInset;
 }
 
 #pragma mark - Property accessors
@@ -415,8 +531,20 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
     _fakeLocationBar.userInteractionEnabled = NO;
     _fakeLocationBar.clipsToBounds = YES;
     _fakeLocationBar.backgroundColor =
-        [UIColor colorNamed:kTextfieldBackgroundColor];
+        IsContentSuggestionsUIModuleRefreshEnabled()
+            ? [UIColor clearColor]
+            : [UIColor colorNamed:kTextfieldBackgroundColor];
     _fakeLocationBar.translatesAutoresizingMaskIntoConstraints = NO;
+    if (IsContentSuggestionsUIModuleRefreshEnabled()) {
+      GradientView* gradientView = [[GradientView alloc]
+          initWithTopColor:[UIColor
+                               colorNamed:@"fake_omnibox_top_gradient_color"]
+               bottomColor:
+                   [UIColor colorNamed:@"fake_omnibox_bottom_gradient_color"]];
+      gradientView.translatesAutoresizingMaskIntoConstraints = NO;
+      [_fakeLocationBar addSubview:gradientView];
+      AddSameConstraints(_fakeLocationBar, gradientView);
+    }
 
     _fakeLocationBarHighlightView = [[UIView alloc] init];
     _fakeLocationBarHighlightView.userInteractionEnabled = NO;
@@ -430,6 +558,12 @@ CGFloat IdentityDiscToolbarOffset(id<UITraitEnvironment> environment) {
 }
 
 #pragma mark - Private
+
+// Returns the font size for the hint label.
+- (UIFont*)hintLabelFont {
+  return LocationBarSteadyViewFont(
+      self.traitCollection.preferredContentSizeCategory);
+}
 
 // Scale the the hint label down to at most content_suggestions::kHintTextScale.
 - (void)scaleHintLabelForPercent:(CGFloat)percent {

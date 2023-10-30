@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,14 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/chrome/browser/ui/badges/badge_consumer.h"
+#import "ios/chrome/browser/ui/commands/omnibox_commands.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_ui_element.h"
-#import "ios/chrome/browser/ui/location_bar/location_bar_consumer.h"
 #import "ios/chrome/browser/ui/orchestrator/location_bar_animatee.h"
 
 @class InfobarMetricsRecorder;
 @class OmniboxTextFieldIOS;
 @protocol ActivityServiceCommands;
 @protocol ApplicationCommands;
-@protocol BrowserCommands;
-@protocol InfobarCommands;
 @protocol LocationBarOffsetProvider;
 @protocol LoadQueryCommands;
 
@@ -29,6 +27,22 @@
 // Notifies the delegate about a tap on the Copy entry in the editing menu.
 - (void)locationBarCopyTapped;
 
+// Returns the target that location bar scribble events should be forwarded to.
+- (UIResponder<UITextInput>*)omniboxScribbleForwardingTarget;
+
+// Request the scribble target to be focused.
+- (void)locationBarRequestScribbleTargetFocus;
+
+// Notifies the delegate about a tap on the share button to record metrics.
+- (void)recordShareButtonPressed;
+
+// Notifies the delegate about a tap on the Visit Copied Link context menu
+// action.
+- (void)locationBarVisitCopyLinkTapped;
+
+// Starts a reverse image search for the image currently in the pasteboard.
+- (void)searchCopiedImage;
+
 @end
 
 // The view controller displaying the location bar. Manages the two states of
@@ -36,20 +50,23 @@
 // the omnibox textfield is displayed; in the non-editing state, the current
 // location is displayed.
 @interface LocationBarViewController
-    : UIViewController <BadgeConsumer, FullscreenUIElement, LocationBarAnimatee>
+    : UIViewController <FullscreenUIElement, LocationBarAnimatee>
 
 // Sets the edit view to use in the editing state. This must be set before the
 // view of this view controller is initialized. This must only be called once.
 - (void)setEditView:(UIView*)editView;
+
+// Sets the badge view to display badges. This must be set before the
+// view of this view controller is initialized. This must only be called once.
+- (void)setBadgeView:(UIView*)badgeView;
 
 @property(nonatomic, assign) BOOL incognito;
 
 // The dispatcher for the share button, voice search, and long press actions.
 @property(nonatomic, weak) id<ActivityServiceCommands,
                               ApplicationCommands,
-                              BrowserCommands,
-                              InfobarCommands,
-                              LoadQueryCommands>
+                              LoadQueryCommands,
+                              OmniboxCommands>
     dispatcher;
 
 // Delegate for this location bar view controller.
@@ -63,30 +80,20 @@
 // - non-editing state, with location icon and text.
 - (void)switchToEditing:(BOOL)editing;
 
-// Updates the location icon to become |icon| and use the new |statusText| for
+// Updates the location icon to become `icon` and use the new `statusText` for
 // a11y labeling.
 - (void)updateLocationIcon:(UIImage*)icon
         securityStatusText:(NSString*)statusText;
 // Updates the location text in the non-editing mode.
-// |clipTail| indicates whether the tail or the head should be clipped when the
+// `clipTail` indicates whether the tail or the head should be clipped when the
 // location text is too long.
 - (void)updateLocationText:(NSString*)text clipTail:(BOOL)clipTail;
 // Updates the location view to show a fake placeholder in the steady location
-// view and hides the trailing button if |isNTP|. Otherwise, shows the
+// view and hides the trailing button if `isNTP`. Otherwise, shows the
 // location text and the button as normal.
 - (void)updateForNTP:(BOOL)isNTP;
-// Sets |enabled| of the share button.
+// Sets `enabled` of the share button.
 - (void)setShareButtonEnabled:(BOOL)enabled;
-// Displays or hides the InfobarButton. |metricsRecorder| can be nil.
-// TODO(crbug.com/935804): This method is currently only being used in the
-// Infobar redesign.
-- (void)displayInfobarButton:(BOOL)display
-             metricsRecorder:(InfobarMetricsRecorder*)metricsRecorder;
-// If |active| is YES applies the active styling to the InfobarButton, if NO it
-// removes it.
-// TODO(crbug.com/935804): This method is currently only being used in the
-// Infobar redesign.
-- (void)setInfobarButtonStyleActive:(BOOL)active;
 
 // Displays the voice search button instead of the share button in steady state,
 // and adds the voice search button to the empty textfield.

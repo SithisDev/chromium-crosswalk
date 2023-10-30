@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,7 @@
 
 #include <memory>
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 namespace ntp_tiles {
 class MostVisitedSites;
@@ -18,7 +16,7 @@ class MostVisitedSites;
 class IOSMostVisitedSitesFactory {
  public:
   static std::unique_ptr<ntp_tiles::MostVisitedSites> NewForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
 };
 
 #endif  // IOS_CHROME_BROWSER_NTP_TILES_IOS_MOST_VISITED_SITES_FACTORY_H_

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/util/accessibility_close_menu_button.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -59,6 +59,10 @@ const CGFloat kContainerCornerRadius = 13.0;
 }
 
 - (void)presentationTransitionWillBegin {
+  // Set the identity chooser view as modal, so controls beneath it are
+  // non-selectable.
+  self.containerView.accessibilityViewIsModal = YES;
+
   self.closeButton =
       [AccessibilityCloseMenuButton buttonWithType:UIButtonTypeCustom];
   [self.closeButton addTarget:self

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,11 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel_factory.h"
@@ -23,6 +24,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/message_filter.h"
 #include "ipc/message_filter_router.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 
 namespace IPC {
 
@@ -44,9 +46,7 @@ ChannelProxy::Context::Context(
   // need to either:
   // 1) Create the ChannelProxy on a different thread, or
   // 2) Just use Channel
-  // Note, we currently make an exception for a NULL listener. That usage
-  // basically works, but is outside the intent of ChannelProxy. This support
-  // will disappear, so please don't rely on it. See crbug.com/364241
+  // We make an exception for NULL listeners.
   DCHECK(!listener ||
          (ipc_task_runner_.get() != default_listener_task_runner_.get()));
 }
@@ -54,12 +54,12 @@ ChannelProxy::Context::Context(
 ChannelProxy::Context::~Context() = default;
 
 void ChannelProxy::Context::ClearIPCTaskRunner() {
-  ipc_task_runner_ = NULL;
+  ipc_task_runner_.reset();
 }
 
 void ChannelProxy::Context::CreateChannel(
     std::unique_ptr<ChannelFactory> factory) {
-  base::AutoLock l(channel_lifetime_lock_);
+  base::AutoLock channel_lock(channel_lifetime_lock_);
   DCHECK(!channel_);
   DCHECK_EQ(factory->GetIPCTaskRunner(), ipc_task_runner_);
   channel_ = factory->BuildChannel(this);
@@ -69,7 +69,7 @@ void ChannelProxy::Context::CreateChannel(
   if (support) {
     thread_safe_channel_ = support->CreateThreadSafeChannel();
 
-    base::AutoLock l(pending_filters_lock_);
+    base::AutoLock filter_lock(pending_filters_lock_);
     for (auto& entry : pending_io_thread_interfaces_)
       support->AddGenericAssociatedInterface(entry.first, entry.second);
     pending_io_thread_interfaces_.clear();
@@ -173,7 +173,7 @@ void ChannelProxy::Context::OnAssociatedInterfaceRequest(
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnChannelOpened() {
-  DCHECK(channel_ != NULL);
+  DCHECK(channel_);
 
   // Assume a reference to ourselves on behalf of this thread.  This reference
   // will be released when we are closed.
@@ -219,11 +219,14 @@ void ChannelProxy::Context::OnChannelClosed() {
 }
 
 void ChannelProxy::Context::Clear() {
-  listener_ = NULL;
+  listener_ = nullptr;
 }
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnSendMessage(std::unique_ptr<Message> message) {
+  if (quota_checker_)
+    quota_checker_->AfterMessagesDequeued(1);
+
   if (!channel_) {
     OnChannelClosed();
     return;
@@ -406,9 +409,9 @@ void ChannelProxy::Context::ClearChannel() {
 void ChannelProxy::Context::AddGenericAssociatedInterfaceForIOThread(
     const std::string& name,
     const GenericAssociatedInterfaceFactory& factory) {
-  base::AutoLock l(channel_lifetime_lock_);
+  base::AutoLock channel_lock(channel_lifetime_lock_);
   if (!channel_) {
-    base::AutoLock l(pending_filters_lock_);
+    base::AutoLock filter_lock(pending_filters_lock_);
     pending_io_thread_interfaces_.emplace_back(name, factory);
     return;
   }
@@ -419,6 +422,9 @@ void ChannelProxy::Context::AddGenericAssociatedInterfaceForIOThread(
 }
 
 void ChannelProxy::Context::Send(Message* message) {
+  if (quota_checker_)
+    quota_checker_->BeforeMessagesEnqueued(1);
+
   ipc_task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&ChannelProxy::Context::OnSendMessage, this,
                                 base::WrapUnique(message)));
@@ -454,7 +460,7 @@ std::unique_ptr<ChannelProxy> ChannelProxy::Create(
 ChannelProxy::ChannelProxy(Context* context)
     : context_(context), did_init_(false) {
 #if defined(ENABLE_IPC_FUZZER)
-  outgoing_message_filter_ = NULL;
+  outgoing_message_filter_ = nullptr;
 #endif
 }
 
@@ -465,7 +471,7 @@ ChannelProxy::ChannelProxy(
     : context_(new Context(listener, ipc_task_runner, listener_task_runner)),
       did_init_(false) {
 #if defined(ENABLE_IPC_FUZZER)
-  outgoing_message_filter_ = NULL;
+  outgoing_message_filter_ = nullptr;
 #endif
 }
 
@@ -478,7 +484,7 @@ ChannelProxy::~ChannelProxy() {
 void ChannelProxy::Init(const IPC::ChannelHandle& channel_handle,
                         Channel::Mode mode,
                         bool create_pipe_now) {
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   // When we are creating a server on POSIX, we need its file descriptor
   // to be created immediately so that it can be accessed and passed
   // to other processes. Forcing it to be created immediately avoids
@@ -486,7 +492,7 @@ void ChannelProxy::Init(const IPC::ChannelHandle& channel_handle,
   if (mode & Channel::MODE_SERVER_FLAG) {
     create_pipe_now = true;
   }
-#endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
+#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   Init(
       ChannelFactory::Create(channel_handle, mode, context_->ipc_task_runner()),
       create_pipe_now);
@@ -496,6 +502,9 @@ void ChannelProxy::Init(std::unique_ptr<ChannelFactory> factory,
                         bool create_pipe_now) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!did_init_);
+
+  DCHECK(!context_->quota_checker_);
+  context_->quota_checker_ = factory->GetQuotaChecker();
 
   if (create_pipe_now) {
     // Create the channel immediately.  This effectively sets up the
@@ -593,12 +602,10 @@ void ChannelProxy::AddGenericAssociatedInterfaceForIOThread(
   context()->AddGenericAssociatedInterfaceForIOThread(name, factory);
 }
 
-void ChannelProxy::GetGenericRemoteAssociatedInterface(
-    const std::string& name,
-    mojo::ScopedInterfaceEndpointHandle handle) {
+void ChannelProxy::GetRemoteAssociatedInterface(
+    mojo::GenericPendingAssociatedReceiver receiver) {
   DCHECK(did_init_);
-  context()->thread_safe_channel().GetAssociatedInterface(
-      name, mojom::GenericInterfaceAssociatedRequest(std::move(handle)));
+  context()->thread_safe_channel().GetAssociatedInterface(std::move(receiver));
 }
 
 void ChannelProxy::ClearIPCTaskRunner() {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,8 @@
 #include "base/strings/string_piece.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 
-class PrefService;
-
-namespace ios {
 class ChromeBrowserState;
-}
+class PrefService;
 
 // Wrapper around a browsing data volume counter that bridges the update counter
 // UI callback to the UI.
@@ -25,12 +22,16 @@ class BrowsingDataCounterWrapper {
       const browsing_data::BrowsingDataCounter::Result&)>;
 
   // This method returns the counter corresponding to the data type specified by
-  // |pref_name| or null if there is no such counter.
+  // `pref_name` or null if there is no such counter.
   static std::unique_ptr<BrowsingDataCounterWrapper> CreateCounterWrapper(
       base::StringPiece pref_name,
-      ios::ChromeBrowserState* browser_state,
+      ChromeBrowserState* browser_state,
       PrefService* pref_service,
       UpdateUICallback update_ui_callback);
+
+  BrowsingDataCounterWrapper(const BrowsingDataCounterWrapper&) = delete;
+  BrowsingDataCounterWrapper& operator=(const BrowsingDataCounterWrapper&) =
+      delete;
 
   ~BrowsingDataCounterWrapper();
 
@@ -53,8 +54,6 @@ class BrowsingDataCounterWrapper {
   // Callback that updates the UI once the counter result is ready. This is
   // invoked by UpdateWithResult.
   UpdateUICallback update_ui_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowsingDataCounterWrapper);
 };
 
 #endif  // IOS_CHROME_BROWSER_BROWSING_DATA_BROWSING_DATA_COUNTER_WRAPPER_H_

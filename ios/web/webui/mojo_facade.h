@@ -1,22 +1,20 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_WEB_WEBUI_MOJO_FACADE_H_
 #define IOS_WEB_WEBUI_MOJO_FACADE_H_
 
+#include <objc/objc.h>
+
 #include <map>
 #include <memory>
 #include <string>
 
+#include "base/callback.h"
 #include "base/values.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
-
-namespace service_manager {
-namespace mojom {
-class InterfaceProvider;
-}  // mojom
-}  // service_manager
 
 namespace web {
 
@@ -27,10 +25,9 @@ class WebState;
 // destroyed on UI thread.
 class MojoFacade {
  public:
-  // Constructs MojoFacade. The calling code must retain the ownership of
-  // |interface_provider| and |web_state|, both can not be null.
-  MojoFacade(service_manager::mojom::InterfaceProvider* interface_provider,
-             WebState* web_state);
+  // Constructs MojoFacade. The calling code must retain ownership of
+  // `web_state`, which cannot be null.
+  explicit MojoFacade(WebState* web_state);
   ~MojoFacade();
 
   // Handles Mojo message received from WebUI page. Returns a valid JSON string
@@ -61,34 +58,35 @@ class MojoFacade {
   MessageNameAndArguments GetMessageNameAndArguments(
       const std::string& mojo_message_as_json);
 
-  // Connects to specified Mojo interface. |args| is a dictionary with the
+  // Connects to specified Mojo interface. `args` is a dictionary with the
   // following keys:
   //   - "interfaceName" (a string representing an interface name);
   //   - "requestHandle" (a number representing MojoHandle of the interface
   //     request).
   void HandleMojoBindInterface(base::Value args);
 
-  // Closes the given handle. |args| is a dictionary which must contain "handle"
+  // Closes the given handle. `args` is a dictionary which must contain "handle"
   // key, which is a number representing a MojoHandle.
   void HandleMojoHandleClose(base::Value args);
 
-  // Creates a Mojo message pipe. |args| is unused.
+  // Creates a Mojo message pipe. `args` is unused.
   // Returns a dictionary with the following keys:
   //   - "result" (a number representing MojoResult);
   //   - "handle0" and "handle1" (the numbers representing two endpoints of the
   //     message pipe).
   base::Value HandleMojoCreateMessagePipe(base::Value args);
 
-  // Writes a message to the message pipe endpoint given by handle. |args| is a
+  // Writes a message to the message pipe endpoint given by handle. `args` is a
   // dictionary which must contain the following keys:
   //   - "handle" (a number representing MojoHandle, the endpoint to write to);
-  //   - "buffer" (a dictionary representing the message data; may be empty);
+  //   - "buffer" (a base-64 string representing the message data; may be
+  //   empty);
   //   - "handles" (an array representing any handles to attach; handles are
   //     transferred and will no longer be valid; may be empty);
   // Returns MojoResult as a number.
   base::Value HandleMojoHandleWriteMessage(base::Value args);
 
-  // Reads a message from the message pipe endpoint given by handle. |args| is
+  // Reads a message from the message pipe endpoint given by handle. `args` is
   // a dictionary which must contain the keys "handle" (a number representing
   // MojoHandle, the endpoint to read from).
   // Returns a dictionary with the following keys:
@@ -99,7 +97,7 @@ class MojoFacade {
   base::Value HandleMojoHandleReadMessage(base::Value args);
 
   // Begins watching a handle for signals to be satisfied or unsatisfiable.
-  // |args| is a dictionary which must contain the following keys:
+  // `args` is a dictionary which must contain the following keys:
   //   - "handle" (a number representing a MojoHandle);
   //   - "signals" (a number representing MojoHandleSignals to watch);
   //   - "callbackId" (a number representing the id which should be passed to
@@ -107,16 +105,13 @@ class MojoFacade {
   // Returns watch id as a number.
   base::Value HandleMojoHandleWatch(base::Value args);
 
-  // Cancels a handle watch initiated by "MojoHandle.watch". |args| is a
+  // Cancels a handle watch initiated by "MojoHandle.watch". `args` is a
   // dictionary which must contain "watchId" key (a number representing id
   // returned from "MojoHandle.watch").
   void HandleMojoWatcherCancel(base::Value args);
 
-  // Provides interfaces.
-  service_manager::mojom::InterfaceProvider* interface_provider_;
   // Runs JavaScript on WebUI page.
   WebState* web_state_ = nil;
-  //  __weak id<CRWJSInjectionEvaluator> script_evaluator_ = nil;
   // Id of the last created watch.
   int last_watch_id_ = 0;
   // Currently active watches created through this facade.

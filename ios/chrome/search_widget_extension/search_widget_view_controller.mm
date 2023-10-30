@@ -1,18 +1,20 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/search_widget_extension/search_widget_view_controller.h"
 
-#include "base/mac/foundation_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/open_from_clipboard/clipboard_recent_content_impl_ios.h"
-#include "ios/chrome/common/app_group/app_group_command.h"
-#include "ios/chrome/common/app_group/app_group_constants.h"
-#include "ios/chrome/common/app_group/app_group_field_trial_version.h"
-#include "ios/chrome/common/app_group/app_group_metrics.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#import "ios/chrome/common/ui_util/image_util.h"
+#import "base/mac/foundation_util.h"
+#import "base/notreached.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/open_from_clipboard/clipboard_recent_content_impl_ios.h"
+#import "ios/chrome/common/app_group/app_group_command.h"
+#import "ios/chrome/common/app_group/app_group_constants.h"
+#import "ios/chrome/common/app_group/app_group_field_trial_version.h"
+#import "ios/chrome/common/app_group/app_group_metrics.h"
+#import "ios/chrome/common/crash_report/crash_helper.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/image_util.h"
 #import "ios/chrome/search_widget_extension/copied_content_view.h"
 #import "ios/chrome/search_widget_extension/search_widget_view.h"
 
@@ -22,20 +24,25 @@
 
 @interface SearchWidgetViewController ()<SearchWidgetViewActionTarget>
 @property(nonatomic, weak) SearchWidgetView* widgetView;
-@property(nonatomic, strong, nullable) NSString* copiedText;
-@property(nonatomic, strong, nullable) UIImage* copiedImage;
 @property(nonatomic) CopiedContentType copiedContentType;
 @property(nonatomic, strong)
     ClipboardRecentContentImplIOS* clipboardRecentContent;
 @property(nonatomic, copy, nullable) NSDictionary* fieldTrialValues;
 // Whether the current default search engine supports search by image
 @property(nonatomic, assign) BOOL supportsSearchByImage;
-@property(nonatomic, readonly) BOOL copiedContentBehaviorEnabled;
 @property(nonatomic, strong) AppGroupCommand* command;
 
 @end
 
 @implementation SearchWidgetViewController
+
++ (void)initialize {
+  if (self == [SearchWidgetViewController self]) {
+    if (crash_helper::common::CanUseCrashpad()) {
+      crash_helper::common::StartCrashpad();
+    }
+  }
+}
 
 - (instancetype)init {
   self = [super init];
@@ -87,7 +94,7 @@
   [self registerWidgetDisplay];
   [self updateWidget];
 
-  // |widgetActiveDisplayMode| does not contain a valid value in viewDidLoad. By
+  // `widgetActiveDisplayMode` does not contain a valid value in viewDidLoad. By
   // the time viewWillAppear is called, it is correct, so set the mode here.
   BOOL initiallyCompact = [self.extensionContext widgetActiveDisplayMode] ==
                           NCWidgetDisplayModeCompact;
@@ -96,16 +103,28 @@
 
 - (void)widgetPerformUpdateWithCompletionHandler:
     (void (^)(NCUpdateResult))completionHandler {
-  completionHandler([self updateWidget] ? NCUpdateResultNewData
-                                        : NCUpdateResultNoData);
+  [self updateWidgetWithCompletionHandler:^(BOOL updates) {
+    completionHandler(updates ? NCUpdateResultNewData : NCUpdateResultNoData);
+  }];
 }
 
-// Updates the widget with latest data from the clipboard. Returns whether any
-// visual updates occurred.
-- (BOOL)updateWidget {
+- (void)updateWidget {
+  [self updateWidgetWithCompletionHandler:^(BOOL updates) {
+    if (updates && self.extensionContext.widgetActiveDisplayMode ==
+                       NCWidgetDisplayModeExpanded) {
+      CGSize maxSize = [self.extensionContext
+          widgetMaximumSizeForDisplayMode:NCWidgetDisplayModeExpanded];
+      self.preferredContentSize =
+          CGSizeMake(maxSize.width, [self.widgetView widgetHeight]);
+    }
+  }];
+}
+
+// Updates the widget with latest data from the clipboard. Calls completion
+// handler with whether any updates occured..
+- (void)updateWidgetWithCompletionHandler:(void (^)(BOOL))completionHandler {
   NSUserDefaults* sharedDefaults = app_group::GetGroupUserDefaults();
-  NSString* fieldTrialKey =
-      base::SysUTF8ToNSString(app_group::kChromeExtensionFieldTrialPreference);
+  NSString* fieldTrialKey = app_group::kChromeExtensionFieldTrialPreference;
   self.fieldTrialValues = [sharedDefaults dictionaryForKey:fieldTrialKey];
 
   NSString* supportsSearchByImageKey =
@@ -113,45 +132,25 @@
   self.supportsSearchByImage =
       [sharedDefaults boolForKey:supportsSearchByImageKey];
 
-  NSString* copiedText;
-  UIImage* copiedImage;
-  CopiedContentType type = CopiedContentTypeNone;
+  NSSet* wantedTypes = [NSSet
+      setWithArray:@[ ContentTypeURL, ContentTypeText, ContentTypeImage ]];
 
-  if (UIImage* image = [self getCopiedImageUsingFlag]) {
-    copiedImage = image;
-    type = CopiedContentTypeImage;
-  } else if (NSURL* url =
-                 [self.clipboardRecentContent recentURLFromClipboard]) {
-    copiedText = url.absoluteString;
-    type = CopiedContentTypeURL;
-  } else if (NSString* text = [self getCopiedTextUsingFlag]) {
-    copiedText = text;
-    type = CopiedContentTypeString;
-  }
-
-  return [self setCopiedContentType:type
-                         copiedText:copiedText
-                        copiedImage:copiedImage];
-}
-
-// Helper method to encapsulate both checking the flag and getting the copied
-// text.
-// TODO(crbug.com/932116): Can be removed when the flag is cleaned up.
-- (NSString*)getCopiedTextUsingFlag {
-  if (!self.copiedContentBehaviorEnabled) {
-    return nil;
-  }
-  return [self.clipboardRecentContent recentTextFromClipboard];
-}
-
-// Helper method to encapsulate both checking the flag and getting the copied
-// image.
-// TODO(crbug.com/932116): Can be removed when the flag is cleaned up.
-- (UIImage*)getCopiedImageUsingFlag {
-  if (!self.copiedContentBehaviorEnabled || !self.supportsSearchByImage) {
-    return nil;
-  }
-  return [self.clipboardRecentContent recentImageFromClipboard];
+  [self.clipboardRecentContent
+      hasContentMatchingTypes:wantedTypes
+            completionHandler:^(NSSet<ContentType>* matchedTypes) {
+              CopiedContentType newType = CopiedContentTypeNone;
+              if (self.supportsSearchByImage &&
+                  [matchedTypes containsObject:ContentTypeImage]) {
+                newType = CopiedContentTypeImage;
+              } else if ([matchedTypes containsObject:ContentTypeURL]) {
+                newType = CopiedContentTypeURL;
+              } else if ([matchedTypes containsObject:ContentTypeText]) {
+                newType = CopiedContentTypeString;
+              }
+              dispatch_async(dispatch_get_main_queue(), ^{
+                completionHandler([self updateCopiedContentType:newType]);
+              });
+            }];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
@@ -211,30 +210,52 @@
 }
 
 - (void)openCopiedContent:(id)sender {
-  DCHECK([self verifyCopiedContentType]);
   switch (self.copiedContentType) {
-    case CopiedContentTypeURL:
-      [self.command prepareToOpenURL:[NSURL URLWithString:self.copiedText]];
+    case CopiedContentTypeURL: {
+      [self.clipboardRecentContent
+          recentURLFromClipboardAsync:^(NSURL* copiedURL) {
+            if (!copiedURL) {
+              return;
+            }
+            [self.command prepareToOpenURL:copiedURL];
+            [self.command executeInApp];
+          }];
       break;
-    case CopiedContentTypeString:
-      [self.command prepareToSearchText:self.copiedText];
+    }
+    case CopiedContentTypeString: {
+      [self.clipboardRecentContent
+          recentTextFromClipboardAsync:^(NSString* copiedText) {
+            if (!copiedText) {
+              return;
+            }
+            [self.command prepareToSearchText:copiedText];
+            [self.command executeInApp];
+          }];
       break;
+    }
     case CopiedContentTypeImage: {
-      // Resize image before converting to NSData so we can store less data.
-      UIImage* resizedImage = ResizeImageForSearchByImage(self.copiedImage);
-      [self.command prepareToSearchImage:resizedImage];
+      [self.clipboardRecentContent
+          recentImageFromClipboardAsync:^(UIImage* copiedImage) {
+            if (!copiedImage) {
+              return;
+            }
+            // Resize image before converting to NSData so we can store less
+            // data.
+            UIImage* resizedImage = ResizeImageForSearchByImage(copiedImage);
+            [self.command prepareToSearchImage:resizedImage];
+            [self.command executeInApp];
+          }];
       break;
     }
     case CopiedContentTypeNone:
       NOTREACHED();
       return;
   }
-  [self.command executeInApp];
 }
 
 #pragma mark - internal
 
-// Opens the main application with the given |command|.
+// Opens the main application with the given `command`.
 - (void)openAppWithCommand:(NSString*)command {
   [self.command prepareWithCommandID:command];
   [self.command executeInApp];
@@ -251,48 +272,15 @@
                       forKey:app_group::kSearchExtensionDisplayCount];
 }
 
-// Sets the copied content type. |copiedText| should be provided if the content
-// type requires textual data, otherwise it should be nil. Likewise,
-// |copiedImage| should be provided if the content type requires image data.
-// Also saves the data and returns YES if the screen needs updating and NO
-// otherwise.
-- (BOOL)setCopiedContentType:(CopiedContentType)type
-                  copiedText:(NSString*)copiedText
-                 copiedImage:(UIImage*)copiedImage {
-  if (self.copiedContentType == type &&
-      [self.copiedText isEqualToString:copiedText] &&
-      [self.copiedImage isEqual:copiedImage]) {
+// Sets the copied content type returns YES if the screen needs updating and NO
+// otherwise. This must only be called on the main thread.
+- (BOOL)updateCopiedContentType:(CopiedContentType)type {
+  if (self.copiedContentType == type) {
     return NO;
   }
   self.copiedContentType = type;
-  self.copiedText = copiedText;
-  self.copiedImage = copiedImage;
-  [self.widgetView setCopiedContentType:self.copiedContentType
-                             copiedText:self.copiedText];
+  [self.widgetView setCopiedContentType:self.copiedContentType];
   return YES;
-}
-
-// Verifies that the current copied content type has the required data with it.
-- (BOOL)verifyCopiedContentType {
-  switch (self.copiedContentType) {
-    case CopiedContentTypeString:
-    case CopiedContentTypeURL:
-      return self.copiedText;
-    case CopiedContentTypeImage:
-      return self.copiedImage;
-    case CopiedContentTypeNone:
-      return true;
-  }
-}
-
-- (BOOL)copiedContentBehaviorEnabled {
-  NSDictionary* storedData = self.fieldTrialValues[@"CopiedContentBehavior"];
-  if (![kCopiedContentBehaviorVersion
-          isEqualToNumber:storedData[kFieldTrialVersionKey]]) {
-    return NO;
-  }
-
-  return [storedData[kFieldTrialValueKey] boolValue];
 }
 
 @end

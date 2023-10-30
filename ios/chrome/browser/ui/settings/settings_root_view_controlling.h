@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,16 @@
 #import <Foundation/Foundation.h>
 
 @protocol ApplicationCommands;
+@protocol BrowserCommands;
+@protocol BrowsingDataCommands;
 
-// TODO(crbug.com/894800): This protocol is added to have a common interface
-// between the SettingsRootViewControllers for table views and collections.
-// Remove it once it is completed.
+// Protocol allowing the dispatcher to be passed to the settings ViewController.
 @protocol SettingsRootViewControlling
 
 // The dispatcher used by this ViewController.
-@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
+@property(nonatomic, weak)
+    id<ApplicationCommands, BrowserCommands, BrowsingDataCommands>
+        dispatcher;
 
 @end
 

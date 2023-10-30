@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@ enum ActivityType {
   NATIVE_TWITTER,
   NATIVE_WEIBO,
   NATIVE_CLIPBOARD,
+  NATIVE_SAVE_IMAGE,
+  NATIVE_PRINT,
   PRINT,
   FIND_IN_PAGE,
   GOOGLE_DRIVE,
@@ -41,22 +43,18 @@ enum ActivityType {
   THIRD_PARTY_POCKET,
   THIRD_PARTY_READABILITY,
   THIRD_PARTY_INSTAPAPER,
-  APPEX_PASSWORD_MANAGEMENT,
   SEND_TAB_TO_SELF,
+  GENERATE_QR_CODE,
   // UNKNOWN must be the last type.
   UNKNOWN,
 };
 
-// Returns the ActivityType enum associated with |activityString|, which is the
-// bundle ID of a iOS App Extension. Returns UNKNOWN if |activityString| does
-// match any known App Extensions. |activityString| must not be nil.
+// Returns the ActivityType enum associated with `activityString`, which is the
+// bundle ID of a iOS App Extension. Returns UNKNOWN if `activityString` does
+// match any known App Extensions. `activityString` must not be nil.
 ActivityType TypeFromString(NSString* activityString);
 
-// Returns the message to present when the activity |type| has completed
-// successfully. Returns nil if no message should be presented.
-NSString* CompletionMessageForActivity(ActivityType type);
-
-// Records the UMA for activity |type|.
+// Records the UMA for activity `type`.
 void RecordMetricForActivity(ActivityType type);
 
 }  // namespace activity_type_util

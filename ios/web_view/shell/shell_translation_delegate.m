@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,12 +29,18 @@
 - (void)translationController:(CWVTranslationController*)controller
     canOfferTranslationFromLanguage:(CWVTranslationLanguage*)pageLanguage
                          toLanguage:(CWVTranslationLanguage*)userLanguage {
+  NSLog(@"%@:%@:%@", NSStringFromSelector(_cmd), pageLanguage, userLanguage);
   __weak ShellTranslationDelegate* weakSelf = self;
 
   self.beforeTranslateActionSheet = [UIAlertController
       alertControllerWithTitle:nil
                        message:@"Pick Translate Action"
                 preferredStyle:UIAlertControllerStyleActionSheet];
+  _beforeTranslateActionSheet.popoverPresentationController.sourceView =
+      [self anyKeyWindow];
+  CGRect bounds = [self anyKeyWindow].bounds;
+  _beforeTranslateActionSheet.popoverPresentationController.sourceRect =
+      CGRectMake(CGRectGetWidth(bounds) / 2, 60, 1, 1);
   UIAlertAction* cancelAction =
       [UIAlertAction actionWithTitle:@"Nope."
                                style:UIAlertActionStyleCancel
@@ -91,10 +97,37 @@
               }];
   [_beforeTranslateActionSheet addAction:neverTranslateAction];
 
-  [[UIApplication sharedApplication].keyWindow.rootViewController
+  [[self anyKeyWindow].rootViewController
       presentViewController:_beforeTranslateActionSheet
                    animated:YES
                  completion:nil];
+}
+
+- (void)translationController:(CWVTranslationController*)controller
+    didStartTranslationFromLanguage:(CWVTranslationLanguage*)sourceLanguage
+                         toLanguage:(CWVTranslationLanguage*)targetLanguage
+                      userInitiated:(BOOL)userInitiated {
+  NSLog(@"%@:%@:%@:%@", NSStringFromSelector(_cmd), sourceLanguage,
+        targetLanguage, @(userInitiated));
+}
+
+- (void)translationController:(CWVTranslationController*)controller
+    didFinishTranslationFromLanguage:(CWVTranslationLanguage*)sourceLanguage
+                          toLanguage:(CWVTranslationLanguage*)targetLanguage
+                               error:(nullable NSError*)error {
+  NSLog(@"%@:%@:%@:%@", NSStringFromSelector(_cmd), sourceLanguage,
+        targetLanguage, error);
+}
+
+#pragma mark - Private
+
+- (UIWindow*)anyKeyWindow {
+  NSArray<UIWindow*>* windows = [UIApplication sharedApplication].windows;
+  for (UIWindow* window in windows) {
+    if (window.isKeyWindow)
+      return window;
+  }
+  return nil;
 }
 
 @end

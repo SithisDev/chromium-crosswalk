@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,18 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "net/base/elements_upload_data_stream.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
-#include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_filter.h"
+#include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory.h"
-#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -44,13 +45,12 @@ namespace net {
 namespace {
 
 const char* kTextHtml = "text/html";
-const char* kTextPlain = "text/plain";
-const char* kAscii = "US-ASCII";
 
 class HeadersURLRequestJob : public URLRequestJob {
  public:
-  HeadersURLRequestJob(URLRequest* request)
-      : URLRequestJob(request, nullptr) {}
+  explicit HeadersURLRequestJob(URLRequest* request) : URLRequestJob(request) {}
+
+  ~HeadersURLRequestJob() override {}
 
   void Start() override {
     // Fills response headers and returns immediately.
@@ -68,7 +68,7 @@ class HeadersURLRequestJob : public URLRequestJob {
     header_string.push_back('\0');
     header_string += std::string("Cache-Control: max-age=600");
     header_string.push_back('\0');
-    if (request()->url().DomainIs("multiplecontenttype")) {
+    if (request()->url().path_piece() == "/multiplecontenttype") {
       header_string += std::string(
           "coNteNt-tYPe: text/plain; charset=iso-8859-4, image/png");
       header_string.push_back('\0');
@@ -91,89 +91,48 @@ class HeadersURLRequestJob : public URLRequestJob {
   }
 
  protected:
-  ~HeadersURLRequestJob() override {}
-
   std::string GetContentTypeValue() const {
-    if (request()->url().DomainIs("badcontenttype"))
+    if (request()->url().path_piece() == "/badcontenttype")
       return "\xff";
     return kTextHtml;
   }
 };
 
-class NetProtocolHandler : public URLRequestJobFactory::ProtocolHandler {
+class NetURLRequestInterceptor : public URLRequestInterceptor {
  public:
-  URLRequestJob* MaybeCreateJob(
-      URLRequest* request,
-      NetworkDelegate* network_delegate) const override {
-    return new HeadersURLRequestJob(request);
+  std::unique_ptr<URLRequestJob> MaybeInterceptRequest(
+      URLRequest* request) const override {
+    return std::make_unique<HeadersURLRequestJob>(request);
   }
 };
 
 class ProtocolHandlerUtilTest : public PlatformTest,
                                 public URLRequest::Delegate {
  public:
-  ProtocolHandlerUtilTest() : request_context_(new TestURLRequestContext) {
-    // Ownership of the protocol handlers is transferred to the factory.
-    job_factory_.SetProtocolHandler("http",
-                                    base::WrapUnique(new NetProtocolHandler));
-    job_factory_.SetProtocolHandler("data",
-                                    base::WrapUnique(new DataProtocolHandler));
-    request_context_->set_job_factory(&job_factory_);
+  ProtocolHandlerUtilTest()
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::IO),
+        request_context_(net::CreateTestURLRequestContextBuilder()->Build()) {
+    URLRequestFilter::GetInstance()->AddHostnameInterceptor(
+        "http", "foo.test", std::make_unique<NetURLRequestInterceptor>());
   }
 
-  NSURLResponse* BuildDataURLResponse(const std::string& mime_type,
-                                      const std::string& encoding,
-                                      const std::string& content) {
-    // Build an URL in the form "data:<mime_type>;charset=<encoding>,<content>"
-    // The ';' is removed if mime_type or charset is empty.
-    std::string url_string = std::string("data:") + mime_type;
-    if (!encoding.empty())
-      url_string += ";charset=" + encoding;
-    url_string += ",";
-    GURL url(url_string);
-
-    std::unique_ptr<URLRequest> request(
-        request_context_->CreateRequest(url, DEFAULT_PRIORITY, this));
-    request->Start();
-    base::RunLoop loop;
-    loop.RunUntilIdle();
-    return GetNSURLResponseForRequest(request.get());
-  }
-
-  void CheckDataResponse(NSURLResponse* response,
-                         const std::string& mime_type,
-                         const std::string& encoding) {
-    EXPECT_NSEQ(base::SysUTF8ToNSString(mime_type), [response MIMEType]);
-    EXPECT_NSEQ(base::SysUTF8ToNSString(encoding), [response textEncodingName]);
-    // The response class must be NSURLResponse (and not NSHTTPURLResponse) when
-    // the scheme is "data".
-    EXPECT_TRUE([response isMemberOfClass:[NSURLResponse class]]);
+  ~ProtocolHandlerUtilTest() override {
+    URLRequestFilter::GetInstance()->ClearHandlers();
   }
 
   void OnResponseStarted(URLRequest* request, int net_error) override {}
   void OnReadCompleted(URLRequest* request, int bytes_read) override {}
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  URLRequestJobFactoryImpl job_factory_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<URLRequestContext> request_context_;
 };
 
 }  // namespace
 
-TEST_F(ProtocolHandlerUtilTest, GetResponseDataSchemeTest) {
-  NSURLResponse* response;
-  // MIME type and charset are correctly carried over.
-  response = BuildDataURLResponse("?mime=type'", "$(charset-*", "content");
-  CheckDataResponse(response, "?mime=type'", "$(charset-*");
-  // Missing values are treated as default values.
-  response = BuildDataURLResponse("", "", "content");
-  CheckDataResponse(response, kTextPlain, kAscii);
-}
-
 TEST_F(ProtocolHandlerUtilTest, GetResponseHttpTest) {
   // Create a request.
-  GURL url(std::string("http://url"));
+  GURL url("http://foo.test/");
   std::unique_ptr<URLRequest> request(
       request_context_->CreateRequest(url, DEFAULT_PRIORITY, this));
   request->Start();
@@ -198,9 +157,9 @@ TEST_F(ProtocolHandlerUtilTest, GetResponseHttpTest) {
 }
 
 TEST_F(ProtocolHandlerUtilTest, BadHttpContentType) {
-  // Create a request using the magic domain that triggers a garbage
+  // Create a request using the magic path that triggers a garbage
   // content-type in the test framework.
-  GURL url(std::string("http://badcontenttype"));
+  GURL url("http://foo.test/badcontenttype");
   std::unique_ptr<URLRequest> request(
       request_context_->CreateRequest(url, DEFAULT_PRIORITY, this));
   request->Start();
@@ -214,9 +173,9 @@ TEST_F(ProtocolHandlerUtilTest, BadHttpContentType) {
 }
 
 TEST_F(ProtocolHandlerUtilTest, MultipleHttpContentType) {
-  // Create a request using the magic domain that triggers a garbage
+  // Create a request using the magic path that triggers a garbage
   // content-type in the test framework.
-  GURL url(std::string("http://multiplecontenttype"));
+  GURL url("http://foo.test/multiplecontenttype");
   std::unique_ptr<URLRequest> request(
       request_context_->CreateRequest(url, DEFAULT_PRIORITY, this));
   request->Start();
@@ -231,7 +190,7 @@ TEST_F(ProtocolHandlerUtilTest, MultipleHttpContentType) {
 }
 
 TEST_F(ProtocolHandlerUtilTest, CopyHttpHeaders) {
-  GURL url(std::string("http://url"));
+  GURL url("http://foo.test/");
   NSMutableURLRequest* in_request =
       [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)];
   [in_request setAllHTTPHeaderFields:@{
@@ -246,7 +205,6 @@ TEST_F(ProtocolHandlerUtilTest, CopyHttpHeaders) {
 
   EXPECT_EQ("referrer", out_request->referrer());
   const HttpRequestHeaders& headers = out_request->extra_request_headers();
-  EXPECT_FALSE(headers.HasHeader("User-Agent"));    // User agent is not copied.
   EXPECT_FALSE(headers.HasHeader("Content-Type"));  // Only in POST requests.
   std::string header;
   EXPECT_TRUE(headers.GetHeader("Accept", &header));
@@ -256,7 +214,7 @@ TEST_F(ProtocolHandlerUtilTest, CopyHttpHeaders) {
 }
 
 TEST_F(ProtocolHandlerUtilTest, AddMissingHeaders) {
-  GURL url(std::string("http://url"));
+  GURL url("http://foo.test/");
   NSMutableURLRequest* in_request =
       [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)];
   std::unique_ptr<URLRequest> out_request(

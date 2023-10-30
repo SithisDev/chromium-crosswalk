@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,31 +9,39 @@
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_controller.h"
 #include "ui/base/window_open_disposition.h"
 
-namespace ios {
-class ChromeBrowserState;
-}
+class Browser;
 enum class UrlLoadStrategy;
-class WebStateList;
+
+namespace synced_sessions {
+class DistantSession;
+}
 
 @protocol ApplicationCommands;
+@protocol RecentTabsMenuProvider;
 @protocol RecentTabsTableViewControllerDelegate;
 @protocol RecentTabsPresentationDelegate;
 @protocol TableViewFaviconDataSource;
 
 @interface RecentTabsTableViewController
-    : ChromeTableViewController<RecentTabsConsumer>
-// The coordinator's BrowserState.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-// The dispatcher used by this ViewController.
-@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
+    : ChromeTableViewController <RecentTabsConsumer,
+                                 UIAdaptivePresentationControllerDelegate>
+// The Browser for the tabs being restored. It's an error to pass a nullptr
+// Browser.
+@property(nonatomic, assign) Browser* browser;
+// The command handler used by this ViewController.
+@property(nonatomic, weak) id<ApplicationCommands> handler;
 // Opaque instructions on how to open urls.
 @property(nonatomic) UrlLoadStrategy loadStrategy;
 // Disposition for tabs restored by this object. Defaults to CURRENT_TAB.
 @property(nonatomic, assign) WindowOpenDisposition restoredTabDisposition;
 // RecentTabsTableViewControllerDelegate delegate.
 @property(nonatomic, weak) id<RecentTabsTableViewControllerDelegate> delegate;
-// WebStateList for tabs restored by this object.
-@property(nonatomic, assign) WebStateList* webStateList;
+// Whether the updates of the RecentTabs should be ignored. Setting this to NO
+// would trigger a reload of the TableView.
+@property(nonatomic, assign) BOOL preventUpdates;
+// Search term for filtering displayed items to those which match `searchTerm`.
+// Setting as null clears any search results and resets to showing all tabs.
+@property(nonatomic, copy) NSString* searchTerms;
 
 // Delegate to present the tab UI.
 @property(nonatomic, weak) id<RecentTabsPresentationDelegate>
@@ -42,12 +50,23 @@ class WebStateList;
 // Data source for images.
 @property(nonatomic, weak) id<TableViewFaviconDataSource> imageDataSource;
 
+// Provider of menu configurations for the recentTabs component.
+@property(nonatomic, weak) id<RecentTabsMenuProvider> menuProvider;
+
+// Multi-window session for this vc's recent tabs.
+@property(nonatomic, assign) UISceneSession* session;
+
 // Initializers.
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithTableViewStyle:(UITableViewStyle)style
-                           appBarStyle:
-                               (ChromeTableViewControllerStyle)appBarStyle
-    NS_UNAVAILABLE;
+- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
+
+// Returns Sessions corresponding to the given `sectionIdentifier`.
+- (synced_sessions::DistantSession const*)sessionForTableSectionWithIdentifier:
+    (NSInteger)sectionIdentifer;
+
+// Hides Sessions corresponding to the given the table view's
+// `sectionIdentifier`.
+- (void)removeSessionAtTableSectionWithIdentifier:(NSInteger)sectionIdentifier;
 
 @end
 

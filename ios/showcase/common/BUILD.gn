@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,9 +9,7 @@ source_set("common") {
     "protocol_alerter.h",
     "protocol_alerter.mm",
   ]
-  deps = [
-    "//base",
-  ]
-  libs = [ "UIKit.framework" ]
+  deps = [ "//base" ]
+  frameworks = [ "UIKit.framework" ]
   configs += [ "//build/config/compiler:enable_arc" ]
 }

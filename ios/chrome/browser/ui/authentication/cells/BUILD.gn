@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,10 +7,6 @@ import("//build/config/chrome_build.gni")
 source_set("cells") {
   configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
-    "account_control_item.h",
-    "account_control_item.mm",
-    "legacy_account_control_item.h",
-    "legacy_account_control_item.mm",
     "signin_promo_view.h",
     "signin_promo_view.mm",
     "signin_promo_view_configurator.h",
@@ -19,35 +15,45 @@ source_set("cells") {
     "signin_promo_view_delegate.h",
     "table_view_account_item.h",
     "table_view_account_item.mm",
+    "table_view_identity_cell.h",
+    "table_view_identity_cell.mm",
+    "table_view_identity_item.h",
+    "table_view_identity_item.mm",
     "table_view_signin_promo_item.h",
     "table_view_signin_promo_item.mm",
   ]
   deps = [
     "//base",
-    "//components/unified_consent",
+    "//build:branding_buildflags",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser",
+    "//ios/chrome/browser/signin:constants",
+    "//ios/chrome/browser/signin:signin_util",
+    "//ios/chrome/browser/ui:feature_flags",
+    "//ios/chrome/browser/ui/authentication/views",
     "//ios/chrome/browser/ui/collection_view/cells",
-    "//ios/chrome/browser/ui/colors",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/settings/cells:public",
     "//ios/chrome/browser/ui/table_view:styler",
-    "//ios/chrome/browser/ui/table_view/cells",
-    "//ios/chrome/common/colors",
-    "//ios/chrome/common/ui_util",
-    "//ios/public/provider/chrome/browser",
-    "//ios/public/provider/chrome/browser/signin",
+    "//ios/chrome/common/ui/colors",
+    "//ios/chrome/common/ui/table_view:cells_constants",
+    "//ios/chrome/common/ui/util",
+    "//ios/chrome/common/ui/util:image_util",
+    "//ios/public/provider/chrome/browser/signin:signin_resources_api",
     "//ui/base",
   ]
-  libs = [ "UIKit.framework" ]
+  public_deps = [
+    ":constants",
+    "//ios/chrome/browser/ui/authentication/views:views_constants",
+    "//ios/chrome/browser/ui/table_view/cells",
+  ]
+  frameworks = [ "UIKit.framework" ]
 }
 
 source_set("unit_tests") {
   configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
-    "account_control_item_unittest.mm",
-    "legacy_account_control_item_unittest.mm",
     "signin_promo_view_unittest.mm",
     "table_view_account_item_unittest.mm",
   ]
@@ -60,8 +66,6 @@ source_set("unit_tests") {
     "//components/pref_registry",
     "//components/sync_preferences",
     "//components/sync_preferences:test_support",
-    "//components/unified_consent",
-    "//components/unified_consent:test_support",
     "//components/version_info",
     "//ios/chrome/app/strings:ios_chromium_strings_grit",
     "//ios/chrome/app/strings:ios_strings_grit",
@@ -73,14 +77,14 @@ source_set("unit_tests") {
     "//ios/chrome/browser/signin:test_support",
     "//ios/chrome/browser/sync",
     "//ios/chrome/browser/ui:feature_flags",
-    "//ios/chrome/browser/ui/colors",
     "//ios/chrome/browser/ui/commands",
-    "//ios/chrome/browser/ui/signin_interaction/public",
     "//ios/chrome/browser/ui/table_view:styler",
     "//ios/chrome/browser/ui/table_view/cells",
-    "//ios/chrome/browser/unified_consent",
-    "//ios/chrome/common/colors",
+    "//ios/chrome/common/ui/colors",
+    "//ios/chrome/common/ui/util:image_util",
     "//ios/chrome/test:test_support",
+    "//ios/public/provider/chrome/browser/signin",
+    "//ios/public/provider/chrome/browser/signin:signin_resources_api",
     "//ios/public/provider/chrome/browser/signin:test_support",
     "//ios/third_party/material_components_ios",
     "//ios/web/public/test",
@@ -88,4 +92,13 @@ source_set("unit_tests") {
     "//third_party/ocmock",
     "//ui/base",
   ]
+}
+
+source_set("constants") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+  sources = [
+    "signin_promo_view_constants.h",
+    "signin_promo_view_constants.mm",
+  ]
+  frameworks = [ "Foundation.framework" ]
 }

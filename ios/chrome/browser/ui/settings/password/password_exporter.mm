@@ -1,29 +1,32 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/password/password_exporter.h"
 
-#include "base/bind.h"
-#include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
-#include "base/threading/scoped_blocking_call.h"
-#include "components/autofill/core/common/password_form.h"
-#include "components/password_manager/core/browser/export/password_csv_writer.h"
-#include "components/password_manager/core/browser/password_manager_metrics_util.h"
-#include "components/password_manager/core/common/passwords_directory_util_ios.h"
-#include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/settings/password/reauthentication_module.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "base/bind.h"
+#import "base/check.h"
+#import "base/files/file_path.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/notreached.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/task/thread_pool.h"
+#import "base/threading/scoped_blocking_call.h"
+#import "components/password_manager/core/browser/export/password_csv_writer.h"
+#import "components/password_manager/core/browser/password_manager_metrics_util.h"
+#import "components/password_manager/core/browser/ui/credential_ui_entry.h"
+#import "components/password_manager/core/common/passwords_directory_util_ios.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/common/ui/reauthentication/reauthentication_module.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using password_manager::metrics_util::LogPasswordSettingsReauthResult;
+using password_manager::metrics_util::ReauthResult;
 
 namespace {
 
@@ -41,9 +44,9 @@ enum class ReauthenticationStatus {
 @implementation PasswordSerializerBridge
 
 - (void)serializePasswords:
-            (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords
+            (const std::vector<password_manager::CredentialUIEntry>&)passwords
                    handler:(void (^)(std::string))serializedPasswordsHandler {
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&password_manager::PasswordCSVWriter::SerializePasswords,
                      std::move(passwords)),
@@ -77,7 +80,9 @@ enum class ReauthenticationStatus {
 
     BOOL success = [data
         writeToURL:fileURL
-           options:(NSDataWritingAtomic | NSDataWritingFileProtectionComplete)
+           options:
+               (NSDataWritingAtomic |
+                NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication)
              error:&error];
 
     if (!success) {
@@ -89,7 +94,7 @@ enum class ReauthenticationStatus {
     }
     return WriteToURLStatus::SUCCESS;
   };
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(writeToFile), base::BindOnce(handler));
 }
@@ -159,7 +164,7 @@ enum class ReauthenticationStatus {
 }
 
 - (void)startExportFlow:
-    (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords {
+    (const std::vector<password_manager::CredentialUIEntry>&)passwords {
   DCHECK(!passwords.empty());
   DCHECK(self.exportState == ExportState::IDLE);
   if ([_weakReauthenticationModule canAttemptReauth]) {
@@ -183,7 +188,7 @@ enum class ReauthenticationStatus {
 }
 
 - (void)serializePasswords:
-    (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords {
+    (const std::vector<password_manager::CredentialUIEntry>&)passwords {
   self.passwordCount = passwords.size();
 
   __weak PasswordExporter* weakSelf = self;
@@ -205,18 +210,23 @@ enum class ReauthenticationStatus {
 - (void)startReauthentication {
   __weak PasswordExporter* weakSelf = self;
 
-  void (^onReauthenticationFinished)(BOOL) = ^(BOOL success) {
-    PasswordExporter* strongSelf = weakSelf;
-    if (!strongSelf)
-      return;
-    if (success) {
-      strongSelf.reauthenticationStatus = ReauthenticationStatus::SUCCESSFUL;
-      [strongSelf showPreparingPasswordsAlert];
-    } else {
-      strongSelf.reauthenticationStatus = ReauthenticationStatus::FAILED;
-    }
-    [strongSelf tryExporting];
-  };
+  void (^onReauthenticationFinished)(ReauthenticationResult) =
+      ^(ReauthenticationResult result) {
+        DCHECK(result != ReauthenticationResult::kSkipped);
+        PasswordExporter* strongSelf = weakSelf;
+        if (!strongSelf)
+          return;
+        if (result == ReauthenticationResult::kSuccess) {
+          LogPasswordSettingsReauthResult(ReauthResult::kSuccess);
+          strongSelf.reauthenticationStatus =
+              ReauthenticationStatus::SUCCESSFUL;
+          [strongSelf showPreparingPasswordsAlert];
+        } else {
+          LogPasswordSettingsReauthResult(ReauthResult::kFailure);
+          strongSelf.reauthenticationStatus = ReauthenticationStatus::FAILED;
+        }
+        [strongSelf tryExporting];
+      };
 
   [_weakReauthenticationModule
       attemptReauthWithLocalizedReason:l10n_util::GetNSString(
@@ -313,7 +323,7 @@ enum class ReauthenticationStatus {
   NSData* serializedPasswordsData =
       [self.serializedPasswords dataUsingEncoding:NSUTF8StringEncoding];
 
-  // Drop |serializedPasswords| as it is no longer needed.
+  // Drop `serializedPasswords` as it is no longer needed.
   self.serializedPasswords = nil;
 
   [_passwordFileWriter writeData:serializedPasswordsData
@@ -324,7 +334,7 @@ enum class ReauthenticationStatus {
 - (void)deleteTemporaryFile:(NSURL*)passwordsTempFileURL {
   NSURL* uniqueDirectoryURL =
       [passwordsTempFileURL URLByDeletingLastPathComponent];
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(^{
         NSFileManager* fileManager = [NSFileManager defaultManager];

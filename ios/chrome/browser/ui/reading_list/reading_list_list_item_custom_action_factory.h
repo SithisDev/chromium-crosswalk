@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 @protocol ReadingListListItem;
 @protocol ReadingListListItemAccessibilityDelegate;
+@protocol ReadingListListItemFactoryDelegate;
 
 // Factory object that creates arrays of custom accessibility actions for
 // ListItems used by the reading list.
@@ -18,8 +19,12 @@
 @property(nonatomic, weak) id<ReadingListListItemAccessibilityDelegate>
     accessibilityDelegate;
 
+// Delegate for the incognito avaibility.
+@property(nonatomic, weak) id<ReadingListListItemFactoryDelegate>
+    incognitoDelegate;
+
 // Creates an array of custom a11y actions for a reading list cell configured
-// for |item| with |status|.
+// for `item` with `status`.
 - (NSArray<UIAccessibilityCustomAction*>*)customActionsForItem:
     (id<ReadingListListItem>)item;
 

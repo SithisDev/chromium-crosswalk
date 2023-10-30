@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -17,6 +17,7 @@
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -37,22 +38,22 @@ TestPersistentCookieStore::~TestPersistentCookieStore() = default;
 
 void TestPersistentCookieStore::RunLoadedCallback() {
   std::vector<std::unique_ptr<net::CanonicalCookie>> cookies;
-  net::CookieOptions options;
-  options.set_include_httponly();
-
   std::unique_ptr<net::CanonicalCookie> cookie(net::CanonicalCookie::Create(
-      kTestCookieURL, "a=b", base::Time::Now(), options));
+      kTestCookieURL, "a=b", base::Time::Now(), /*server_time=*/absl::nullopt,
+      /*cookie_partition_key=*/absl::nullopt));
   cookies.push_back(std::move(cookie));
 
-  std::unique_ptr<net::CanonicalCookie> bad_canonical_cookie(
-      std::make_unique<net::CanonicalCookie>(
+  std::unique_ptr<net::CanonicalCookie> bad_canonical_cookie =
+      net::CanonicalCookie::CreateUnsafeCookieForTesting(
           "name", "\x81r\xe4\xbd\xa0\xe5\xa5\xbd", "domain", "/path/",
           base::Time(),  // creation
           base::Time(),  // expires
           base::Time(),  // last accessed
+          base::Time(),  // last updated
           false,         // secure
           false,         // httponly
-          net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT));
+          net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT,
+          false /* same_party */);
   cookies.push_back(std::move(bad_canonical_cookie));
   std::move(loaded_callback_).Run(std::move(cookies));
 }
@@ -122,12 +123,11 @@ ScopedTestingCookieStoreIOSClient::~ScopedTestingCookieStoreIOSClient() {
 
 void RecordCookieChanges(std::vector<net::CanonicalCookie>* out_cookies,
                          std::vector<bool>* out_removes,
-                         const net::CanonicalCookie& cookie,
-                         net::CookieChangeCause cause) {
+                         const net::CookieChangeInfo& change) {
   DCHECK(out_cookies);
-  out_cookies->push_back(cookie);
+  out_cookies->push_back(change.cookie);
   if (out_removes)
-    out_removes->push_back(net::CookieChangeCauseIsDeletion(cause));
+    out_removes->push_back(net::CookieChangeCauseIsDeletion(change.cause));
 }
 
 void SetCookie(const std::string& cookie_line,
@@ -135,8 +135,12 @@ void SetCookie(const std::string& cookie_line,
                net::CookieStore* store) {
   net::CookieOptions options;
   options.set_include_httponly();
-  store->SetCookieWithOptionsAsync(url, cookie_line, options,
-                                   base::DoNothing());
+  auto canonical_cookie = net::CanonicalCookie::Create(
+      url, cookie_line, base::Time::Now(), /*server_time=*/absl::nullopt,
+      /*cookie_partition_key=*/absl::nullopt);
+  ASSERT_TRUE(canonical_cookie);
+  store->SetCanonicalCookieAsync(std::move(canonical_cookie), url, options,
+                                 base::DoNothing());
   net::CookieStoreIOS::NotifySystemCookiesChanged();
   // Wait until the flush is posted.
   base::RunLoop().RunUntilIdle();

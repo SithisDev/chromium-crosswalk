@@ -1,28 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/external_files/external_file_remover_impl.h"
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/threading/scoped_blocking_call.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "components/bookmarks/browser/url_and_title.h"
-#include "components/sessions/core/tab_restore_service.h"
-#include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_util.h"
-#include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
-#import "ios/chrome/browser/tabs/tab_model_list.h"
+#import <utility>
+
+#import "base/bind.h"
+#import "base/callback_helpers.h"
+#import "base/logging.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/task/thread_pool.h"
+#import "base/threading/scoped_blocking_call.h"
+#import "components/bookmarks/browser/bookmark_model.h"
+#import "components/bookmarks/browser/url_and_title.h"
+#import "components/sessions/core/tab_restore_service.h"
+#import "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_util.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/main/browser_list.h"
+#import "ios/chrome/browser/main/browser_list_factory.h"
+#import "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#include "ios/web/public/navigation/navigation_item.h"
-#include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/thread/web_thread.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -37,16 +41,16 @@ NSString* const kInboxPath = @"Inbox";
 // Conversion factor to turn number of days to number of seconds.
 const CFTimeInterval kSecondsPerDay = 60 * 60 * 24;
 
-// Empty callback. The closure owned by |closure_runner| will be invoked as
+// Empty callback. The closure owned by `closure_runner` will be invoked as
 // part of the destructor of base::ScopedClosureRunner (which takes care of
 // checking for null closure).
 void RunCallback(base::ScopedClosureRunner closure_runner) {}
 
-NSSet* ComputeReferencedExternalFiles(ios::ChromeBrowserState* browser_state,
-                                      WebStateList* web_state_list) {
+NSSet* ComputeReferencedExternalFiles(Browser* browser) {
   NSMutableSet* referenced_files = [NSMutableSet set];
-  if (!browser_state)
+  if (!browser)
     return referenced_files;
+  WebStateList* web_state_list = browser->GetWebStateList();
   // Check the currently open tabs for external files.
   for (int index = 0; index < web_state_list->count(); ++index) {
     web::WebState* web_state = web_state_list->GetWebStateAt(index);
@@ -55,17 +59,24 @@ NSSet* ComputeReferencedExternalFiles(ios::ChromeBrowserState* browser_state,
       [referenced_files addObject:base::SysUTF8ToNSString(
                                       last_committed_url.ExtractFileName())];
     }
-    web::NavigationItem* pending_item =
-        web_state->GetNavigationManager()->GetPendingItem();
-    if (pending_item && UrlIsExternalFileReference(pending_item->GetURL())) {
-      [referenced_files
-          addObject:base::SysUTF8ToNSString(
-                        pending_item->GetURL().ExtractFileName())];
+
+    // An "unrealized" WebState has no pending load. Checking for realization
+    // before accessing the NavigationManager prevents accidental realization
+    // of the WebState.
+    if (web_state->IsRealized()) {
+      web::NavigationItem* pending_item =
+          web_state->GetNavigationManager()->GetPendingItem();
+      if (pending_item && UrlIsExternalFileReference(pending_item->GetURL())) {
+        [referenced_files
+            addObject:base::SysUTF8ToNSString(
+                          pending_item->GetURL().ExtractFileName())];
+      }
     }
   }
   // Do the same for the recently closed tabs.
   sessions::TabRestoreService* restore_service =
-      IOSChromeTabRestoreServiceFactory::GetForBrowserState(browser_state);
+      IOSChromeTabRestoreServiceFactory::GetForBrowserState(
+          browser->GetBrowserState());
   DCHECK(restore_service);
   for (const auto& entry : restore_service->entries()) {
     sessions::TabRestoreService::Tab* tab =
@@ -95,8 +106,8 @@ NSString* GetInboxDirectoryPath() {
 }
 
 // Removes all the files in the Inbox directory that are not in
-// |files_to_keep| and that are older than |age_in_days| days.
-// |files_to_keep| may be nil if all files should be removed.
+// `files_to_keep` and that are older than `age_in_days` days.
+// `files_to_keep` may be nil if all files should be removed.
 void RemoveFilesWithOptions(NSSet* files_to_keep, NSInteger age_in_days) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::WILL_BLOCK);
@@ -138,7 +149,7 @@ void RemoveFilesWithOptions(NSSet* files_to_keep, NSInteger age_in_days) {
 }  // namespace
 
 ExternalFileRemoverImpl::ExternalFileRemoverImpl(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     sessions::TabRestoreService* tab_restore_service)
     : tab_restore_service_(tab_restore_service),
       browser_state_(browser_state),
@@ -156,7 +167,7 @@ void ExternalFileRemoverImpl::RemoveAfterDelay(base::TimeDelta delay,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::ScopedClosureRunner closure_runner =
       base::ScopedClosureRunner(std::move(callback));
-  bool remove_all_files = delay == base::TimeDelta::FromSeconds(0);
+  bool remove_all_files = delay == base::Seconds(0);
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&ExternalFileRemoverImpl::RemoveFiles,
@@ -220,20 +231,23 @@ void ExternalFileRemoverImpl::RemoveFiles(
   const NSInteger kMinimumAgeInDays = 30;
   NSInteger age_in_days = all_files ? 0 : kMinimumAgeInDays;
 
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&RemoveFilesWithOptions, referenced_files, age_in_days),
-      base::Bind(&RunCallback, base::Passed(&closure_runner)));
+      base::BindOnce(&RunCallback, std::move(closure_runner)));
 }
 
 NSSet* ExternalFileRemoverImpl::GetReferencedExternalFiles() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Add files from all TabModels.
+  // Add files from all Browsers.
   NSMutableSet* referenced_external_files = [NSMutableSet set];
-  for (TabModel* tab_model in TabModelList::GetTabModelsForChromeBrowserState(
-           browser_state_)) {
-    NSSet* files =
-        ComputeReferencedExternalFiles(browser_state_, tab_model.webStateList);
+  BrowserList* browser_list =
+      BrowserListFactory::GetForBrowserState(browser_state_);
+  std::set<Browser*> browsers = browser_state_->IsOffTheRecord()
+                                    ? browser_list->AllIncognitoBrowsers()
+                                    : browser_list->AllRegularBrowsers();
+  for (Browser* browser : browsers) {
+    NSSet* files = ComputeReferencedExternalFiles(browser);
     if (files) {
       [referenced_external_files unionSet:files];
     }

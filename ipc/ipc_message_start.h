@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,62 +13,16 @@
 // for all new work.
 enum IPCMessageStart {
   AutomationMsgStart = 0,
-  FrameMsgStart,
-  PageMsgStart,
-  ViewMsgStart,
-  WidgetMsgStart,
-  InputMsgStart,
   TestMsgStart,
   WorkerMsgStart,
   NaClMsgStart,
-  GpuChannelMsgStart,
-  MediaMsgStart,
   PpapiMsgStart,
-  DOMStorageMsgStart,
-  ResourceMsgStart,
-  BlobMsgStart,
-  MidiMsgStart,
-  ChromeMsgStart,
-  DragMsgStart,
-  PrintMsgStart,
   ExtensionMsgStart,
-  TextInputClientMsgStart,
-  BlinkTestMsgStart,
-  AccessibilityMsgStart,
-  PrerenderMsgStart,
   ChromotingMsgStart,
-  BrowserPluginMsgStart,
-  AndroidWebViewMsgStart,
-  MediaPlayerMsgStart,
-  TracingMsgStart,
-  PeerConnectionTrackerMsgStart,
-  WebRtcLoggingMsgStart,
-  TtsMsgStart,
   NaClHostMsgStart,
   EncryptedMediaMsgStart,
-  CastMsgStart,
-  ChromeExtensionMsgStart,
   GinJavaBridgeMsgStart,
-  ChromeUtilityPrintingMsgStart,
-  OzoneGpuMsgStart,
-  WebTestMsgStart,
-  NetworkHintsMsgStart,
-  CastMediaMsgStart,
-  SyncCompositorMsgStart,
-  ExtensionsGuestViewMsgStart,
-  GuestViewMsgStart,
-  // Note: CastCryptoMsgStart and CastChannelMsgStart reserved for Chromecast
-  // internal code. Contact gunsch@ before changing/removing.
-  CastCryptoMsgStart,
-  CastChannelMsgStart,
-  IPCTestMsgStart,
-  MediaPlayerDelegateMsgStart,
-  SurfaceViewManagerMsgStart,
   ExtensionWorkerMsgStart,
-  SubresourceFilterMsgStart,
-  ChromeAppsMsgStart,
-  UnfreezableFrameMsgStart,
-  TentaMsgStart, // For tenta extensions
   LastIPCMsgStart  // Must come last.
 };
 

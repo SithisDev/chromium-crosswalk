@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 #import "ios/chrome/browser/ui/fullscreen/test/test_fullscreen_controller.h"
 #import "ios/chrome/browser/ui/fullscreen/test/test_fullscreen_mediator.h"
 #import "ios/web/public/navigation/navigation_item.h"
-#include "ios/web/public/security/ssl_status.h"
+#import "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/test/fakes/fake_navigation_context.h"
-#import "ios/web/public/test/fakes/test_navigation_manager.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
-#include "testing/platform_test.h"
+#import "ios/web/public/test/fakes/fake_navigation_manager.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,9 +26,8 @@ class FullscreenWebStateObserverTest : public PlatformTest {
         controller_(&model_),
         mediator_(&controller_, &model_),
         observer_(&controller_, &model_, &mediator_) {
-    // Set up a TestNavigationManager.
-    std::unique_ptr<web::TestNavigationManager> navigation_manager =
-        std::make_unique<web::TestNavigationManager>();
+    // Set up a FakeNavigationManager.
+    auto navigation_manager = std::make_unique<web::FakeNavigationManager>();
     navigation_manager_ = navigation_manager.get();
     web_state_.SetNavigationManager(std::move(navigation_manager));
     // Begin observing the WebState.
@@ -43,8 +42,8 @@ class FullscreenWebStateObserverTest : public PlatformTest {
   }
 
   FullscreenModel& model() { return model_; }
-  web::TestWebState& web_state() { return web_state_; }
-  web::TestNavigationManager& navigation_manager() {
+  web::FakeWebState& web_state() { return web_state_; }
+  web::FakeNavigationManager& navigation_manager() {
     return *navigation_manager_;
   }
 
@@ -52,8 +51,8 @@ class FullscreenWebStateObserverTest : public PlatformTest {
   FullscreenModel model_;
   TestFullscreenController controller_;
   TestFullscreenMediator mediator_;
-  web::TestWebState web_state_;
-  web::TestNavigationManager* navigation_manager_;
+  web::FakeWebState web_state_;
+  web::FakeNavigationManager* navigation_manager_;
   FullscreenWebStateObserver observer_;
 };
 

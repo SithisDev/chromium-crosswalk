@@ -1,18 +1,19 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/autofill/cells/cvc_item.h"
 
-#include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import "base/feature_list.h"
+#import "build/branding_buildflags.h"
+#import "components/autofill/core/common/autofill_features.h"
+#import "components/grit/components_scaled_resources.h"
+#import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#import "ios/public/provider/chrome/browser/ui/text_field_styling.h"
-#import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/public/provider/chrome/browser/ui_utils/ui_utils_api.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,6 +32,8 @@ const CGFloat kUICVCSpacing = 20;
 const CGFloat kTextFieldHeight = 50;
 // Width of the date text fields.
 const CGFloat kDateTextFieldWidth = 40;
+// Height of the Google pay badge.
+const CGFloat kGooglePayBadgeHeight = 22;
 }
 
 @interface CVCCell ()<UITextFieldDelegate>
@@ -52,8 +55,6 @@ const CGFloat kDateTextFieldWidth = 40;
 @synthesize CVCText = _CVCText;
 @synthesize showDateInput = _showDateInput;
 @synthesize showNewCardButton = _showNewCardButton;
-@synthesize showDateInputError = _showDateInputError;
-@synthesize showCVCInputError = _showCVCInputError;
 @synthesize CVCImageResourceID = _CVCImageResourceID;
 
 - (instancetype)initWithType:(NSInteger)type {
@@ -79,10 +80,6 @@ const CGFloat kDateTextFieldWidth = 40;
 
   cell.CVCContainerLeadingConstraintWithDate.active = self.showDateInput;
   cell.CVCContainerLeadingConstraintWithoutDate.active = !self.showDateInput;
-
-  [cell.monthInput setUseErrorStyling:self.showDateInputError];
-  [cell.yearInput setUseErrorStyling:self.showDateInputError];
-  [cell.CVCInput setUseErrorStyling:self.showDateInputError];
 
   cell.buttonForNewCard.hidden = !self.showNewCardButton;
 
@@ -114,17 +111,30 @@ const CGFloat kDateTextFieldWidth = 40;
     UIView* contentView = self.contentView;
 
     _instructionsTextLabel = [[UILabel alloc] init];
-    _instructionsTextLabel.font =
-        [[MDCTypography fontLoader] mediumFontOfSize:14];
-    _instructionsTextLabel.textColor = [[MDCPalette greyPalette] tint500];
+    _instructionsTextLabel.font = [UIFont systemFontOfSize:14
+                                                    weight:UIFontWeightMedium];
+    _instructionsTextLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
     _instructionsTextLabel.numberOfLines = 0;
     _instructionsTextLabel.lineBreakMode = NSLineBreakByWordWrapping;
     _instructionsTextLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:_instructionsTextLabel];
 
+    UIImageView* googlePayBadge = [[UIImageView alloc] init];
+    googlePayBadge.translatesAutoresizingMaskIntoConstraints = NO;
+    googlePayBadge.contentMode = UIViewContentModeScaleAspectFit;
+    googlePayBadge.image = NativeImage(IDR_AUTOFILL_GOOGLE_PAY);
+// IDR_AUTOFILL_GOOGLE_PAY_DARK only exists in official builds.
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+    if (UITraitCollection.currentTraitCollection.userInterfaceStyle ==
+        UIUserInterfaceStyleDark) {
+      googlePayBadge.image = NativeImage(IDR_AUTOFILL_GOOGLE_PAY_DARK);
+    }
+#endif
+    [contentView addSubview:googlePayBadge];
+
     _errorLabel = [[UILabel alloc] init];
-    _errorLabel.font = [[MDCTypography fontLoader] regularFontOfSize:12];
-    _errorLabel.textColor = [[MDCPalette cr_redPalette] tint500];
+    _errorLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    _errorLabel.textColor = [UIColor colorNamed:kRedColor];
     _errorLabel.numberOfLines = 0;
     _errorLabel.lineBreakMode = NSLineBreakByWordWrapping;
     _errorLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -134,8 +144,7 @@ const CGFloat kDateTextFieldWidth = 40;
     _dateContainerView.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:_dateContainerView];
 
-    _monthInput =
-        ios::GetChromeBrowserProvider()->CreateStyledTextField(CGRectZero);
+    _monthInput = ios::provider::CreateStyledTextField();
     _monthInput.placeholder = l10n_util::GetNSString(
         IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_EXPIRY_MONTH);
     _monthInput.accessibilityIdentifier = @"month_textField";
@@ -150,8 +159,7 @@ const CGFloat kDateTextFieldWidth = 40;
     _dateSeparator.translatesAutoresizingMaskIntoConstraints = NO;
     [_dateContainerView addSubview:_dateSeparator];
 
-    _yearInput =
-        ios::GetChromeBrowserProvider()->CreateStyledTextField(CGRectZero);
+    _yearInput = ios::provider::CreateStyledTextField();
     _yearInput.placeholder =
         l10n_util::GetNSString(IDS_IOS_AUTOFILL_DIALOG_PLACEHOLDER_EXPIRY_YEAR);
     _yearInput.accessibilityIdentifier = @"year_textField";
@@ -164,8 +172,8 @@ const CGFloat kDateTextFieldWidth = 40;
     _CVCContainerView.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:_CVCContainerView];
 
-    _CVCInput =
-        ios::GetChromeBrowserProvider()->CreateStyledTextField(CGRectZero);
+    _CVCInput = ios::provider::CreateStyledTextField();
+    _CVCInput.textColor = [UIColor colorNamed:kTextPrimaryColor];
     _CVCInput.placeholder =
         l10n_util::GetNSString(IDS_AUTOFILL_DIALOG_PLACEHOLDER_CVC);
     _CVCInput.accessibilityIdentifier = @"CVC_textField";
@@ -180,11 +188,11 @@ const CGFloat kDateTextFieldWidth = 40;
 
     _buttonForNewCard = [UIButton buttonWithType:UIButtonTypeCustom];
     _buttonForNewCard.titleLabel.font =
-        [[MDCTypography fontLoader] regularFontOfSize:12];
+        [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
     [_buttonForNewCard
         setTitle:l10n_util::GetNSString(IDS_AUTOFILL_CARD_UNMASK_NEW_CARD_LINK)
         forState:UIControlStateNormal];
-    [_buttonForNewCard setTitleColor:[[MDCPalette cr_bluePalette] tint500]
+    [_buttonForNewCard setTitleColor:[UIColor colorNamed:kBlueColor]
                             forState:UIControlStateNormal];
     _buttonForNewCard.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:_buttonForNewCard];
@@ -201,9 +209,18 @@ const CGFloat kDateTextFieldWidth = 40;
           constraintEqualToAnchor:contentView.trailingAnchor
                          constant:-kHorizontalPadding],
 
+      // Google Pay badge.
+      [googlePayBadge.topAnchor
+          constraintEqualToAnchor:_instructionsTextLabel.bottomAnchor
+                         constant:kUISpacing],
+      [googlePayBadge.leadingAnchor
+          constraintEqualToAnchor:_instructionsTextLabel.leadingAnchor],
+      [googlePayBadge.heightAnchor
+          constraintEqualToConstant:kGooglePayBadgeHeight],
+
       // Date container
       [_dateContainerView.topAnchor
-          constraintEqualToAnchor:_instructionsTextLabel.bottomAnchor
+          constraintEqualToAnchor:googlePayBadge.bottomAnchor
                          constant:kUISpacing],
       [_dateContainerView.leadingAnchor
           constraintEqualToAnchor:_instructionsTextLabel.leadingAnchor],
@@ -316,9 +333,6 @@ const CGFloat kDateTextFieldWidth = 40;
   self.dateContainerView.hidden = YES;
   self.CVCContainerLeadingConstraintWithDate.active = NO;
   self.CVCContainerLeadingConstraintWithoutDate.active = YES;
-  [self.monthInput setUseErrorStyling:NO];
-  [self.yearInput setUseErrorStyling:NO];
-  [self.CVCInput setUseErrorStyling:NO];
   self.buttonForNewCard.hidden = YES;
   self.CVCImageView.image = nil;
 }

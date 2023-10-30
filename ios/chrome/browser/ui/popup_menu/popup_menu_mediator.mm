@@ -1,61 +1,96 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_mediator.h"
 
-#include "base/feature_list.h"
-#include "base/logging.h"
-#include "base/mac/foundation_util.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/bookmarks/browser/bookmark_model.h"
-#include "components/feature_engagement/public/feature_constants.h"
-#include "components/feature_engagement/public/tracker.h"
-#include "components/language/ios/browser/ios_language_detection_tab_helper.h"
+#import "base/check_op.h"
+#import "base/feature_list.h"
+#import "base/ios/ios_util.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/bookmarks/browser/bookmark_model.h"
+#import "components/bookmarks/common/bookmark_pref_names.h"
+#import "components/feature_engagement/public/feature_constants.h"
+#import "components/feature_engagement/public/tracker.h"
+#import "components/language/ios/browser/ios_language_detection_tab_helper.h"
 #import "components/language/ios/browser/ios_language_detection_tab_helper_observer_bridge.h"
-#include "components/open_from_clipboard/clipboard_recent_content.h"
-#include "components/translate/core/browser/translate_manager.h"
-#include "components/translate/core/browser/translate_prefs.h"
+#import "components/open_from_clipboard/clipboard_recent_content.h"
+#import "components/prefs/ios/pref_observer_bridge.h"
+#import "components/prefs/pref_change_registrar.h"
+#import "components/prefs/pref_service.h"
+#import "components/profile_metrics/browser_profile_type.h"
+#import "components/translate/core/browser/translate_manager.h"
+#import "components/translate/core/browser/translate_prefs.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/find_in_page/find_tab_helper.h"
+#import "ios/chrome/browser/follow/follow_browser_agent.h"
+#import "ios/chrome/browser/follow/follow_menu_updater.h"
+#import "ios/chrome/browser/follow/follow_tab_helper.h"
+#import "ios/chrome/browser/follow/follow_util.h"
+#import "ios/chrome/browser/ntp/features.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter_observer_bridge.h"
+#import "ios/chrome/browser/overlays/public/overlay_request.h"
+#import "ios/chrome/browser/overlays/public/overlay_request_queue.h"
+#import "ios/chrome/browser/overlays/public/web_content_area/http_auth_overlay.h"
+#import "ios/chrome/browser/policy/browser_policy_connector_ios.h"
+#import "ios/chrome/browser/policy/policy_util.h"
 #import "ios/chrome/browser/search_engines/search_engines_util.h"
+#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #import "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/ui/activity_services/canonical_url_retriever.h"
-#include "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
+#import "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/reading_list_add_command.h"
+#import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_tile_constants.h"
+#import "ios/chrome/browser/ui/icons/action_icon.h"
+#import "ios/chrome/browser/ui/icons/chrome_symbol.h"
 #import "ios/chrome/browser/ui/list_model/list_model.h"
+#import "ios/chrome/browser/ui/ntp/metrics/feed_metrics_recorder.h"
 #import "ios/chrome/browser/ui/popup_menu/cells/popup_menu_navigation_item.h"
+#import "ios/chrome/browser/ui/popup_menu/cells/popup_menu_text_item.h"
 #import "ios/chrome/browser/ui/popup_menu/cells/popup_menu_tools_item.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
 #import "ios/chrome/browser/ui/popup_menu/public/cells/popup_menu_item.h"
 #import "ios/chrome/browser/ui/popup_menu/public/popup_menu_consumer.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_menu_notification_delegate.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_menu_notifier.h"
-#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/image_search_param_generator.h"
+#import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
+#import "ios/chrome/browser/web/font_size/font_size_tab_helper.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#import "ios/public/provider/chrome/browser/user_feedback/user_feedback_provider.h"
-#include "ios/web/public/favicon/favicon_status.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ios/components/webui/web_ui_url_constants.h"
+#import "ios/public/provider/chrome/browser/text_zoom/text_zoom_api.h"
+#import "ios/public/provider/chrome/browser/user_feedback/user_feedback_api.h"
+#import "ios/web/common/features.h"
+#import "ios/web/common/user_agent.h"
+#import "ios/web/public/favicon/favicon_status.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#include "ios/web/public/navigation/navigation_manager.h"
-#include "ios/web/public/user_agent.h"
-#include "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/image/image.h"
+#import "ios/web/public/web_client.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/gfx/image/image.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using base::RecordAction;
+using base::UserMetricsAction;
 
 namespace {
 PopupMenuToolsItem* CreateTableViewItem(int titleID,
@@ -73,11 +108,47 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   }
   return item;
 }
+
+PopupMenuToolsItem* CreateFollowItem(int titleID,
+                                     PopupMenuAction action,
+                                     NSString* imageName,
+                                     NSString* accessibilityID) {
+  DCHECK(IsWebChannelsEnabled());
+  PopupMenuToolsItem* item =
+      [[PopupMenuToolsItem alloc] initWithType:kItemTypeEnumZero];
+  item.title = l10n_util::GetNSStringF(titleID, base::SysNSStringToUTF16(@""));
+  item.enabled = NO;
+  item.actionIdentifier = action;
+  item.accessibilityIdentifier = accessibilityID;
+  if (imageName) {
+    item.image = [[UIImage imageNamed:imageName]
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+  }
+  return item;
 }
+
+PopupMenuTextItem* CreateEnterpriseInfoItem(NSString* imageName,
+                                            NSString* message,
+                                            PopupMenuAction action,
+                                            NSString* accessibilityID) {
+  PopupMenuTextItem* item =
+      [[PopupMenuTextItem alloc] initWithType:kItemTypeEnumZero];
+  item.imageName = imageName;
+  item.message = message;
+  item.actionIdentifier = action;
+  item.accessibilityIdentifier = accessibilityID;
+
+  return item;
+}
+
+}  // namespace
 
 @interface PopupMenuMediator () <BookmarkModelBridgeObserver,
                                  CRWWebStateObserver,
+                                 FollowMenuUpdater,
                                  IOSLanguageDetectionTabHelperObserving,
+                                 OverlayPresenterObserving,
+                                 PrefObserverDelegate,
                                  ReadingListMenuNotificationDelegate,
                                  WebStateListObserving> {
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
@@ -87,6 +158,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   // Bridge to get notified of the language detection event.
   std::unique_ptr<language::IOSLanguageDetectionTabHelperObserverBridge>
       _iOSLanguageDetectionTabHelperObserverBridge;
+  std::unique_ptr<OverlayPresenterObserver> _overlayPresenterObserver;
+  // Pref observer to track changes to prefs.
+  std::unique_ptr<PrefObserverBridge> _prefObserverBridge;
+  // Registrar for pref changes notifications.
+  std::unique_ptr<PrefChangeRegistrar> _prefChangeRegistrar;
 }
 
 // Items to be displayed in the popup menu.
@@ -108,14 +184,32 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 // Whether the hint for the "New Incognito Tab" item should be triggered.
 @property(nonatomic, assign) BOOL triggerNewIncognitoTabTip;
 
+// The current browser policy connector.
+@property(nonatomic, assign) BrowserPolicyConnectorIOS* browserPolicyConnector;
+
+// Whether an overlay is currently presented over the web content area.
+@property(nonatomic, assign, getter=isWebContentAreaShowingOverlay)
+    BOOL webContentAreaShowingOverlay;
+
+// Whether the web content is currently being blocked.
+@property(nonatomic, assign) BOOL contentBlocked;
+
+// URLs for the current webpage, which are used to update the follow status.
+@property(nonatomic, strong) WebPageURLs* webPage;
+
+// YES if the current website has been followed.
+@property(nonatomic, assign) BOOL followed;
+
 #pragma mark*** Specific Items ***
 
 @property(nonatomic, strong) PopupMenuToolsItem* openNewIncognitoTabItem;
 @property(nonatomic, strong) PopupMenuToolsItem* reloadStopItem;
+@property(nonatomic, strong) PopupMenuToolsItem* followItem;
 @property(nonatomic, strong) PopupMenuToolsItem* readLaterItem;
 @property(nonatomic, strong) PopupMenuToolsItem* bookmarkItem;
 @property(nonatomic, strong) PopupMenuToolsItem* translateItem;
 @property(nonatomic, strong) PopupMenuToolsItem* findInPageItem;
+@property(nonatomic, strong) PopupMenuToolsItem* textZoomItem;
 @property(nonatomic, strong) PopupMenuToolsItem* siteInformationItem;
 @property(nonatomic, strong) PopupMenuToolsItem* requestDesktopSiteItem;
 @property(nonatomic, strong) PopupMenuToolsItem* requestMobileSiteItem;
@@ -128,34 +222,14 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 @implementation PopupMenuMediator
 
-@synthesize items = _items;
-@synthesize isIncognito = _isIncognito;
-@synthesize popupMenu = _popupMenu;
-@synthesize bookmarkModel = _bookmarkModel;
-@synthesize dispatcher = _dispatcher;
-@synthesize engagementTracker = _engagementTracker;
-@synthesize readingListMenuNotifier = _readingListMenuNotifier;
-@synthesize triggerNewIncognitoTabTip = _triggerNewIncognitoTabTip;
-@synthesize type = _type;
-@synthesize webState = _webState;
-@synthesize webStateList = _webStateList;
-@synthesize openNewIncognitoTabItem = _openNewIncognitoTabItem;
-@synthesize reloadStopItem = _reloadStopItem;
-@synthesize readLaterItem = _readLaterItem;
-@synthesize bookmarkItem = _bookmarkItem;
-@synthesize findInPageItem = _findInPageItem;
-@synthesize siteInformationItem = _siteInformationItem;
-@synthesize requestDesktopSiteItem = _requestDesktopSiteItem;
-@synthesize requestMobileSiteItem = _requestMobileSiteItem;
-@synthesize readingListItem = _readingListItem;
-@synthesize specificItems = _specificItems;
-
 #pragma mark - Public
 
 - (instancetype)initWithType:(PopupMenuType)type
                   isIncognito:(BOOL)isIncognito
              readingListModel:(ReadingListModel*)readingListModel
-    triggerNewIncognitoTabTip:(BOOL)triggerNewIncognitoTabTip {
+    triggerNewIncognitoTabTip:(BOOL)triggerNewIncognitoTabTip
+       browserPolicyConnector:
+           (BrowserPolicyConnectorIOS*)browserPolicyConnector {
   self = [super init];
   if (self) {
     _isIncognito = isIncognito;
@@ -164,7 +238,10 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
         [[ReadingListMenuNotifier alloc] initWithReadingList:readingListModel];
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
     _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
+    _overlayPresenterObserver =
+        std::make_unique<OverlayPresenterObserverBridge>(self);
     _triggerNewIncognitoTabTip = triggerNewIncognitoTabTip;
+    _browserPolicyConnector = browserPolicyConnector;
   }
   return self;
 }
@@ -179,6 +256,14 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   if (_webState) {
     _webState->RemoveObserver(_webStateObserver.get());
     _webStateObserver.reset();
+    if (self.followItem) {
+      FollowTabHelper* followTabHelper =
+          FollowTabHelper::FromWebState(_webState);
+      if (followTabHelper) {
+        followTabHelper->RemoveFollowMenuUpdater();
+      }
+      self.webPage = nil;
+    }
     _webState = nullptr;
   }
 
@@ -196,9 +281,19 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     _engagementTracker = nullptr;
   }
 
+  if (_webContentAreaOverlayPresenter) {
+    _webContentAreaOverlayPresenter->RemoveObserver(
+        _overlayPresenterObserver.get());
+    self.webContentAreaShowingOverlay = NO;
+    _webContentAreaOverlayPresenter = nullptr;
+  }
+
   _readingListMenuNotifier = nil;
   _bookmarkModelBridge.reset();
   _iOSLanguageDetectionTabHelperObserverBridge.reset();
+
+  _prefChangeRegistrar.reset();
+  _prefObserverBridge.reset();
 }
 
 #pragma mark - CRWWebStateObserver
@@ -216,12 +311,6 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 - (void)webState:(web::WebState*)webState
     didFinishNavigation:(web::NavigationContext*)navigation {
-  DCHECK_EQ(_webState, webState);
-  [self updatePopupMenu];
-}
-
-- (void)webState:(web::WebState*)webState
-    didPruneNavigationItemsWithCount:(size_t)pruned_item_count {
   DCHECK_EQ(_webState, webState);
   [self updatePopupMenu];
 }
@@ -263,7 +352,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   DCHECK_EQ(_webStateList, webStateList);
   self.webState = newWebState;
 }
@@ -301,6 +390,26 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   [self updateBookmarkItem];
 }
 
+#pragma mark - OverlayPresenterObserving
+
+- (void)overlayPresenter:(OverlayPresenter*)presenter
+    willShowOverlayForRequest:(OverlayRequest*)request
+          initialPresentation:(BOOL)initialPresentation {
+  self.webContentAreaShowingOverlay = YES;
+}
+
+- (void)overlayPresenter:(OverlayPresenter*)presenter
+    didHideOverlayForRequest:(OverlayRequest*)request {
+  self.webContentAreaShowingOverlay = NO;
+}
+
+#pragma mark - PrefObserverDelegate
+
+- (void)onPreferenceChanged:(const std::string&)preferenceName {
+  if (preferenceName == bookmarks::prefs::kEditBookmarksEnabled)
+    [self updateBookmarkItem];
+}
+
 #pragma mark - Properties
 
 - (void)setWebState:(web::WebState*)webState {
@@ -315,12 +424,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   if (_webState) {
     _webState->AddObserver(_webStateObserver.get());
 
-    // Observer the language::IOSLanguageDetectionTabHelper for |_webState|.
+    // Observer the language::IOSLanguageDetectionTabHelper for `_webState`.
     _iOSLanguageDetectionTabHelperObserverBridge =
         std::make_unique<language::IOSLanguageDetectionTabHelperObserverBridge>(
             language::IOSLanguageDetectionTabHelper::FromWebState(_webState),
             self);
-
     if (self.popupMenu) {
       [self updatePopupMenu];
     }
@@ -338,6 +446,24 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   if (_webStateList) {
     self.webState = self.webStateList->GetActiveWebState();
     _webStateList->AddObserver(_webStateListObserver.get());
+  }
+}
+
+- (void)setWebContentAreaOverlayPresenter:
+    (OverlayPresenter*)webContentAreaOverlayPresenter {
+  if (_webContentAreaOverlayPresenter) {
+    _webContentAreaOverlayPresenter->RemoveObserver(
+        _overlayPresenterObserver.get());
+    self.webContentAreaShowingOverlay = NO;
+  }
+
+  _webContentAreaOverlayPresenter = webContentAreaOverlayPresenter;
+
+  if (_webContentAreaOverlayPresenter) {
+    _webContentAreaOverlayPresenter->AddObserver(
+        _overlayPresenterObserver.get());
+    self.webContentAreaShowingOverlay =
+        _webContentAreaOverlayPresenter->IsShowingOverlayUI();
   }
 }
 
@@ -395,20 +521,32 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     switch (self.type) {
       case PopupMenuTypeToolsMenu:
         [self createToolsMenuItems];
+        if (self.webState && self.followItem) {
+          FollowTabHelper* followTabHelper =
+              FollowTabHelper::FromWebState(self.webState);
+          if (followTabHelper) {
+            followTabHelper->SetFollowMenuUpdater(self);
+          }
+        }
         break;
       case PopupMenuTypeNavigationForward:
+        DCHECK(!UseSymbols());
         [self createNavigationItemsForType:PopupMenuTypeNavigationForward];
         break;
       case PopupMenuTypeNavigationBackward:
+        DCHECK(!UseSymbols());
         [self createNavigationItemsForType:PopupMenuTypeNavigationBackward];
         break;
       case PopupMenuTypeTabGrid:
+        DCHECK(!UseSymbols());
         [self createTabGridMenuItems];
         break;
       case PopupMenuTypeTabStripTabGrid:
+        DCHECK(!UseSymbols());
         [self createTabGridMenuItems];
         break;
-      case PopupMenuTypeSearch:
+      case PopupMenuTypeNewTab:
+        DCHECK(!UseSymbols());
         [self createSearchMenuItems];
         break;
     }
@@ -423,6 +561,8 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
       [specificItems addObject:self.translateItem];
     if (self.findInPageItem)
       [specificItems addObject:self.findInPageItem];
+    if (self.textZoomItem)
+      [specificItems addObject:self.textZoomItem];
     if (self.siteInformationItem)
       [specificItems addObject:self.siteInformationItem];
     if (self.requestDesktopSiteItem)
@@ -436,7 +576,23 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   return _items;
 }
 
-#pragma mark - PopupMenuActionHandlerCommands
+- (void)setWebContentAreaShowingOverlay:(BOOL)webContentAreaShowingOverlay {
+  if (_webContentAreaShowingOverlay == webContentAreaShowingOverlay)
+    return;
+  _webContentAreaShowingOverlay = webContentAreaShowingOverlay;
+  [self updatePopupMenu];
+}
+
+- (void)setPrefService:(PrefService*)prefService {
+  _prefService = prefService;
+  _prefChangeRegistrar = std::make_unique<PrefChangeRegistrar>();
+  _prefChangeRegistrar->Init(prefService);
+  _prefObserverBridge.reset(new PrefObserverBridge(self));
+  _prefObserverBridge->ObserveChangesForPreference(
+      bookmarks::prefs::kEditBookmarksEnabled, _prefChangeRegistrar.get());
+}
+
+#pragma mark - PopupMenuActionHandlerDelegate
 
 - (void)readPageLater {
   if (!self.webState)
@@ -469,6 +625,57 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   self.webState->GetNavigationManager()->GoToIndex(index);
 }
 
+- (void)recordSettingsMetricsPerProfile {
+  profile_metrics::BrowserProfileType type =
+      _isIncognito ? profile_metrics::BrowserProfileType::kIncognito
+                   : profile_metrics::BrowserProfileType::kRegular;
+  base::UmaHistogramEnumeration("Settings.OpenSettingsFromMenu.PerProfileType",
+                                type);
+}
+
+- (void)recordDownloadsMetricsPerProfile {
+  profile_metrics::BrowserProfileType type =
+      _isIncognito ? profile_metrics::BrowserProfileType::kIncognito
+                   : profile_metrics::BrowserProfileType::kRegular;
+  base::UmaHistogramEnumeration("Download.OpenDownloadsFromMenu.PerProfileType",
+                                type);
+}
+
+- (void)searchCopiedImage {
+  ClipboardRecentContent* clipboardRecentContent =
+      ClipboardRecentContent::GetInstance();
+  clipboardRecentContent->GetRecentImageFromClipboard(
+      base::BindOnce(^(absl::optional<gfx::Image> optionalImage) {
+        if (!optionalImage) {
+          return;
+        }
+        UIImage* image = [optionalImage.value().ToUIImage() copy];
+        web::NavigationManager::WebLoadParams webParams =
+            ImageSearchParamGenerator::LoadParamsForImage(
+                image, self.templateURLService);
+        UrlLoadParams params = UrlLoadParams::InCurrentTab(webParams);
+
+        self.URLLoadingBrowserAgent->Load(params);
+      }));
+}
+
+- (void)toggleFollowed {
+  DCHECK(IsWebChannelsEnabled());
+  DCHECK(self.followBrowserAgent);
+
+  if (self.followed) {
+    self.followBrowserAgent->UnfollowWebSite(self.webPage,
+                                             FollowSource::PopupMenu);
+  } else {
+    self.followBrowserAgent->FollowWebSite(self.webPage,
+                                           FollowSource::PopupMenu);
+  }
+}
+
+- (web::WebState*)currentWebState {
+  return self.webState;
+}
+
 #pragma mark - IOSLanguageDetectionTabHelperObserving
 
 - (void)iOSLanguageDetectionTabHelper:
@@ -492,32 +699,78 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   [self.popupMenu itemsHaveChanged:@[ self.readingListItem ]];
 }
 
+#pragma mark - FollowMenuUpdater
+
+- (void)updateFollowMenuItemWithWebPage:(WebPageURLs*)webPage
+                               followed:(BOOL)followed
+                             domainName:(NSString*)domainName
+                                enabled:(BOOL)enabled {
+  DCHECK(IsWebChannelsEnabled());
+  self.webPage = webPage;
+  self.followed = followed;
+  self.followItem.enabled = enabled;
+  self.followItem.title =
+      followed ? l10n_util::GetNSStringF(IDS_IOS_TOOLS_MENU_UNFOLLOW, u"")
+               : l10n_util::GetNSStringF(IDS_IOS_TOOLS_MENU_FOLLOW, u"");
+  self.followItem.image = [[UIImage
+      imageNamed:followed ? @"popup_menu_unfollow" : @"popup_menu_follow"]
+      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+
+  [self.popupMenu itemsHaveChanged:@[ self.followItem ]];
+}
+
+#pragma mark - BrowserContainerConsumer
+
+- (void)setContentBlocked:(BOOL)contentBlocked {
+  if (_contentBlocked == contentBlocked) {
+    return;
+  }
+  _contentBlocked = contentBlocked;
+  [self updatePopupMenu];
+}
+
 #pragma mark - Popup updates (Private)
 
 // Updates the popup menu to have its state in sync with the current page
 // status.
 - (void)updatePopupMenu {
   [self updateReloadStopItem];
-  self.readLaterItem.enabled = [self isCurrentURLWebURL];
+  // The "Add to Reading List" functionality requires JavaScript execution,
+  // which is paused while overlays are displayed over the web content area.
+  self.readLaterItem.enabled =
+      !self.webContentAreaShowingOverlay && [self isCurrentURLWebURL];
   [self updateBookmarkItem];
   self.translateItem.enabled = [self isTranslateEnabled];
   self.findInPageItem.enabled = [self isFindInPageEnabled];
+  self.textZoomItem.enabled = [self isTextZoomEnabled];
   self.siteInformationItem.enabled = [self currentWebPageSupportsSiteInfo];
   self.requestDesktopSiteItem.enabled =
       [self userAgentType] == web::UserAgentType::MOBILE;
   self.requestMobileSiteItem.enabled =
       [self userAgentType] == web::UserAgentType::DESKTOP;
 
+  // Update follow menu item.
+  if (self.followItem &&
+      GetFollowActionState(self.webState) != FollowActionStateHidden) {
+    DCHECK(IsWebChannelsEnabled());
+    FollowTabHelper* followTabHelper =
+        FollowTabHelper::FromWebState(self.webState);
+    if (followTabHelper) {
+      followTabHelper->UpdateFollowMenuItem();
+    }
+  }
+
   // Reload the items.
   [self.popupMenu itemsHaveChanged:self.specificItems];
 }
 
-// Updates the |bookmark| item to match the bookmarked status of the page.
+// Updates `self.bookmarkItem` to match the bookmarked status of the page.
 - (void)updateBookmarkItem {
   if (!self.bookmarkItem)
     return;
 
-  self.bookmarkItem.enabled = [self isCurrentURLWebURL];
+  self.bookmarkItem.enabled =
+      [self isCurrentURLWebURL] && [self isEditBookmarksEnabled];
 
   if (self.webState && self.bookmarkModel &&
       self.bookmarkModel->IsBookmarked(self.webState->GetVisibleURL())) {
@@ -528,7 +781,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   } else {
     self.bookmarkItem.title =
-        l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_ADD_TO_BOOKMARKS);
+        l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_BOOKMARK);
     self.bookmarkItem.accessibilityIdentifier = kToolsMenuAddToBookmarks;
     self.bookmarkItem.image = [[UIImage imageNamed:@"popup_menu_add_bookmark"]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -537,7 +790,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   [self.popupMenu itemsHaveChanged:@[ self.bookmarkItem ]];
 }
 
-// Updates the |reloadStopItem| item to match the current behavior.
+// Updates the `reloadStopItem` item to match the current behavior.
 - (void)updateReloadStopItem {
   if ([self isPageLoading] &&
       self.reloadStopItem.accessibilityIdentifier == kToolsMenuReload) {
@@ -571,6 +824,16 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   if (URL.SchemeIs(kChromeUIScheme) && URL.host() == kChromeUIOfflineHost) {
     return YES;
   }
+  // Do not show site info for NTP.
+  if (URL.spec() == kChromeUIAboutNewTabURL ||
+      URL.spec() == kChromeUINewTabURL) {
+    return NO;
+  }
+
+  if (self.contentBlocked) {
+    return NO;
+  }
+
   return navItem->GetVirtualURL().is_valid();
 }
 
@@ -584,9 +847,6 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 // Whether the translate menu item should be enabled.
 - (BOOL)isTranslateEnabled {
-  if (!base::FeatureList::IsEnabled(translate::kTranslateMobileManualTrigger))
-    return NO;
-
   if (!self.webState)
     return NO;
 
@@ -601,6 +861,23 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   return translate_manager->CanManuallyTranslate();
 }
 
+// Determines whether or not translate is available on the page and logs the
+// result. This method should only be called once per popup menu shown.
+- (void)logTranslateAvailability {
+  if (!self.webState)
+    return;
+
+  auto* translate_client =
+      ChromeIOSTranslateClient::FromWebState(self.webState);
+  if (!translate_client)
+    return;
+
+  translate::TranslateManager* translate_manager =
+      translate_client->GetTranslateManager();
+  DCHECK(translate_manager);
+  translate_manager->CanManuallyTranslate(true);
+}
+
 // Whether find in page is enabled.
 - (BOOL)isFindInPageEnabled {
   if (!self.webState)
@@ -608,6 +885,20 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   auto* helper = FindTabHelper::FromWebState(self.webState);
   return (helper && helper->CurrentPageSupportsFindInPage() &&
           !helper->IsFindUIActive());
+}
+
+// Whether or not text zoom is enabled for this page.
+- (BOOL)isTextZoomEnabled {
+  if (self.webContentAreaShowingOverlay) {
+    return NO;
+  }
+
+  if (!self.webState) {
+    return NO;
+  }
+  FontSizeTabHelper* helper = FontSizeTabHelper::FromWebState(self.webState);
+  return helper && helper->CurrentPageSupportsTextZoom() &&
+         !helper->IsTextZoomUIActive();
 }
 
 // Whether the page is currently loading.
@@ -637,10 +928,20 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   for (web::NavigationItem* navigationItem : navigationItems) {
     PopupMenuNavigationItem* item =
         [[PopupMenuNavigationItem alloc] initWithType:kItemTypeEnumZero];
-    item.title = base::SysUTF16ToNSString(navigationItem->GetTitleForDisplay());
-    const gfx::Image& image = navigationItem->GetFavicon().image;
-    if (!image.IsEmpty())
-      item.favicon = image.ToUIImage();
+    if ([self shouldUseIncognitoNTPResourcesForURL:navigationItem
+                                                       ->GetVirtualURL()]) {
+      item.title = l10n_util::GetNSStringWithFixup(IDS_IOS_NEW_INCOGNITO_TAB);
+      item.favicon = UseSymbols()
+                         ? CustomSymbolWithPointSize(kIncognitoCircleFillSymbol,
+                                                     kSymbolActionPointSize)
+                         : [UIImage imageNamed:@"incognito_badge"];
+    } else {
+      item.title =
+          base::SysUTF16ToNSString(navigationItem->GetTitleForDisplay());
+      const gfx::Image& image = navigationItem->GetFaviconStatus().image;
+      if (!image.IsEmpty())
+        item.favicon = image.ToUIImage();
+    }
     item.actionIdentifier = PopupMenuActionNavigate;
     item.navigationItem = navigationItem;
     [items addObject:item];
@@ -660,74 +961,82 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 // Creates the menu items for the search menu.
 - (void)createSearchMenuItems {
-  NSMutableArray* items = [NSMutableArray array];
+  self.items = @[ [self searchMenuStaticItems] ];
 
-  // The consumer is expecting an array of arrays of items. Each sub array
-  // represent a section in the popup menu. Having one sub array means having
-  // all the items in the same section.
-  PopupMenuToolsItem* copiedContentItem = nil;
-  if (base::FeatureList::IsEnabled(kCopiedContentBehavior)) {
-    ClipboardRecentContent* clipboardRecentContent =
-        ClipboardRecentContent::GetInstance();
+  ClipboardRecentContent* clipboardRecentContent =
+      ClipboardRecentContent::GetInstance();
 
-    if (search_engines::SupportsSearchByImage(self.templateURLService) &&
-        clipboardRecentContent->GetRecentImageFromClipboard()) {
-      copiedContentItem = CreateTableViewItem(
-          IDS_IOS_TOOLS_MENU_SEARCH_COPIED_IMAGE,
-          PopupMenuActionSearchCopiedImage, @"popup_menu_paste_and_go",
-          kToolsMenuCopiedImageSearch);
-    } else if (clipboardRecentContent->GetRecentURLFromClipboard()) {
-      copiedContentItem = CreateTableViewItem(
-          IDS_IOS_TOOLS_MENU_VISIT_COPIED_LINK, PopupMenuActionPasteAndGo,
-          @"popup_menu_paste_and_go", kToolsMenuPasteAndGo);
-    } else if (clipboardRecentContent->GetRecentTextFromClipboard()) {
-      copiedContentItem = CreateTableViewItem(
-          IDS_IOS_TOOLS_MENU_SEARCH_COPIED_TEXT, PopupMenuActionPasteAndGo,
-          @"popup_menu_paste_and_go", kToolsMenuPasteAndGo);
-    }
-  } else {
-    NSString* pasteboardString = [UIPasteboard generalPasteboard].string;
-    if (pasteboardString) {
-      copiedContentItem = CreateTableViewItem(
-          IDS_IOS_TOOLS_MENU_PASTE_AND_GO, PopupMenuActionPasteAndGo,
-          @"popup_menu_paste_and_go", kToolsMenuPasteAndGo);
-    }
-  }
-  if (copiedContentItem) {
-    if (base::FeatureList::IsEnabled(kToolbarNewTabButton)) {
-      [items addObject:@[ copiedContentItem ]];
-    } else {
-      [items addObject:copiedContentItem];
-    }
-  }
+  std::set<ClipboardContentType> clipboard_types;
+  clipboard_types.insert(ClipboardContentType::URL);
+  clipboard_types.insert(ClipboardContentType::Text);
+  clipboard_types.insert(ClipboardContentType::Image);
 
+  clipboardRecentContent->HasRecentContentFromClipboard(
+      clipboard_types,
+      base::BindOnce(^(std::set<ClipboardContentType> matched_types) {
+        __block NSMutableArray* items = [NSMutableArray array];
+        // The consumer is expecting an array of arrays of items. Each sub array
+        // represent a section in the popup menu. Having one sub array means
+        // having all the items in the same section.
+        PopupMenuToolsItem* copiedContentItem = nil;
+        if (search_engines::SupportsSearchByImage(self.templateURLService) &&
+            matched_types.find(ClipboardContentType::Image) !=
+                matched_types.end()) {
+          copiedContentItem = CreateTableViewItem(
+              IDS_IOS_TOOLS_MENU_SEARCH_COPIED_IMAGE,
+              PopupMenuActionSearchCopiedImage, @"popup_menu_paste_and_go",
+              kToolsMenuCopiedImageSearch);
+        } else if (matched_types.find(ClipboardContentType::URL) !=
+                   matched_types.end()) {
+          copiedContentItem = CreateTableViewItem(
+              IDS_IOS_TOOLS_MENU_VISIT_COPIED_LINK,
+              PopupMenuActionVisitCopiedLink, @"popup_menu_paste_and_go",
+              kToolsMenuPasteAndGo);
+        } else if (matched_types.find(ClipboardContentType::Text) !=
+                   matched_types.end()) {
+          copiedContentItem = CreateTableViewItem(
+              IDS_IOS_TOOLS_MENU_SEARCH_COPIED_TEXT,
+              PopupMenuActionSearchCopiedText, @"popup_menu_paste_and_go",
+              kToolsMenuPasteAndGo);
+        }
+        if (copiedContentItem) {
+          [items addObject:@[ copiedContentItem ]];
+        }
+
+        [items addObject:[self searchMenuStaticItems]];
+        self.items = items;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [self.popupMenu setPopupMenuItems:self.items];
+        });
+      }));
+}
+
+// Creates and returns the search menu items that are static (i.e. always in
+// the search menu).
+- (NSArray<TableViewItem<PopupMenuItem>*>*)searchMenuStaticItems {
   PopupMenuToolsItem* QRCodeSearch = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_QR_SCANNER, PopupMenuActionQRCodeSearch,
       @"popup_menu_qr_scanner", kToolsMenuQRCodeSearch);
   PopupMenuToolsItem* voiceSearch = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_VOICE_SEARCH, PopupMenuActionVoiceSearch,
       @"popup_menu_voice_search", kToolsMenuVoiceSearch);
+
   PopupMenuToolsItem* newSearch =
       CreateTableViewItem(IDS_IOS_TOOLS_MENU_NEW_SEARCH, PopupMenuActionSearch,
                           @"popup_menu_search", kToolsMenuSearch);
+  // Disable the new search if the incognito mode is forced by enterprise
+  // policy.
+  newSearch.enabled = !IsIncognitoModeForced(self.prefService);
+
   PopupMenuToolsItem* newIncognitoSearch = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_NEW_INCOGNITO_SEARCH, PopupMenuActionIncognitoSearch,
       @"popup_menu_new_incognito_tab", kToolsMenuIncognitoSearch);
+  // Disable the new incognito search if the incognito mode is disabled by
+  // enterprise policy.
+  newIncognitoSearch.enabled = !IsIncognitoModeDisabled(self.prefService);
 
-  if (base::FeatureList::IsEnabled(kToolbarNewTabButton)) {
-    [items addObject:@[
-      newSearch, newIncognitoSearch, voiceSearch, QRCodeSearch
-    ]];
-  } else {
-    [items addObject:QRCodeSearch];
-    [items addObject:voiceSearch];
-  }
-
-  if (base::FeatureList::IsEnabled(kToolbarNewTabButton)) {
-    self.items = items;
-  } else {
-    self.items = @[ items ];
-  }
+  return @[ newSearch, newIncognitoSearch, voiceSearch, QRCodeSearch ];
 }
 
 // Creates the menu items for the tools menu.
@@ -740,29 +1049,73 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   NSArray* tabActions = [@[ self.reloadStopItem ]
       arrayByAddingObjectsFromArray:[self itemsForNewTab]];
 
+  if (base::ios::IsMultipleScenesSupported()) {
+    tabActions =
+        [tabActions arrayByAddingObjectsFromArray:[self itemsForNewWindow]];
+  }
+
   NSArray* browserActions = [self actionItems];
 
   NSArray* collectionActions = [self collectionItems];
 
-  self.items = @[ tabActions, collectionActions, browserActions ];
+  if (_browserPolicyConnector &&
+      _browserPolicyConnector->HasMachineLevelPolicies()) {
+    // Show enterprise infomation when chrome is managed by policy and the
+    // settings UI flag is enabled.
+    NSArray* textActions = [self enterpriseInfoSection];
+    self.items =
+        @[ tabActions, collectionActions, browserActions, textActions ];
+  } else {
+    self.items = @[ tabActions, collectionActions, browserActions ];
+  }
 }
 
 - (NSArray<TableViewItem*>*)itemsForNewTab {
   // Open New Tab.
-  TableViewItem* openNewTabItem =
+  PopupMenuToolsItem* openNewTabItem =
       CreateTableViewItem(IDS_IOS_TOOLS_MENU_NEW_TAB, PopupMenuActionOpenNewTab,
                           @"popup_menu_new_tab", kToolsMenuNewTabId);
+
+  // Disable the new tab menu item if the incognito mode is forced by enterprise
+  // policy.
+  openNewTabItem.enabled = !IsIncognitoModeForced(self.prefService);
 
   // Open New Incognito Tab.
   self.openNewIncognitoTabItem = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_NEW_INCOGNITO_TAB, PopupMenuActionOpenNewIncognitoTab,
       @"popup_menu_new_incognito_tab", kToolsMenuNewIncognitoTabId);
 
+  // Disable the new incognito tab menu item if the incognito mode is disabled
+  // by enterprise policy.
+  self.openNewIncognitoTabItem.enabled =
+      !IsIncognitoModeDisabled(self.prefService);
+
   return @[ openNewTabItem, self.openNewIncognitoTabItem ];
+}
+
+- (NSArray<TableViewItem*>*)itemsForNewWindow {
+  if (!base::ios::IsMultipleScenesSupported())
+    return @[];
+
+  // Create the menu item -- hardcoded string and no accessibility ID.
+  PopupMenuToolsItem* openNewWindowItem = CreateTableViewItem(
+      IDS_IOS_TOOLS_MENU_NEW_WINDOW, PopupMenuActionOpenNewWindow,
+      @"popup_menu_new_window", kToolsMenuNewWindowId);
+
+  return @[ openNewWindowItem ];
 }
 
 - (NSArray<TableViewItem*>*)actionItems {
   NSMutableArray* actionsArray = [NSMutableArray array];
+
+  if (!self.isIncognito && IsWebChannelsEnabled() &&
+      GetFollowActionState(self.webState) != FollowActionStateHidden) {
+    // Follow.
+    self.followItem =
+        CreateFollowItem(IDS_IOS_TOOLS_MENU_FOLLOW, PopupMenuActionFollow,
+                         @"popup_menu_follow", kToolsMenuFollowId);
+    [actionsArray addObject:self.followItem];
+  }
   // Read Later.
   self.readLaterItem = CreateTableViewItem(
       IDS_IOS_CONTENT_CONTEXT_ADDTOREADINGLIST, PopupMenuActionReadLater,
@@ -771,32 +1124,37 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
   // Add to bookmark.
   self.bookmarkItem = CreateTableViewItem(
-      IDS_IOS_TOOLS_MENU_ADD_TO_BOOKMARKS, PopupMenuActionPageBookmark,
+      IDS_IOS_TOOLS_MENU_BOOKMARK, PopupMenuActionPageBookmark,
       @"popup_menu_add_bookmark", kToolsMenuAddToBookmarks);
   [actionsArray addObject:self.bookmarkItem];
 
   // Translate.
-  if (base::FeatureList::IsEnabled(translate::kTranslateMobileManualTrigger)) {
-    UMA_HISTOGRAM_BOOLEAN("Translate.MobileMenuTranslate.Shown",
-                          [self isTranslateEnabled]);
-
-    self.translateItem = CreateTableViewItem(
-        IDS_IOS_TOOLS_MENU_TRANSLATE, PopupMenuActionTranslate,
-        @"popup_menu_translate", kToolsMenuTranslateId);
-    if (self.engagementTracker &&
-        self.engagementTracker->ShouldTriggerHelpUI(
-            feature_engagement::kIPHBadgedTranslateManualTriggerFeature)) {
-      self.translateItem.badgeText = l10n_util::GetNSStringWithFixup(
-          IDS_IOS_TOOLS_MENU_CELL_NEW_FEATURE_BADGE);
-    }
-    [actionsArray addObject:self.translateItem];
+  [self logTranslateAvailability];
+  self.translateItem = CreateTableViewItem(
+      IDS_IOS_TOOLS_MENU_TRANSLATE, PopupMenuActionTranslate,
+      @"popup_menu_translate", kToolsMenuTranslateId);
+  if (self.engagementTracker &&
+      self.engagementTracker->ShouldTriggerHelpUI(
+          feature_engagement::kIPHBadgedTranslateManualTriggerFeature) &&
+      self.isTranslateEnabled) {
+    self.translateItem.badgeText = l10n_util::GetNSStringWithFixup(
+        IDS_IOS_TOOLS_MENU_CELL_NEW_FEATURE_BADGE);
   }
+  [actionsArray addObject:self.translateItem];
 
-  // Find in Pad.
+  // Find in Page.
   self.findInPageItem = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_FIND_IN_PAGE, PopupMenuActionFindInPage,
       @"popup_menu_find_in_page", kToolsMenuFindInPageId);
   [actionsArray addObject:self.findInPageItem];
+
+  // Text Zoom
+  if (ios::provider::IsTextZoomEnabled()) {
+    self.textZoomItem = CreateTableViewItem(
+        IDS_IOS_TOOLS_MENU_TEXT_ZOOM, PopupMenuActionTextZoom,
+        @"popup_menu_text_zoom", kToolsMenuTextZoom);
+    [actionsArray addObject:self.textZoomItem];
+  }
 
   if ([self userAgentType] != web::UserAgentType::DESKTOP) {
     // Request Desktop Site.
@@ -822,9 +1180,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   [actionsArray addObject:self.siteInformationItem];
 
   // Report an Issue.
-  if (ios::GetChromeBrowserProvider()
-          ->GetUserFeedbackProvider()
-          ->IsUserFeedbackEnabled()) {
+  if (ios::provider::IsUserFeedbackSupported()) {
     TableViewItem* reportIssue = CreateTableViewItem(
         IDS_IOS_OPTIONS_REPORT_AN_ISSUE, PopupMenuActionReportIssue,
         @"popup_menu_report_an_issue", kToolsMenuReportAnIssueId);
@@ -864,8 +1220,13 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   self.readingListItem = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_READING_LIST, PopupMenuActionReadingList,
       @"popup_menu_reading_list", kToolsMenuReadingListId);
-  self.readingListItem.badgeNumber =
+  NSInteger numberOfUnreadArticles =
       [self.readingListMenuNotifier readingListUnreadCount];
+  self.readingListItem.badgeNumber = numberOfUnreadArticles;
+  if (numberOfUnreadArticles) {
+    self.readingListItem.additionalAccessibilityLabel =
+        AccessibilityLabelForReadingListCellWithCount(numberOfUnreadArticles);
+  }
   if (self.engagementTracker &&
       self.engagementTracker->ShouldTriggerHelpUI(
           feature_engagement::kIPHBadgedReadingListFeature)) {
@@ -885,12 +1246,34 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
                           @"popup_menu_history", kToolsMenuHistoryId);
   history.enabled = !self.isIncognito;
 
+  // Open Downloads folder.
+  TableViewItem* downloadsFolder = CreateTableViewItem(
+      IDS_IOS_TOOLS_MENU_DOWNLOADS, PopupMenuActionOpenDownloads,
+      @"popup_menu_downloads", kToolsMenuDownloadsId);
+
   // Settings.
   TableViewItem* settings =
       CreateTableViewItem(IDS_IOS_TOOLS_MENU_SETTINGS, PopupMenuActionSettings,
-                          @"popup_menu_settings", kToolsMenuSettingsId);
+                          @"popup_menu_settings", kToolsMenuSettingsActionId);
 
-  return @[ bookmarks, self.readingListItem, recentTabs, history, settings ];
+  if (self.isIncognito &&
+      base::FeatureList::IsEnabled(kUpdateHistoryEntryPointsInIncognito)) {
+    return @[ bookmarks, self.readingListItem, downloadsFolder, settings ];
+  }
+
+  return @[
+    bookmarks, self.readingListItem, recentTabs, history, downloadsFolder,
+    settings
+  ];
+}
+
+// Creates the section for enterprise info.
+- (NSArray<TableViewItem*>*)enterpriseInfoSection {
+  NSString* message = l10n_util::GetNSString(IDS_IOS_ENTERPRISE_MANAGED_INFO);
+  TableViewItem* enterpriseInfoItem = CreateEnterpriseInfoItem(
+      @"popup_menu_enterprise_icon", message,
+      PopupMenuActionEnterpriseInfoMessage, kTextMenuEnterpriseInfo);
+  return @[ enterpriseInfoItem ];
 }
 
 // Returns the UserAgentType currently in use.
@@ -903,6 +1286,22 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     return web::UserAgentType::NONE;
 
   return visibleItem->GetUserAgentType();
+}
+
+#pragma mark - Other private methods
+
+// Returns YES if user is allowed to edit any bookmarks.
+- (BOOL)isEditBookmarksEnabled {
+    return self.prefService->GetBoolean(
+        bookmarks::prefs::kEditBookmarksEnabled);
+}
+
+// Returns YES if incognito NTP title and image should be used for back/forward
+// item associated with `URL`.
+- (BOOL)shouldUseIncognitoNTPResourcesForURL:(const GURL&)URL {
+  return URL.DeprecatedGetOriginAsURL() == kChromeUINewTabURL &&
+         self.isIncognito &&
+         base::FeatureList::IsEnabled(kUpdateHistoryEntryPointsInIncognito);
 }
 
 @end

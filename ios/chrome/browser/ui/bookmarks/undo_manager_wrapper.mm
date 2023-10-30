@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/ui/bookmarks/undo_manager_wrapper.h"
+#import "ios/chrome/browser/ui/bookmarks/undo_manager_wrapper.h"
 
-#include <memory>
+#import <memory>
 
-#include "components/undo/bookmark_undo_service.h"
-#include "components/undo/undo_manager.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/ui/bookmarks/undo_manager_bridge_observer.h"
-#include "ios/chrome/browser/undo/bookmark_undo_service_factory.h"
+#import "components/undo/bookmark_undo_service.h"
+#import "components/undo/undo_manager.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/ui/bookmarks/undo_manager_bridge_observer.h"
+#import "ios/chrome/browser/undo/bookmark_undo_service_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -27,7 +27,7 @@
 @synthesize hasUndoManagerChanged = _hasUndoManagerChanged;
 @synthesize undoManager = _undoManager;
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState {
   self = [super init];
   if (self) {
     _undoManager =

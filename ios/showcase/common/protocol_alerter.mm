@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #import <objc/runtime.h>
 
-#include "base/logging.h"
+#import "base/logging.h"
 #import "base/strings/sys_string_conversions.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -155,7 +155,8 @@ char kAssociatedProtocolNameKey;
       [description appendString:@" "];
     [description appendString:keyword];
     [description appendString:@":"];
-    [description appendString:[self argumentDescriptionAtIndex:argumentIndex]];
+    [description
+        appendString:[self crsc_argumentDescriptionAtIndex:argumentIndex]];
     argumentIndex++;
   }
 
@@ -164,16 +165,16 @@ char kAssociatedProtocolNameKey;
 
 // Return a string describing the argument value at |index|.
 // (|index| is in NSInvocation's argument array).
-- (NSString*)argumentDescriptionAtIndex:(NSInteger)index {
+- (NSString*)crsc_argumentDescriptionAtIndex:(NSInteger)index {
   const char* type = [self.methodSignature getArgumentTypeAtIndex:index];
 
   switch (*type) {
     case '@':
-      return [self objectDescriptionAtIndex:index];
+      return [self crsc_objectDescriptionAtIndex:index];
     case 'q':
-      return [self longLongDescriptionAtIndex:index];
+      return [self crsc_longLongDescriptionAtIndex:index];
     case 'Q':
-      return [self unsignedLongLongDescriptionAtIndex:index];
+      return [self crsc_unsignedLongLongDescriptionAtIndex:index];
     // Add cases as needed here.
     default:
       return [NSString stringWithFormat:@"<Unknown Type:%s>", type];
@@ -182,7 +183,7 @@ char kAssociatedProtocolNameKey;
 
 // Return a string describing an argument at |index| that's known to be an
 // objective-C object.
-- (NSString*)objectDescriptionAtIndex:(NSInteger)index {
+- (NSString*)crsc_objectDescriptionAtIndex:(NSInteger)index {
   __unsafe_unretained id object;
 
   [self getArgument:&object atIndex:index];
@@ -216,7 +217,7 @@ char kAssociatedProtocolNameKey;
 
 // Returns a string describing an argument at |index| that is known to be a long
 // long.
-- (NSString*)longLongDescriptionAtIndex:(NSInteger)index {
+- (NSString*)crsc_longLongDescriptionAtIndex:(NSInteger)index {
   long long value;
 
   [self getArgument:&value atIndex:index];
@@ -225,7 +226,7 @@ char kAssociatedProtocolNameKey;
 
 // Returns a string describing an argument at |index| that is known to be an
 // unsigned long long.
-- (NSString*)unsignedLongLongDescriptionAtIndex:(NSInteger)index {
+- (NSString*)crsc_unsignedLongLongDescriptionAtIndex:(NSInteger)index {
   unsigned long long value;
 
   [self getArgument:&value atIndex:index];

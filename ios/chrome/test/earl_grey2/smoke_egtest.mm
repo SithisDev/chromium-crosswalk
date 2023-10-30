@@ -1,19 +1,25 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <TestLib/EarlGreyImpl/EarlGrey.h>
 #import <UIKit/UIKit.h>
 
-#include "ios/chrome/grit/ios_strings.h"
+#import "base/ios/ios_util.h"
+#import "ios/chrome/browser/prefs/pref_names.h"
+#import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey_app_interface.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/chrome/test/earl_grey2/chrome_earl_grey_edo.h"
+#import "ios/testing/earl_grey/app_launch_manager.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/web/common/features.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -29,21 +35,17 @@
 // Tests that a tab can be opened.
 - (void)testOpenTab {
   // Open tools menu.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI openToolsMenu];
 
   // Open new tab.
   // TODO(crbug.com/917114): Calling the string directly is temporary while we
   // roll out a solution to access constants across the code base for EG2.
   id<GREYMatcher> newTabButtonMatcher =
       grey_accessibilityID(@"kToolsMenuNewTabId");
-  [[EarlGrey selectElementWithMatcher:newTabButtonMatcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI tapToolsMenuButton:newTabButtonMatcher];
 
-  // Get tab count.
-  NSUInteger tabCount =
-      [[GREYHostApplicationDistantObject sharedInstance] GetMainTabCount];
-  GREYAssertEqual(2, tabCount, @"Expected 2 tabs.");
+  // Wait until tab opened and test if there're 2 tabs in total.
+  [ChromeEarlGrey waitForMainTabCount:2];
 }
 
 // Tests that helpers from chrome_matchers.h are available for use in tests.
@@ -51,28 +53,22 @@
   [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
       performAction:grey_tap()];
 
-  // Tap a second time to close the menu.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI closeToolsMenu];
 }
 
 // Tests that helpers from chrome_actions.h are available for use in tests.
 - (void)testToggleSettingsSwitch {
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::SettingsMenuButton()]
-      performAction:grey_tap()];
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::SettingsMenuPasswordsButton()]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::SettingsMenuPasswordsButton()];
 
   // Toggle the passwords switch off and on.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          @"savePasswordsItem_switch")]
-      performAction:chrome_test_util::TurnSettingsSwitchOn(NO)];
+                                          kSavePasswordSwitchTableViewId)]
+      performAction:chrome_test_util::TurnTableViewSwitchOn(NO)];
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          @"savePasswordsItem_switch")]
-      performAction:chrome_test_util::TurnSettingsSwitchOn(YES)];
+                                          kSavePasswordSwitchTableViewId)]
+      performAction:chrome_test_util::TurnTableViewSwitchOn(YES)];
 
   // Close the settings menu.
   [[EarlGrey
@@ -90,16 +86,9 @@
 // Tests that string resources are loaded into the ResourceBundle and available
 // for use in tests.
 - (void)testAppResourcesArePresent {
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
-
   NSString* settingsLabel = l10n_util::GetNSString(IDS_IOS_TOOLBAR_SETTINGS);
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(settingsLabel)]
       assertWithMatcher:grey_sufficientlyVisible()];
-
-  // Tap a second time to close the menu.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
 }
 
 // Tests that helpers in chrome_earl_grey_ui.h are available for use in tests.
@@ -151,13 +140,13 @@
   GREYAssertTrue(![ChromeEarlGrey isAutofillProfilePresentWithGUID:fakeGUID
                                                autofillProfileName:profileName],
                  @"Autofill profile should not be present.");
-  [ChromeEarlGrey injectAutofillProfileOnFakeSyncServerWithGUID:fakeGUID
-                                            autofillProfileName:profileName];
+  [ChromeEarlGrey addAutofillProfileToFakeSyncServerWithGUID:fakeGUID
+                                         autofillProfileName:profileName];
 }
 
 // Tests waitForSufficientlyVisibleElementWithMatcher in chrome_earl_grey.h
 - (void)testWaitForSufficientlyVisibleElementWithMatcher {
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::NewTabPageOmnibox()]
       performAction:grey_tap()];
   [ChromeEarlGrey
       waitForSufficientlyVisibleElementWithMatcher:chrome_test_util::Omnibox()];
@@ -172,7 +161,8 @@
 
 // Tests executeJavaScript:error: in chrome_earl_grey.h
 - (void)testExecuteJavaScript {
-  id actualResult = [ChromeEarlGrey executeJavaScript:@"0"];
+  auto result = [ChromeEarlGrey evaluateJavaScript:@"0"];
+  NSNumber* actualResult = [NSNumber numberWithInt:result.GetDouble()];
   GREYAssertEqualObjects(@0, actualResult,
                          @"Actual JavaScript execution result: %@",
                          actualResult);
@@ -190,6 +180,138 @@
 - (void)testAccessibilityUtil {
   [ChromeEarlGrey loadURL:GURL("chrome://version")];
   [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
+}
+
+// Tests enabling/disabling features through [AppLaunchManager
+// ensureAppLaunchedWithFeaturesEnabled]
+- (void)testAppLaunchManagerLaunchWithFeatures {
+  [[AppLaunchManager sharedManager]
+      ensureAppLaunchedWithFeaturesEnabled:{kTestFeature}
+                                  disabled:{}
+                            relaunchPolicy:NoForceRelaunchAndResetState];
+
+  GREYAssertTrue([ChromeEarlGrey isTestFeatureEnabled],
+                 @"kTestFeature should be enabled");
+
+  GREYAssertEqual([ChromeEarlGrey mainTabCount], 1U,
+                  @"Exactly one new tab should be opened.");
+}
+
+// Tests enabling variations and trigger variations through [AppLaunchManager
+// ensureAppLaunchedWithLaunchConfiguration:]
+- (void)testAppLaunchManagerLaunchWithVariations {
+  AppLaunchConfiguration config;
+  config.variations_enabled = {111111, 222222};
+  config.trigger_variations_enabled = {999999, 777777};
+  [[AppLaunchManager sharedManager] ensureAppLaunchedWithConfiguration:config];
+
+  GREYAssertTrue([ChromeEarlGrey isTriggerVariationEnabled:999999],
+                 @"Trigger variation 123456 should be enabled");
+  GREYAssertTrue([ChromeEarlGrey isTriggerVariationEnabled:777777],
+                 @"Trigger variation 123456 should be enabled");
+  GREYAssertTrue([ChromeEarlGrey isVariationEnabled:111111],
+                 @"Variation 987654 should be enabled");
+  GREYAssertTrue([ChromeEarlGrey isVariationEnabled:222222],
+                 @"Variation 987654 should be enabled");
+
+  GREYAssertEqual([ChromeEarlGrey mainTabCount], 1U,
+                  @"Exactly one new tab should be opened.");
+}
+
+// Tests AppLaunchManager can pass an arbitrary arg to host app.
+- (void)testAppLaunchManagerLaunchWithArbitraryArgs {
+  AppLaunchConfiguration config;
+  config.additional_args = {"-switch1", "--switch2", "--switch3=somevalue"};
+  config.relaunch_policy = ForceRelaunchByKilling;
+
+  [[AppLaunchManager sharedManager] ensureAppLaunchedWithConfiguration:config];
+
+  GREYAssertTrue([ChromeEarlGrey appHasLaunchSwitch:"switch1"],
+                 @"switch1 should be in app launch switches.");
+  GREYAssertTrue([ChromeEarlGrey appHasLaunchSwitch:"switch2"],
+                 @"switch2 should be in app launch switches.");
+  GREYAssertTrue([ChromeEarlGrey appHasLaunchSwitch:"switch3"],
+                 @"switch3 should be in app launch switches.");
+
+  GREYAssertFalse([ChromeEarlGrey appHasLaunchSwitch:"switch4"],
+                  @"switch4 should not be in app launch switches.");
+}
+
+// Tests gracefully kill through AppLaunchManager.
+// TODO(crbug.com/1354554): Test flaky on smoke.
+- (void)DISABLED_testAppLaunchManagerForceRelaunchByCleanShutdown {
+  [ChromeEarlGrey openNewTab];
+  [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
+      disabled:{}
+      relaunchPolicy:ForceRelaunchByCleanShutdown];
+  [[EarlGrey selectElementWithMatcher:grey_text(@"Restore")]
+      assertWithMatcher:grey_notVisible()];
+}
+
+// Tests hard kill(crash) through AppLaunchManager.
+- (void)testAppLaunchManagerForceRelaunchByKilling {
+  [ChromeEarlGrey openNewTab];
+  [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
+      disabled:{}
+      relaunchPolicy:ForceRelaunchByKilling];
+  [ChromeEarlGrey
+      waitForSufficientlyVisibleElementWithMatcher:grey_text(@"Restore")];
+  [ChromeEarlGrey waitForMainTabCount:1];
+}
+
+// Tests running resets after relaunch through AppLaunchManager.
+- (void)testAppLaunchManagerNoForceRelaunchAndResetState {
+  [self disableMockAuthentication];
+  [ChromeEarlGrey openNewTab];
+  [[AppLaunchManager sharedManager]
+      ensureAppLaunchedWithFeaturesEnabled:{kTestFeature}
+                                  disabled:{}
+                            relaunchPolicy:NoForceRelaunchAndResetState];
+  [ChromeEarlGrey waitForMainTabCount:1];
+  DCHECK([ChromeEarlGreyAppInterface isFakeSyncServerSetUp]);
+}
+
+// Tests no force relaunch.
+- (void)testAppLaunchManagerNoForceRelaunchAndKeepState {
+  [self disableMockAuthentication];
+  [ChromeEarlGrey openNewTab];
+  // No relauch when feature list isn't changed.
+  [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
+      disabled:{}
+      relaunchPolicy:NoForceRelaunchAndKeepState];
+  [ChromeEarlGrey waitForMainTabCount:2];
+  [[EarlGrey selectElementWithMatcher:grey_text(@"Restore")]
+      assertWithMatcher:grey_notVisible()];
+}
+
+// Tests backgrounding app and moving app back through AppLaunchManager.
+- (void)testAppLaunchManagerBackgroundAndForegroundApp {
+  [ChromeEarlGrey openNewTab];
+  [ChromeEarlGrey loadURL:GURL("chrome://version")];
+  [[AppLaunchManager sharedManager] backgroundAndForegroundApp];
+  [ChromeEarlGrey waitForMainTabCount:2];
+}
+
+// Tests isCompactWidth method in chrome_earl_grey.h.
+- (void)testisCompactWidth {
+  BOOL expectedIsCompactWidth =
+      [[chrome_test_util::GetAnyKeyWindow() traitCollection]
+          horizontalSizeClass] == UIUserInterfaceSizeClassCompact;
+  GREYAssertTrue([ChromeEarlGrey isCompactWidth] == expectedIsCompactWidth,
+                 @"isCompactWidth should return %@",
+                 expectedIsCompactWidth ? @"YES" : @"NO");
+}
+
+// Tests helpers that retrieve prefs and local state values.
+- (void)testGetPrefs {
+  // The actual pref names and values below are irrelevant, but the calls
+  // themselves should return data without crashing or asserting.
+  [ChromeEarlGrey localStateIntegerPref:prefs::kBrowserStatesNumCreated];
+  [ChromeEarlGrey localStateStringPref:prefs::kBrowserStateLastUsed];
+
+  [ChromeEarlGrey userBooleanPref:prefs::kIosBookmarkPromoAlreadySeen];
+  [ChromeEarlGrey userIntegerPref:prefs::kIosBookmarkCachedTopMostRow];
+  [ChromeEarlGrey userStringPref:prefs::kDefaultCharset];
 }
 
 @end

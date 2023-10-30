@@ -1,13 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_WEB_SHELL_TEST_APP_WEB_SHELL_TEST_UTIL_H_
 #define IOS_WEB_SHELL_TEST_APP_WEB_SHELL_TEST_UTIL_H_
 
-#import "ios/web/public/web_state/web_state.h"
-
 namespace web {
+class WebState;
+
 namespace shell_test_util {
 
 // Gets the current WebState for the web shell.

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,8 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
-#include "ios/chrome/browser/leveldb_proto/proto_database_provider_factory.h"
 #include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory_util.h"
-#include "ios/chrome/browser/pref_names.h"
+#import "ios/chrome/browser/prefs/pref_names.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
 
@@ -24,8 +23,7 @@ using ntp_snippets::ContentSuggestionsService;
 // static
 ContentSuggestionsService*
 IOSChromeContentSuggestionsServiceFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
-  DCHECK(!browser_state->IsOffTheRecord());
+    ChromeBrowserState* browser_state) {
   return static_cast<ContentSuggestionsService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -53,7 +51,6 @@ IOSChromeContentSuggestionsServiceFactory::
   DependsOn(ios::HistoryServiceFactory::GetInstance());
   DependsOn(IOSChromeLargeIconServiceFactory::GetInstance());
   DependsOn(ReadingListModelFactory::GetInstance());
-  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
 }
 
 IOSChromeContentSuggestionsServiceFactory::
@@ -74,5 +71,11 @@ void IOSChromeContentSuggestionsServiceFactory::RegisterBrowserStatePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kArticlesForYouEnabled, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kNTPContentSuggestionsEnabled, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kNTPContentSuggestionsForSupervisedUserEnabled, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }

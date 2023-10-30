@@ -1,76 +1,41 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
-#import <XCTest/XCTest.h>
-
-#include "components/strings/grit/components_strings.h"
+#import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/web/public/test/http_server/http_server.h"
-#include "ios/web/public/test/http_server/http_server_util.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Returns matcher that looks for text in UILabel, UITextView, and UITextField
-// objects, checking if their displayed strings contain the provided |text|.
-id<GREYMatcher> ContainsText(NSString* text) {
-  MatchesBlock matches = ^BOOL(id element) {
-    return [[element text] containsString:text];
-  };
-  DescribeToBlock describe = ^void(id<GREYDescription> description) {
-    [description appendText:[NSString stringWithFormat:@"hasText('%@')", text]];
-  };
-  id<GREYMatcher> matcher =
-      [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
-                                           descriptionBlock:describe];
-  return grey_allOf(grey_anyOf(grey_kindOfClass([UILabel class]),
-                               grey_kindOfClass([UITextField class]),
-                               grey_kindOfClass([UITextView class]), nil),
-                    matcher, nil);
-}
-
 // A matcher for the main title of the Sad Tab in 'reload' mode.
 id<GREYMatcher> reloadSadTabTitleText() {
-  static id matcher = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    matcher = [GREYMatchers
-        matcherForText:l10n_util::GetNSString(IDS_SAD_TAB_MESSAGE)];
-  });
-  return matcher;
+  return chrome_test_util::ContainsPartialText(
+      l10n_util::GetNSString(IDS_SAD_TAB_MESSAGE));
 }
 
 // A matcher for the main title of the Sad Tab in 'feedback' mode.
 id<GREYMatcher> feedbackSadTabTitleContainsText() {
-  static id matcher = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    matcher = ContainsText(l10n_util::GetNSString(IDS_SAD_TAB_RELOAD_TRY));
-  });
-  return matcher;
+  return chrome_test_util::ContainsPartialText(
+      l10n_util::GetNSString(IDS_SAD_TAB_RELOAD_TRY));
 }
 
 // A matcher for a help string suggesting the user use Incognito Mode.
 id<GREYMatcher> incognitoHelpContainsText() {
-  static id matcher = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    matcher =
-        ContainsText(l10n_util::GetNSString(IDS_SAD_TAB_RELOAD_INCOGNITO));
-  });
-  return matcher;
+  return chrome_test_util::ContainsPartialText(
+      l10n_util::GetNSString(IDS_SAD_TAB_RELOAD_INCOGNITO));
 }
-}
+}  // namespace
 
 // Sad Tab View integration tests for Chrome.
 @interface SadTabViewTestCase : ChromeTestCase
@@ -83,11 +48,11 @@ id<GREYMatcher> incognitoHelpContainsText() {
 // visited within 60 seconds, for this reason this one test can not
 // be easily split up across multiple tests
 // as visiting Sad Tab may not be idempotent.
-- (void)testSadTabView {
+// TODO(crbug.com/1047238): Test fails when run on iOS 13.
+- (void)DISABLED_testSadTabView {
   // Prepare a simple but known URL to avoid testing from the NTP.
-  web::test::SetUpFileBasedHttpServer();
-  const GURL simple_URL = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/destination.html");
+  GREYAssertTrue(self.testServer->Start(), @"Server did not start.");
+  const GURL simple_URL = self.testServer->GetURL("/destination.html");
 
   // Prepare a helper block to test Sad Tab navigating from and to normal pages.
   void (^loadAndCheckSimpleURL)() = ^void() {

@@ -1,27 +1,45 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/web/web_state/ui/crw_wk_ui_handler.h"
 
-#include "base/strings/sys_string_conversions.h"
+#import "base/logging.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/strings/sys_string_conversions.h"
 #import "ios/web/navigation/wk_navigation_action_util.h"
 #import "ios/web/navigation/wk_navigation_util.h"
-#import "ios/web/public/java_script_dialog_type.h"
-#include "ios/web/public/service/web_state_interface_provider.h"
+#import "ios/web/public/ui/context_menu_params.h"
+#import "ios/web/public/ui/java_script_dialog_type.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/web_state/ui/crw_context_menu_controller.h"
 #import "ios/web/web_state/ui/crw_wk_ui_handler_delegate.h"
 #import "ios/web/web_state/user_interaction_state.h"
 #import "ios/web/web_state/web_state_impl.h"
 #import "ios/web/web_view/wk_security_origin_util.h"
 #import "ios/web/webui/mojo_facade.h"
 #import "net/base/mac/url_conversions.h"
-#include "url/gurl.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+namespace {
+
+// Histogram name that logs permission requests.
+const char kPermissionRequestsHistogram[] = "IOS.Permission.Requests";
+
+// Values for UMA permission histograms. These values are based on
+// WKMediaCaptureType and persisted to logs. Entries should not be renumbered
+// and numeric values should never be reused.
+enum class PermissionRequest {
+  RequestCamera = 0,
+  RequestMicrophone = 1,
+  RequestCameraAndMicrophone = 2,
+  kMaxValue = RequestCameraAndMicrophone,
+};
+
+}  // namespace
 
 @interface CRWWKUIHandler () {
   // Backs up property with the same name.
@@ -37,29 +55,51 @@
 
 @implementation CRWWKUIHandler
 
-#pragma mark - Public
+#pragma mark - CRWWebViewHandler
 
 - (void)close {
+  [super close];
   _mojoFacade.reset();
 }
 
 #pragma mark - Property
 
 - (web::WebStateImpl*)webStateImpl {
-  return [self.delegate webStateImplForUIHandler:self];
+  return [self.delegate webStateImplForWebViewHandler:self];
 }
 
 - (web::MojoFacade*)mojoFacade {
-  if (!_mojoFacade) {
-    service_manager::mojom::InterfaceProvider* interfaceProvider =
-        self.webStateImpl->GetWebStateInterfaceProvider();
-    _mojoFacade =
-        std::make_unique<web::MojoFacade>(interfaceProvider, self.webStateImpl);
-  }
+  if (!_mojoFacade)
+    _mojoFacade = std::make_unique<web::MojoFacade>(self.webStateImpl);
   return _mojoFacade.get();
 }
 
 #pragma mark - WKUIDelegate
+
+- (void)webView:(WKWebView*)webView
+    requestMediaCapturePermissionForOrigin:(WKSecurityOrigin*)origin
+                          initiatedByFrame:(WKFrameInfo*)frame
+                                      type:(WKMediaCaptureType)type
+                           decisionHandler:
+                               (void (^)(WKPermissionDecision decision))
+                                   decisionHandler API_AVAILABLE(ios(15.0)) {
+  PermissionRequest request;
+  switch (type) {
+    case WKMediaCaptureTypeCamera:
+      request = PermissionRequest::RequestCamera;
+      break;
+    case WKMediaCaptureTypeMicrophone:
+      request = PermissionRequest::RequestMicrophone;
+      break;
+    case WKMediaCaptureTypeCameraAndMicrophone:
+      request = PermissionRequest::RequestCameraAndMicrophone;
+      break;
+  }
+  base::UmaHistogramEnumeration(kPermissionRequestsHistogram, request);
+  web::GetWebClient()->WillDisplayMediaCapturePermissionPrompt(
+      self.webStateImpl);
+  decisionHandler(WKPermissionDecisionPrompt);
+}
 
 - (WKWebView*)webView:(WKWebView*)webView
     createWebViewWithConfiguration:(WKWebViewConfiguration*)configuration
@@ -77,7 +117,7 @@
       valueForHTTPHeaderField:web::wk_navigation_util::kReferrerHeaderName];
   GURL openerURL = referrer.length
                        ? GURL(base::SysNSStringToUTF8(referrer))
-                       : [self.delegate documentURLForUIHandler:self];
+                       : [self.delegate documentURLForWebViewHandler:self];
 
   // There is no reliable way to tell if there was a user gesture, so this code
   // checks if user has recently tapped on web view. TODO(crbug.com/809706):
@@ -101,8 +141,8 @@
     return nil;
 
   // WKWebView requires WKUIDelegate to return a child view created with
-  // exactly the same |configuration| object (exception is raised if config is
-  // different). |configuration| param and config returned by
+  // exactly the same `configuration` object (exception is raised if config is
+  // different). `configuration` param and config returned by
   // WKWebViewConfigurationProvider are different objects because WKWebView
   // makes a shallow copy of the config inside init, so every WKWebView
   // owns a separate shallow copy of WKWebViewConfiguration.
@@ -112,8 +152,22 @@
 }
 
 - (void)webViewDidClose:(WKWebView*)webView {
-  if (self.webStateImpl && self.webStateImpl->HasOpener())
-    self.webStateImpl->CloseWebState();
+  // This is triggered by a JavaScript `close()` method call, only if the tab
+  // was opened using `window.open`. WebKit is checking that this is the case,
+  // so we can close the tab unconditionally here.
+  if (self.webStateImpl) {
+    __weak __typeof(self) weakSelf = self;
+    // -webViewDidClose will typically trigger another webState to activate,
+    // which may in turn also close. To prevent reentrant modificationre in
+    // WebStateList, trigger a PostTask here.
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(^{
+          web::WebStateImpl* webStateImpl = weakSelf.webStateImpl;
+          if (webStateImpl) {
+            webStateImpl->CloseWebState();
+          }
+        }));
+  }
 }
 
 - (void)webView:(WKWebView*)webView
@@ -170,35 +224,40 @@
                        }];
 }
 
-- (BOOL)webView:(WKWebView*)webView
-    shouldPreviewElement:(WKPreviewElementInfo*)elementInfo {
-  return self.webStateImpl->ShouldPreviewLink(
-      net::GURLWithNSURL(elementInfo.linkURL));
-}
+- (void)webView:(WKWebView*)webView
+    contextMenuConfigurationForElement:(WKContextMenuElementInfo*)elementInfo
+                     completionHandler:
+                         (void (^)(UIContextMenuConfiguration* _Nullable))
+                             completionHandler {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    completionHandler(nil);
+    return;
+  }
 
-- (UIViewController*)webView:(WKWebView*)webView
-    previewingViewControllerForElement:(WKPreviewElementInfo*)elementInfo
-                        defaultActions:
-                            (NSArray<id<WKPreviewActionItem>>*)previewActions {
-  // Prevent |_contextMenuController| from intercepting the default behavior for
-  // the current on-going touch. Otherwise it would cancel the on-going Peek&Pop
-  // action and show its own context menu instead (crbug.com/770619).
-  [self.contextMenuController allowSystemUIForCurrentGesture];
+  web::ContextMenuParams params;
+  params.link_url = net::GURLWithNSURL(elementInfo.linkURL);
 
-  return self.webStateImpl->GetPreviewingViewController(
-      net::GURLWithNSURL(elementInfo.linkURL));
+  delegate->ContextMenuConfiguration(self.webStateImpl, params,
+                                     completionHandler);
 }
 
 - (void)webView:(WKWebView*)webView
-    commitPreviewingViewController:(UIViewController*)previewingViewController {
-  return self.webStateImpl->CommitPreviewingViewController(
-      previewingViewController);
+     contextMenuForElement:(WKContextMenuElementInfo*)elementInfo
+    willCommitWithAnimator:
+        (id<UIContextMenuInteractionCommitAnimating>)animator {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->ContextMenuWillCommitWithAnimator(self.webStateImpl, animator);
 }
 
 #pragma mark - Helper
 
-// Helper to respond to |webView:runJavaScript...| delegate methods.
-// |completionHandler| must not be nil.
+// Helper to respond to `webView:runJavaScript...| delegate methods.
+// `completionHandler` must not be nil.
 - (void)runJavaScriptDialogOfType:(web::JavaScriptDialogType)type
                  initiatedByFrame:(WKFrameInfo*)frame
                           message:(NSString*)message
@@ -210,6 +269,18 @@
   // the requesting page's URL.
   GURL requestURL = net::GURLWithNSURL(frame.request.URL);
   if (!requestURL.is_valid()) {
+    completionHandler(NO, nil);
+    return;
+  }
+
+  if (self.webStateImpl->GetVisibleURL().DeprecatedGetOriginAsURL() !=
+          requestURL.DeprecatedGetOriginAsURL() &&
+      frame.mainFrame) {
+    // Dialog was requested by web page's main frame, but visible URL has
+    // different origin. This could happen if the user has started a new
+    // browser initiated navigation. There is no value in showing dialogs
+    // requested by page, which this WebState is about to leave. But presenting
+    // the dialog can lead to phishing and other abusive behaviors.
     completionHandler(NO, nil);
     return;
   }

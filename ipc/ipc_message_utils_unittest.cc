@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,16 @@
 #include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/shared_memory.h"
 #include "base/test/test_shared_memory_util.h"
 #include "base/unguessable_token.h"
+#include "build/build_config.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+#endif
 
 namespace IPC {
 namespace {
@@ -111,7 +115,7 @@ TEST(IPCMessageUtilsTest, MojoChannelHandle) {
 }
 
 TEST(IPCMessageUtilsTest, OptionalUnset) {
-  base::Optional<int> opt;
+  absl::optional<int> opt;
   base::Pickle pickle;
   IPC::WriteParam(&pickle, opt);
 
@@ -119,14 +123,14 @@ TEST(IPCMessageUtilsTest, OptionalUnset) {
   IPC::LogParam(opt, &log);
   EXPECT_EQ("(unset)", log);
 
-  base::Optional<int> unserialized_opt;
+  absl::optional<int> unserialized_opt;
   base::PickleIterator iter(pickle);
   EXPECT_TRUE(IPC::ReadParam(&pickle, &iter, &unserialized_opt));
   EXPECT_FALSE(unserialized_opt);
 }
 
 TEST(IPCMessageUtilsTest, OptionalSet) {
-  base::Optional<int> opt(10);
+  absl::optional<int> opt(10);
   base::Pickle pickle;
   IPC::WriteParam(&pickle, opt);
 
@@ -134,30 +138,11 @@ TEST(IPCMessageUtilsTest, OptionalSet) {
   IPC::LogParam(opt, &log);
   EXPECT_EQ("10", log);
 
-  base::Optional<int> unserialized_opt;
+  absl::optional<int> unserialized_opt;
   base::PickleIterator iter(pickle);
   EXPECT_TRUE(IPC::ReadParam(&pickle, &iter, &unserialized_opt));
   EXPECT_TRUE(unserialized_opt);
   EXPECT_EQ(opt.value(), unserialized_opt.value());
-}
-
-TEST(IPCMessageUtilsTest, SharedMemoryHandle) {
-  base::SharedMemoryCreateOptions options;
-  options.size = 1004;
-  base::SharedMemory shmem;
-  ASSERT_TRUE(shmem.Create(options));
-
-  base::SharedMemoryHandle pre_pickle = shmem.handle().Duplicate();
-  ASSERT_TRUE(pre_pickle.IsValid());
-
-  IPC::Message message;
-  IPC::WriteParam(&message, pre_pickle);
-
-  base::SharedMemoryHandle post_pickle;
-  base::PickleIterator iter(message);
-  EXPECT_TRUE(IPC::ReadParam(&message, &iter, &post_pickle));
-  EXPECT_EQ(pre_pickle.GetGUID(), post_pickle.GetGUID());
-  EXPECT_EQ(pre_pickle.GetSize(), post_pickle.GetSize());
 }
 
 template <typename SharedMemoryRegionType>
@@ -171,9 +156,7 @@ TYPED_TEST_SUITE(SharedMemoryRegionTypedTest, AllSharedMemoryRegionTypes);
 
 TYPED_TEST(SharedMemoryRegionTypedTest, WriteAndRead) {
   const size_t size = 2314;
-  TypeParam pre_pickle;
-  base::WritableSharedMemoryMapping pre_mapping;
-  std::tie(pre_pickle, pre_mapping) = base::CreateMappedRegion<TypeParam>(size);
+  auto [pre_pickle, pre_mapping] = base::CreateMappedRegion<TypeParam>(size);
   const size_t pre_size = pre_pickle.GetSize();
 
   const std::string content = "Hello, world!";
@@ -235,6 +218,105 @@ TEST(IPCMessageUtilsTest, FlatMap) {
 
   EXPECT_EQ(input, output);
 }
+
+TEST(IPCMessageUtilsTest, StrongAlias) {
+  using TestType = base::StrongAlias<class Tag, int>;
+  TestType input(42);
+
+  base::Pickle pickle;
+  IPC::WriteParam(&pickle, input);
+
+  base::PickleIterator iter(pickle);
+  TestType output;
+  EXPECT_TRUE(IPC::ReadParam(&pickle, &iter, &output));
+
+  EXPECT_EQ(input, output);
+}
+
+TEST(IPCMessageUtilsTest, LegacyDictValueConversion) {
+  base::DictionaryValue dict_value;
+  dict_value.GetDict().Set("path1", 42);
+  dict_value.GetDict().Set("path2", 84);
+  base::ListValue subvalue;
+  subvalue.Append(1234);
+  subvalue.Append(5678);
+  dict_value.SetKey("path3", std::move(subvalue));
+
+  IPC::Message message;
+  ParamTraits<base::DictionaryValue>::Write(&message, dict_value);
+
+  base::PickleIterator iter(message);
+  base::DictionaryValue read_value;
+  ASSERT_TRUE(
+      ParamTraits<base::DictionaryValue>::Read(&message, &iter, &read_value));
+  EXPECT_EQ(dict_value, read_value);
+}
+
+TEST(IPCMessageUtilsTest, DictValueConversion) {
+  base::Value::Dict dict_value;
+  dict_value.Set("path1", 42);
+  dict_value.Set("path2", 84);
+  base::Value::List subvalue;
+  subvalue.Append(1234);
+  subvalue.Append(5678);
+  dict_value.Set("path3", std::move(subvalue));
+
+  IPC::Message message;
+  ParamTraits<base::Value::Dict>::Write(&message, dict_value);
+
+  base::PickleIterator iter(message);
+  base::Value::Dict read_value;
+  ASSERT_TRUE(
+      ParamTraits<base::Value::Dict>::Read(&message, &iter, &read_value));
+  EXPECT_EQ(dict_value, read_value);
+}
+
+TEST(IPCMessageUtilsTest, LegacyListValueConversion) {
+  base::ListValue list_value;
+  list_value.Append(42);
+  list_value.Append(84);
+
+  IPC::Message message;
+  ParamTraits<base::ListValue>::Write(&message, list_value);
+
+  base::PickleIterator iter(message);
+  base::ListValue read_value;
+  ASSERT_TRUE(ParamTraits<base::ListValue>::Read(&message, &iter, &read_value));
+  EXPECT_EQ(list_value, read_value);
+}
+
+TEST(IPCMessageUtilsTest, ListValueConversion) {
+  base::Value::List list_value;
+  list_value.Append(42);
+  list_value.Append(84);
+
+  IPC::Message message;
+  ParamTraits<base::Value::List>::Write(&message, list_value);
+
+  base::PickleIterator iter(message);
+  base::Value::List read_value;
+  ASSERT_TRUE(
+      ParamTraits<base::Value::List>::Read(&message, &iter, &read_value));
+  EXPECT_EQ(list_value, read_value);
+}
+
+#if BUILDFLAG(IS_WIN)
+TEST(IPCMessageUtilsTest, ScopedHandle) {
+  HANDLE raw_dupe_handle;
+  ASSERT_TRUE(::DuplicateHandle(::GetCurrentProcess(), ::GetCurrentProcess(),
+                                ::GetCurrentProcess(), &raw_dupe_handle, 0,
+                                FALSE, DUPLICATE_SAME_ACCESS));
+  base::win::ScopedHandle dupe_handle(raw_dupe_handle);
+
+  Message message(0, 0, Message::PRIORITY_LOW);
+  WriteParam(&message, dupe_handle);
+
+  base::PickleIterator iter(message);
+  base::win::ScopedHandle read_handle;
+  EXPECT_TRUE(ReadParam(&message, &iter, &read_handle));
+  EXPECT_TRUE(read_handle.IsValid());
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace
 }  // namespace IPC

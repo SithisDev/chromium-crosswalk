@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,12 @@
 // A protocol implemented by a delegate of PreloadController
 @protocol PreloadControllerDelegate
 
-// Should preload controller request a desktop site.
-- (BOOL)preloadShouldUseDesktopUserAgent;
+// WebState from which preload controller should copy the session history.
+// This web state will be replaced on successful preload.
+- (web::WebState*)webStateToReplace;
 
-// Returns YES if the given |url| should be backed by a native controller.
-- (BOOL)preloadHasNativeControllerForURL:(const GURL&)url;
+// Returns the UIView used to contain the WebView for sizing purposes.
+- (UIView*)webViewContainer;
 
 @end
 

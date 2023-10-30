@@ -1,36 +1,34 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_mediator.h"
 
-#include "components/sessions/core/tab_restore_service.h"
-#include "components/sync_sessions/open_tabs_ui_delegate.h"
-#include "components/sync_sessions/session_sync_service.h"
-#include "components/sync_sessions/synced_session.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "components/sessions/core/tab_restore_service.h"
+#import "components/sync_sessions/open_tabs_ui_delegate.h"
+#import "components/sync_sessions/session_sync_service.h"
+#import "components/sync_sessions/synced_session.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/favicon/favicon_loader.h"
-#include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
-#include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
-#include "ios/chrome/browser/sync/session_sync_service_factory.h"
-#include "ios/chrome/browser/sync/sync_setup_service.h"
-#include "ios/chrome/browser/sync/sync_setup_service_factory.h"
+#import "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
+#import "ios/chrome/browser/net/crurl.h"
+#import "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
+#import "ios/chrome/browser/sync/session_sync_service_factory.h"
+#import "ios/chrome/browser/sync/sync_setup_service.h"
+#import "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_consumer.h"
 #import "ios/chrome/browser/ui/recent_tabs/sessions_sync_user_state.h"
-#include "url/gurl.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
+#import "ios/chrome/common/ui/favicon/favicon_constants.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-namespace {
-// Desired width and height of favicon.
-const CGFloat kFaviconWidthHeight = 24;
-// Minimum favicon size to retrieve.
-const CGFloat kFaviconMinWidthHeight = 16;
-}  // namespace
-
-@interface RecentTabsMediator ()<SyncedSessionsObserver> {
+@interface RecentTabsMediator () <SyncedSessionsObserver,
+                                  WebStateListObserving> {
   std::unique_ptr<synced_sessions::SyncedSessionsObserverBridge>
       _syncedSessionsObserver;
   std::unique_ptr<recent_tabs::ClosedTabsObserverBridge> _closedTabsObserver;
@@ -41,18 +39,31 @@ const CGFloat kFaviconMinWidthHeight = 16;
 - (SessionsSyncUserState)userSignedInState;
 // Utility functions for -userSignedInState so these can be mocked out
 // easily for unit tests.
-- (BOOL)isSignedIn;
+- (BOOL)hasSyncConsent;
 - (BOOL)isSyncTabsEnabled;
 - (BOOL)hasForeignSessions;
 - (BOOL)isSyncCompleted;
 // Reload the panel.
 - (void)refreshSessionsView;
+// YES if Tabs are being updated in batch. (e.g. Closing All, or Undoing a Close
+// All).
+@property(nonatomic, assign) BOOL processingBatchOperation;
 
 @end
 
-@implementation RecentTabsMediator
+@implementation RecentTabsMediator {
+  std::unique_ptr<WebStateListObserverBridge> _webStateListObserver;
+}
 @synthesize browserState = _browserState;
 @synthesize consumer = _consumer;
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
+  }
+  return self;
+}
 
 #pragma mark - Public Interface
 
@@ -75,6 +86,12 @@ const CGFloat kFaviconMinWidthHeight = 16;
 
 - (void)disconnect {
   _syncedSessionsObserver.reset();
+
+  if (_webStateList) {
+    _webStateList->RemoveObserver(_webStateListObserver.get());
+    _webStateListObserver.reset();
+    _webStateList = nullptr;
+  }
 
   if (_closedTabsObserver) {
     sessions::TabRestoreService* restoreService =
@@ -106,34 +123,71 @@ const CGFloat kFaviconMinWidthHeight = 16;
   sessions::TabRestoreService* restoreService =
       IOSChromeTabRestoreServiceFactory::GetForBrowserState(_browserState);
   restoreService->LoadTabsFromLastSession();
-  [self.consumer refreshRecentlyClosedTabs];
+  // A WebStateList batch operation can result in batch changes to the
+  // TabRestoreService (e.g., closing or restoring all tabs). To properly batch
+  // process TabRestoreService changes, those changes must be executed inside
+  // the WebStateList batch operation callback. This allows RecentTabs to ignore
+  // individual tabRestoreServiceChanged calls that correspond to the
+  // WebStateList batch operation. The consumer is updated once after the batch
+  // operation is completed.
+  if (!self.processingBatchOperation)
+    [self.consumer refreshRecentlyClosedTabs];
 }
 
 - (void)tabRestoreServiceDestroyed:(sessions::TabRestoreService*)service {
   [self.consumer setTabRestoreService:nullptr];
 }
 
+#pragma mark - WebStateListObserving
+
+- (void)webStateListWillBeginBatchOperation:(WebStateList*)webStateList {
+  self.processingBatchOperation = YES;
+}
+
+- (void)webStateListBatchOperationEnded:(WebStateList*)webStateList {
+  self.processingBatchOperation = NO;
+  // A WebStateList batch operation can result in batch changes to the
+  // TabRestoreService (e.g., closing or restoring all tabs). Individual
+  // TabRestoreService updates are ignored between
+  // `-webStateListWillBeginBatchOperation:` and
+  // `-webStateListBatchOperationEnded:`. The consumer is updated once after the
+  // batch operation is complete.
+  [self.consumer refreshRecentlyClosedTabs];
+}
+
 #pragma mark - TableViewFaviconDataSource
 
-- (void)faviconForURL:(const GURL&)URL
+- (void)faviconForURL:(CrURL*)URL
            completion:(void (^)(FaviconAttributes*))completion {
   FaviconLoader* faviconLoader =
       IOSChromeFaviconLoaderFactory::GetForBrowserState(self.browserState);
   faviconLoader->FaviconForPageUrl(
-      URL, kFaviconWidthHeight, kFaviconMinWidthHeight,
+      URL.gurl, kDesiredSmallFaviconSizePt, kMinFaviconSizePt,
       /*fallback_to_google_server=*/false, ^(FaviconAttributes* attributes) {
         completion(attributes);
       });
 }
 
+#pragma mark - Setters/Getters
+
+- (void)setWebStateList:(WebStateList*)webStateList {
+  if (_webStateList)
+    _webStateList->RemoveObserver(_webStateListObserver.get());
+
+  _webStateList = webStateList;
+
+  if (_webStateList)
+    _webStateList->AddObserver(_webStateListObserver.get());
+}
+
 #pragma mark - Private
 
-- (BOOL)isSignedIn {
-  return _syncedSessionsObserver->IsSignedIn();
+- (BOOL)hasSyncConsent {
+  return _syncedSessionsObserver->HasSyncConsent();
 }
 
 - (BOOL)isSyncTabsEnabled {
-  DCHECK([self isSignedIn]);
+  DCHECK([self hasSyncConsent]);
   SyncSetupService* service =
       SyncSetupServiceFactory::GetForBrowserState(_browserState);
   return !service->UserActionIsRequiredToHaveTabSyncWork();
@@ -141,7 +195,7 @@ const CGFloat kFaviconMinWidthHeight = 16;
 
 // Returns whether this profile has any foreign sessions to sync.
 - (SessionsSyncUserState)userSignedInState {
-  if (![self isSignedIn])
+  if (![self hasSyncConsent])
     return SessionsSyncUserState::USER_SIGNED_OUT;
   if (![self isSyncTabsEnabled])
     return SessionsSyncUserState::USER_SIGNED_IN_SYNC_OFF;

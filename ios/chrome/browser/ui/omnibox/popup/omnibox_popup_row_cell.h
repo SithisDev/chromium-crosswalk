@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,10 +33,6 @@ const CGFloat kOmniboxPopupCellMinimumHeight = 58;
 // It handles all the layout logic internally.
 @interface OmniboxPopupRowCell : UITableViewCell
 
-// Layout this cell with the given data before displaying.
-- (void)setupWithAutocompleteSuggestion:(id<AutocompleteSuggestion>)suggestion
-                              incognito:(BOOL)incognito;
-
 @property(nonatomic, weak) id<OmniboxPopupRowCellDelegate> delegate;
 // Used to fetch favicons.
 @property(nonatomic, weak) id<FaviconRetriever> faviconRetriever;
@@ -56,6 +52,10 @@ const CGFloat kOmniboxPopupCellMinimumHeight = 58;
 
 // Image view for the leading image.
 @property(nonatomic, strong, readonly) OmniboxIconView* leadingIconView;
+
+// Layout this cell with the given data before displaying.
+- (void)setupWithAutocompleteSuggestion:(id<AutocompleteSuggestion>)suggestion
+                              incognito:(BOOL)incognito;
 
 @end
 

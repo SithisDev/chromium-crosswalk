@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,36 +7,15 @@
 
 #include "base/ios/block_types.h"
 #import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/settings/sync/utils/sync_presenter.h"
 
-@protocol ApplicationCommands;
 @class BrowserViewController;
-@class TabModel;
-
-class AppUrlLoadingService;
 
 // Coordinator for BrowserViewController.
-@interface BrowserCoordinator : ChromeCoordinator
-
-// Use only -initWithBaseViewController:browser:
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-    NS_UNAVAILABLE;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_UNAVAILABLE;
+@interface BrowserCoordinator : ChromeCoordinator <SyncPresenter>
 
 // The main view controller.
 @property(nonatomic, strong, readonly) BrowserViewController* viewController;
-
-// Command handler for ApplicationCommands.
-@property(nonatomic, weak) id<ApplicationCommands> applicationCommandHandler;
-
-// The application level component for url loading. Should be used only by
-// browser state level UrlLoadingService instances.
-@property(nonatomic, assign) AppUrlLoadingService* appURLLoadingService;
-
-// The tab model.
-@property(nonatomic, weak, readonly) TabModel* tabModel;
 
 // Activates/deactivates the object. This will enable/disable the ability for
 // this object to browse, and to have live UIWebViews associated with it. While

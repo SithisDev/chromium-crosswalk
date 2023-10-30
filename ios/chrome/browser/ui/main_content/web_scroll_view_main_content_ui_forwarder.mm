@@ -1,28 +1,28 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/main_content/web_scroll_view_main_content_ui_forwarder.h"
 
-#include <memory>
+#import <memory>
 
-#include "base/logging.h"
+#import "base/check.h"
 #import "ios/chrome/browser/ui/main_content/main_content_ui_state.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/web/public/navigation/navigation_context.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-// Uses the current values of |proxy|'s properties to update the
-// MainContentUIState via |updater|.
+// Uses the current values of `proxy`'s properties to update the
+// MainContentUIState via `updater`.
 void UpdateStateWithProxy(MainContentUIStateUpdater* updater,
                           CRWWebViewScrollViewProxy* proxy) {
   [updater scrollViewSizeDidChange:proxy.frame.size];
@@ -46,7 +46,7 @@ void UpdateStateWithProxy(MainContentUIStateUpdater* updater,
 @property(nonatomic, readonly) WebStateList* webStateList;
 // The WebStateList's active WebState.
 @property(nonatomic, assign) web::WebState* webState;
-// The scroll view proxy whose scroll events are forwarded to |updater|.
+// The scroll view proxy whose scroll events are forwarded to `updater`.
 @property(nonatomic, readonly, strong) CRWWebViewScrollViewProxy* proxy;
 
 @end
@@ -80,7 +80,7 @@ void UpdateStateWithProxy(MainContentUIStateUpdater* updater,
 }
 
 - (void)dealloc {
-  // |-disconnect| must be called before deallocation.
+  // `-disconnect` must be called before deallocation.
   DCHECK(!_webStateListBridge);
   DCHECK(!_webStateBridge);
   DCHECK(!_webState);
@@ -191,7 +191,7 @@ void UpdateStateWithProxy(MainContentUIStateUpdater* updater,
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   self.webState = newWebState;
 }
 

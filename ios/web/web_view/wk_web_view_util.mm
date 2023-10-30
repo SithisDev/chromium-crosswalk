@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,44 +12,21 @@
 
 namespace web {
 
-bool IsSafeBrowsingWarningDisplayedInWebView(WKWebView* web_view) {
-  // A SafeBrowsing warning is a UIScrollView that is inserted on top of
-  // WKWebView's scroll view. This method uses heuristics to detect this view.
-  // It may break in the future if WebKit's implementation of SafeBrowsing
-  // warnings changes.
-  UIView* containing_view = web_view.scrollView.superview;
-  if (!containing_view)
-    return false;
+void CreateFullPagePdf(WKWebView* web_view,
+                       base::OnceCallback<void(NSData*)> callback) {
 
-  UIView* top_view = containing_view.subviews.lastObject;
+  if (!web_view) {
+    std::move(callback).Run(nil);
+    return;
+  }
 
-  if (top_view == web_view.scrollView)
-    return false;
-
-  return [top_view isKindOfClass:[UIScrollView class]] &&
-         [NSStringFromClass([top_view class]) containsString:@"Warning"] &&
-         top_view.subviews.count > 0 &&
-         [top_view.subviews.firstObject.subviews.lastObject
-             isKindOfClass:[UIButton class]];
-}
-
-bool RequiresContentFilterBlockingWorkaround() {
-  if (!GetWebClient()->IsSlimNavigationManagerEnabled())
-    return false;
-
-  // This is fixed in iOS13 beta 7.
-  if (@available(iOS 13, *))
-    return false;
-
-  if (@available(iOS 12.2, *))
-    return true;
-
-  return false;
-}
-
-bool RequiresProvisionalNavigationFailureWorkaround() {
-  if (@available(iOS 12.2, *))
-    return true;
-  return false;
+  __block base::OnceCallback<void(NSData*)> callback_for_block =
+      std::move(callback);
+  WKPDFConfiguration* pdf_configuration = [[WKPDFConfiguration alloc] init];
+  [web_view
+      createPDFWithConfiguration:pdf_configuration
+               completionHandler:^(NSData* pdf_document_data, NSError* error) {
+                 std::move(callback_for_block).Run(pdf_document_data);
+               }];
 }
 }  // namespace web

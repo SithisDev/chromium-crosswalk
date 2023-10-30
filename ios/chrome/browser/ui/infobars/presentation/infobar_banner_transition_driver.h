@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
                 InfobarBannerInteractionDelegate>
 
 // Delegate used to position the InfobarBanner.
-@property(nonatomic, assign) id<InfobarBannerPositioner> bannerPositioner;
+@property(nonatomic, weak) id<InfobarBannerPositioner> bannerPositioner;
 
 // Completes the banner presentation if taking place. This will stop the banner
 // animation and move it to the presenting ViewController hierarchy.

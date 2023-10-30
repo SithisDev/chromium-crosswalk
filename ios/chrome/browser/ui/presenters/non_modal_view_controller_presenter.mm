@@ -1,12 +1,14 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/presenters/non_modal_view_controller_presenter.h"
 
-#include "base/logging.h"
+#import <ostream>
+
+#import "base/check.h"
 #import "ios/chrome/browser/ui/presenters/contained_presenter_delegate.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -61,42 +63,63 @@ constexpr CGFloat kAnimationOutDuration = 0.1;
 - (void)presentAnimated:(BOOL)animated {
   DCHECK(!self.animator) << "Presenting again is not supported.";
   __weak __typeof(self) weakSelf = self;
-  self.animator = [[UIViewPropertyAnimator alloc]
-      initWithDuration:animated ? kAnimationInDuration : 0
-                 curve:UIViewAnimationCurveEaseOut
-            animations:^{
-              weakSelf.containerView.alpha = 1.0;
-              weakSelf.containerView.transform = CGAffineTransformIdentity;
-            }];
-  [self.animator addCompletion:^(UIViewAnimatingPosition finalPosition) {
+  auto animation = ^{
+    weakSelf.containerView.alpha = 1.0;
+    weakSelf.containerView.transform = CGAffineTransformIdentity;
+  };
+  auto completion = ^void(UIViewAnimatingPosition) {
     [weakSelf.presentedViewController
         didMoveToParentViewController:weakSelf.baseViewController];
-    [weakSelf.delegate containedPresenterDidPresent:weakSelf];
-  }];
-  [self.animator startAnimation];
+    if ([weakSelf.delegate
+            respondsToSelector:@selector(containedPresenterDidPresent:)]) {
+      [weakSelf.delegate containedPresenterDidPresent:weakSelf];
+    }
+  };
+
+  if (animated) {
+    self.animator = [[UIViewPropertyAnimator alloc]
+        initWithDuration:animated ? kAnimationInDuration : 0
+                   curve:UIViewAnimationCurveEaseOut
+              animations:animation];
+    [self.animator addCompletion:completion];
+    [self.animator startAnimation];
+  } else {
+    animation();
+    completion(UIViewAnimatingPositionEnd);
+  }
 }
 
 - (void)dismissAnimated:(BOOL)animated {
-  if (self.animator.state == UIViewAnimatingStateActive) {
+  if (self.animator.state == UIViewAnimatingStateActive)
     [self.animator stopAnimation:YES];
-  }
 
   [self.presentedViewController willMoveToParentViewController:nil];
 
   __weak __typeof(self) weakSelf = self;
-  UIViewPropertyAnimator* dismissAnimator = [[UIViewPropertyAnimator alloc]
-      initWithDuration:animated ? kAnimationOutDuration : 0
-                 curve:UIViewAnimationCurveEaseOut
-            animations:^{
-              weakSelf.containerView.alpha = 0.0;
-            }];
-  [dismissAnimator addCompletion:^(UIViewAnimatingPosition finalPosition) {
+  auto animation = ^{
+    weakSelf.containerView.alpha = 0.0;
+  };
+  auto completion = ^void(UIViewAnimatingPosition) {
     [weakSelf.presentedViewController.view removeFromSuperview];
     [weakSelf.presentedViewController removeFromParentViewController];
     [weakSelf.containerView removeFromSuperview];
-    [weakSelf.delegate containedPresenterDidDismiss:weakSelf];
-  }];
-  [dismissAnimator startAnimation];
+    if ([weakSelf.delegate
+            respondsToSelector:@selector(containedPresenterDidDismiss:)]) {
+      [weakSelf.delegate containedPresenterDidDismiss:weakSelf];
+    }
+  };
+
+  if (animated) {
+    UIViewPropertyAnimator* dismissAnimator = [[UIViewPropertyAnimator alloc]
+        initWithDuration:animated ? kAnimationOutDuration : 0
+                   curve:UIViewAnimationCurveEaseOut
+              animations:animation];
+    [dismissAnimator addCompletion:completion];
+    [dismissAnimator startAnimation];
+  } else {
+    animation();
+    completion(UIViewAnimatingPositionEnd);
+  }
 }
 
 @end

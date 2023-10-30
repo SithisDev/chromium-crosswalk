@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,12 @@
 
 #include <vector>
 
-// Accessibility identifier for |-UnifiedConsentViewController.view|.
-extern NSString* const kUnifiedConsentScrollViewIdentifier;
-
 @protocol UnifiedConsentViewControllerDelegate;
 
 // UnifiedConsentViewController is a sub view controller to ask for the user
 // consent before the user can sign-in.
 // All the string ids displayed by the view are available with
-// |consentStringIds| and |openSettingsStringId|. Those can be used to record
+// `consentStringIds` and `openSettingsStringId`. Those can be used to record
 // the consent agreed by the user.
 @interface UnifiedConsentViewController : UIViewController
 
@@ -36,17 +33,17 @@ extern NSString* const kUnifiedConsentScrollViewIdentifier;
 // the way they appear on the screen.
 - (const std::vector<int>&)consentStringIds;
 
-// Shows (if hidden) and updates the IdentityPickerView.
-- (void)updateIdentityPickerViewWithUserFullName:(NSString*)fullName
-                                           email:(NSString*)email;
+// Shows (if hidden) and updates the IdentityButtonControl.
+- (void)updateIdentityButtonControlWithUserFullName:(NSString*)fullName
+                                              email:(NSString*)email;
 
-// Updates the IdentityPickerView avatar. If the identity picker view is hidden,
-// -[UnifiedConsentViewController updateIdentityPickerViewWithUserFullName:
-//  email:] has to be called before.
-- (void)updateIdentityPickerViewWithAvatar:(UIImage*)avatar;
+// Updates the IdentityButtonControl avatar. If the identity picker view is
+// hidden, -[UnifiedConsentViewController
+// updateIdentityButtonControlWithUserFullName:email:] has to be called before.
+- (void)updateIdentityButtonControlWithAvatar:(UIImage*)avatar;
 
-// Hides the IdentityPickerView.
-- (void)hideIdentityPickerView;
+// Hides the IdentityButtonControl.
+- (void)hideIdentityButtonControl;
 
 // Scrolls the consent view to the bottom.
 - (void)scrollToBottom;

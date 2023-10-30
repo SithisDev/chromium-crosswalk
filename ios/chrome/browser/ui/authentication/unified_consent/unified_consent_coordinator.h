@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_AUTHENTICATION_UNIFIED_CONSENT_UNIFIED_CONSENT_COORDINATOR_H_
 #define IOS_CHROME_BROWSER_UI_AUTHENTICATION_UNIFIED_CONSENT_UNIFIED_CONSENT_COORDINATOR_H_
 
-#import <UIKit/UIKit.h>
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 
 #include <vector>
 
@@ -17,6 +17,10 @@
 
 // Called when the user taps on the settings link.
 - (void)unifiedConsentCoordinatorDidTapSettingsLink:
+    (UnifiedConsentCoordinator*)coordinator;
+
+// Called when the user taps on the 'Learn More' link.
+- (void)unifiedConsentCoordinatorDidTapLearnMoreLink:
     (UnifiedConsentCoordinator*)coordinator;
 
 // Called when the user scrolls down to the bottom (or when the view controller
@@ -40,14 +44,14 @@
 // a sub view controller to ask for the user consent before the user can
 // sign-in.
 // All the string ids displayed by the view are available with
-// |consentStringIds| and |openSettingsStringId|. Those can be used to record
+// `consentStringIds` and `openSettingsStringId`. Those can be used to record
 // the consent agreed by the user.
-@interface UnifiedConsentCoordinator : NSObject
+@interface UnifiedConsentCoordinator : ChromeCoordinator
 
 @property(nonatomic, weak) id<UnifiedConsentCoordinatorDelegate> delegate;
-// Identity selected by the user to sign-in. By default, the first identity from
-// GetAllIdentitiesSortedForDisplay() is used.
-// Must be non-nil if at least one identity exists.
+// Identity selected by the user to sign-in. By default, the identity returned
+// by `GetDefaultIdentity()` is used. Must be non-nil if at least one identity
+// exists.
 @property(nonatomic, strong) ChromeIdentity* selectedIdentity;
 // Informs the coordinator whether the identity picker should automatically be
 // open when the UnifiedConsent view appears.
@@ -60,9 +64,12 @@
 @property(nonatomic, readonly) BOOL isScrolledToBottom;
 // Returns YES if the user tapped on the setting link.
 @property(nonatomic, readonly) BOOL settingsLinkWasTapped;
-
-// Starts this coordinator.
-- (void)start;
+// If YES, the UI elements are disabled.
+@property(nonatomic, assign, getter=isUIDisabled) BOOL uiDisabled;
+// Returns true if there are policies disabling Sync for at least one data type.
+@property(nonatomic, readonly) BOOL hasManagedSyncDataType;
+// Returns true if there are account restrictions.
+@property(nonatomic, readonly) BOOL hasAccountRestrictions;
 
 // List of string ids used for the user consent. The string ids order matches
 // the way they appear on the screen.

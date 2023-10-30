@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #import <QuartzCore/CAAnimation.h>
 #import <QuartzCore/CAMediaTimingFunction.h>
 
-#include "base/logging.h"
+#import "base/check_op.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
-#include "ios/chrome/browser/ui/util/rtl_geometry.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/util/rtl_geometry.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,11 +53,11 @@ const CGFloat kStrokeEndAtApogee = 1;
 
 @interface ToolbarToolsMenuButton ()<CAAnimationDelegate> {
   // Whether the reading list contains unseen items.
-  BOOL readingListContainsUnseenItems_;
+  BOOL _readingListContainsUnseenItems;
   // The CALayers containing the drawn dots.
-  NSMutableArray<CAShapeLayer*>* pathLayers_;
+  NSMutableArray<CAShapeLayer*>* _pathLayers;
   // Whether the CALayers are being animated.
-  BOOL animationOnGoing_;
+  BOOL _animationOnGoing;
 }
 
 // Tints of the button.
@@ -73,7 +73,7 @@ const CGFloat kStrokeEndAtApogee = 1;
 
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
-    pathLayers_ = [[NSMutableArray alloc] initWithCapacity:kNumberOfDots];
+    _pathLayers = [[NSMutableArray alloc] initWithCapacity:kNumberOfDots];
 
     [self configureSpotlightView];
   }
@@ -91,13 +91,13 @@ const CGFloat kStrokeEndAtApogee = 1;
   UIColor* newTint = nil;
   switch (self.state) {
     case UIControlStateNormal:
-      newTint = self.configuration.buttonsTintColor;
+      newTint = self.toolbarConfiguration.buttonsTintColor;
       break;
     case UIControlStateHighlighted:
-      newTint = self.configuration.buttonsTintColorHighlighted;
+      newTint = self.toolbarConfiguration.buttonsTintColorHighlighted;
       break;
     default:
-      newTint = self.configuration.buttonsTintColor;
+      newTint = self.toolbarConfiguration.buttonsTintColor;
       break;
       }
   self.tintColor = newTint;
@@ -105,11 +105,11 @@ const CGFloat kStrokeEndAtApogee = 1;
 
 // Initializes the pathLayers.
 - (void)initializeShapeLayers {
-  for (NSUInteger i = 0; i < pathLayers_.count; i++) {
-    [pathLayers_[i] removeFromSuperlayer];
+  for (NSUInteger i = 0; i < _pathLayers.count; i++) {
+    [_pathLayers[i] removeFromSuperlayer];
   }
 
-  pathLayers_ = [[NSMutableArray alloc] initWithCapacity:kNumberOfDots];
+  _pathLayers = [[NSMutableArray alloc] initWithCapacity:kNumberOfDots];
   for (NSUInteger i = 0; i < kNumberOfDots; i++) {
     const CGFloat x = kDotOffsetXHorizontal + kHorizontalSpaceBetweenDots * i;
     const CGFloat y = kDotOffsetYHorizontal;
@@ -128,14 +128,14 @@ const CGFloat kStrokeEndAtApogee = 1;
     [pathLayer setStrokeStart:kStrokeStartAtRest];
     [pathLayer setStrokeEnd:kStrokeEndAtRest];
     [self.layer addSublayer:pathLayer];
-    [pathLayers_ addObject:pathLayer];
+    [_pathLayers addObject:pathLayer];
   }
 }
 
-// Returns a keyframe-based animation of the property identified by |keyPath|.
-// The animation immediately sets the property's value to |initialValue|.
-// After |frameStart| frames, the property's value animates to
-// |intermediaryValue|, and then to |finalValue|.
+// Returns a keyframe-based animation of the property identified by `keyPath`.
+// The animation immediately sets the property's value to `initialValue`.
+// After `frameStart` frames, the property's value animates to
+// `intermediaryValue`, and then to `finalValue`.
 - (CAAnimation*)animationWithInitialValue:(id)initialValue
                         intermediaryValue:(id)intermediaryValue
                                finalValue:(id)finalValue
@@ -199,14 +199,14 @@ const CGFloat kStrokeEndAtApogee = 1;
   return animation;
 }
 
-// Starts animating the button towards the color |targetColor|.
+// Starts animating the button towards the color `targetColor`.
 - (void)animateToColor:(UIColor*)targetColor {
-  animationOnGoing_ = YES;
+  _animationOnGoing = YES;
 
-  DCHECK(pathLayers_.count == kNumberOfDots);
+  DCHECK(_pathLayers.count == kNumberOfDots);
   // Add four animations for each stroke.
   for (int i = 0; i < kNumberOfDots; i++) {
-    CAShapeLayer* pathLayer = pathLayers_[i];
+    CAShapeLayer* pathLayer = _pathLayers[i];
     int dotToAnimate = kNumberOfDots - i;
     if (UseRTLLayout()) {
       dotToAnimate = i;
@@ -248,10 +248,10 @@ const CGFloat kStrokeEndAtApogee = 1;
                              forKeyPath:@"strokeColor"];
     colorAnimation.fillMode = kCAFillModeForwards;
 
-    // |self| needs to know when the animations are finished. This is achieved
-    // by having |self| be registered as a CAAnimationDelegate.
+    // `self` needs to know when the animations are finished. This is achieved
+    // by having `self` be registered as a CAAnimationDelegate.
     // Because all animations have the same duration, any animation can be used.
-    // Arbitrarly use the |strokeStartAnimation| of the first dot.
+    // Arbitrarly use the `strokeStartAnimation` of the first dot.
     if (i == 0) {
       strokeStartAnimation.delegate = self;
     }
@@ -275,7 +275,7 @@ const CGFloat kStrokeEndAtApogee = 1;
   // CAShapeLayer when an animation is on going.
   // To reflect any potential tint color change, the CAShapeLayer will be
   // recreated at the end of the animation.
-  if (!animationOnGoing_)
+  if (!_animationOnGoing)
     [self initializeShapeLayers];
 }
 
@@ -289,7 +289,7 @@ const CGFloat kStrokeEndAtApogee = 1;
 #pragma mark - CAAnimationDelegate
 
 - (void)animationDidStop:(CAAnimation*)animation finished:(BOOL)flag {
-  animationOnGoing_ = NO;
+  _animationOnGoing = NO;
   // Recreate the CAShapeLayers in case the tint code changed while the
   // animation was going on.
   [self initializeShapeLayers];

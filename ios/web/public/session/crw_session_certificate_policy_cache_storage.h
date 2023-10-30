@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,11 @@ namespace web {
 extern NSString* const kCertificateSerializationKey;
 extern NSString* const kHostSerializationKey;
 extern NSString* const kStatusSerializationKey;
+
+// Total bytes serialized during CRWSessionCertificateStorage encoding since the
+// uptime.
+size_t GetCertPolicyBytesEncoded();
+
 }  // namespace web
 
 // A serializable representation of a certificate.
@@ -36,7 +41,7 @@ extern NSString* const kStatusSerializationKey;
 
 // The certificate represented by this storage.
 @property(nonatomic, readonly) net::X509Certificate* certificate;
-// The hostname of the page that issued |certificate|.
+// The hostname of the page that issued `certificate`.
 @property(nonatomic, readonly) std::string& host;
 // The allowance chosen for the certificate.
 @property(nonatomic, readonly) net::CertStatus status;

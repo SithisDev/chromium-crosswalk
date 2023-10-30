@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,27 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
+class ChromeBrowserState;
 class FaviconLoader;
 
-namespace ios {
-class ChromeBrowserState;
-}
-
 // Singleton that owns all FaviconLoaders and associates them with
-// ios::ChromeBrowserState.
+// ChromeBrowserState.
 class IOSChromeFaviconLoaderFactory : public BrowserStateKeyedServiceFactory {
  public:
-  static FaviconLoader* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+  static FaviconLoader* GetForBrowserState(ChromeBrowserState* browser_state);
   static FaviconLoader* GetForBrowserStateIfExists(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
   static IOSChromeFaviconLoaderFactory* GetInstance();
+  // Returns the default factory used to build FaviconLoader. Can be registered
+  // with SetTestingFactory to use the FaviconService instance during testing.
+  static TestingFactory GetDefaultFactory();
+
+  IOSChromeFaviconLoaderFactory(const IOSChromeFaviconLoaderFactory&) = delete;
+  IOSChromeFaviconLoaderFactory& operator=(
+      const IOSChromeFaviconLoaderFactory&) = delete;
 
  private:
   friend class base::NoDestructor<IOSChromeFaviconLoaderFactory>;
@@ -39,8 +41,6 @@ class IOSChromeFaviconLoaderFactory : public BrowserStateKeyedServiceFactory {
   web::BrowserState* GetBrowserStateToUse(
       web::BrowserState* context) const override;
   bool ServiceIsNULLWhileTesting() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(IOSChromeFaviconLoaderFactory);
 };
 
 #endif  // IOS_CHROME_BROWSER_FAVICON_IOS_CHROME_FAVICON_LOADER_FACTORY_H_

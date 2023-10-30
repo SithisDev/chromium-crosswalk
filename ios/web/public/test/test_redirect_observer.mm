@@ -1,13 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/test/test_redirect_observer.h"
+#import "ios/web/public/test/test_redirect_observer.h"
 
-#include "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_context.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -33,7 +33,7 @@ GURL TestRedirectObserver::GetFinalUrlForUrl(const GURL& url) {
     if (redirect_chain.original_url == url)
       return redirect_chain.final_url;
   }
-  // If load for |url| did not occur after BeginObservingRedirectsForUrl() is
+  // If load for `url` did not occur after BeginObservingRedirectsForUrl() is
   // called, there will be no final redirected URL.
   return GURL();
 }

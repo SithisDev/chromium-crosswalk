@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,6 +37,15 @@ imageset("activity_services_find_in_page") {
     "activity_services_find_in_page.imageset/activity_services_find_in_page-60@2x.png",
     "activity_services_find_in_page.imageset/activity_services_find_in_page-60@3x.png",
     "activity_services_find_in_page.imageset/activity_services_find_in_page-76@2x.png",
+  ]
+}
+
+imageset("activity_services_generate_qr_code") {
+  sources = [
+    "activity_services_generate_qr_code.imageset/Contents.json",
+    "activity_services_generate_qr_code.imageset/activity_services_generate_qr_code-60@2x.png",
+    "activity_services_generate_qr_code.imageset/activity_services_generate_qr_code-60@3x.png",
+    "activity_services_generate_qr_code.imageset/activity_services_generate_qr_code-76@2x.png",
   ]
 }
 

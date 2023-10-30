@@ -1,16 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 
-#include "base/logging.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
-#import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/incognito_color_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -29,51 +24,48 @@
 }
 
 - (UIColor*)NTPBackgroundColor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO, ntp_home::kNTPBackgroundColor(),
-      [UIColor colorNamed:kBackgroundDarkColor]);
+  return ntp_home::kNTPBackgroundColor();
 }
 
 - (UIColor*)backgroundColor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO, [UIColor colorNamed:kBackgroundColor],
-      [UIColor colorNamed:kBackgroundDarkColor]);
+  return [UIColor colorNamed:kBackgroundColor];
+}
+
+- (UIColor*)focusedBackgroundColor {
+  return [UIColor colorNamed:kGroupedPrimaryBackgroundColor];
+}
+
+- (UIColor*)focusedLocationBarBackgroundColor {
+  return [UIColor colorNamed:kTextfieldFocusedBackgroundColor];
 }
 
 - (UIColor*)buttonsTintColor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO, [UIColor colorNamed:@"tab_toolbar_button_color"],
-      [UIColor colorNamed:@"tab_toolbar_button_color_incognito"]);
+  return [UIColor colorNamed:kToolbarButtonColor];
 }
 
 - (UIColor*)buttonsTintColorHighlighted {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO,
-      [UIColor colorNamed:@"tab_toolbar_button_color_highlighted"],
-      [UIColor colorNamed:@"tab_toolbar_button_color_highlighted_incognito"]);
+  return [UIColor colorNamed:@"tab_toolbar_button_color_highlighted"];
 }
 
 - (UIColor*)buttonsSpotlightColor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO,
-      [UIColor colorNamed:@"tab_toolbar_button_halo_color"],
-      [UIColor colorNamed:@"tab_toolbar_button_halo_color_incognito"]);
+  return [UIColor colorNamed:@"tab_toolbar_button_halo_color"];
 }
 
 - (UIColor*)dimmedButtonsSpotlightColor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO,
-      [UIColor colorNamed:@"tab_toolbar_button_halo_color"],
-      [UIColor colorNamed:@"tab_toolbar_button_halo_color_incognito"]);
+  return [UIColor colorNamed:@"tab_toolbar_button_halo_color"];
 }
 
 - (UIColor*)locationBarBackgroundColorWithVisibility:(CGFloat)visibilityFactor {
-  return color::IncognitoDynamicColor(
-      self.style == INCOGNITO,
-      [[UIColor colorNamed:kTextfieldBackgroundColor]
-          colorWithAlphaComponent:visibilityFactor],
-      [[UIColor colorNamed:kTextfieldBackgroundDarkColor]
-          colorWithAlphaComponent:visibilityFactor]);
+  // For the omnibox specifically, the background should be different in
+  // incognito compared to dark mode.
+  switch (self.style) {
+    case NORMAL:
+      return [[UIColor colorNamed:kTextfieldBackgroundColor]
+          colorWithAlphaComponent:visibilityFactor];
+    case INCOGNITO:
+      return [[UIColor colorNamed:@"omnibox_incognito_background_color"]
+          colorWithAlphaComponent:visibilityFactor];
+  }
 }
 
 @end

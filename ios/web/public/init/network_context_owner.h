@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,11 +31,11 @@ namespace web {
 class NetworkContextOwner : public net::URLRequestContextGetterObserver {
  public:
   // This initiates creation of the NetworkContext object on I/O thread and
-  // connects the pipe in |network_context_client| to it.
+  // connects the pipe in `network_context_client` to it.
   NetworkContextOwner(
       net::URLRequestContextGetter* request_context,
       const std::vector<std::string>& cors_exempt_header_list,
-      network::mojom::NetworkContextPtr* network_context_client);
+      mojo::Remote<network::mojom::NetworkContext>* network_context_client);
 
   ~NetworkContextOwner() override;
 
@@ -45,7 +45,8 @@ class NetworkContextOwner : public net::URLRequestContextGetterObserver {
  private:
   void InitializeOnIOThread(
       const std::vector<std::string> cors_exempt_header_list,
-      network::mojom::NetworkContextRequest network_context_request);
+      mojo::PendingReceiver<network::mojom::NetworkContext>
+          network_context_receiver);
 
   scoped_refptr<net::URLRequestContextGetter> request_context_;
   std::unique_ptr<network::NetworkContext> network_context_;

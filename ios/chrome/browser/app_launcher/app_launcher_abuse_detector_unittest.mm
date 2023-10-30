@@ -1,34 +1,24 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/app_launcher/app_launcher_abuse_detector.h"
+#import "ios/chrome/browser/app_launcher/app_launcher_abuse_detector.h"
 
-#include "testing/gtest/include/gtest/gtest.h"
-#include "testing/platform_test.h"
-#include "url/gurl.h"
+#import "testing/gtest/include/gtest/gtest.h"
+#import "testing/platform_test.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-namespace {
-const GURL kSourceUrl1("http://www.google.com");
-const GURL kSourceUrl2("http://www.goog.com");
-const GURL kSourceUrl3("http://www.goog.ab");
-const GURL kSourceUrl4("http://www.foo.com");
-const GURL kAppUrl1("facetime://+1354");
-const GURL kAppUrl2("facetime-audio://+1234");
-const GURL kAppUrl3("abc://abc");
-const GURL kAppUrl4("chrome://www.google.com");
-
-}  // namespace
 
 using AppLauncherAbuseDetectorTest = PlatformTest;
 
 // Tests cases when the same app is launched repeatedly from same source.
 TEST_F(AppLauncherAbuseDetectorTest,
        TestRepeatedAppLaunches_SameAppSameSource) {
+  const GURL kSourceUrl1("http://www.google.com");
+
   AppLauncherAbuseDetector* abuseDetector =
       [[AppLauncherAbuseDetector alloc] init];
   EXPECT_EQ(ExternalAppLaunchPolicyAllow,
@@ -59,6 +49,12 @@ TEST_F(AppLauncherAbuseDetectorTest,
 // Tests cases when same app is launched repeatedly from different sources.
 TEST_F(AppLauncherAbuseDetectorTest,
        TestRepeatedAppLaunches_SameAppDifferentSources) {
+  const GURL kSourceUrl1("http://www.google.com");
+  const GURL kSourceUrl2("http://www.goog.com");
+  const GURL kSourceUrl3("http://www.goog.ab");
+  const GURL kSourceUrl4("http://www.foo.com");
+  const GURL kAppUrl1("facetime://+1354");
+
   AppLauncherAbuseDetector* abuseDetector =
       [[AppLauncherAbuseDetector alloc] init];
   EXPECT_EQ(ExternalAppLaunchPolicyAllow,
@@ -90,6 +86,15 @@ TEST_F(AppLauncherAbuseDetectorTest,
 // Tests cases when different apps are launched from different sources.
 TEST_F(AppLauncherAbuseDetectorTest,
        TestRepeatedAppLaunches_DifferentAppsDifferentSources) {
+  const GURL kSourceUrl1("http://www.google.com");
+  const GURL kSourceUrl2("http://www.goog.com");
+  const GURL kSourceUrl3("http://www.goog.ab");
+  const GURL kSourceUrl4("http://www.foo.com");
+  const GURL kAppUrl1("facetime://+1354");
+  const GURL kAppUrl2("facetime-audio://+1234");
+  const GURL kAppUrl3("abc://abc");
+  const GURL kAppUrl4("chrome://www.google.com");
+
   AppLauncherAbuseDetector* abuseDetector =
       [[AppLauncherAbuseDetector alloc] init];
   EXPECT_EQ(ExternalAppLaunchPolicyAllow,
@@ -121,6 +126,11 @@ TEST_F(AppLauncherAbuseDetectorTest,
 // Tests blocking App launch only when the app have been allowed through the
 // abuse detector before.
 TEST_F(AppLauncherAbuseDetectorTest, TestBlockLaunchingApp) {
+  const GURL kSourceUrl1("http://www.google.com");
+  const GURL kSourceUrl2("http://www.goog.com");
+  const GURL kAppUrl1("facetime://+1354");
+  const GURL kAppUrl2("facetime-audio://+1234");
+
   AppLauncherAbuseDetector* abuseDetector =
       [[AppLauncherAbuseDetector alloc] init];
   EXPECT_EQ(ExternalAppLaunchPolicyAllow,
@@ -145,4 +155,26 @@ TEST_F(AppLauncherAbuseDetectorTest, TestBlockLaunchingApp) {
   EXPECT_EQ(ExternalAppLaunchPolicyBlock,
             [abuseDetector launchPolicyForURL:kAppUrl2
                             fromSourcePageURL:kSourceUrl2]);
+}
+
+// Tests blocking app launch when the target app is Chrome itself.
+TEST_F(AppLauncherAbuseDetectorTest, TestBlockLaunchingChrome) {
+  const GURL kChromeAppUrl1("googlechrome://www.google.com");
+  const GURL kChromeAppUrl2("googlechromes://www.google.com");
+  const GURL kChromeAppUrl3("googlechrome-x-callback://www.google.com");
+  const GURL kSourceUrl("http://www.google.com");
+
+  AppLauncherAbuseDetector* abuseDetector =
+      [[AppLauncherAbuseDetector alloc] init];
+  EXPECT_EQ(ExternalAppLaunchPolicyBlock,
+            [abuseDetector launchPolicyForURL:kChromeAppUrl1
+                            fromSourcePageURL:kSourceUrl]);
+
+  EXPECT_EQ(ExternalAppLaunchPolicyBlock,
+            [abuseDetector launchPolicyForURL:kChromeAppUrl2
+                            fromSourcePageURL:kSourceUrl]);
+
+  EXPECT_EQ(ExternalAppLaunchPolicyBlock,
+            [abuseDetector launchPolicyForURL:kChromeAppUrl3
+                            fromSourcePageURL:kSourceUrl]);
 }

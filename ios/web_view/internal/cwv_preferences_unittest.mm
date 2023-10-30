@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include "components/prefs/in_memory_pref_store.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/translate/core/browser/translate_pref_names.h"
-#import "ios/web_view/public/cwv_preferences_autofill.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
@@ -37,7 +37,13 @@ class CWVPreferencesTest : public PlatformTest {
                                        true);
     pref_registry->RegisterBooleanPref(
         password_manager::prefs::kCredentialsEnableService, true);
-    pref_registry->RegisterBooleanPref(prefs::kOfferTranslateEnabled, true);
+    pref_registry->RegisterBooleanPref(translate::prefs::kOfferTranslateEnabled,
+                                       true);
+    pref_registry->RegisterBooleanPref(
+        password_manager::prefs::kPasswordLeakDetectionEnabled, true);
+
+    pref_registry->RegisterBooleanPref(prefs::kSafeBrowsingEnabled, true);
+    pref_registry->RegisterBooleanPref(prefs::kSafeBrowsingEnhanced, false);
 
     scoped_refptr<PersistentPrefStore> pref_store = new InMemoryPrefStore();
     PrefServiceFactory factory;
@@ -71,6 +77,27 @@ TEST_F(CWVPreferencesTest, TranslationEnabled) {
   EXPECT_TRUE(preferences_.translationEnabled);
   preferences_.translationEnabled = NO;
   EXPECT_FALSE(preferences_.translationEnabled);
+}
+
+// Tests CWVPreferences |passwordAutofillEnabled|.
+TEST_F(CWVPreferencesTest, PasswordAutofillEnabled) {
+  EXPECT_TRUE(preferences_.passwordAutofillEnabled);
+  preferences_.passwordAutofillEnabled = NO;
+  EXPECT_FALSE(preferences_.passwordAutofillEnabled);
+}
+
+// Tests CWVPreferences |passwordLeakCheckEnabled|.
+TEST_F(CWVPreferencesTest, PasswordLeakCheckEnabled) {
+  EXPECT_TRUE(preferences_.passwordLeakCheckEnabled);
+  preferences_.passwordLeakCheckEnabled = NO;
+  EXPECT_FALSE(preferences_.passwordLeakCheckEnabled);
+}
+
+// Tests safe browsing setting.
+TEST_F(CWVPreferencesTest, SafeBrowsingEnabled) {
+  EXPECT_TRUE(preferences_.safeBrowsingEnabled);
+  preferences_.safeBrowsingEnabled = NO;
+  EXPECT_FALSE(preferences_.safeBrowsingEnabled);
 }
 
 }  // namespace ios_web_view

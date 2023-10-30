@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,17 @@
   // container view itself.
   UIView* hitView = [super hitTest:point withEvent:event];
   return hitView == self ? nil : hitView;
+}
+
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent*)event {
+  // Only register touches that land inside a subview.  Otherwise, return NO to
+  // allow touches to continue to the underlying UI.
+  for (UIView* subview in self.subviews) {
+    CGPoint adjustedPoint = [subview convertPoint:point fromView:self];
+    if ([subview pointInside:adjustedPoint withEvent:event])
+      return YES;
+  }
+  return NO;
 }
 
 - (void)didMoveToWindow {

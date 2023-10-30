@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,18 @@
 @property(nonatomic, strong) UIImage* image;
 // Whether the cell associated with this item should be enabled.
 @property(nonatomic, assign) BOOL enabled;
-// Number to be displayed in the badge. If 0, the badge is hidden.
+// Number to be displayed in the badge. If 0, the badge is hidden. This is not
+// read by VoiceOver.
 @property(nonatomic, assign) NSInteger badgeNumber;
 // Text to be displayed in the badge. Set to nil to hide the badge. The text
-// badge is only displayed if the numbered badge is hidden.
+// badge is only displayed if the numbered badge is hidden. This is not read by
+// VoiceOver.
 @property(nonatomic, copy) NSString* badgeText;
-// Whether the item is associated with a destructive action. If |YES|, then a
+// Whether the item is associated with a destructive action. If `YES`, then a
 // specific styling is applied.
 @property(nonatomic, assign) BOOL destructiveAction;
+// Additional label. Read after `title` if not nil.
+@property(nonatomic, strong) NSString* additionalAccessibilityLabel;
 
 @end
 
@@ -37,13 +41,16 @@
 // Title label for the cell.
 @property(nonatomic, strong, readonly) UILabel* titleLabel;
 
-// Whether the cell is associated with a destructive action. If |YES|, then a
+// Whether the cell is associated with a destructive action. If `YES`, then a
 // specific styling is applied.
 @property(nonatomic, assign) BOOL destructiveAction;
 
+// Additional label. Read after `title` if not nil.
+@property(nonatomic, strong) NSString* additionalAccessibilityLabel;
+
 // Sets the number on the badge number.
 - (void)setBadgeNumber:(NSInteger)badgeNumber;
-// Sets the text of the badge text. Hides the badge text if |badgeText| is nil.
+// Sets the text of the badge text. Hides the badge text if `badgeText` is nil.
 - (void)setBadgeText:(NSString*)badgeText;
 
 // After this is called, the cell is listening for the

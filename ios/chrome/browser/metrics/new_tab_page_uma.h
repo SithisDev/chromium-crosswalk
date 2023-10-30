@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 
 #include "ui/base/page_transition_types.h"
 
-namespace ios {
 class ChromeBrowserState;
-}  // namespace ios
-
 class GURL;
+namespace web {
+class WebState;
+}
 
 // This namespace provides various helpers around handling NTP Uma calls.
 namespace new_tab_page_uma {
@@ -28,17 +28,22 @@ enum ActionType {
   ACTION_OPENED_READING_LIST_ENTRY,
   ACTION_OPENED_SUGGESTION,
   ACTION_OPENED_LEARN_MORE,
-  ACTION_OPENED_PROMO,
+  ACTION_OPENED_PROMO,  // Deprecated as of 09/2022.
   ACTION_OPENED_HISTORY_ENTRY,
   ACTION_NAVIGATED_USING_VOICE_SEARCH,
   NUM_ACTION_TYPES,
 };
 
-void RecordAction(ios::ChromeBrowserState* browserState, ActionType action);
-void RecordActionFromOmnibox(ios::ChromeBrowserState* browserState,
+void RecordAction(ChromeBrowserState* browser_state,
+                  web::WebState* web_state,
+                  ActionType action);
+
+void RecordActionFromOmnibox(ChromeBrowserState* browser_state,
+                             web::WebState* web_state,
                              const GURL& url,
                              ui::PageTransition transition,
-                             bool isExpectingVoiceSearch);
+                             bool is_expecting_voice_search);
+
 }  // namespace new_tab_page_uma
 
 #endif  // IOS_CHROME_BROWSER_METRICS_NEW_TAB_PAGE_UMA_H_

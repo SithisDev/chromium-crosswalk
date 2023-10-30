@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,15 @@
 + (void)resetAuthentication;
 
 // Removes all infobars and clears any presented state.
-+ (void)removeInfoBarsAndPresentedState;
+// See +[ChromeTestCaseAppInterface isCompletionInvokedWithUUID:] to know when
+// all views are dismissed.
++ (void)removeInfoBarsAndPresentedStateWithCompletionUUID:
+    (NSUUID*)completionUUID;
+
+// Returns YES if the completion related to `completionUUID` has been invoked.
+// Once this method returns YES, `completionUUID` is dropped, and a second call
+// will return NO.
++ (BOOL)isCompletionInvokedWithUUID:(NSUUID*)completionUUID;
 
 @end
 

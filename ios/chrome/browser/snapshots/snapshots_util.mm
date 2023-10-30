@@ -1,19 +1,18 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/snapshots/snapshots_util.h"
+#import "ios/chrome/browser/snapshots/snapshots_util.h"
 
 #import <UIKit/UIKit.h>
 
-#include "base/bind.h"
-#include "base/files/file_util.h"
-#include "base/location.h"
-#include "base/mac/foundation_util.h"
-#include "base/path_service.h"
-#include "base/stl_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
+#import "base/bind.h"
+#import "base/files/file_util.h"
+#import "base/location.h"
+#import "base/mac/foundation_util.h"
+#import "base/path_service.h"
+#import "base/strings/stringprintf.h"
+#import "base/task/thread_pool.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -27,10 +26,10 @@ const char* kOrientationDescriptions[] = {
     "PortraitUpsideDown",
 };
 
-// Delete all files in |paths|.
+// Delete all files in `paths`.
 void DeleteAllFiles(std::vector<base::FilePath> paths) {
   for (const auto& path : paths) {
-    ignore_result(base::DeleteFile(path, false));
+    base::DeleteFile(path);
   }
 }
 }  // namespace
@@ -40,7 +39,7 @@ void ClearIOSSnapshots(base::OnceClosure callback) {
   // list of snapshots stored on the device can't be obtained programmatically.
   std::vector<base::FilePath> snapshots_paths;
   GetSnapshotsPaths(&snapshots_paths);
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&DeleteAllFiles, std::move(snapshots_paths)),
       std::move(callback));
@@ -61,7 +60,7 @@ void GetSnapshotsPaths(std::vector<base::FilePath>* snapshots_paths) {
   } else if (scale == 3) {
     retina_suffix = "@3x";
   }
-  for (unsigned int i = 0; i < base::size(kOrientationDescriptions); i++) {
+  for (unsigned int i = 0; i < std::size(kOrientationDescriptions); i++) {
     std::string snapshot_filename =
         base::StringPrintf("UIApplicationAutomaticSnapshotDefault-%s%s.png",
                            kOrientationDescriptions[i], retina_suffix);

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/prefs/pref_member.h"
 #include "ios/chrome/browser/ios_chrome_io_thread.h"
 #include "ios/chrome/browser/net/net_types.h"
-#include "net/cert/ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
@@ -27,31 +25,23 @@
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
 
+class AcceptLanguagePrefWatcher;
+class ChromeBrowserState;
+enum class ChromeBrowserStateType;
 class HostContentSettingsMap;
 class IOSChromeHttpUserAgentSettings;
-class IOSChromeNetworkDelegate;
 class IOSChromeURLRequestContextGetter;
 
 namespace content_settings {
 class CookieSettings;
 }
 
-namespace ios {
-class ChromeBrowserState;
-enum class ChromeBrowserStateType;
-}
-
 namespace net {
-class CookieStore;
-class HttpServerProperties;
 class HttpTransactionFactory;
 class ProxyConfigService;
-class ProxyResolutionService;
 class ReportSender;
 class SystemCookieStore;
-class TransportSecurityPersister;
-class TransportSecurityState;
-class URLRequestJobFactoryImpl;
+class URLRequestContextBuilder;
 }  // namespace net
 
 // Conceptually speaking, the ChromeBrowserStateIOData represents data that
@@ -65,18 +55,10 @@ class ChromeBrowserStateIOData {
   typedef std::vector<scoped_refptr<IOSChromeURLRequestContextGetter>>
       IOSChromeURLRequestContextGetterVector;
 
+  ChromeBrowserStateIOData(const ChromeBrowserStateIOData&) = delete;
+  ChromeBrowserStateIOData& operator=(const ChromeBrowserStateIOData&) = delete;
+
   virtual ~ChromeBrowserStateIOData();
-
-  // Returns true if |scheme| is handled in Chrome, or by default handlers in
-  // net::URLRequest.
-  static bool IsHandledProtocol(const std::string& scheme);
-
-  // Utility to install additional WebUI handlers into the |job_factory|.
-  // Ownership of the handlers is transferred from |protocol_handlers|
-  // to the |job_factory|.
-  static void InstallProtocolHandlers(
-      net::URLRequestJobFactoryImpl* job_factory,
-      ProtocolHandlerMap* protocol_handlers);
 
   // Initializes the ChromeBrowserStateIOData object and primes the
   // RequestContext generation. Must be called prior to any of the Get*()
@@ -84,15 +66,6 @@ class ChromeBrowserStateIOData {
   void Init(ProtocolHandlerMap* protocol_handlers) const;
 
   net::URLRequestContext* GetMainRequestContext() const;
-  net::URLRequestContext* GetIsolatedAppRequestContext(
-      net::URLRequestContext* main_context,
-      const base::FilePath& partition_path) const;
-
-  // Sets the cookie store associated with a partition path.
-  // The path must exist. If there is already a cookie store, it is deleted.
-  void SetCookieStoreForPartitionPath(
-      std::unique_ptr<net::CookieStore> cookie_store,
-      const base::FilePath& partition_path);
 
   // These are useful when the Chrome layer is called from the content layer
   // with a content::ResourceContext, and they want access to Chrome data for
@@ -100,15 +73,7 @@ class ChromeBrowserStateIOData {
   content_settings::CookieSettings* GetCookieSettings() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
 
-  StringPrefMember* google_services_account_id() const {
-    return &google_services_user_account_id_;
-  }
-
-  net::TransportSecurityState* transport_security_state() const {
-    return transport_security_state_.get();
-  }
-
-  ios::ChromeBrowserStateType browser_state_type() const {
+  ChromeBrowserStateType browser_state_type() const {
     return browser_state_type_;
   }
 
@@ -124,28 +89,6 @@ class ChromeBrowserStateIOData {
   bool GetMetricsEnabledStateOnIOThread() const;
 
  protected:
-  // A URLRequestContext for apps that owns its cookie store and HTTP factory,
-  // to ensure they are deleted.
-  class AppRequestContext : public net::URLRequestContext {
-   public:
-    AppRequestContext();
-
-    void SetCookieStore(std::unique_ptr<net::CookieStore> cookie_store);
-    void SetHttpNetworkSession(
-        std::unique_ptr<net::HttpNetworkSession> http_network_session);
-    void SetHttpTransactionFactory(
-        std::unique_ptr<net::HttpTransactionFactory> http_factory);
-    void SetJobFactory(std::unique_ptr<net::URLRequestJobFactory> job_factory);
-
-    ~AppRequestContext() override;
-
-   private:
-    std::unique_ptr<net::CookieStore> cookie_store_;
-    std::unique_ptr<net::HttpNetworkSession> http_network_session_;
-    std::unique_ptr<net::HttpTransactionFactory> http_factory_;
-    std::unique_ptr<net::URLRequestJobFactory> job_factory_;
-  };
-
   // Created on the UI thread, read on the IO thread during
   // ChromeBrowserStateIOData lazy initialization.
   struct ProfileParams {
@@ -163,7 +106,7 @@ class ChromeBrowserStateIOData {
     std::unique_ptr<net::ProxyConfigService> proxy_config_service;
 
     // SystemCookieStore should be initialized from the UI thread as it depends
-    // on the |browser_state|.
+    // on the `browser_state`.
     std::unique_ptr<net::SystemCookieStore> system_cookie_store;
 
     // The browser state this struct was populated from. It's passed as a void*
@@ -171,34 +114,19 @@ class ChromeBrowserStateIOData {
     void* browser_state;
   };
 
-  explicit ChromeBrowserStateIOData(
-      ios::ChromeBrowserStateType browser_state_type);
+  explicit ChromeBrowserStateIOData(ChromeBrowserStateType browser_state_type);
 
-  void InitializeOnUIThread(ios::ChromeBrowserState* browser_state);
-  void ApplyProfileParamsToContext(net::URLRequestContext* context) const;
+  void InitializeOnUIThread(ChromeBrowserState* browser_state);
 
-  std::unique_ptr<net::URLRequestJobFactory> SetUpJobFactoryDefaults(
-      std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory,
-      net::NetworkDelegate* network_delegate) const;
-
-  // Called when the ChromeBrowserState is destroyed. |context_getters| must
+  // Called when the ChromeBrowserState is destroyed. `context_getters` must
   // include all URLRequestContextGetters that refer to the
   // ChromeBrowserStateIOData's URLRequestContexts. Triggers destruction of the
-  // ChromeBrowserStateIOData and shuts down |context_getters| safely on the IO
+  // ChromeBrowserStateIOData and shuts down `context_getters` safely on the IO
   // thread.
   // TODO(mmenke):  Passing all those URLRequestContextGetters around like this
   //     is really silly.  Can we do something cleaner?
   void ShutdownOnUIThread(
       std::unique_ptr<IOSChromeURLRequestContextGetterVector> context_getters);
-
-  net::ProxyResolutionService* proxy_resolution_service() const {
-    return proxy_resolution_service_.get();
-  }
-
-  net::HttpServerProperties* http_server_properties() const;
-
-  void set_http_server_properties(
-      std::unique_ptr<net::HttpServerProperties> http_server_properties) const;
 
   net::URLRequestContext* main_request_context() const {
     return main_request_context_.get();
@@ -206,22 +134,7 @@ class ChromeBrowserStateIOData {
 
   bool initialized() const { return initialized_; }
 
-  std::unique_ptr<net::HttpNetworkSession> CreateHttpNetworkSession(
-      const ProfileParams& profile_params) const;
-
-  // Creates main network transaction factory.
-  std::unique_ptr<net::HttpCache> CreateMainHttpFactory(
-      net::HttpNetworkSession* session,
-      std::unique_ptr<net::HttpCache::BackendFactory> main_backend) const;
-
-  // Creates network transaction factory.
-  std::unique_ptr<net::HttpCache> CreateHttpFactory(
-      net::HttpNetworkSession* shared_session,
-      std::unique_ptr<net::HttpCache::BackendFactory> backend) const;
-
  private:
-  typedef std::map<base::FilePath, AppRequestContext*> URLRequestContextMap;
-
   // --------------------------------------------
   // Virtual interface for subtypes to implement:
   // --------------------------------------------
@@ -229,19 +142,8 @@ class ChromeBrowserStateIOData {
   // Does the actual initialization of the ChromeBrowserStateIOData subtype.
   // Subtypes should use the static helper functions above to implement this.
   virtual void InitializeInternal(
-      std::unique_ptr<IOSChromeNetworkDelegate> chrome_network_delegate,
-      ProfileParams* profile_params,
-      ProtocolHandlerMap* protocol_handlers) const = 0;
-
-  // Does an on-demand initialization of a RequestContext for the given
-  // isolated app.
-  virtual AppRequestContext* InitializeAppRequestContext(
-      net::URLRequestContext* main_context) const = 0;
-
-  // These functions are used to transfer ownership of the lazily initialized
-  // context from ChromeBrowserStateIOData to the URLRequestContextGetter.
-  virtual AppRequestContext* AcquireIsolatedAppRequestContext(
-      net::URLRequestContext* main_context) const = 0;
+      net::URLRequestContextBuilder* context_builder,
+      ProfileParams* profile_params) const = 0;
 
   // The order *DOES* matter for the majority of these member variables, so
   // don't move them around unless you know what you're doing!
@@ -263,29 +165,18 @@ class ChromeBrowserStateIOData {
   // ChromeBrowserStateIOData. Deleted after lazy initialization.
   mutable std::unique_ptr<ProfileParams> profile_params_;
 
-  mutable StringPrefMember google_services_user_account_id_;
-
   // Member variables which are pointed to by the various context objects.
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember enable_do_not_track_;
 
   BooleanPrefMember enable_metrics_;
+  std::unique_ptr<AcceptLanguagePrefWatcher> accept_language_pref_watcher_;
 
-  mutable std::unique_ptr<net::ProxyResolutionService>
-      proxy_resolution_service_;
-  mutable std::unique_ptr<net::TransportSecurityState>
-      transport_security_state_;
-  mutable std::unique_ptr<net::CTVerifier> cert_transparency_verifier_;
-  mutable std::unique_ptr<net::HttpServerProperties> http_server_properties_;
-  mutable std::unique_ptr<net::TransportSecurityPersister>
-      transport_security_persister_;
   mutable std::unique_ptr<net::ReportSender> certificate_report_sender_;
 
   // These are only valid in between LazyInitialize() and their accessor being
   // called.
   mutable std::unique_ptr<net::URLRequestContext> main_request_context_;
-  // One URLRequestContext per isolated app for main and media requests.
-  mutable URLRequestContextMap app_request_context_map_;
 
   mutable scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
@@ -294,9 +185,7 @@ class ChromeBrowserStateIOData {
   mutable std::unique_ptr<IOSChromeHttpUserAgentSettings>
       chrome_http_user_agent_settings_;
 
-  const ios::ChromeBrowserStateType browser_state_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeBrowserStateIOData);
+  const ChromeBrowserStateType browser_state_type_;
 };
 
 #endif  // IOS_CHROME_BROWSER_BROWSER_STATE_CHROME_BROWSER_STATE_IO_DATA_H_

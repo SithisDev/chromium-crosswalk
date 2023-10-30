@@ -1,43 +1,39 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/webui/url_data_manager_ios_backend.h"
+#import "ios/web/webui/url_data_manager_ios_backend.h"
 
-#include <set>
+#import <set>
 
-#include "base/bind.h"
-#include "base/command_line.h"
-#include "base/compiler_specific.h"
-#include "base/debug/alias.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
-#include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
-#include "base/trace_event/trace_event.h"
-#include "ios/web/public/browser_state.h"
-#include "ios/web/public/thread/web_task_traits.h"
-#include "ios/web/public/thread/web_thread.h"
+#import "base/bind.h"
+#import "base/command_line.h"
+#import "base/compiler_specific.h"
+#import "base/debug/alias.h"
+#import "base/memory/ref_counted.h"
+#import "base/memory/ref_counted_memory.h"
+#import "base/memory/weak_ptr.h"
+#import "base/strings/string_util.h"
+#import "base/task/single_thread_task_runner.h"
+#import "base/trace_event/trace_event.h"
+#import "ios/web/public/browser_state.h"
+#import "ios/web/public/thread/web_task_traits.h"
+#import "ios/web/public/thread/web_thread.h"
 #import "ios/web/public/web_client.h"
-#include "ios/web/webui/shared_resources_data_source_ios.h"
-#include "ios/web/webui/url_data_source_ios_impl.h"
-#include "net/base/io_buffer.h"
-#include "net/base/net_errors.h"
-#include "net/filter/gzip_source_stream.h"
-#include "net/filter/source_stream.h"
-#include "net/http/http_response_headers.h"
-#include "net/http/http_status_code.h"
-#include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory.h"
-#include "ui/base/template_expressions.h"
-#include "ui/base/webui/i18n_source_stream.h"
-#include "url/url_util.h"
+#import "ios/web/webui/shared_resources_data_source_ios.h"
+#import "ios/web/webui/url_data_source_ios_impl.h"
+#import "net/base/io_buffer.h"
+#import "net/base/net_errors.h"
+#import "net/filter/source_stream.h"
+#import "net/http/http_response_headers.h"
+#import "net/http/http_status_code.h"
+#import "net/url_request/url_request.h"
+#import "net/url_request/url_request_context.h"
+#import "net/url_request/url_request_job.h"
+#import "net/url_request/url_request_job_factory.h"
+#import "ui/base/template_expressions.h"
+#import "ui/base/webui/i18n_source_stream.h"
+#import "url/url_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -49,13 +45,16 @@ namespace web {
 
 namespace {
 
+const char kContentSecurityPolicy[] = "Content-Security-Policy";
 const char kChromeURLContentSecurityPolicyHeaderBase[] =
-    "Content-Security-Policy: script-src chrome://resources "
-    "'self'; ";
+    "script-src chrome://resources 'self'; ";
 
-const char kChromeURLXFrameOptionsHeader[] = "X-Frame-Options: DENY";
+const char kXFrameOptions[] = "X-Frame-Options";
+const char kChromeURLXFrameOptionsHeader[] = "DENY";
 
-// Returns whether |url| passes some sanity checks and is a valid GURL.
+const char kWebUIResourcesHost[] = "resources";
+
+// Returns whether `url` passes some sanity checks and is a valid GURL.
 bool CheckURLIsValid(const GURL& url) {
   std::vector<std::string> additional_schemes;
   DCHECK(GetWebClient()->IsAppSpecificURL(url) ||
@@ -70,7 +69,7 @@ bool CheckURLIsValid(const GURL& url) {
   return true;
 }
 
-// Parse |url| to get the path which will be used to resolve the request. The
+// Parse `url` to get the path which will be used to resolve the request. The
 // path is the remaining portion after the scheme and hostname.
 void URLToRequestPath(const GURL& url, std::string* path) {
   const std::string& spec = url.possibly_invalid_spec();
@@ -82,6 +81,22 @@ void URLToRequestPath(const GURL& url, std::string* path) {
     path->assign(spec.substr(offset));
 }
 
+// Checks for webui resources path inside the given `url` and return a
+// fixed one if needed, or the original one otherwise. In js modules,
+// The use of x/../../../../ui/webui/resources is mapped by webkit to
+// x/ui/webui/resources so to not go out of scope of the module.
+GURL RedirectWebUIResources(const GURL url) {
+  static std::string kWebUIResources = "/ui/webui/resources";
+  if (base::StartsWith(url.path(), kWebUIResources,
+                       base::CompareCase::SENSITIVE)) {
+    GURL::Replacements replacements;
+    replacements.SetHostStr(kWebUIResourcesHost);
+    replacements.SetPathStr(url.path().c_str() + kWebUIResources.size());
+    return url.ReplaceComponents(replacements);
+  }
+  return url;
+}
+
 }  // namespace
 
 // URLRequestChromeJob is a net::URLRequestJob that manages running
@@ -90,11 +105,15 @@ void URLToRequestPath(const GURL& url, std::string* path) {
 // calls back once the data is available.
 class URLRequestChromeJob : public net::URLRequestJob {
  public:
-  // |is_incognito| set when job is generated from an incognito profile.
+  // `is_incognito` set when job is generated from an incognito profile.
   URLRequestChromeJob(net::URLRequest* request,
-                      net::NetworkDelegate* network_delegate,
                       BrowserState* browser_state,
                       bool is_incognito);
+
+  URLRequestChromeJob(const URLRequestChromeJob&) = delete;
+  URLRequestChromeJob& operator=(const URLRequestChromeJob&) = delete;
+
+  ~URLRequestChromeJob() override;
 
   // net::URLRequestJob implementation.
   void Start() override;
@@ -104,7 +123,7 @@ class URLRequestChromeJob : public net::URLRequestJob {
   void GetResponseInfo(net::HttpResponseInfo* info) override;
   std::unique_ptr<net::SourceStream> SetUpSourceStream() override;
 
-  // Used to notify that the requested data's |mime_type| is ready.
+  // Used to notify that the requested data's `mime_type` is ready.
   void MimeTypeAvailable(URLDataSourceIOSImpl* source,
                          const std::string& mime_type);
 
@@ -132,8 +151,6 @@ class URLRequestChromeJob : public net::URLRequestJob {
     deny_xframe_options_ = deny_xframe_options;
   }
 
-  void set_is_gzipped(bool is_gzipped) { is_gzipped_ = is_gzipped; }
-
   void set_source(scoped_refptr<URLDataSourceIOSImpl> source) {
     source_ = source;
   }
@@ -148,11 +165,13 @@ class URLRequestChromeJob : public net::URLRequestJob {
  private:
   friend class URLDataManagerIOSBackend;
 
-  ~URLRequestChromeJob() override;
-
-  // Do the actual copy from data_ (the data we're serving) into |buf|.
+  // Do the actual copy from data_ (the data we're serving) into `buf`.
   // Separate from ReadRawData so we can handle async I/O.
   int CompleteRead(net::IOBuffer* buf, int buf_size);
+
+  // Called asynchronously to notify of an error occuring while trying to start
+  // the job.
+  void NotifyStartErrorAsync();
 
   // The actual data we're serving.  NULL until it's been fetched.
   scoped_refptr<base::RefCountedMemory> data_;
@@ -179,10 +198,6 @@ class URLRequestChromeJob : public net::URLRequestJob {
   // If true, sets  the "X-Frame-Options: DENY" header.
   bool deny_xframe_options_;
 
-  // True when gzip encoding should be used. NOTE: this requires the original
-  // resources in resources.pak use compress="gzip".
-  bool is_gzipped_;
-
   // The URLDataSourceIOSImpl that is servicing this request. This is a shared
   // pointer so that the request can continue to be served even if the source is
   // detached from the backend that initially owned it.
@@ -202,15 +217,12 @@ class URLRequestChromeJob : public net::URLRequestJob {
   URLDataManagerIOSBackend* backend_;
 
   base::WeakPtrFactory<URLRequestChromeJob> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLRequestChromeJob);
 };
 
 URLRequestChromeJob::URLRequestChromeJob(net::URLRequest* request,
-                                         net::NetworkDelegate* network_delegate,
                                          BrowserState* browser_state,
                                          bool is_incognito)
-    : net::URLRequestJob(request, network_delegate),
+    : net::URLRequestJob(request),
       data_offset_(0),
       pending_buf_size_(0),
       allow_caching_(true),
@@ -218,7 +230,6 @@ URLRequestChromeJob::URLRequestChromeJob(net::URLRequest* request,
       content_security_policy_object_source_("object-src 'none';"),
       content_security_policy_frame_source_("frame-src 'none';"),
       deny_xframe_options_(true),
-      is_gzipped_(false),
       send_content_type_header_(false),
       is_incognito_(is_incognito),
       browser_state_(browser_state),
@@ -234,21 +245,23 @@ URLRequestChromeJob::~URLRequestChromeJob() {
 }
 
 void URLRequestChromeJob::Start() {
-  TRACE_EVENT_ASYNC_BEGIN1("browser", "DataManager:Request", this, "URL",
-                           request_->url().possibly_invalid_spec());
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("browser", "DataManager:Request",
+                                    TRACE_ID_LOCAL(this), "URL",
+                                    request_->url().possibly_invalid_spec());
 
   if (!request_)
     return;
   DCHECK(browser_state_);
 
   // Obtain the URLDataManagerIOSBackend instance that is associated with
-  // |browser_state_|. Note that this *must* be done on the IO thread.
+  // `browser_state_`. Note that this *must* be done on the IO thread.
   backend_ = browser_state_->GetURLDataManagerIOSBackendOnIOThread();
   DCHECK(backend_);
 
   if (!backend_->StartRequest(request_, this)) {
-    NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
-                                           net::ERR_INVALID_URL));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&URLRequestChromeJob::NotifyStartErrorAsync,
+                                  weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -279,33 +292,22 @@ void URLRequestChromeJob::GetResponseInfo(net::HttpResponseInfo* info) {
     std::string base = kChromeURLContentSecurityPolicyHeaderBase;
     base.append(content_security_policy_object_source_);
     base.append(content_security_policy_frame_source_);
-    info->headers->AddHeader(base);
+    info->headers->AddHeader(kContentSecurityPolicy, base);
   }
 
   if (deny_xframe_options_)
-    info->headers->AddHeader(kChromeURLXFrameOptionsHeader);
-
-  if (is_gzipped_)
-    info->headers->AddHeader("Content-Encoding: gzip");
+    info->headers->AddHeader(kXFrameOptions, kChromeURLXFrameOptionsHeader);
 
   if (!allow_caching_)
-    info->headers->AddHeader("Cache-Control: no-cache");
+    info->headers->AddHeader("Cache-Control", "no-cache");
 
-  if (send_content_type_header_ && !mime_type_.empty()) {
-    std::string content_type = base::StringPrintf(
-        "%s:%s", net::HttpRequestHeaders::kContentType, mime_type_.c_str());
-    info->headers->AddHeader(content_type);
-  }
+  if (send_content_type_header_ && !mime_type_.empty())
+    info->headers->AddHeader(net::HttpRequestHeaders::kContentType, mime_type_);
 }
 
 std::unique_ptr<net::SourceStream> URLRequestChromeJob::SetUpSourceStream() {
   std::unique_ptr<net::SourceStream> source_stream =
       net::URLRequestJob::SetUpSourceStream();
-
-  if (is_gzipped_) {
-    source_stream = net::GzipSourceStream::Create(std::move(source_stream),
-                                                  net::SourceStream::TYPE_GZIP);
-  }
 
   // The URLRequestJob and the SourceStreams we are creating are owned by the
   // same parent URLRequest, thus it is safe to pass the replacements via a raw
@@ -317,7 +319,7 @@ std::unique_ptr<net::SourceStream> URLRequestChromeJob::SetUpSourceStream() {
     // It is safe to pass the raw replacements directly to the source stream, as
     // both this URLRequestChromeJob and the I18nSourceStream are owned by the
     // same root URLRequest. The replacements are owned by the URLDataSourceImpl
-    // which we keep alive via |source_|, ensuring its lifetime is also bound
+    // which we keep alive via `source_`, ensuring its lifetime is also bound
     // to the safe URLRequest.
     source_stream = ui::I18nSourceStream::Create(
         std::move(source_stream), net::SourceStream::TYPE_NONE, replacements);
@@ -330,20 +332,23 @@ void URLRequestChromeJob::MimeTypeAvailable(URLDataSourceIOSImpl* source,
                                             const std::string& mime_type) {
   set_mime_type(mime_type);
 
-  if (mime_type == "text/html")
+  if (mime_type == "text/html" || (mime_type == "application/javascript" &&
+                                   source->ShouldReplaceI18nInJS())) {
     set_source(source);
+  }
 
   NotifyHeadersComplete();
 }
 
 void URLRequestChromeJob::DataAvailable(base::RefCountedMemory* bytes) {
-  TRACE_EVENT_ASYNC_END0("browser", "DataManager:Request", this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("browser", "DataManager:Request",
+                                  TRACE_ID_LOCAL(this));
   if (bytes) {
     data_ = bytes;
     if (pending_buf_.get()) {
       CHECK(pending_buf_->data());
       int rv = CompleteRead(pending_buf_.get(), pending_buf_size_);
-      pending_buf_ = NULL;
+      pending_buf_.reset();
       ReadRawDataComplete(rv);
     }
   } else {
@@ -368,7 +373,7 @@ int URLRequestChromeJob::ReadRawData(net::IOBuffer* buf, int buf_size) {
 int URLRequestChromeJob::CompleteRead(net::IOBuffer* buf, int buf_size) {
   // http://crbug.com/373841
   char url_buf[128];
-  base::strlcpy(url_buf, request_->url().spec().c_str(), base::size(url_buf));
+  base::strlcpy(url_buf, request_->url().spec().c_str(), std::size(url_buf));
   base::debug::Alias(url_buf);
 
   int remaining = data_->size() - data_offset_;
@@ -381,10 +386,14 @@ int URLRequestChromeJob::CompleteRead(net::IOBuffer* buf, int buf_size) {
   return buf_size;
 }
 
+void URLRequestChromeJob::NotifyStartErrorAsync() {
+  NotifyStartError(net::ERR_INVALID_URL);
+}
+
 namespace {
 
-// Gets mime type for data that is available from |source| by |path|.
-// After that, notifies |job| that mime type is available. This method
+// Gets mime type for data that is available from `source` by `path`.
+// After that, notifies `job` that mime type is available. This method
 // should be called on the UI thread, but notification is performed on
 // the IO thread.
 void GetMimeTypeOnUI(URLDataSourceIOSImpl* source,
@@ -392,10 +401,9 @@ void GetMimeTypeOnUI(URLDataSourceIOSImpl* source,
                      const base::WeakPtr<URLRequestChromeJob>& job) {
   DCHECK_CURRENTLY_ON(WebThread::UI);
   std::string mime_type = source->source()->GetMimeType(path);
-  base::PostTaskWithTraits(
-      FROM_HERE, {WebThread::IO},
-      base::BindOnce(&URLRequestChromeJob::MimeTypeAvailable, job,
-                     base::RetainedRef(source), mime_type));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&URLRequestChromeJob::MimeTypeAvailable, job,
+                                base::RetainedRef(source), mime_type));
 }
 
 }  // namespace
@@ -405,18 +413,21 @@ namespace {
 class ChromeProtocolHandler
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
-  // |is_incognito| should be set for incognito profiles.
+  // `is_incognito` should be set for incognito profiles.
   ChromeProtocolHandler(BrowserState* browser_state, bool is_incognito)
       : browser_state_(browser_state), is_incognito_(is_incognito) {}
+
+  ChromeProtocolHandler(const ChromeProtocolHandler&) = delete;
+  ChromeProtocolHandler& operator=(const ChromeProtocolHandler&) = delete;
+
   ~ChromeProtocolHandler() override {}
 
-  net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const override {
+  std::unique_ptr<net::URLRequestJob> CreateJob(
+      net::URLRequest* request) const override {
     DCHECK(request);
 
-    return new URLRequestChromeJob(request, network_delegate, browser_state_,
-                                   is_incognito_);
+    return std::make_unique<URLRequestChromeJob>(request, browser_state_,
+                                                 is_incognito_);
   }
 
   bool IsSafeRedirectTarget(const GURL& location) const override {
@@ -428,8 +439,6 @@ class ChromeProtocolHandler
 
   // True when generated from an incognito profile.
   const bool is_incognito_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeProtocolHandler);
 };
 
 }  // namespace
@@ -483,15 +492,17 @@ bool URLDataManagerIOSBackend::StartRequest(const net::URLRequest* request,
   if (!CheckURLIsValid(request->url()))
     return false;
 
-  URLDataSourceIOSImpl* source = GetDataSourceFromURL(request->url());
+  GURL url = RedirectWebUIResources(request->url());
+
+  URLDataSourceIOSImpl* source = GetDataSourceFromURL(url);
   if (!source)
     return false;
 
-  if (!source->source()->ShouldServiceRequest(request->url()))
+  if (!source->source()->ShouldServiceRequest(url))
     return false;
 
   std::string path;
-  URLToRequestPath(request->url(), &path);
+  URLToRequestPath(url, &path);
 
   // Save this request so we know where to send the data.
   RequestID request_id = next_request_id_++;
@@ -503,7 +514,6 @@ bool URLDataManagerIOSBackend::StartRequest(const net::URLRequest* request,
       source->source()->GetContentSecurityPolicyObjectSrc());
   job->set_content_security_policy_frame_source("frame-src 'none';");
   job->set_deny_xframe_options(source->source()->ShouldDenyXFrameOptions());
-  job->set_is_gzipped(source->source()->IsGzipped(path));
   job->set_send_content_type_header(false);
 
   // Forward along the request to the data source.
@@ -512,7 +522,7 @@ bool URLDataManagerIOSBackend::StartRequest(const net::URLRequest* request,
   // message loop before request for data. And correspondingly their
   // replies are put on the IO thread in the same order.
   scoped_refptr<base::SingleThreadTaskRunner> target_runner =
-      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::UI});
+      web::GetUIThreadTaskRunner({});
   target_runner->PostTask(
       FROM_HERE, base::BindOnce(&GetMimeTypeOnUI, base::RetainedRef(source),
                                 path, job->weak_factory_.GetWeakPtr()));
@@ -547,8 +557,8 @@ void URLDataManagerIOSBackend::CallStartRequest(
     const std::string& path,
     int request_id) {
   source->source()->StartDataRequest(
-      path,
-      base::Bind(&URLDataSourceIOSImpl::SendResponse, source, request_id));
+      path, base::BindRepeating(&URLDataSourceIOSImpl::SendResponse, source,
+                                request_id));
 }
 
 void URLDataManagerIOSBackend::RemoveRequest(URLRequestChromeJob* job) {

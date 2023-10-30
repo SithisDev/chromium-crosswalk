@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,25 +9,14 @@
 
 @class ChromeCoordinator;
 class Browser;
-namespace ios {
-class ChromeBrowserState;
-}
+
 typedef NSMutableArray<ChromeCoordinator*> MutableCoordinatorArray;
 
 // A coordinator object that manages view controllers and other coordinators.
 // Members of this class should clean up their own UI when they are deallocated.
-// TODO(crbug.com/795832): Move to ui/coordinators.
 @interface ChromeCoordinator : NSObject
 
-// Creates a coordinator that will use |viewController|.
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController;
-// Creates a coordinator that uses |viewController| and |browserState|.
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_DESIGNATED_INITIALIZER;
-
-// Creates a coordinator that uses |viewController| and |browser|.
+// Creates a coordinator that uses `viewController` and `browser`.
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser
     NS_DESIGNATED_INITIALIZER;
@@ -39,18 +28,18 @@ typedef NSMutableArray<ChromeCoordinator*> MutableCoordinatorArray;
     MutableCoordinatorArray* childCoordinators;
 
 // The currently 'active' child coordinator, if any. By default this is the last
-// coordinator in |childCoordinators|, but subclasses need not adhere to that.
+// coordinator in `childCoordinators`, but subclasses need not adhere to that.
 @property(strong, nonatomic, readonly)
     ChromeCoordinator* activeChildCoordinator;
 
 // The view controller this coordinator was initialized with.
 @property(weak, nonatomic, readonly) UIViewController* baseViewController;
 
-// The navigation controller this coordinator was initialized with.
-@property(weak, nonatomic) UINavigationController* navigationController;
-
-// The coordinator's BrowserState.
-@property(assign, nonatomic, readonly) ios::ChromeBrowserState* browserState;
+// Parent coordinator can set this to allow the child coordinator to push their
+// view controller to the navigationController instead of presenting it if
+// needed. This is usually the same object as `baseViewController`.
+@property(weak, nonatomic, readonly)
+    UINavigationController* baseNavigationController;
 
 // The coordinator's Browser, if one was assigned.
 @property(assign, nonatomic, readonly) Browser* browser;

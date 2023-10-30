@@ -1,23 +1,25 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/autofill/autofill_profile_table_view_controller.h"
 
-#include "base/guid.h"
-#include "base/mac/foundation_util.h"
-#include "base/strings/utf_string_conversions.h"
+#import "base/guid.h"
+#import "base/mac/foundation_util.h"
+#import "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "components/autofill/core/browser/data_model/autofill_profile.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/chrome/browser/ui/settings/personal_data_manager_finished_profile_tasks_waiter.h"
+#import "components/autofill/core/browser/data_model/autofill_profile.h"
+#import "components/autofill/core/browser/personal_data_manager.h"
+#import "components/autofill/core/common/autofill_features.h"
+#import "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/autofill/personal_data_manager_factory.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/ui/settings/personal_data_manager_finished_profile_tasks_waiter.h"
 #import "ios/chrome/browser/ui/settings/settings_root_table_view_controller.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_controller_test.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#import "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -35,6 +37,11 @@ class AutofillProfileTableViewControllerTest
     // WebDataService; this is not initialized on a TestChromeBrowserState by
     // default.
     chrome_browser_state_->CreateWebDataService();
+
+    // Set circular SyncService dependency to null.
+    autofill::PersonalDataManagerFactory::GetForBrowserState(
+        chrome_browser_state_.get())
+        ->OnSyncServiceInitialized(nullptr);
   }
 
   ChromeTableViewController* InstantiateController() override {
@@ -48,6 +55,13 @@ class AutofillProfileTableViewControllerTest
     autofill::PersonalDataManager* personal_data_manager =
         autofill::PersonalDataManagerFactory::GetForBrowserState(
             chrome_browser_state_.get());
+    if (base::FeatureList::IsEnabled(
+            autofill::features::kAutofillUseAlternativeStateNameMap)) {
+      personal_data_manager->personal_data_manager_cleaner_for_testing()
+          ->alternative_state_name_map_updater_for_testing()
+          ->set_local_state_for_testing(local_state_.Get());
+    }
+    personal_data_manager->OnSyncServiceInitialized(nullptr);
     PersonalDataManagerFinishedProfileTasksWaiter waiter(personal_data_manager);
 
     autofill::AutofillProfile autofill_profile(base::GenerateGUID(), origin);
@@ -58,7 +72,8 @@ class AutofillProfileTableViewControllerTest
     waiter.Wait();  // Wait for completion of the asynchronous operation.
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
+  IOSChromeScopedTestingLocalState local_state_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
 };
 
@@ -74,7 +89,7 @@ TEST_F(AutofillProfileTableViewControllerTest, TestInitialization) {
   EXPECT_EQ(1, NumberOfItemsInSection(0));
   // Expect subtitle section to contain one row (the address Autofill toggle
   // subtitle).
-  EXPECT_NE(nil, [controller.tableViewModel footerForSection:0]);
+  EXPECT_NE(nil, [controller.tableViewModel footerForSectionIndex:0]);
 
   // Check the footer of the first section.
   CheckSectionFooterWithId(IDS_AUTOFILL_ENABLE_PROFILES_TOGGLE_SUBLABEL, 0);

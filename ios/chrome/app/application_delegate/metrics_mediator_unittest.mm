@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,56 +7,48 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/mac/scoped_block.h"
-#include "components/metrics/metrics_service.h"
+#import "base/test/metrics/histogram_tester.h"
+#import "components/metrics/metrics_service.h"
+#import "components/previous_session_info/previous_session_info.h"
+#import "components/previous_session_info/previous_session_info_private.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
-#include "ios/chrome/browser/application_context.h"
-#import "ios/chrome/browser/metrics/previous_session_info.h"
-#import "ios/chrome/browser/metrics/previous_session_info_private.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/test_browser.h"
 #import "ios/chrome/browser/ui/main/browser_interface_provider.h"
-#import "ios/chrome/browser/ui/main/test/stub_browser_interface.h"
-#import "ios/chrome/browser/ui/main/test/stub_browser_interface_provider.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/test/fake_scene_state.h"
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/chrome/test/base/scoped_block_swizzler.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
+#import "ios/chrome/common/app_group/app_group_metrics.h"
 #import "ios/chrome/test/ocmock/OCMockObject+BreakpadControllerTesting.h"
-#include "net/base/network_change_notifier.h"
-#include "testing/platform_test.h"
-#import "third_party/breakpad/breakpad/src/client/ios/BreakpadController.h"
+#import "ios/testing/scoped_block_swizzler.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "net/base/network_change_notifier.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-#include "third_party/ocmock/gtest_support.h"
+#import "third_party/ocmock/gtest_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-#pragma mark - connectionTypeChanged tests.
-
 // Mock class for testing MetricsMediator.
 @interface MetricsMediatorMock : MetricsMediator
 @property(nonatomic) NSInteger reportingValue;
-@property(nonatomic) NSInteger breakpadUpload;
 - (void)reset;
-- (void)setReporting:(BOOL)enableReporting;
 @end
 
 @implementation MetricsMediatorMock
 @synthesize reportingValue = _reportingValue;
-@synthesize breakpadUpload = _breakpadUpload;
 
 - (void)reset {
   _reportingValue = -1;
-  _breakpadUpload = -1;
-}
-- (void)setBreakpadUploadingEnabled:(BOOL)enableUploading {
-  _breakpadUpload = enableUploading ? 1 : 0;
 }
 - (void)setReporting:(BOOL)enableReporting {
   _reportingValue = enableReporting ? 1 : 0;
-}
-- (BOOL)isMetricsReportingEnabledWifiOnly {
-  return YES;
 }
 - (BOOL)areMetricsEnabled {
   return YES;
@@ -64,112 +56,115 @@
 
 @end
 
-// Gives the differents net::NetworkChangeNotifier::ConnectionType based on
-// scenario number.
-net::NetworkChangeNotifier::ConnectionType getConnectionType(int number) {
-  switch (number) {
-    case 0:
-      return net::NetworkChangeNotifier::CONNECTION_UNKNOWN;
-    case 1:
-      return net::NetworkChangeNotifier::CONNECTION_ETHERNET;
-    case 2:
-      return net::NetworkChangeNotifier::CONNECTION_WIFI;
-    case 3:
-      return net::NetworkChangeNotifier::CONNECTION_2G;
-    case 4:
-      return net::NetworkChangeNotifier::CONNECTION_3G;
-    case 5:
-      return net::NetworkChangeNotifier::CONNECTION_4G;
-    case 6:
-      return net::NetworkChangeNotifier::CONNECTION_NONE;
-    case 7:
-      return net::NetworkChangeNotifier::CONNECTION_BLUETOOTH;
-    default:
-      return net::NetworkChangeNotifier::CONNECTION_UNKNOWN;
-  }
-}
-
-// Gives the differents expected value based on scenario number.
-int getExpectedValue(int number) {
-  if (number > 2 && number < 6)
-    return 0;
-  return 1;
-}
-
 using MetricsMediatorTest = PlatformTest;
 
-// Verifies that connectionTypeChanged correctly enables or disables the
-// uploading in the breakpad and in the metrics service.
-TEST_F(MetricsMediatorTest, connectionTypeChanged) {
-  [[PreviousSessionInfo sharedInstance] setIsFirstSessionAfterUpgrade:NO];
-  MetricsMediatorMock* mock_metrics_helper = [[MetricsMediatorMock alloc] init];
+// Tests that histograms logged in a widget are correctly re-emitted by Chrome.
+TEST_F(MetricsMediatorTest, WidgetHistogramMetricsRecorded) {
+  using app_group::HistogramCountKey;
 
-  // Checks all different scenarios.
-  for (int i = 0; i < 8; ++i) {
-    [mock_metrics_helper reset];
-    [mock_metrics_helper connectionTypeChanged:getConnectionType(i)];
-    EXPECT_EQ(getExpectedValue(i), [mock_metrics_helper reportingValue]);
-    EXPECT_EQ(getExpectedValue(i), [mock_metrics_helper breakpadUpload]);
-  }
+  base::HistogramTester tester;
+  NSString* histogram = @"MyHistogram";
 
-  // Checks that no new ConnectionType has been added.
-  EXPECT_EQ(net::NetworkChangeNotifier::CONNECTION_BLUETOOTH,
-            net::NetworkChangeNotifier::CONNECTION_LAST);
+  // Simulate 1 event fired in bucket 0, and 2 events fired in bucket 2.
+  NSString* keyBucket0 = HistogramCountKey(histogram, 0);
+  NSString* keyBucket1 = HistogramCountKey(histogram, 1);
+  NSString* keyBucket2 = HistogramCountKey(histogram, 2);
+
+  NSUserDefaults* sharedDefaults = app_group::GetGroupUserDefaults();
+  [sharedDefaults setInteger:1 forKey:keyBucket0];
+  [sharedDefaults setInteger:2 forKey:keyBucket2];
+
+  const metrics_mediator::HistogramNameCountPair histograms[] = {
+      {
+          histogram,
+          // 3 buckets, to make sure that the first and last buckets are logged.
+          3,
+      },
+  };
+
+  metrics_mediator::RecordWidgetUsage(histograms);
+
+  // Verify that the correct events were emitted.
+  tester.ExpectBucketCount("MyHistogram", 0, 1);
+  tester.ExpectBucketCount("MyHistogram", 1, 0);
+  tester.ExpectBucketCount("MyHistogram", 2, 2);
+
+  // Verify that all entries in NSUserDefaults have been removed.
+  EXPECT_EQ(0, [sharedDefaults integerForKey:keyBucket0]);
+  EXPECT_EQ(0, [sharedDefaults integerForKey:keyBucket1]);
+  EXPECT_EQ(0, [sharedDefaults integerForKey:keyBucket2]);
 }
 
 #pragma mark - logLaunchMetrics tests.
 
 // A block that takes as arguments the caller and the arguments from
 // UserActivityHandler +handleStartupParameters and returns nothing.
-typedef void (^logLaunchMetricsBlock)(id, const char*, int);
+typedef void (^LogLaunchMetricsBlock)(id, const char*, int);
 
 class MetricsMediatorLogLaunchTest : public PlatformTest {
  protected:
   MetricsMediatorLogLaunchTest()
-      : has_been_called_(FALSE),
-        web_state_list_(
-            std::make_unique<WebStateList>(&web_state_list_delegate_)) {}
+      : browser_state_(TestChromeBrowserState::Builder().Build()),
+        num_tabs_has_been_called_(FALSE),
+        num_ntp_tabs_has_been_called_(FALSE),
+        num_live_ntp_tabs_has_been_called_(FALSE) {}
 
   void initiateMetricsMediator(BOOL coldStart, int tabCount) {
-    id mainTabModel = [OCMockObject mockForClass:[TabModel class]];
-    [[[mainTabModel stub] andReturnValue:@(tabCount)] count];
-    WebStateList* web_state_list = web_state_list_.get();
-    [[[mainTabModel stub] andReturnValue:OCMOCK_VALUE(web_state_list)]
-        webStateList];
-    StubBrowserInterfaceProvider* concreteProvider =
-        [[StubBrowserInterfaceProvider alloc] init];
-    concreteProvider.mainInterface.tabModel = mainTabModel;
-    interface_provider_ = concreteProvider;
-
-    swizzle_block_ = [^(id self, int numTab) {
-      has_been_called_ = YES;
+    num_tabs_swizzle_block_ = [^(id self, int numTab) {
+      num_tabs_has_been_called_ = YES;
       // Tests.
       EXPECT_EQ(tabCount, numTab);
     } copy];
+    num_ntp_tabs_swizzle_block_ = [^(id self, int numTab) {
+      num_ntp_tabs_has_been_called_ = YES;
+      // Tests.
+      EXPECT_EQ(tabCount, numTab);
+    } copy];
+    num_live_ntp_tabs_swizzle_block_ = [^(id self, int numTab) {
+      num_live_ntp_tabs_has_been_called_ = YES;
+    } copy];
     if (coldStart) {
-      uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
+      tabs_uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
           [MetricsMediator class], @selector(recordNumTabAtStartup:),
-          swizzle_block_));
+          num_tabs_swizzle_block_));
+      ntp_tabs_uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
+          [MetricsMediator class], @selector(recordNumNTPTabAtStartup:),
+          num_ntp_tabs_swizzle_block_));
     } else {
-      uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
+      tabs_uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
           [MetricsMediator class], @selector(recordNumTabAtResume:),
-          swizzle_block_));
+          num_tabs_swizzle_block_));
+      ntp_tabs_uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
+          [MetricsMediator class], @selector(recordNumNTPTabAtResume:),
+          num_ntp_tabs_swizzle_block_));
+      live_ntp_tabs_uma_histogram_swizzler_.reset(new ScopedBlockSwizzler(
+          [MetricsMediator class], @selector(recordNumLiveNTPTabAtResume:),
+          num_live_ntp_tabs_swizzle_block_));
     }
   }
 
-  void verifySwizzleHasBeenCalled() { EXPECT_TRUE(has_been_called_); }
-
-  id<BrowserInterfaceProvider> getInterfaceProvider() {
-    return interface_provider_;
+  void TearDown() override {
+    connected_scenes_ = nil;
+    PlatformTest::TearDown();
   }
 
- private:
-  id<BrowserInterfaceProvider> interface_provider_;
-  __block BOOL has_been_called_;
-  logLaunchMetricsBlock swizzle_block_;
-  std::unique_ptr<ScopedBlockSwizzler> uma_histogram_swizzler_;
-  std::unique_ptr<WebStateList> web_state_list_;
-  FakeWebStateListDelegate web_state_list_delegate_;
+  void verifySwizzleHasBeenCalled() {
+    EXPECT_TRUE(num_tabs_has_been_called_);
+    EXPECT_TRUE(num_ntp_tabs_has_been_called_);
+  }
+
+  web::WebTaskEnvironment task_environment_;
+  std::unique_ptr<TestChromeBrowserState> browser_state_;
+  NSArray<FakeSceneState*>* connected_scenes_;
+  __block BOOL num_tabs_has_been_called_;
+  __block BOOL num_ntp_tabs_has_been_called_;
+  __block BOOL num_live_ntp_tabs_has_been_called_;
+  LogLaunchMetricsBlock num_tabs_swizzle_block_;
+  LogLaunchMetricsBlock num_ntp_tabs_swizzle_block_;
+  LogLaunchMetricsBlock num_live_ntp_tabs_swizzle_block_;
+  std::unique_ptr<ScopedBlockSwizzler> tabs_uma_histogram_swizzler_;
+  std::unique_ptr<ScopedBlockSwizzler> ntp_tabs_uma_histogram_swizzler_;
+  std::unique_ptr<ScopedBlockSwizzler> live_ntp_tabs_uma_histogram_swizzler_;
 };
 
 // Verifies that the log of the number of open tabs is sent and verifies
@@ -178,6 +173,17 @@ TEST_F(MetricsMediatorLogLaunchTest,
   // Setup.
   BOOL coldStart = YES;
   initiateMetricsMediator(coldStart, 23);
+  // 23 tabs across three scenes.
+  connected_scenes_ = [FakeSceneState sceneArrayWithCount:3
+                                             browserState:browser_state_.get()];
+  [connected_scenes_[0] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:9];
+  [connected_scenes_[1] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:9];
+  [connected_scenes_[2] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:5];
+  // Mark one of the scenes as active.
+  connected_scenes_[0].activationLevel = SceneActivationLevelForegroundActive;
 
   const NSTimeInterval kFirstUserActionTimeout = 30.0;
 
@@ -192,9 +198,8 @@ TEST_F(MetricsMediatorLogLaunchTest,
          forKey:metrics_mediator::kAppEnteredBackgroundDateKey];
 
   // Action.
-  [MetricsMediator
-      logLaunchMetricsWithStartupInformation:startupInformation
-                           interfaceProvider:getInterfaceProvider()];
+  [MetricsMediator logLaunchMetricsWithStartupInformation:startupInformation
+                                          connectedScenes:connected_scenes_];
 
   // Tests.
   NSDate* dateStored = [[NSUserDefaults standardUserDefaults]
@@ -210,6 +215,18 @@ TEST_F(MetricsMediatorLogLaunchTest, logLaunchMetricsNoBackgroundDate) {
   // Setup.
   BOOL coldStart = NO;
   initiateMetricsMediator(coldStart, 32);
+  // 32 tabs across five scenes.
+  connected_scenes_ = [FakeSceneState sceneArrayWithCount:5
+                                             browserState:browser_state_.get()];
+  [connected_scenes_[0] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:8];
+  [connected_scenes_[1] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:8];
+  // Scene 2 has zero tabs.
+  [connected_scenes_[3] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:8];
+  [connected_scenes_[4] appendWebStatesWithURL:GURL(kChromeUINewTabURL)
+                                         count:8];
 
   id startupInformation =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];
@@ -219,12 +236,11 @@ TEST_F(MetricsMediatorLogLaunchTest, logLaunchMetricsNoBackgroundDate) {
       removeObjectForKey:metrics_mediator::kAppEnteredBackgroundDateKey];
 
   // Action.
-  [MetricsMediator
-      logLaunchMetricsWithStartupInformation:startupInformation
-                           interfaceProvider:getInterfaceProvider()];
-
+  [MetricsMediator logLaunchMetricsWithStartupInformation:startupInformation
+                                          connectedScenes:connected_scenes_];
   // Tests.
   verifySwizzleHasBeenCalled();
+  EXPECT_TRUE(num_live_ntp_tabs_has_been_called_);
 }
 
 using MetricsMediatorNoFixtureTest = PlatformTest;

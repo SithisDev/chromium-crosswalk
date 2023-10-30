@@ -1,16 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#import "ios/chrome/browser/browsing_data/browsing_data_remover_factory.h"
 
-#include <utility>
+#import <utility>
 
-#include "base/no_destructor.h"
-#include "components/keyed_service/ios/browser_state_dependency_manager.h"
-#include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/browsing_data/browsing_data_remover_impl.h"
+#import "base/no_destructor.h"
+#import "components/keyed_service/ios/browser_state_dependency_manager.h"
+#import "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/browsing_data/browsing_data_remover_impl.h"
 #import "ios/chrome/browser/sessions/session_service_ios.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -19,14 +19,14 @@
 
 // static
 BrowsingDataRemover* BrowsingDataRemoverFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<BrowsingDataRemover*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
 
 // static
 BrowsingDataRemover* BrowsingDataRemoverFactory::GetForBrowserStateIfExists(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<BrowsingDataRemover*>(
       GetInstance()->GetServiceForBrowserState(browser_state, false));
 }
@@ -47,8 +47,8 @@ BrowsingDataRemoverFactory::~BrowsingDataRemoverFactory() = default;
 std::unique_ptr<KeyedService>
 BrowsingDataRemoverFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   return std::make_unique<BrowsingDataRemoverImpl>(
       browser_state, [SessionServiceIOS sharedService]);
 }

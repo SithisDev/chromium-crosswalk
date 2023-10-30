@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 
-#include "base/logging.h"
+#import "base/check.h"
 #import "ios/web/common/web_view_creation_util.h"
-#include "ios/web/public/test/fakes/test_browser_state.h"
+#import "ios/web/public/test/fakes/fake_browser_state.h"
 #import "third_party/ocmock/OCMock/NSInvocation+OCMAdditions.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 
@@ -19,18 +19,18 @@
 
 namespace {
 
-// Returns an OCMocked WKWebView whose |evaluateJavaScript:completionHandler:|
-// method has been mocked to execute |block| instead. |block| cannot be nil.
+// Returns an OCMocked WKWebView whose `evaluateJavaScript:completionHandler:`
+// method has been mocked to execute `block` instead. `block` cannot be nil.
 WKWebView* BuildMockWKWebViewWithStubbedJSEvalFunction(
     void (^block)(NSInvocation*)) {
   DCHECK(block);
-  web::TestBrowserState browser_state;
-  WKWebView* webView = web::BuildWKWebView(CGRectZero, &browser_state);
-  id mockWebView = [OCMockObject partialMockForObject:webView];
-  [[[mockWebView stub] andDo:^void(NSInvocation* invocation) {
-      block(invocation);
+  web::FakeBrowserState browser_state;
+  WKWebView* web_view = web::BuildWKWebView(CGRectZero, &browser_state);
+  id mock_web_view = [OCMockObject partialMockForObject:web_view];
+  [[[mock_web_view stub] andDo:^void(NSInvocation* invocation) {
+    block(invocation);
   }] evaluateJavaScript:OCMOCK_ANY completionHandler:OCMOCK_ANY];
-  return mockWebView;
+  return mock_web_view;
 }
 
 }  // namespace

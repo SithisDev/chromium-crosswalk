@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,40 +11,49 @@
 #import "ios/chrome/browser/first_run/first_run_metrics.h"
 
 // Values of the UMA Startup.MobileSessionCallerApp histogram.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum MobileSessionCallerApp {
   CALLER_APP_GOOGLE_SEARCH = 0,
-  CALLER_APP_GOOGLE_GMAIL,
-  CALLER_APP_GOOGLE_PLUS,
-  CALLER_APP_GOOGLE_DRIVE,
-  CALLER_APP_GOOGLE_EARTH,
-  CALLER_APP_GOOGLE_OTHER,
-  CALLER_APP_OTHER,
-  CALLER_APP_APPLE_MOBILESAFARI,
-  CALLER_APP_APPLE_OTHER,
-  CALLER_APP_GOOGLE_YOUTUBE,
-  CALLER_APP_GOOGLE_MAPS,
-  CALLER_APP_NOT_AVAILABLE,  // Includes being launched from Smart App Banner.
-  CALLER_APP_GOOGLE_CHROME_TODAY_EXTENSION,
-  CALLER_APP_GOOGLE_CHROME_SEARCH_EXTENSION,
-  CALLER_APP_GOOGLE_CHROME_CONTENT_EXTENSION,
-  CALLER_APP_GOOGLE_CHROME_SHARE_EXTENSION,
-  CALLER_APP_GOOGLE_CHROME,
+  CALLER_APP_GOOGLE_GMAIL = 1,
+  CALLER_APP_GOOGLE_PLUS = 2,
+  CALLER_APP_GOOGLE_DRIVE = 3,
+  CALLER_APP_GOOGLE_EARTH = 4,
+  CALLER_APP_GOOGLE_OTHER = 5,
+  CALLER_APP_OTHER = 6,
+  CALLER_APP_APPLE_MOBILESAFARI = 7,
+  CALLER_APP_APPLE_OTHER = 8,
+  CALLER_APP_GOOGLE_YOUTUBE = 9,
+  CALLER_APP_GOOGLE_MAPS = 10,
+  // Includes being launched from Smart App Banner.
+  CALLER_APP_NOT_AVAILABLE = 11,
+  CALLER_APP_GOOGLE_CHROME_TODAY_EXTENSION = 12,
+  CALLER_APP_GOOGLE_CHROME_SEARCH_EXTENSION = 13,
+  CALLER_APP_GOOGLE_CHROME_CONTENT_EXTENSION = 14,
+  CALLER_APP_GOOGLE_CHROME_SHARE_EXTENSION = 15,
+  CALLER_APP_GOOGLE_CHROME = 16,
+  // An application launched Chrome with an http/https URL as the default
+  // browser.
+  CALLER_APP_THIRD_PARTY = 17,
   MOBILE_SESSION_CALLER_APP_COUNT,
 };
 
 @interface ChromeAppStartupParameters : AppStartupParameters
 
 - (instancetype)initWithExternalURL:(const GURL&)externalURL
-                        completeURL:(const GURL&)completeURL NS_UNAVAILABLE;
+                        completeURL:(const GURL&)completeURL
+                    applicationMode:(ApplicationModeForTabOpening)mode
+    NS_UNAVAILABLE;
 
 - (instancetype)initWithExternalURL:(const GURL&)externalURL
                   declaredSourceApp:(NSString*)declaredSourceApp
                     secureSourceApp:(NSString*)secureSourceApp
                         completeURL:(NSURL*)completeURL
+                    applicationMode:(ApplicationModeForTabOpening)mode
     NS_DESIGNATED_INITIALIZER;
 
 // Returns a ChromeAppStartupParameters instance containing the URL to
-// open (|externalURL|). In case the URL is conforming to the x-callback-url
+// open (`externalURL`). In case the URL is conforming to the x-callback-url
 // specification, additional information are stored in the returned value.
 //
 // The forms of the URLs we expect are:
@@ -75,7 +84,7 @@ enum MobileSessionCallerApp {
 // - x-<protocol>://x-callback-url/<action>?url=<url/goes/here>
 //   This forms is compliant with x-callback-url (x-callback-url.com).
 //   Currently the only action supported for external application is "open" and
-//   the only required parameter is |url| containing the url to open inclusive
+//   the only required parameter is `url` containing the url to open inclusive
 //   of protocol.
 //   For application members of the Chrome Application Group,
 //   "app-group-command" command can be used. In that case, the paramaters are

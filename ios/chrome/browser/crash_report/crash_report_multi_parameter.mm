@@ -1,16 +1,19 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/crash_report/crash_report_multi_parameter.h"
 
-#include <memory>
+#import <memory>
 
-#include "base/json/json_writer.h"
-#include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/values.h"
-#import "ios/chrome/browser/crash_report/breakpad_helper.h"
+#import "base/check.h"
+#import "base/json/json_writer.h"
+#import "base/notreached.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/values.h"
+#import "components/previous_session_info/previous_session_info.h"
+#import "ios/chrome/browser/crash_report/crash_helper.h"
+#import "third_party/abseil-cpp/absl/types/optional.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -24,48 +27,42 @@ const int kMaximumBreakpadValueSize = 255;
 }
 
 @implementation CrashReportMultiParameter {
-  NSString* crashReportKey_;
-  std::unique_ptr<base::DictionaryValue> dictionary_;
+  crash_reporter::CrashKeyString<256>* _key;
+  base::Value _dictionary;
 }
 
-- (instancetype)initWithKey:(NSString*)key {
+- (instancetype)initWithKey:(crash_reporter::CrashKeyString<256>&)key {
   if ((self = [super init])) {
-    DCHECK([key length] && ([key length] <= kMaximumBreakpadValueSize));
-    dictionary_.reset(new base::DictionaryValue());
-    crashReportKey_ = [key copy];
+    _dictionary = base::Value(base::Value::Type::DICTIONARY);
+    _key = &key;
   }
   return self;
 }
 
-- (void)removeValue:(NSString*)key {
-  dictionary_->Remove(base::SysNSStringToUTF8(key).c_str(), nullptr);
+- (void)removeValue:(base::StringPiece)key {
+  _dictionary.RemoveKey(key);
   [self updateCrashReport];
 }
 
-- (void)setValue:(NSString*)key withValue:(int)value {
-  dictionary_->SetInteger(base::SysNSStringToUTF8(key).c_str(), value);
+- (void)setValue:(base::StringPiece)key withValue:(int)value {
+  _dictionary.SetIntKey(key, value);
   [self updateCrashReport];
 }
 
-- (void)incrementValue:(NSString*)key {
-  int value;
-  std::string utf8_string = base::SysNSStringToUTF8(key);
-  if (dictionary_->GetInteger(utf8_string.c_str(), &value)) {
-    dictionary_->SetInteger(utf8_string.c_str(), value + 1);
-  } else {
-    dictionary_->SetInteger(utf8_string.c_str(), 1);
-  }
+- (void)incrementValue:(base::StringPiece)key {
+  const int value = _dictionary.FindIntKey(key).value_or(0);
+  _dictionary.SetIntKey(key, value + 1);
   [self updateCrashReport];
 }
 
-- (void)decrementValue:(NSString*)key {
-  int value;
-  std::string utf8_string = base::SysNSStringToUTF8(key);
-  if (dictionary_->GetInteger(utf8_string.c_str(), &value)) {
+- (void)decrementValue:(base::StringPiece)key {
+  const absl::optional<int> maybe_value = _dictionary.FindIntKey(key);
+  if (maybe_value.has_value()) {
+    const int value = maybe_value.value();
     if (value <= 1) {
-      dictionary_->Remove(utf8_string.c_str(), nullptr);
+      _dictionary.RemoveKey(key);
     } else {
-      dictionary_->SetInteger(utf8_string.c_str(), value - 1);
+      _dictionary.SetIntKey(key, value - 1);
     }
     [self updateCrashReport];
   }
@@ -73,16 +70,12 @@ const int kMaximumBreakpadValueSize = 255;
 
 - (void)updateCrashReport {
   std::string stateAsJson;
-  base::JSONWriter::Write(*dictionary_.get(), &stateAsJson);
+  base::JSONWriter::Write(_dictionary, &stateAsJson);
   if (stateAsJson.length() > kMaximumBreakpadValueSize) {
     NOTREACHED();
     return;
   }
-  breakpad_helper::AddReportParameter(
-      crashReportKey_,
-      [NSString stringWithCString:stateAsJson.c_str()
-                         encoding:[NSString defaultCStringEncoding]],
-      true);
+  _key->Set(stateAsJson);
 }
 
 @end

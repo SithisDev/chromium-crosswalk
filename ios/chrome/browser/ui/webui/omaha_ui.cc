@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ web::WebUIIOSDataSource* CreateOmahaUIHTMLSource() {
   web::WebUIIOSDataSource* source =
       web::WebUIIOSDataSource::Create(kChromeUIOmahaHost);
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->AddResourcePath("omaha.js", IDR_IOS_OMAHA_JS);
   source->SetDefaultResource(IDR_IOS_OMAHA_HTML);
   return source;
@@ -37,6 +37,10 @@ web::WebUIIOSDataSource* CreateOmahaUIHTMLSource() {
 class OmahaDOMHandler : public WebUIIOSMessageHandler {
  public:
   OmahaDOMHandler();
+
+  OmahaDOMHandler(const OmahaDOMHandler&) = delete;
+  OmahaDOMHandler& operator=(const OmahaDOMHandler&) = delete;
+
   ~OmahaDOMHandler() override;
 
   // WebUIIOSMessageHandler implementation.
@@ -44,16 +48,14 @@ class OmahaDOMHandler : public WebUIIOSMessageHandler {
 
  private:
   // Asynchronously fetches the debug information. Called from JS.
-  void HandleRequestDebugInformation(const base::ListValue* args);
+  void HandleRequestDebugInformation(const base::Value::List& args);
 
   // Called when the debug information have been computed.
-  void OnDebugInformationAvailable(base::DictionaryValue* debug_information);
+  void OnDebugInformationAvailable(base::Value::Dict debug_information);
 
   // WeakPtr factory needed because this object might be deleted before
   // receiving the callbacks from the OmahaService.
   base::WeakPtrFactory<OmahaDOMHandler> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(OmahaDOMHandler);
 };
 
 OmahaDOMHandler::OmahaDOMHandler() : weak_ptr_factory_(this) {}
@@ -68,27 +70,27 @@ void OmahaDOMHandler::RegisterMessages() {
 }
 
 void OmahaDOMHandler::HandleRequestDebugInformation(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   OmahaService::GetDebugInformation(
-      base::Bind(&OmahaDOMHandler::OnDebugInformationAvailable,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&OmahaDOMHandler::OnDebugInformationAvailable,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OmahaDOMHandler::OnDebugInformationAvailable(
-    base::DictionaryValue* debug_information) {
-  std::vector<const base::Value*> args{debug_information};
+    base::Value::Dict debug_information) {
+  base::ValueView args[] = {debug_information};
   web_ui()->CallJavascriptFunction("updateOmahaDebugInformation", args);
 }
 
 }  // namespace
 
 // OmahaUI
-OmahaUI::OmahaUI(web::WebUIIOS* web_ui) : WebUIIOSController(web_ui) {
+OmahaUI::OmahaUI(web::WebUIIOS* web_ui, const std::string& host)
+    : WebUIIOSController(web_ui, host) {
   web_ui->AddMessageHandler(std::make_unique<OmahaDOMHandler>());
 
   // Set up the chrome://omaha/ source.
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromWebUIIOS(web_ui);
+  ChromeBrowserState* browser_state = ChromeBrowserState::FromWebUIIOS(web_ui);
   web::WebUIIOSDataSource::Add(browser_state, CreateOmahaUIHTMLSource());
 }
 

@@ -1,20 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/download/ar_quick_look_coordinator.h"
 
+#import <ARKit/ARKit.h>
 #import <QuickLook/QuickLook.h>
 
-#include <memory>
+#import <memory>
 
-#include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/scoped_observer.h"
+#import "base/ios/block_types.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/scoped_observation.h"
 #import "ios/chrome/browser/download/ar_quick_look_tab_helper.h"
 #import "ios/chrome/browser/download/ar_quick_look_tab_helper_delegate.h"
-#import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/web_state_list/web_state_dependency_installer_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -47,155 +48,54 @@ PresentQLPreviewController GetHistogramEnum(
 
 }  // namespace
 
-@interface ARQuickLookCoordinator () <WebStateListObserving,
-                                      ARQuickLookTabHelperDelegate,
-                                      QLPreviewControllerDataSource,
-                                      QLPreviewControllerDelegate> {
-  // WebStateList observers.
-  std::unique_ptr<WebStateListObserverBridge> _webStateListObserverBridge;
-  std::unique_ptr<ScopedObserver<WebStateList, WebStateListObserver>>
-      _scopedWebStateListObserver;
-}
+// Helper class that acts as delegate and data source for the presented
+// QLPreviewController. It informs the WebState of its visibility changes
+// (as the USDZ preview will cover the WebState).
+@interface ARQuickLookPreviewControllerDelegate
+    : NSObject <QLPreviewControllerDataSource, QLPreviewControllerDelegate>
 
-// The WebStateList being observed.
-@property(nonatomic, assign) WebStateList* webStateList;
+- (instancetype)initWithWebState:(web::WebState*)webState
+                       sourceURL:(NSURL*)sourceURL
+                    canonicalURL:(NSURL*)canonicalURL
+                    allowScaling:(BOOL)allowScaling
+                    dismissBlock:(ProceduralBlock)dismissBlock
+    NS_DESIGNATED_INITIALIZER;
 
-// Whether the coordinator is started.
-@property(nonatomic, assign) BOOL started;
+- (instancetype)init NS_UNAVAILABLE;
 
-// The file URL pointing to the downloaded USDZ format file.
-@property(nonatomic, copy) NSURL* fileURL;
-
-// Displays USDZ format files. Set as a weak reference so it only exists while
-// its being presented by baseViewController.
-@property(nonatomic, weak) QLPreviewController* viewController;
+- (void)viewPresented;
 
 @end
 
-@implementation ARQuickLookCoordinator
+@implementation ARQuickLookPreviewControllerDelegate {
+  base::WeakPtr<web::WebState> _weakWebState;
+  NSURL* _sourceURL;
+  NSURL* _canonicalURL;
+  BOOL _allowScaling;
+  ProceduralBlock _dismissBlock;
+}
 
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-                              webStateList:(WebStateList*)webStateList {
-  DCHECK(webStateList);
-  self = [super initWithBaseViewController:viewController
-                              browserState:browserState];
-  if (self) {
-    _webStateList = webStateList;
+- (instancetype)initWithWebState:(web::WebState*)webState
+                       sourceURL:(NSURL*)sourceURL
+                    canonicalURL:(NSURL*)canonicalURL
+                    allowScaling:(BOOL)allowScaling
+                    dismissBlock:(ProceduralBlock)dismissBlock {
+  if ((self = [super init])) {
+    DCHECK(webState);
+    DCHECK(sourceURL);
+    _weakWebState = webState->GetWeakPtr();
+    _sourceURL = sourceURL;
+    _canonicalURL = canonicalURL;
+    _allowScaling = allowScaling;
+    _dismissBlock = dismissBlock;
   }
   return self;
 }
 
-- (void)start {
-  if (self.started)
-    return;
-
-  // Install delegates for each WebState in WebStateList.
-  for (int i = 0; i < self.webStateList->count(); i++) {
-    web::WebState* webState = self.webStateList->GetWebStateAt(i);
-    [self installDelegatesForWebState:webState];
-  }
-
-  [self addWebStateListObserver];
-  self.started = YES;
-}
-
-- (void)stop {
-  if (!self.started)
-    return;
-
-  [self removeWebStateListObserver];
-
-  // Uninstall delegates for each WebState in WebStateList.
-  for (int i = 0; i < self.webStateList->count(); i++) {
-    web::WebState* webState = self.webStateList->GetWebStateAt(i);
-    [self uninstallDelegatesForWebState:webState];
-  }
-
-  [self.viewController dismissViewControllerAnimated:YES completion:nil];
-  self.viewController = nil;
-  self.fileURL = nil;
-  self.started = NO;
-}
-
-#pragma mark - Private
-
-// Adds observer for WebStateList.
-- (void)addWebStateListObserver {
-  _webStateListObserverBridge =
-      std::make_unique<WebStateListObserverBridge>(self);
-  _scopedWebStateListObserver =
-      std::make_unique<ScopedObserver<WebStateList, WebStateListObserver>>(
-          _webStateListObserverBridge.get());
-  _scopedWebStateListObserver->Add(self.webStateList);
-}
-
-// Removes observer for WebStateList.
-- (void)removeWebStateListObserver {
-  _scopedWebStateListObserver.reset();
-  _webStateListObserverBridge.reset();
-}
-
-// Installs delegates for |webState|.
-- (void)installDelegatesForWebState:(web::WebState*)webState {
-  if (ARQuickLookTabHelper::FromWebState(webState)) {
-    ARQuickLookTabHelper::FromWebState(webState)->set_delegate(self);
-  }
-}
-
-// Uninstalls delegates for |webState|.
-- (void)uninstallDelegatesForWebState:(web::WebState*)webState {
-  if (ARQuickLookTabHelper::FromWebState(webState)) {
-    ARQuickLookTabHelper::FromWebState(webState)->set_delegate(nil);
-  }
-}
-
-#pragma mark - WebStateListObserving
-
-- (void)webStateList:(WebStateList*)webStateList
-    didInsertWebState:(web::WebState*)webState
-              atIndex:(int)index
-           activating:(BOOL)activating {
-  [self installDelegatesForWebState:webState];
-}
-
-- (void)webStateList:(WebStateList*)webStateList
-    didReplaceWebState:(web::WebState*)oldWebState
-          withWebState:(web::WebState*)newWebState
-               atIndex:(int)index {
-  [self uninstallDelegatesForWebState:oldWebState];
-  [self installDelegatesForWebState:newWebState];
-}
-
-- (void)webStateList:(WebStateList*)webStateList
-    didDetachWebState:(web::WebState*)webState
-              atIndex:(int)index {
-  [self uninstallDelegatesForWebState:webState];
-}
-
-#pragma mark - ARQuickLookTabHelperDelegate
-
-- (void)ARQuickLookTabHelper:(ARQuickLookTabHelper*)tabHelper
-    didFinishDowloadingFileWithURL:(NSURL*)fileURL {
-  self.fileURL = fileURL;
-
-  UMA_HISTOGRAM_ENUMERATION(
-      kIOSPresentQLPreviewControllerHistogram,
-      GetHistogramEnum(self.baseViewController, self.fileURL));
-
-  // QLPreviewController should not be presented if the file URL is nil.
-  if (!self.fileURL) {
-    return;
-  }
-
-  QLPreviewController* viewController = [[QLPreviewController alloc] init];
-  viewController.dataSource = self;
-  viewController.delegate = self;
-  [self.baseViewController presentViewController:viewController
-                                        animated:YES
-                                      completion:nil];
-  self.viewController = viewController;
+- (void)viewPresented {
+  web::WebState* webState = _weakWebState.get();
+  if (webState)
+    webState->DidCoverWebContent();
 }
 
 #pragma mark - QLPreviewControllerDataSource
@@ -207,14 +107,116 @@ PresentQLPreviewController GetHistogramEnum(
 
 - (id<QLPreviewItem>)previewController:(QLPreviewController*)controller
                     previewItemAtIndex:(NSInteger)index {
-  return self.fileURL;
+  ARQuickLookPreviewItem* item =
+      [[ARQuickLookPreviewItem alloc] initWithFileAtURL:_sourceURL];
+  item.allowsContentScaling = _allowScaling;
+  item.canonicalWebPageURL = _canonicalURL;
+  return item;
 }
 
 #pragma mark - QLPreviewControllerDelegate
 
 - (void)previewControllerDidDismiss:(QLPreviewController*)controller {
-  self.viewController = nil;
-  self.fileURL = nil;
+  web::WebState* webState = _weakWebState.get();
+  if (webState)
+    webState->DidRevealWebContent();
+
+  if (_dismissBlock) {
+    _dismissBlock();
+  }
+}
+
+@end
+
+@interface ARQuickLookCoordinator () <DependencyInstalling,
+                                      ARQuickLookTabHelperDelegate> {
+  // Bridge which observes WebStateList and alerts this coordinator when this
+  // needs to register the Mediator with a new WebState.
+  std::unique_ptr<WebStateDependencyInstallerBridge> _dependencyInstallerBridge;
+  // The delegate passed to the QLPreviewController. It informs the WebState
+  // that it may be hidden (during the presentation of the USDZ file) and it
+  // serves as a data source for the preview controller.
+  ARQuickLookPreviewControllerDelegate* _delegate;
+}
+
+@end
+
+@implementation ARQuickLookCoordinator
+
+- (instancetype)initWithBaseViewController:(UIViewController*)baseViewController
+                                   browser:(Browser*)browser {
+  if (self = [super initWithBaseViewController:baseViewController
+                                       browser:browser]) {
+    _dependencyInstallerBridge =
+        std::make_unique<WebStateDependencyInstallerBridge>(
+            self, browser->GetWebStateList());
+  }
+  return self;
+}
+
+- (void)stop {
+  // Reset this observer manually. We want this to go out of scope now, to
+  // ensure it detaches before `browser` and its WebStateList get destroyed.
+  _dependencyInstallerBridge.reset();
+
+  _delegate = nil;
+}
+
+#pragma mark - DependencyInstalling methods
+
+- (void)installDependencyForWebState:(web::WebState*)webState {
+  if (ARQuickLookTabHelper::FromWebState(webState)) {
+    ARQuickLookTabHelper::FromWebState(webState)->set_delegate(self);
+  }
+}
+
+- (void)uninstallDependencyForWebState:(web::WebState*)webState {
+  if (ARQuickLookTabHelper::FromWebState(webState)) {
+    ARQuickLookTabHelper::FromWebState(webState)->set_delegate(nil);
+  }
+}
+
+#pragma mark - ARQuickLookTabHelperDelegate
+
+- (void)presentUSDZFileWithURL:(NSURL*)fileURL
+                  canonicalURL:(NSURL*)canonicalURL
+                      webState:(web::WebState*)webState
+           allowContentScaling:(BOOL)allowContentScaling {
+  base::UmaHistogramEnumeration(
+      kIOSPresentQLPreviewControllerHistogram,
+      GetHistogramEnum(self.baseViewController, fileURL));
+
+  // Do not present if the URL is invalid or if there is already
+  // a preview in progress.
+  if (!fileURL || _delegate)
+    return;
+
+  __weak ARQuickLookCoordinator* weakSelf = self;
+  _delegate = [[ARQuickLookPreviewControllerDelegate alloc]
+      initWithWebState:webState
+             sourceURL:fileURL
+          canonicalURL:canonicalURL
+          allowScaling:allowContentScaling
+          dismissBlock:^{
+            [weakSelf previewDismissed];
+          }];
+
+  QLPreviewController* viewController = [[QLPreviewController alloc] init];
+  viewController.dataSource = _delegate;
+  viewController.delegate = _delegate;
+
+  __weak ARQuickLookPreviewControllerDelegate* weakDelegate = _delegate;
+  [self.baseViewController presentViewController:viewController
+                                        animated:YES
+                                      completion:^{
+                                        [weakDelegate viewPresented];
+                                      }];
+}
+
+#pragma mark - Private
+
+- (void)previewDismissed {
+  _delegate = nil;
 }
 
 @end

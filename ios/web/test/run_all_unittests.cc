@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,6 @@ int main(int argc, char** argv) {
   mojo::core::Init();
 
   return base::LaunchUnitTests(
-      argc, argv, base::Bind(&web::WebTestSuite::Run,
-                             base::Unretained(&test_suite)));
+      argc, argv,
+      base::BindOnce(&web::WebTestSuite::Run, base::Unretained(&test_suite)));
 }

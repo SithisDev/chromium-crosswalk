@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,16 @@
 
 #import "ios/chrome/browser/ui/table_view/table_view_favicon_data_source.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 @interface HistoryMediator : NSObject<TableViewFaviconDataSource>
 
 // The coordinator's BrowserState.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
+@property(nonatomic, assign) ChromeBrowserState* browserState;
 
 - (instancetype)init NS_UNAVAILABLE;
-// Init method. |browserState| can't be nil.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+// Init method. `browserState` can't be nil.
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 
 @end

@@ -1,24 +1,29 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #ifndef IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_CONTROLLER_H_
 #define IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_CONTROLLER_H_
 
-#import <Foundation/NSObject.h>
+#import <UIKit/UIKit.h>
 
 #include <memory>
 
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
+#import "components/password_manager/ios/ios_password_manager_driver.h"
 #import "components/password_manager/ios/password_form_helper.h"
+#import "components/password_manager/ios/password_generation_provider.h"
+#import "components/password_manager/ios/password_manager_client_bridge.h"
+#import "components/password_manager/ios/password_manager_driver_bridge.h"
 #import "ios/chrome/browser/passwords/ios_chrome_password_manager_client.h"
-#import "ios/chrome/browser/passwords/ios_chrome_password_manager_driver.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 
 @protocol ApplicationCommands;
+@class CommandDispatcher;
 @class NotifyUserAutoSigninViewController;
-@protocol PasswordFormFiller;
+@protocol PasswordBreachCommands;
 @protocol PasswordsUiDelegate;
-@class UIViewController;
+@class SharedPasswordController;
 
 namespace password_manager {
 class PasswordManagerClient;
@@ -26,9 +31,11 @@ class PasswordManagerClient;
 
 // Delegate for registering view controller and displaying its view. Used to
 // add views to BVC.
+// TODO(crbug.com/1272487): Refactor this API to not be coupled to the BVC and
+// to use the UI command patterns.
 @protocol PasswordControllerDelegate
 
-// Adds |viewController| as child controller in order to display auto sign-in
+// Adds `viewController` as child controller in order to display auto sign-in
 // notification. Returns YES if view was displayed, NO otherwise.
 - (BOOL)displaySignInNotification:(UIViewController*)viewController
                         fromTabId:(NSString*)tabId;
@@ -39,13 +46,17 @@ class PasswordManagerClient;
 @end
 
 // Per-tab password controller. Handles password autofill and saving.
-@interface PasswordController : NSObject<CRWWebStateObserver,
-                                         PasswordManagerClientDelegate,
-                                         PasswordManagerDriverDelegate,
-                                         PasswordFormHelperDelegate>
+// TODO(crbug.com/1272487): Refactor this into an appropriately-scoped object,
+// such as a browser agent.
+@interface PasswordController
+    : NSObject <CRWWebStateObserver, IOSChromePasswordManagerClientBridge>
 
 // An object that can provide suggestions from this PasswordController.
 @property(nonatomic, readonly) id<FormSuggestionProvider> suggestionProvider;
+
+// An object that can provide password generation from this PasswordController.
+@property(nonatomic, readonly) id<PasswordGenerationProvider>
+    generationProvider;
 
 // The PasswordManagerClient owned by this PasswordController.
 @property(nonatomic, readonly)
@@ -55,20 +66,21 @@ class PasswordManagerClient;
 @property(nonatomic, readonly)
     password_manager::PasswordManagerDriver* passwordManagerDriver;
 
-// The PasswordFormFiller owned by this PasswordController.
-@property(nonatomic, readonly) id<PasswordFormFiller> passwordFormFiller;
-
 // The base view controller from which to present UI.
 @property(nonatomic, readwrite, weak) UIViewController* baseViewController;
-
-// The dispatcher used for the PasswordController. This property can return nil
-// even after being set to a non-nil object.
-@property(nonatomic, weak) id<ApplicationCommands> dispatcher;
 
 // Delegate used by this PasswordController to show UI on BVC.
 @property(weak, nonatomic) id<PasswordControllerDelegate> delegate;
 
-// |webState| should not be nil.
+// CommandDispatcher for dispatching commands.
+@property(nonatomic) CommandDispatcher* dispatcher;
+
+// The shared password controller that handles all non //ios/chrome specific
+// business logic.
+@property(nonatomic, readonly)
+    SharedPasswordController* sharedPasswordController;
+
+// `webState` should not be nil.
 - (instancetype)initWithWebState:(web::WebState*)webState;
 
 // This is just for testing.

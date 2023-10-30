@@ -1,28 +1,30 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
+#import <memory>
+#import <string>
 
-#include "base/bind.h"
-#include "base/run_loop.h"
+#import "base/bind.h"
+#import "base/run_loop.h"
 #import "base/test/ios/wait_util.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "ios/web/grit/ios_web_resources.h"
+#import "base/threading/thread_task_runner_handle.h"
+#import "ios/web/grit/ios_web_resources.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#include "ios/web/public/service/web_state_interface_provider.h"
 #import "ios/web/public/test/navigation_test_util.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/webui/web_ui_ios_controller.h"
-#include "ios/web/public/webui/web_ui_ios_controller_factory.h"
-#include "ios/web/public/webui/web_ui_ios_data_source.h"
-#include "ios/web/test/grit/test_resources.h"
-#include "ios/web/test/mojo_test.mojom.h"
-#include "ios/web/test/test_url_constants.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/webui/web_ui_ios_controller.h"
+#import "ios/web/public/webui/web_ui_ios_controller_factory.h"
+#import "ios/web/public/webui/web_ui_ios_data_source.h"
+#import "ios/web/test/grit/test_resources.h"
+#import "ios/web/test/mojo_test.mojom.h"
+#import "ios/web/test/test_url_constants.h"
 #import "ios/web/test/web_int_test.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "url/gurl.h"
-#include "url/scheme_host_port.h"
+#import "mojo/public/cpp/bindings/pending_remote.h"
+#import "mojo/public/cpp/bindings/receiver_set.h"
+#import "mojo/public/cpp/bindings/remote.h"
+#import "url/gurl.h"
+#import "url/scheme_host_port.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -40,11 +42,11 @@ const char kTestWebUIURLHost[] = "testwebui";
 const NSTimeInterval kMessageTimeout = 5.0;
 
 // UI handler class which communicates with test WebUI page as follows:
-// - page sends "syn" message to |TestUIHandler|
-// - |TestUIHandler| replies with "ack" message
+// - page sends "syn" message to `TestUIHandler`
+// - `TestUIHandler` replies with "ack" message
 // - page replies back with "fin"
 //
-// Once "fin" is received |IsFinReceived()| call will return true, indicating
+// Once "fin" is received `IsFinReceived()` call will return true, indicating
 // that communication was successful. See test WebUI page code here:
 // ios/web/test/data/mojo_test.js
 class TestUIHandler : public TestUIHandlerMojo {
@@ -56,7 +58,9 @@ class TestUIHandler : public TestUIHandlerMojo {
   bool IsFinReceived() { return fin_received_; }
 
   // TestUIHandlerMojo overrides.
-  void SetClientPage(TestPagePtr page) override { page_ = std::move(page); }
+  void SetClientPage(mojo::PendingRemote<TestPage> page) override {
+    page_.Bind(std::move(page));
+  }
   void HandleJsMessage(const std::string& message) override {
     if (message == "syn") {
       // Received "syn" message from WebUI page, send "ack" as reply.
@@ -76,26 +80,26 @@ class TestUIHandler : public TestUIHandlerMojo {
     }
   }
 
-  void BindTestUIHandlerMojoRequest(TestUIHandlerMojoRequest request) {
-    bindings_.AddBinding(this, std::move(request));
+  void BindTestHandler(mojo::PendingReceiver<TestUIHandlerMojo> receiver) {
+    receivers_.Add(this, std::move(receiver));
   }
 
  private:
-  mojo::BindingSet<TestUIHandlerMojo> bindings_;
-  TestPagePtr page_ = nullptr;
-  // |true| if "syn" has been received.
+  mojo::ReceiverSet<TestUIHandlerMojo> receivers_;
+  mojo::Remote<TestPage> page_;
+  // `true` if "syn" has been received.
   bool syn_received_ = false;
-  // |true| if "fin" has been received.
+  // `true` if "fin" has been received.
   bool fin_received_ = false;
 };
 
 // Controller for test WebUI.
 class TestUI : public WebUIIOSController {
  public:
-  // Constructs controller from |web_ui| and |ui_handler| which will communicate
+  // Constructs controller from `web_ui` and `ui_handler` which will communicate
   // with test WebUI page.
-  TestUI(WebUIIOS* web_ui, TestUIHandler* ui_handler)
-      : WebUIIOSController(web_ui) {
+  TestUI(WebUIIOS* web_ui, const std::string& host, TestUIHandler* ui_handler)
+      : WebUIIOSController(web_ui, host) {
     web::WebUIIOSDataSource* source =
         web::WebUIIOSDataSource::Create(kTestWebUIURLHost);
 
@@ -107,16 +111,18 @@ class TestUI : public WebUIIOSController {
     web::WebState* web_state = web_ui->GetWebState();
     web::WebUIIOSDataSource::Add(web_state->GetBrowserState(), source);
 
-    web_state->GetWebStateInterfaceProvider()->registry()->AddInterface(
-        base::Bind(&TestUIHandler::BindTestUIHandlerMojoRequest,
-                   base::Unretained(ui_handler)));
+    web_state->GetInterfaceBinderForMainFrame()->AddInterface(
+        base::BindRepeating(&TestUIHandler::BindTestHandler,
+                            base::Unretained(ui_handler)));
   }
+
+  ~TestUI() override = default;
 };
 
 // Factory that creates TestUI controller.
 class TestWebUIControllerFactory : public WebUIIOSControllerFactory {
  public:
-  // Constructs a controller factory which will eventually create |ui_handler|.
+  // Constructs a controller factory which will eventually create `ui_handler`.
   explicit TestWebUIControllerFactory(TestUIHandler* ui_handler)
       : ui_handler_(ui_handler) {}
 
@@ -127,7 +133,7 @@ class TestWebUIControllerFactory : public WebUIIOSControllerFactory {
     if (!url.SchemeIs(kTestWebUIScheme))
       return nullptr;
     DCHECK_EQ(url.host(), kTestWebUIURLHost);
-    return std::make_unique<TestUI>(web_ui, ui_handler_);
+    return std::make_unique<TestUI>(web_ui, url.host(), ui_handler_);
   }
 
   NSInteger GetErrorCodeForWebUIURL(const GURL& url) const override {
@@ -162,11 +168,11 @@ class WebUIMojoTest : public WebIntTest {
       // WebState owns CRWWebUIManager. When WebState is destroyed,
       // CRWWebUIManager is autoreleased and will be destroyed upon autorelease
       // pool purge. However in this test, WebTest destructor is called before
-      // PlatformTest, thus CRWWebUIManager outlives the WebThreadBundle.
+      // PlatformTest, thus CRWWebUIManager outlives the WebTaskenvironment.
       // However, CRWWebUIManager owns a URLFetcherImpl, which DCHECKs that its
       // destructor is called on UI web thread. Hence, URLFetcherImpl has to
-      // outlive the WebThreadBundle, since [NSThread mainThread] will not be
-      // WebThread::UI once WebThreadBundle is destroyed.
+      // outlive the WebTaskenvironment, since [NSThread mainThread] will not be
+      // WebThread::UI once WebTaskenvironment is destroyed.
       web_state_.reset();
       ui_handler_.reset();
       WebUIIOSControllerFactory::DeregisterFactory(factory_.get());
@@ -188,7 +194,7 @@ class WebUIMojoTest : public WebIntTest {
 
 // Tests that JS can send messages to the native code and vice versa.
 // TestUIHandler is used for communication and test succeeds only when
-// |TestUIHandler| successfully receives "ack" message from WebUI page.
+// `TestUIHandler` successfully receives "ack" message from WebUI page.
 TEST_F(WebUIMojoTest, MessageExchange) {
   @autoreleasepool {
     url::SchemeHostPort tuple(kTestWebUIScheme, kTestWebUIURLHost, 0);
@@ -198,7 +204,7 @@ TEST_F(WebUIMojoTest, MessageExchange) {
     // when loading the page. TODO(crbug.com/705819): Remove this call.
     web_state()->GetNavigationManager()->LoadIfNecessary();
 
-    // Wait until |TestUIHandler| receives "fin" message from WebUI page.
+    // Wait until `TestUIHandler` receives "fin" message from WebUI page.
     bool fin_received =
         base::test::ios::WaitUntilConditionOrTimeout(kMessageTimeout, ^{
           // Flush any pending tasks. Don't RunUntilIdle() because

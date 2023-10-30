@@ -1,12 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_WEB_NET_COOKIE_NOTIFICATION_BRIDGE_H_
 #define IOS_WEB_NET_COOKIE_NOTIFICATION_BRIDGE_H_
 
-#include "base/macros.h"
-
+@protocol NSObject;
 @class NSNotification;
 
 namespace web {
@@ -17,13 +16,18 @@ namespace web {
 class CookieNotificationBridge {
  public:
   CookieNotificationBridge();
+
+  CookieNotificationBridge(const CookieNotificationBridge&) = delete;
+  CookieNotificationBridge& operator=(const CookieNotificationBridge&) = delete;
+
   ~CookieNotificationBridge();
 
  private:
   static void OnNotificationReceived(NSNotification* notification);
-  id observer_;
 
-  DISALLOW_COPY_AND_ASSIGN(CookieNotificationBridge);
+  // Token returned by NSNotificationCenter upon registration. Owned by the
+  // bridge and used to unregister from NSNotificationCenter in destructor.
+  __strong id<NSObject> registration_;
 };
 
 }  // namespace web

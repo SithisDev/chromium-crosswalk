@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <string>
 
 #include "ios/web/public/navigation/referrer.h"
-#include "net/url_request/url_request.h"
+#include "net/url_request/referrer_policy.h"
 
 class GURL;
 
 namespace web {
 
 // Returns the string that should be sent as the Referer header value for
-// navigating to |destination| from the given referrer, taking the referrer
+// navigating to `destination` from the given referrer, taking the referrer
 // policy into account. Returns an empty string if no Referer should be sent.
 std::string ReferrerHeaderValueForNavigation(const GURL& destination,
                                              const web::Referrer& referrer);
@@ -24,9 +24,8 @@ std::string ReferrerHeaderValueForNavigation(const GURL& destination,
 // any.
 // TODO(stuartmorgan): Replace this with ReferrerForNavigation, since it should
 // always be used with ReferrerHeaderValueForNavigation anyway.
-net::URLRequest::ReferrerPolicy PolicyForNavigation(
-    const GURL& destination,
-    const web::Referrer& referrer);
+net::ReferrerPolicy PolicyForNavigation(const GURL& destination,
+                                        const web::Referrer& referrer);
 
 // Returns the WebReferrerPolicy corresponding to the given policy string
 // (e.g., 'always', 'never', 'origin', 'default'). The string is assumed to

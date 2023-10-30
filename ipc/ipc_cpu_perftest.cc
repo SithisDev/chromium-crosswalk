@@ -1,16 +1,19 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
+#include <tuple>
 
 #include "base/bind.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/perf_log.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_perftest_messages.h"
@@ -20,7 +23,8 @@
 #include "ipc/ipc_test_base.h"
 #include "mojo/core/test/mojo_test_base.h"
 #include "mojo/core/test/multiprocess_test_helper.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace IPC {
@@ -57,7 +61,7 @@ std::string GetLogTitle(const std::string& label, const TestParams& params) {
 }
 
 base::TimeDelta GetFrameTime(size_t frames_per_second) {
-  return base::TimeDelta::FromSecondsD(1.0 / frames_per_second);
+  return base::Seconds(1.0 / frames_per_second);
 }
 
 class PerfCpuLogger {
@@ -65,8 +69,16 @@ class PerfCpuLogger {
   explicit PerfCpuLogger(base::StringPiece test_name)
       : test_name_(test_name),
         process_metrics_(base::ProcessMetrics::CreateCurrentProcessMetrics()) {
-    process_metrics_->GetPlatformIndependentCPUUsage();
+    // Query the CPU usage once to start the recording interval.
+    const double inital_cpu_usage =
+        process_metrics_->GetPlatformIndependentCPUUsage();
+    // This should have been the first call so the reported cpu usage should be
+    // exactly zero.
+    DCHECK_EQ(inital_cpu_usage, 0.0);
   }
+
+  PerfCpuLogger(const PerfCpuLogger&) = delete;
+  PerfCpuLogger& operator=(const PerfCpuLogger&) = delete;
 
   ~PerfCpuLogger() {
     double result = process_metrics_->GetPlatformIndependentCPUUsage();
@@ -76,14 +88,12 @@ class PerfCpuLogger {
  private:
   std::string test_name_;
   std::unique_ptr<base::ProcessMetrics> process_metrics_;
-
-  DISALLOW_COPY_AND_ASSIGN(PerfCpuLogger);
 };
 
 MULTIPROCESS_TEST_MAIN(MojoPerfTestClientTestChildMain) {
   MojoPerfTestClient client;
   int rv = mojo::core::test::MultiprocessTestHelper::RunClientMain(
-      base::Bind(&MojoPerfTestClient::Run, base::Unretained(&client)),
+      base::BindOnce(&MojoPerfTestClient::Run, base::Unretained(&client)),
       true /* pass_pipe_ownership_to_main */);
 
   base::RunLoop run_loop;
@@ -106,11 +116,11 @@ class ChannelSteadyPingPongListener : public Listener {
   void SetTestParams(const TestParams& params,
                      const std::string& label,
                      bool sync,
-                     const base::Closure& quit_closure) {
+                     base::OnceClosure quit_closure) {
     params_ = params;
     label_ = label;
     sync_ = sync;
-    quit_closure_ = quit_closure;
+    quit_closure_ = std::move(quit_closure);
     payload_ = std::string(params.message_size, 'a');
   }
 
@@ -169,7 +179,7 @@ class ChannelSteadyPingPongListener : public Listener {
   void StopPingPong() {
     cpu_logger_.reset();
     timer_.AbandonAndStop();
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
   }
 
   void OnPing(const std::string& payload) {
@@ -191,7 +201,7 @@ class ChannelSteadyPingPongListener : public Listener {
   void SendPong() { sender_->Send(new TestMsg_Ping(payload_)); }
 
  private:
-  Sender* sender_ = nullptr;
+  raw_ptr<Sender> sender_ = nullptr;
   TestParams params_;
   std::string payload_;
   std::string label_;
@@ -203,7 +213,7 @@ class ChannelSteadyPingPongListener : public Listener {
   base::RepeatingTimer timer_;
   std::unique_ptr<PerfCpuLogger> cpu_logger_;
 
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 };
 
 class ChannelSteadyPingPongTest : public IPCChannelMojoTestBase {
@@ -269,6 +279,9 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
  public:
   MojoSteadyPingPongTest() = default;
 
+  MojoSteadyPingPongTest(const MojoSteadyPingPongTest&) = delete;
+  MojoSteadyPingPongTest& operator=(const MojoSteadyPingPongTest&) = delete;
+
  protected:
   void RunPingPongServer(MojoHandle mp, const std::string& label, bool sync) {
     label_ = label;
@@ -276,7 +289,8 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
 
     mojo::MessagePipeHandle mp_handle(mp);
     mojo::ScopedMessagePipeHandle scoped_mp(mp_handle);
-    ping_receiver_.Bind(IPC::mojom::ReflectorPtrInfo(std::move(scoped_mp), 0u));
+    ping_receiver_.Bind(
+        mojo::PendingRemote<IPC::mojom::Reflector>(std::move(scoped_mp), 0u));
 
     LockThreadAffinity thread_locker(kSharedCore);
     std::vector<TestParams> params_list = GetDefaultTestParams();
@@ -284,8 +298,9 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
       params_ = params;
       payload_ = std::string(params.message_size, 'a');
 
-      ping_receiver_->Ping("hello", base::Bind(&MojoSteadyPingPongTest::OnHello,
-                                               base::Unretained(this)));
+      ping_receiver_->Ping("hello",
+                           base::BindOnce(&MojoSteadyPingPongTest::OnHello,
+                                          base::Unretained(this)));
       base::RunLoop run_loop;
       quit_closure_ = run_loop.QuitWhenIdleClosure();
       run_loop.Run();
@@ -293,7 +308,7 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
 
     ping_receiver_->Quit();
 
-    ignore_result(ping_receiver_.PassInterface().PassHandle().release());
+    std::ignore = ping_receiver_.Unbind().PassPipe().release();
   }
 
   void OnHello(const std::string& value) {
@@ -339,7 +354,7 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
   void StopPingPong() {
     cpu_logger_.reset();
     timer_.AbandonAndStop();
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
   }
 
   void OnPong(const std::string& value) {
@@ -359,8 +374,9 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
   }
 
   void SendPing() {
-    ping_receiver_->Ping(payload_, base::Bind(&MojoSteadyPingPongTest::OnPong,
-                                              base::Unretained(this)));
+    ping_receiver_->Ping(payload_,
+                         base::BindOnce(&MojoSteadyPingPongTest::OnPong,
+                                        base::Unretained(this)));
   }
 
   static int RunPingPongClient(MojoHandle mp) {
@@ -380,7 +396,7 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
   std::string label_;
   bool sync_ = false;
 
-  IPC::mojom::ReflectorPtr ping_receiver_;
+  mojo::Remote<IPC::mojom::Reflector> ping_receiver_;
 
   int count_down_ = 0;
   int frame_count_down_ = 0;
@@ -388,13 +404,11 @@ class MojoSteadyPingPongTest : public mojo::core::test::MojoTestBase {
   base::RepeatingTimer timer_;
   std::unique_ptr<PerfCpuLogger> cpu_logger_;
 
-  base::Closure quit_closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoSteadyPingPongTest);
+  base::OnceClosure quit_closure_;
 };
 
 DEFINE_TEST_CLIENT_WITH_PIPE(PingPongClient, MojoSteadyPingPongTest, h) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   return RunPingPongClient(h);
 }
 
@@ -402,14 +416,14 @@ DEFINE_TEST_CLIENT_WITH_PIPE(PingPongClient, MojoSteadyPingPongTest, h) {
 // instead of raw IPC::Messages.
 TEST_F(MojoSteadyPingPongTest, AsyncPingPong) {
   RunTestClient("PingPongClient", [&](MojoHandle h) {
-    base::test::ScopedTaskEnvironment scoped_task_environment;
+    base::test::SingleThreadTaskEnvironment task_environment;
     RunPingPongServer(h, "Mojo_CPU_Async", false);
   });
 }
 
 TEST_F(MojoSteadyPingPongTest, SyncPingPong) {
   RunTestClient("PingPongClient", [&](MojoHandle h) {
-    base::test::ScopedTaskEnvironment scoped_task_environment;
+    base::test::SingleThreadTaskEnvironment task_environment;
     RunPingPongServer(h, "Mojo_CPU_Sync", true);
   });
 }

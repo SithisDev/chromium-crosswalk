@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,16 @@
 #endif
 
 ProceduralBlockWithURL BlockToOpenURL(UIResponder* responder,
-                                      id<ApplicationCommands> dispatcher) {
+                                      id<ApplicationCommands> handler) {
   __weak UIResponder* weakResponder = responder;
-  __weak id<ApplicationCommands> weakDispatcher = dispatcher;
+  __weak id<ApplicationCommands> weakHandler = handler;
   ProceduralBlockWithURL blockToOpenURL = ^(const GURL& url) {
     UIResponder* strongResponder = weakResponder;
     if (!strongResponder)
       return;
     OpenNewTabCommand* command =
         [OpenNewTabCommand commandWithURLFromChrome:url];
-    [weakDispatcher closeSettingsUIAndOpenURL:command];
+    [weakHandler closeSettingsUIAndOpenURL:command];
   };
   return [blockToOpenURL copy];
 }

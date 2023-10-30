@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,19 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/bind.h"
+#import "base/bind.h"
 #import "base/mac/foundation_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/favicon/core/fallback_url_util.h"
-#include "components/favicon/core/favicon_server_fetcher_params.h"
-#include "components/favicon/core/large_icon_service.h"
-#include "components/favicon_base/fallback_icon_style.h"
-#include "components/favicon_base/favicon_callback.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/favicon/core/fallback_url_util.h"
+#import "components/favicon/core/large_icon_service.h"
+#import "components/favicon_base/fallback_icon_style.h"
+#import "components/favicon_base/favicon_callback.h"
+#import "components/favicon_base/favicon_types.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/favicon/favicon_attributes.h"
-#include "net/traffic_annotation/network_traffic_annotation.h"
-#include "skia/ext/skia_utils_ios.h"
-#include "url/gurl.h"
+#import "ios/chrome/common/ui/favicon/favicon_attributes.h"
+#import "net/traffic_annotation/network_traffic_annotation.h"
+#import "skia/ext/skia_utils_ios.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -62,14 +62,14 @@ void FaviconLoader::FaviconForPageUrl(
     bool fallback_to_google_server,  // retrieve favicon from Google Server if
                                      // GetLargeIconOrFallbackStyle() doesn't
                                      // return valid favicon.
-    FaviconAttributesCompletionBlock faviconBlockHandler) {
-  DCHECK(faviconBlockHandler);
+    FaviconAttributesCompletionBlock favicon_block_handler) {
+  DCHECK(favicon_block_handler);
   NSString* key =
       [NSString stringWithFormat:@"%d %@", (int)round(size_in_points),
                                  base::SysUTF8ToNSString(page_url.spec())];
   FaviconAttributes* value = [favicon_cache_ objectForKey:key];
   if (value) {
-    faviconBlockHandler(value);
+    favicon_block_handler(value);
     return;
   }
 
@@ -91,7 +91,7 @@ void FaviconLoader::FaviconForPageUrl(
 
       DCHECK(favicon.size.width <= size_in_points &&
              favicon.size.height <= size_in_points);
-      faviconBlockHandler(attributes);
+      favicon_block_handler(attributes);
       return;
     } else if (fallback_to_google_server) {
       void (^favicon_loaded_from_server_block)(
@@ -106,13 +106,12 @@ void FaviconLoader::FaviconForPageUrl(
             // fallback style will be used.
             FaviconForPageUrl(
                 block_page_url, size_in_points, min_size_in_points,
-                /*continueToGoogleServer=*/false, faviconBlockHandler);
+                /*continueToGoogleServer=*/false, favicon_block_handler);
           };
 
       large_icon_service_
           ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-              favicon::FaviconServerFetcherParams::CreateForMobile(
-                  block_page_url),
+              block_page_url,
               /*may_page_url_be_private=*/true,
               /*should_trim_page_url_path=*/false, kTrafficAnnotation,
               base::BindRepeating(favicon_loaded_from_server_block));
@@ -131,11 +130,11 @@ void FaviconLoader::FaviconForPageUrl(
                                is_default_background_color];
 
     [favicon_cache_ setObject:attributes forKey:key];
-    faviconBlockHandler(attributes);
+    favicon_block_handler(attributes);
   };
 
   // First, synchronously return a fallback image.
-  faviconBlockHandler([FaviconAttributes attributesWithDefaultImage]);
+  favicon_block_handler([FaviconAttributes attributesWithDefaultImage]);
 
   // Now fetch the image synchronously.
   DCHECK(large_icon_service_);
@@ -144,18 +143,79 @@ void FaviconLoader::FaviconForPageUrl(
       base::BindRepeating(favicon_block), &cancelable_task_tracker_);
 }
 
+void FaviconLoader::FaviconForPageUrlOrHost(
+    const GURL& page_url,
+    float size_in_points,
+    FaviconAttributesCompletionBlock favicon_block_handler) {
+  DCHECK(favicon_block_handler);
+  NSString* key = [NSString
+      stringWithFormat:@"%d %@ with fallback", (int)round(size_in_points),
+                       base::SysUTF8ToNSString(page_url.spec())];
+  FaviconAttributes* value = [favicon_cache_ objectForKey:key];
+  if (value) {
+    favicon_block_handler(value);
+    return;
+  }
+
+  const CGFloat scale = UIScreen.mainScreen.scale;
+  GURL block_page_url(page_url);
+  auto favicon_block = ^(const favicon_base::LargeIconResult& result) {
+    // GetLargeIconOrFallbackStyle() either returns a valid favicon (which can
+    // be the default favicon) or fallback attributes.
+    if (result.bitmap.is_valid()) {
+      scoped_refptr<base::RefCountedMemory> data =
+          result.bitmap.bitmap_data.get();
+      // The favicon code assumes favicons are PNG-encoded.
+      UIImage* favicon = [UIImage
+          imageWithData:[NSData dataWithBytes:data->front() length:data->size()]
+                  scale:scale];
+      FaviconAttributes* attributes =
+          [FaviconAttributes attributesWithImage:favicon];
+      [favicon_cache_ setObject:attributes forKey:key];
+
+      DCHECK(favicon.size.width <= size_in_points &&
+             favicon.size.height <= size_in_points);
+      favicon_block_handler(attributes);
+      return;
+    }
+
+    // Did not get valid favicon back and are not attempting to retrieve one
+    // from a Google Server.
+    DCHECK(result.fallback_icon_style);
+    FaviconAttributes* attributes = [FaviconAttributes
+        attributesWithMonogram:base::SysUTF16ToNSString(
+                                   favicon::GetFallbackIconText(block_page_url))
+                     textColor:UIColorFromRGB(kFallbackIconDefaultTextColor)
+               backgroundColor:UIColor.clearColor
+        defaultBackgroundColor:result.fallback_icon_style->
+                               is_default_background_color];
+
+    [favicon_cache_ setObject:attributes forKey:key];
+    favicon_block_handler(attributes);
+  };
+
+  // First, synchronously return a fallback image.
+  favicon_block_handler([FaviconAttributes attributesWithDefaultImage]);
+
+  // Now fetch the image synchronously.
+  DCHECK(large_icon_service_);
+  large_icon_service_->GetIconRawBitmapOrFallbackStyleForPageUrl(
+      page_url, scale * size_in_points, base::BindRepeating(favicon_block),
+      &cancelable_task_tracker_);
+}
+
 void FaviconLoader::FaviconForIconUrl(
     const GURL& icon_url,
     float size_in_points,
     float min_size_in_points,
-    FaviconAttributesCompletionBlock faviconBlockHandler) {
-  DCHECK(faviconBlockHandler);
+    FaviconAttributesCompletionBlock favicon_block_handler) {
+  DCHECK(favicon_block_handler);
   NSString* key =
       [NSString stringWithFormat:@"%d %@", (int)round(size_in_points),
                                  base::SysUTF8ToNSString(icon_url.spec())];
   FaviconAttributes* value = [favicon_cache_ objectForKey:key];
   if (value) {
-    faviconBlockHandler(value);
+    favicon_block_handler(value);
     return;
   }
 
@@ -176,7 +236,7 @@ void FaviconLoader::FaviconForIconUrl(
       FaviconAttributes* attributes =
           [FaviconAttributes attributesWithImage:favicon];
       [favicon_cache_ setObject:attributes forKey:key];
-      faviconBlockHandler(attributes);
+      favicon_block_handler(attributes);
       return;
     }
     // Did not get valid favicon back and are not attempting to retrieve one
@@ -191,11 +251,11 @@ void FaviconLoader::FaviconForIconUrl(
                                is_default_background_color];
 
     [favicon_cache_ setObject:attributes forKey:key];
-    faviconBlockHandler(attributes);
+    favicon_block_handler(attributes);
   };
 
   // First, return a fallback synchronously.
-  faviconBlockHandler([FaviconAttributes
+  favicon_block_handler([FaviconAttributes
       attributesWithImage:[UIImage imageNamed:@"default_world_favicon"]]);
 
   // Now call the service for a better async icon.
@@ -207,4 +267,8 @@ void FaviconLoader::FaviconForIconUrl(
 
 void FaviconLoader::CancellAllRequests() {
   cancelable_task_tracker_.TryCancelAll();
+}
+
+base::WeakPtr<FaviconLoader> FaviconLoader::AsWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
 }

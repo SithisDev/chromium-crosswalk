@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
@@ -15,32 +14,33 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-namespace ios {
-class ChromeBrowserState;
-}
-
 class AuthenticationService;
 class AuthenticationServiceDelegate;
+class ChromeBrowserState;
 
-// Singleton that owns all |AuthenticationServices| and associates them with
-// browser states. Listens for the |BrowserState|'s destruction notification and
-// cleans up the associated |AuthenticationService|.
+// Singleton that owns all `AuthenticationServices` and associates them with
+// browser states. Listens for the `BrowserState`'s destruction notification and
+// cleans up the associated `AuthenticationService`.
 class AuthenticationServiceFactory : public BrowserStateKeyedServiceFactory {
  public:
   static AuthenticationService* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
+      ChromeBrowserState* browser_state);
   static AuthenticationServiceFactory* GetInstance();
 
   // Force the instantiation of AuthenticationService and initialize it with
   // the given delegate. Must be called before GetForBrowserState (not doing
   // so is a security issue and the app will terminate).
   static void CreateAndInitializeForBrowserState(
-      ios::ChromeBrowserState* browser_state,
+      ChromeBrowserState* browser_state,
       std::unique_ptr<AuthenticationServiceDelegate> delegate);
 
   // Returns the default factory used to build AuthenticationServices. Can be
   // registered with SetTestingFactory to use real instances during testing.
   static TestingFactory GetDefaultFactory();
+
+  AuthenticationServiceFactory(const AuthenticationServiceFactory&) = delete;
+  AuthenticationServiceFactory& operator=(const AuthenticationServiceFactory&) =
+      delete;
 
  private:
   friend class base::NoDestructor<AuthenticationServiceFactory>;
@@ -56,8 +56,6 @@ class AuthenticationServiceFactory : public BrowserStateKeyedServiceFactory {
 
   // KeyedServiceBaseFactory implementation.
   bool ServiceIsNULLWhileTesting() const override;
-
-  DISALLOW_COPY_AND_ASSIGN(AuthenticationServiceFactory);
 };
 
 #endif  // IOS_CHROME_BROWSER_SIGNIN_AUTHENTICATION_SERVICE_FACTORY_H_

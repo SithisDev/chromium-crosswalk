@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,17 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_pump_for_io.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
-#include "base/task_runner_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_attachment_set.h"
@@ -83,9 +83,13 @@ class ChannelNacl::ReaderThreadRunner
   //                      above callbacks.
   ReaderThreadRunner(
       int pipe,
-      base::Callback<void(std::unique_ptr<MessageContents>)> data_read_callback,
-      base::Callback<void()> failure_callback,
+      base::RepeatingCallback<void(std::unique_ptr<MessageContents>)>
+          data_read_callback,
+      base::RepeatingCallback<void()> failure_callback,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
+
+  ReaderThreadRunner(const ReaderThreadRunner&) = delete;
+  ReaderThreadRunner& operator=(const ReaderThreadRunner&) = delete;
 
   // DelegateSimpleThread implementation. Reads data from the pipe in a loop
   // until either we are told to quit or a read fails.
@@ -93,17 +97,17 @@ class ChannelNacl::ReaderThreadRunner
 
  private:
   int pipe_;
-  base::Callback<void(std::unique_ptr<MessageContents>)> data_read_callback_;
-  base::Callback<void ()> failure_callback_;
+  base::RepeatingCallback<void(std::unique_ptr<MessageContents>)>
+      data_read_callback_;
+  base::RepeatingCallback<void()> failure_callback_;
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReaderThreadRunner);
 };
 
 ChannelNacl::ReaderThreadRunner::ReaderThreadRunner(
     int pipe,
-    base::Callback<void(std::unique_ptr<MessageContents>)> data_read_callback,
-    base::Callback<void()> failure_callback,
+    base::RepeatingCallback<void(std::unique_ptr<MessageContents>)>
+        data_read_callback,
+    base::RepeatingCallback<void()> failure_callback,
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
     : pipe_(pipe),
       data_read_callback_(data_read_callback),
@@ -161,14 +165,15 @@ bool ChannelNacl::Connect() {
   // ChannelProxy for an example of that). Therefore, we must wait until Connect
   // is called to decide which SingleThreadTaskRunner to pass to
   // ReaderThreadRunner.
-  reader_thread_runner_.reset(new ReaderThreadRunner(
+  reader_thread_runner_ = std::make_unique<ReaderThreadRunner>(
       pipe_,
-      base::Bind(&ChannelNacl::DidRecvMsg, weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&ChannelNacl::ReadDidFail, weak_ptr_factory_.GetWeakPtr()),
-      base::ThreadTaskRunnerHandle::Get()));
-  reader_thread_.reset(
-      new base::DelegateSimpleThread(reader_thread_runner_.get(),
-                                     "ipc_channel_nacl reader thread"));
+      base::BindRepeating(&ChannelNacl::DidRecvMsg,
+                          weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&ChannelNacl::ReadDidFail,
+                          weak_ptr_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get());
+  reader_thread_ = std::make_unique<base::DelegateSimpleThread>(
+      reader_thread_runner_.get(), "ipc_channel_nacl reader thread");
   reader_thread_->Start();
   waiting_connect_ = false;
   // If there were any messages queued before connection, send them.
@@ -207,10 +212,8 @@ bool ChannelNacl::Send(Message* message) {
   Logging::GetInstance()->OnSendMessage(message_ptr.get());
 #endif  // BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
 
-  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"),
-                         "ChannelNacl::Send",
-                         message->header()->flags,
-                         TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "ChannelNacl::Send",
+                         message->header()->flags, TRACE_EVENT_FLAG_FLOW_OUT);
   output_queue_.push_back(std::move(message_ptr));
   if (!waiting_connect_)
     return ProcessOutgoingMessages();

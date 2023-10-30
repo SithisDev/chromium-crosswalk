@@ -1,17 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/ui/history/history_util.h"
+#import "ios/chrome/browser/ui/history/history_util.h"
 
-#include "base/i18n/rtl.h"
-#include "base/i18n/time_formatting.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/time/time.h"
-#include "components/strings/grit/components_strings.h"
-#include "components/url_formatter/url_formatter.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/time_format.h"
+#import "base/i18n/rtl.h"
+#import "base/i18n/time_formatting.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/time/time.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/url_formatter/url_formatter.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/base/l10n/time_format.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -19,9 +19,9 @@
 
 namespace history {
 
-base::string16 GetRelativeDateLocalized(const base::Time& visit_time) {
+std::u16string GetRelativeDateLocalized(const base::Time& visit_time) {
   base::Time midnight = base::Time::Now().LocalMidnight();
-  base::string16 date_str = ui::TimeFormat::RelativeDate(visit_time, &midnight);
+  std::u16string date_str = ui::TimeFormat::RelativeDate(visit_time, &midnight);
   if (date_str.empty()) {
     date_str = base::TimeFormatFriendlyDate(visit_time);
   } else {
@@ -32,10 +32,10 @@ base::string16 GetRelativeDateLocalized(const base::Time& visit_time) {
   return date_str;
 }
 
-NSString* FormattedTitle(const base::string16& title, const GURL& url) {
+NSString* FormattedTitle(const std::u16string& title, const GURL& url) {
   // Use url as title if no title.
   bool using_url_as_the_title = false;
-  base::string16 formatted_title(title);
+  std::u16string formatted_title(title);
   if (title.empty()) {
     using_url_as_the_title = true;
     formatted_title = url_formatter::FormatUrl(url);

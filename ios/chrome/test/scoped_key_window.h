@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,9 @@
 // key window and restores it on destruction.
 class ScopedKeyWindow {
  public:
-  explicit ScopedKeyWindow()
-      : current_key_window_(
-            [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds]),
-        original_key_window_([UIApplication sharedApplication].keyWindow) {
-    [current_key_window_ makeKeyAndVisible];
-  }
-  ~ScopedKeyWindow() { [original_key_window_ makeKeyAndVisible]; }
-  UIWindow* Get() { return current_key_window_; }
+  explicit ScopedKeyWindow();
+  ~ScopedKeyWindow();
+  UIWindow* Get();
 
  private:
   __strong UIWindow* current_key_window_;

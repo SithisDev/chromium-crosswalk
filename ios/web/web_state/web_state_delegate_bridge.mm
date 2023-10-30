@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/web/public/web_state/web_state_delegate_bridge.h"
+#import "ios/web/public/web_state_delegate_bridge.h"
 
-#include "base/logging.h"
-#import "ios/web/public/web_state/context_menu_params.h"
+#import "ios/web/public/ui/context_menu_params.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -47,14 +46,6 @@ WebState* WebStateDelegateBridge::OpenURLFromWebState(
   return nullptr;
 }
 
-void WebStateDelegateBridge::HandleContextMenu(
-    WebState* source,
-    const ContextMenuParams& params) {
-  if ([delegate_ respondsToSelector:@selector(webState:handleContextMenu:)]) {
-    [delegate_ webState:source handleContextMenu:params];
-  }
-}
-
 void WebStateDelegateBridge::ShowRepostFormWarningDialog(
     WebState* source,
     base::OnceCallback<void(bool)> callback) {
@@ -83,53 +74,62 @@ void WebStateDelegateBridge::OnAuthRequired(
     WebState* source,
     NSURLProtectionSpace* protection_space,
     NSURLCredential* proposed_credential,
-    const AuthCallback& callback) {
-  AuthCallback local_callback(callback);
+    AuthCallback callback) {
   if ([delegate_
           respondsToSelector:@selector(webState:
                                  didRequestHTTPAuthForProtectionSpace:
                                                    proposedCredential:
                                                     completionHandler:)]) {
+    __block AuthCallback local_callback = std::move(callback);
     [delegate_ webState:source
         didRequestHTTPAuthForProtectionSpace:protection_space
                           proposedCredential:proposed_credential
                            completionHandler:^(NSString* username,
                                                NSString* password) {
-                             local_callback.Run(username, password);
+                             std::move(local_callback).Run(username, password);
                            }];
   } else {
-    local_callback.Run(nil, nil);
+    std::move(callback).Run(nil, nil);
   }
 }
 
-bool WebStateDelegateBridge::ShouldPreviewLink(WebState* source,
-                                               const GURL& link_url) {
-  if ([delegate_
-          respondsToSelector:@selector(webState:shouldPreviewLinkWithURL:)]) {
-    return [delegate_ webState:source shouldPreviewLinkWithURL:link_url];
-  }
-  return false;
-}
-
-UIViewController* WebStateDelegateBridge::GetPreviewingViewController(
-    WebState* source,
-    const GURL& link_url) {
-  if ([delegate_ respondsToSelector:@selector
-                 (webState:previewingViewControllerForLinkWithURL:)]) {
-    return [delegate_ webState:source
-        previewingViewControllerForLinkWithURL:link_url];
+UIView* WebStateDelegateBridge::GetWebViewContainer(WebState* source) {
+  if ([delegate_ respondsToSelector:@selector(webViewContainerForWebState:)]) {
+    return [delegate_ webViewContainerForWebState:source];
   }
   return nil;
 }
 
-void WebStateDelegateBridge::CommitPreviewingViewController(
+void WebStateDelegateBridge::ContextMenuConfiguration(
     WebState* source,
-    UIViewController* previewing_view_controller) {
+    const ContextMenuParams& params,
+    void (^completion_handler)(UIContextMenuConfiguration*)) {
   if ([delegate_ respondsToSelector:@selector
-                 (webState:commitPreviewingViewController:)]) {
+                 (webState:
+                     contextMenuConfigurationForParams:completionHandler:)]) {
     [delegate_ webState:source
-        commitPreviewingViewController:previewing_view_controller];
+        contextMenuConfigurationForParams:params
+                        completionHandler:completion_handler];
+  } else {
+    completion_handler(nil);
   }
+}
+
+void WebStateDelegateBridge::ContextMenuWillCommitWithAnimator(
+    WebState* source,
+    id<UIContextMenuInteractionCommitAnimating> animator) {
+  if ([delegate_ respondsToSelector:@selector(webState:
+                                        contextMenuWillCommitWithAnimator:)]) {
+    [delegate_ webState:source contextMenuWillCommitWithAnimator:animator];
+  }
+}
+
+id<CRWResponderInputView> WebStateDelegateBridge::GetResponderInputView(
+    WebState* source) {
+  if ([delegate_ respondsToSelector:@selector(webStateInputViewProvider:)]) {
+    return [delegate_ webStateInputViewProvider:source];
+  }
+  return nil;
 }
 
 }  // web

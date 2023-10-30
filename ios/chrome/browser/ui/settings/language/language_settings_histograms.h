@@ -1,14 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_SETTINGS_LANGUAGE_LANGUAGE_SETTINGS_HISTOGRAMS_H_
 #define IOS_CHROME_BROWSER_UI_SETTINGS_LANGUAGE_LANGUAGE_SETTINGS_HISTOGRAMS_H_
 
-// UMA histogram names. These constants are repeated in LanguagesManager.java.
-const char kLanguageSettingsPageImpressionHistogram[] =
-    "LanguageSettings.PageImpression";
-const char kLanguageSettingsActionsHistogram[] = "LanguageSettings.Actions";
+// UMA histogram names.
+extern const char kLanguageSettingsPageImpressionHistogram[];
+extern const char kLanguageSettingsActionsHistogram[];
 
 // Enum for the LanguageSettings.PageImpression histogram. These constants are
 // repeated in LanguagesManager.java.
@@ -18,6 +17,10 @@ enum class LanguageSettingsPages {
   PAGE_MAIN = 0,
   PAGE_ADD_LANGUAGE = 1,
   PAGE_LANGUAGE_DETAILS = 2,
+  // PAGE_CHROME_LANGUAGE = 3, // Windows and Android only.
+  // PAGE_ADVANCED_LANGUAGE_SETTINGS = 4,
+  // PAGE_TARGET_LANGUAGE = 5,
+  // PAGE_LANGUAGE_OVERFLOW_MENU_OPENED = 6 // Desktop only.
   kMaxValue = PAGE_LANGUAGE_DETAILS,
 };
 

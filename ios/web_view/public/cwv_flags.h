@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-CWV_EXPORT
 // Used to configure feature flags during runtime. Flags are persisted across
 // app restarts.
+CWV_EXPORT
 @interface CWVFlags : NSObject
 
 // Whether or not sync and wallet features are communicating with the sandbox

@@ -1,15 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/chrome/browser/metrics/ios_chrome_stability_metrics_provider.h"
+#import "ios/chrome/browser/metrics/ios_chrome_stability_metrics_provider.h"
 
-#include "base/feature_list.h"
-#include "base/metrics/histogram_macros.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/metrics/features.h"
+#import "base/feature_list.h"
+#import "base/metrics/histogram_macros.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/components/webui/web_ui_url_constants.h"
+#import "ios/web/common/features.h"
 #import "ios/web/public/navigation/navigation_context.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -37,15 +38,6 @@ void IOSChromeStabilityMetricsProvider::OnRecordingDisabled() {
   recording_enabled_ = false;
 }
 
-void IOSChromeStabilityMetricsProvider::ProvideStabilityMetrics(
-    metrics::SystemProfileProto* system_profile_proto) {
-  helper_.ProvideStabilityMetrics(system_profile_proto);
-}
-
-void IOSChromeStabilityMetricsProvider::ClearSavedStabilityMetrics() {
-  helper_.ClearSavedStabilityMetrics();
-}
-
 void IOSChromeStabilityMetricsProvider::LogRendererCrash() {
   if (!recording_enabled_)
     return;
@@ -56,7 +48,7 @@ void IOSChromeStabilityMetricsProvider::LogRendererCrash() {
   int dummy_termination_code = 105;
   helper_.LogRendererCrash(false /* not an extension process */,
                            base::TERMINATION_STATUS_ABNORMAL_TERMINATION,
-                           dummy_termination_code, base::nullopt);
+                           dummy_termination_code);
 }
 
 void IOSChromeStabilityMetricsProvider::WebStateDidStartLoading(
@@ -65,8 +57,6 @@ void IOSChromeStabilityMetricsProvider::WebStateDidStartLoading(
     return;
 
   UMA_HISTOGRAM_BOOLEAN(kPageLoadCountLoadingStartedMetric, true);
-  if (!base::FeatureList::IsEnabled(kLogLoadStartedInDidStartNavigation))
-    helper_.LogLoadStarted();
 }
 
 void IOSChromeStabilityMetricsProvider::WebStateDidStartNavigation(
@@ -82,8 +72,7 @@ void IOSChromeStabilityMetricsProvider::WebStateDidStartNavigation(
   } else if (navigation_context->IsSameDocument()) {
     type = PageLoadCountNavigationType::SAME_DOCUMENT_WEB_NAVIGATION;
   } else {
-    if (base::FeatureList::IsEnabled(kLogLoadStartedInDidStartNavigation))
-      helper_.LogLoadStarted();
+    helper_.LogLoadStarted();
   }
   UMA_HISTOGRAM_ENUMERATION(kPageLoadCountMetric, type,
                             PageLoadCountNavigationType::COUNT);

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/macros.h"
-#include "components/keyed_service/core/keyed_service.h"
+#include "base/supports_user_data.h"
 
+class Browser;
 @class ChromeBroadcaster;
 class FullscreenControllerObserver;
 class WebStateList;
@@ -18,9 +18,13 @@ class WebStateList;
 // calculates how much of the toolbar should be visible as a result.  When the
 // user scrolls down the screen, the toolbar should be hidden to allow more of
 // the page's content to be visible.
-class FullscreenController : public KeyedService {
+class FullscreenController : public base::SupportsUserData::Data {
  public:
   explicit FullscreenController() = default;
+
+  // Retrieves the FullscreenController for `browser`. This should only be
+  // called with the kFullscreenControllerBrowserScoped turned on.
+  static FullscreenController* FromBrowser(Browser* browser);
 
   // The ChromeBroadcaster through the FullscreenController receives UI
   // information necessary to calculate fullscreen progress.
@@ -51,6 +55,10 @@ class FullscreenController : public KeyedService {
   virtual void IncrementDisabledCounter() = 0;
   virtual void DecrementDisabledCounter() = 0;
 
+  // Returns whether fullscreen is implemented by resizing the web view scroll
+  // view rather than setting the content inset.
+  virtual bool ResizesScrollView() const = 0;
+
   // FullscreenController isn't notified when the trait collection of the
   // browser is changed. This method is here to notify it.
   virtual void BrowserTraitCollectionChangedBegin() = 0;
@@ -78,9 +86,16 @@ class FullscreenController : public KeyedService {
   // 1.0.
   virtual void ExitFullscreen() = 0;
 
- private:
+  virtual void FreezeToolbarHeight(bool freeze_toolbar_height) = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(FullscreenController);
+  // Force horizontal content resize, when content isn't tracking resize by
+  // itself.
+  virtual void ResizeHorizontalViewport() = 0;
+
+ protected:
+  // Returns the key used to store the UserData. Protected so it can be used in
+  // tests.
+  static const void* UserDataKey();
 };
 
 #endif  // IOS_CHROME_BROWSER_UI_FULLSCREEN_FULLSCREEN_CONTROLLER_H_

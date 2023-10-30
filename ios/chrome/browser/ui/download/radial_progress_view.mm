@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #import <QuartzCore/QuartzCore.h>
 
-#include "base/mac/foundation_util.h"
+#import "base/mac/foundation_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -23,11 +23,6 @@
 @end
 
 @implementation RadialProgressView
-
-@synthesize progress = _progress;
-@synthesize lineWidth = _lineWidth;
-@synthesize progressTintColor = _progressTintColor;
-@synthesize trackTintColor = _trackTintColor;
 @synthesize progressLayer = _progressLayer;
 
 #pragma mark - UIView overrides
@@ -47,12 +42,26 @@
 
 - (void)willMoveToSuperview:(UIView*)newSuperview {
   if (newSuperview && !self.progressLayer.superlayer) {
-    self.trackLayer.fillColor = [UIColor clearColor].CGColor;
-    self.trackLayer.strokeColor = self.trackTintColor.CGColor;
+    self.trackLayer.fillColor = UIColor.clearColor.CGColor;
+    UIColor* resolvedColor = [self.trackTintColor
+        resolvedColorWithTraitCollection:self.traitCollection];
+    self.trackLayer.strokeColor = resolvedColor.CGColor;
     self.trackLayer.lineWidth = self.lineWidth;
 
     [self.trackLayer addSublayer:self.progressLayer];
     [self updateProgressLayer];
+  }
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+
+  BOOL differentColorAppearance = [self.traitCollection
+      hasDifferentColorAppearanceComparedToTraitCollection:
+          previousTraitCollection];
+  if (differentColorAppearance) {
+    self.trackLayer.strokeColor = self.trackTintColor.CGColor;
+    self.progressLayer.strokeColor = self.progressTintColor.CGColor;
   }
 }
 
@@ -99,8 +108,10 @@
 - (CAShapeLayer*)progressLayer {
   if (!_progressLayer) {
     _progressLayer = [CAShapeLayer layer];
-    _progressLayer.fillColor = [UIColor clearColor].CGColor;
-    _progressLayer.strokeColor = self.progressTintColor.CGColor;
+    _progressLayer.fillColor = UIColor.clearColor.CGColor;
+    UIColor* resolvedColor = [self.progressTintColor
+        resolvedColorWithTraitCollection:self.traitCollection];
+    _progressLayer.strokeColor = resolvedColor.CGColor;
     _progressLayer.lineWidth = self.lineWidth;
   }
   return _progressLayer;

@@ -1,10 +1,9 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/util/unicode_util.h"
 
-#include "base/logging.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -36,7 +35,7 @@ unichar kLTRUnicodeRanges[kLTRRangeCount][2] = {
     {0x0386, 0x0386}};
 
 // Returns the character set created from the unicode value ranges in
-// |kRTLUnicodeRanges|.
+// `kRTLUnicodeRanges`.
 NSCharacterSet* GetRTLCharSet() {
   static NSCharacterSet* g_rtl_charset = nil;
   static dispatch_once_t rtl_once_token;
@@ -54,7 +53,7 @@ NSCharacterSet* GetRTLCharSet() {
 }
 
 // Returns the character set created from the unicode value ranges in
-// |kLTRUnicodeRanges|.
+// `kLTRUnicodeRanges`.
 NSCharacterSet* GetLTRCharSet() {
   static NSCharacterSet* g_ltr_charset = nil;
   static dispatch_once_t ltr_once_token;
@@ -99,7 +98,7 @@ NSString* GetEscapedUnicodeStringForString(NSString* string) {
     // string format, it only uses the minimum number of digits necessary to
     // express the character value.  However, constructing NSString literals
     // using Unicode character codes requires that each character have 4 hex
-    // digits following the "\u".  |zero_prefix| is constructed such that it
+    // digits following the "\u".  `zero_prefix` is constructed such that it
     // ensures each character to have 4 digits.
     NSString* zero_prefix = @"";
     if (c < 0x0010)

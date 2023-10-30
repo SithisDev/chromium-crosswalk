@@ -1,21 +1,19 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/web_state_list/web_state_list_favicon_driver_observer.h"
 
-#include "base/logging.h"
-#include "components/favicon/ios/web_favicon_driver.h"
-#include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#import "components/favicon/ios/web_favicon_driver.h"
+#import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "testing/platform_test.h"
-#include "ui/gfx/image/image.h"
-#include "url/gurl.h"
+#import "ios/web/public/test/web_task_environment.h"
+#import "testing/gtest/include/gtest/gtest.h"
+#import "testing/platform_test.h"
+#import "ui/gfx/image/image.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -42,6 +40,12 @@
 class WebStateListFaviconDriverObserverTest : public PlatformTest {
  public:
   WebStateListFaviconDriverObserverTest();
+
+  WebStateListFaviconDriverObserverTest(
+      const WebStateListFaviconDriverObserverTest&) = delete;
+  WebStateListFaviconDriverObserverTest& operator=(
+      const WebStateListFaviconDriverObserverTest&) = delete;
+
   ~WebStateListFaviconDriverObserverTest() override = default;
 
   favicon::FaviconDriver* CreateAndInsertWebState();
@@ -55,14 +59,12 @@ class WebStateListFaviconDriverObserverTest : public PlatformTest {
   }
 
  private:
-  web::TestWebThreadBundle test_web_thread_bundle_;
-  std::unique_ptr<ios::ChromeBrowserState> browser_state_;
+  web::WebTaskEnvironment task_environment_;
+  std::unique_ptr<ChromeBrowserState> browser_state_;
   FakeWebStateListDelegate web_state_list_delegate_;
   WebStateList web_state_list_;
   FakeWebStateFaviconDriverObserver* favicon_observer_;
   WebStateListFaviconDriverObserver web_state_list_favicon_driver_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebStateListFaviconDriverObserverTest);
 };
 
 WebStateListFaviconDriverObserverTest::WebStateListFaviconDriverObserverTest()

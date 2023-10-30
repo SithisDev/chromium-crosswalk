@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,21 @@
 
 // Accessibility IDs for the table view in various kinds of popup menus.
 extern NSString* const kPopupMenuToolsMenuTableViewId;
+extern NSString* const kPopupMenuToolsMenuActionListId;
 extern NSString* const kPopupMenuNavigationTableViewId;
+extern NSString* const kPopupMenuTabGridMenuTableViewId;
 
 // Accessibility IDs for the Tools Menu items.
+// Downloads item accessibility Identifier.
+extern NSString* const kToolsMenuDownloadsId;
 // Reload item accessibility Identifier.
 extern NSString* const kToolsMenuReload;
 // Stop item accessibility Identifier.
 extern NSString* const kToolsMenuStop;
 // New Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewTabId;
+// New Tab item accessibility Identifier.
+extern NSString* const kToolsMenuNewWindowId;
 // New incognito Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewIncognitoTabId;
 // Close all Tabs item accessibility Identifier.
@@ -26,6 +32,8 @@ extern NSString* const kToolsMenuCloseAllTabsId;
 extern NSString* const kToolsMenuCloseAllIncognitoTabsId;
 // Close the current tab item accessibility Identifier.
 extern NSString* const kToolsMenuCloseTabId;
+// Follow item accessibility Identifier.
+extern NSString* const kToolsMenuFollowId;
 // Bookmarks item accessibility Identifier.
 extern NSString* const kToolsMenuBookmarksId;
 // Reading List item accessibility Identifier.
@@ -34,6 +42,8 @@ extern NSString* const kToolsMenuReadingListId;
 extern NSString* const kToolsMenuOtherDevicesId;
 // History item accessibility Identifier.
 extern NSString* const kToolsMenuHistoryId;
+// Passwords item accessibility Identifier.
+extern NSString* const kToolsMenuPasswordsId;
 // Report an issue item accessibility Identifier.
 extern NSString* const kToolsMenuReportAnIssueId;
 // Translate item accessibility Identifier.
@@ -44,6 +54,8 @@ extern NSString* const kToolsMenuFindInPageId;
 extern NSString* const kToolsMenuRequestDesktopId;
 // Settings item accessibility Identifier.
 extern NSString* const kToolsMenuSettingsId;
+// Settings action item accessibility Identifier.
+extern NSString* const kToolsMenuSettingsActionId;
 // Help item accessibility Identifier.
 extern NSString* const kToolsMenuHelpId;
 // Request mobile item accessibility Identifier.
@@ -60,15 +72,25 @@ extern NSString* const kToolsMenuSiteInformation;
 extern NSString* const kToolsMenuPasteAndGo;
 // Voice Search item accessibility Identifier.
 extern NSString* const kToolsMenuVoiceSearch;
-// TODO(crbug.com/974751): Check if this is still used.
 // Search item accessibility Identifier.
 extern NSString* const kToolsMenuSearch;
-// TODO(crbug.com/974751): Check if this is still used.
 // Incognito Search item accessibility Identifier.
 extern NSString* const kToolsMenuIncognitoSearch;
 // QR Code Search item accessibility Identifier.
 extern NSString* const kToolsMenuQRCodeSearch;
 // Copied Image Search item accessibility Identifier.
 extern NSString* const kToolsMenuCopiedImageSearch;
+// Text Zoom item accessibility identifier.
+extern NSString* const kToolsMenuTextZoom;
+// Text Enterprise info item accessibility identifier.
+extern NSString* const kTextMenuEnterpriseInfo;
+// Follow item accessibility Identifier.
+extern NSString* const kToolsMenuFollow;
+// Unfollow item accessibility Identifier.
+extern NSString* const kToolsMenuUnfollow;
+// Clear Browsing Data item accessibility identifier.
+extern NSString* const kToolsMenuClearBrowsingData;
+// Share Chrome accessibility Identifier.
+extern NSString* const kToolsMenuShareChromeId;
 
 #endif  // IOS_CHROME_BROWSER_UI_POPUP_MENU_POPUP_MENU_CONSTANTS_H_

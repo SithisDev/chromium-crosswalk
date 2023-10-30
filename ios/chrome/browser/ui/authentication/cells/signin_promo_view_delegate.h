@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,16 @@
 
 @protocol SigninPromoViewDelegate <NSObject>
 
-// Called by SigninPromoView when the user taps the primary button in cold state
-// mode.
+// Called by SigninPromoView when the user taps the primary button with no
+// identities on the device.
 - (void)signinPromoViewDidTapSigninWithNewAccount:(SigninPromoView*)view;
 
-// Called by SigninPromoView when the user taps the primary button in warm state
-// mode.
+// Called by SigninPromoView when the user taps the primary button with one
+// or more identities on the device.
 - (void)signinPromoViewDidTapSigninWithDefaultAccount:(SigninPromoView*)view;
 
-// Called by SigninPromoView when the user taps the secondary button in warm
-// state mode.
+// Called by SigninPromoView when the user taps the secondary button with one
+// or more identities on the device.
 - (void)signinPromoViewDidTapSigninWithOtherAccount:(SigninPromoView*)view;
 
 // Called by SigninPromoView when the user taps the close button.

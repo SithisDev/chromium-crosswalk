@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,8 @@
 // Fake implementation of ShellRiskDataLoader.
 @implementation ShellRiskDataLoader
 
-#pragma mark CWVCreditCardVerifierDataSource
-
-- (void)creditCardVerifier:(CWVCreditCardVerifier*)creditCardVerifier
-    getRiskDataWithCompletionHandler:
-        (void (^)(NSString* riskData))completionHandler {
-  completionHandler(@"dummy-risk-data");
+- (NSString*)riskData {
+  return @"dummy-risk-data";
 }
 
 @end

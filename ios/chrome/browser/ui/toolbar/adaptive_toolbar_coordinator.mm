@@ -1,12 +1,24 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_coordinator.h"
 
-#include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter.h"
+#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/ui/commands/activity_service_commands.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/chrome/browser/ui/commands/find_in_page_commands.h"
+#import "ios/chrome/browser/ui/commands/omnibox_commands.h"
+#import "ios/chrome/browser/ui/commands/popup_menu_commands.h"
+#import "ios/chrome/browser/ui/main/layout_guide_scene_agent.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
+#import "ios/chrome/browser/ui/menu/browser_action_factory.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_coordinator+subclassing.h"
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_view_controller.h"
@@ -16,8 +28,9 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_mediator.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
+#import "ios/chrome/browser/web/web_navigation_browser_agent.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,6 +44,8 @@
 @property(nonatomic, strong) ToolbarMediator* mediator;
 // Actions handler for the toolbar buttons.
 @property(nonatomic, strong) ToolbarButtonActionsHandler* actionHandler;
+// The layout guide center to use to coordinate views.
+@property(nonatomic, readonly) LayoutGuideCenter* layoutGuideCenter;
 
 @end
 
@@ -38,8 +53,9 @@
 
 #pragma mark - ChromeCoordinator
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
-  return [super initWithBaseViewController:nil browserState:browserState];
+- (instancetype)initWithBrowser:(Browser*)browser {
+  DCHECK(browser);
+  return [super initWithBaseViewController:nil browser:browser];
 }
 
 - (void)start {
@@ -49,22 +65,26 @@
   self.started = YES;
 
   self.viewController.longPressDelegate = self.longPressDelegate;
-#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
-  if (@available(iOS 13, *)) {
-    self.viewController.overrideUserInterfaceStyle =
-        self.browserState->IsOffTheRecord() ? UIUserInterfaceStyleDark
-                                            : UIUserInterfaceStyleUnspecified;
-  }
-#endif
+  self.viewController.overrideUserInterfaceStyle =
+      self.browser->GetBrowserState()->IsOffTheRecord()
+          ? UIUserInterfaceStyleDark
+          : UIUserInterfaceStyleUnspecified;
+  self.viewController.layoutGuideCenter = self.layoutGuideCenter;
 
   self.mediator = [[ToolbarMediator alloc] init];
-  self.mediator.incognito = self.browserState->IsOffTheRecord();
-  self.mediator.templateURLService =
-      ios::TemplateURLServiceFactory::GetForBrowserState(self.browserState);
+  self.mediator.incognito = self.browser->GetBrowserState()->IsOffTheRecord();
   self.mediator.consumer = self.viewController;
-  self.mediator.webStateList = self.webStateList;
-  self.mediator.bookmarkModel =
-      ios::BookmarkModelFactory::GetForBrowserState(self.browserState);
+  self.mediator.webStateList = self.browser->GetWebStateList();
+  self.mediator.webContentAreaOverlayPresenter = OverlayPresenter::FromBrowser(
+      self.browser, OverlayModality::kWebContentArea);
+  self.mediator.templateURLService =
+      ios::TemplateURLServiceFactory::GetForBrowserState(
+          self.browser->GetBrowserState());
+  self.mediator.actionFactory =
+      [[BrowserActionFactory alloc] initWithBrowser:self.browser
+                                           scenario:MenuScenario::kToolbarMenu];
+
+  self.viewController.menuProvider = self.mediator;
 }
 
 - (void)stop {
@@ -74,6 +94,18 @@
 }
 
 #pragma mark - Properties
+
+- (LayoutGuideCenter*)layoutGuideCenter {
+  SceneState* sceneState =
+      SceneStateBrowserAgent::FromBrowser(self.browser)->GetSceneState();
+  LayoutGuideSceneAgent* layoutGuideSceneAgent =
+      [LayoutGuideSceneAgent agentFromScene:sceneState];
+  if (self.browser->GetBrowserState()->IsOffTheRecord()) {
+    return layoutGuideSceneAgent.incognitoLayoutGuideCenter;
+  } else {
+    return layoutGuideSceneAgent.layoutGuideCenter;
+  }
+}
 
 - (void)setLongPressDelegate:(id<PopupMenuLongPressDelegate>)longPressDelegate {
   _longPressDelegate = longPressDelegate;
@@ -100,6 +132,11 @@
   [self.viewController setScrollProgressForTabletOmnibox:progress];
 }
 
+- (UIResponder<UITextInput>*)fakeboxScribbleForwardingTarget {
+  // Only works in primary toolbar.
+  return nil;
+}
+
 #pragma mark - ToolbarCommands
 
 - (void)triggerToolsMenuButtonAnimation {
@@ -115,16 +152,33 @@
 #pragma mark - Protected
 
 - (ToolbarButtonFactory*)buttonFactoryWithType:(ToolbarType)type {
-  BOOL isIncognito = self.browserState->IsOffTheRecord();
+  BOOL isIncognito = self.browser->GetBrowserState()->IsOffTheRecord();
   ToolbarStyle style = isIncognito ? INCOGNITO : NORMAL;
 
-  self.actionHandler = [[ToolbarButtonActionsHandler alloc] init];
-  self.actionHandler.dispatcher = self.dispatcher;
-  self.actionHandler.incognito = self.browserState->IsOffTheRecord();
+  ToolbarButtonActionsHandler* actionHandler =
+      [[ToolbarButtonActionsHandler alloc] init];
+
+  CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
+
+  actionHandler.applicationHandler =
+      HandlerForProtocol(dispatcher, ApplicationCommands);
+  actionHandler.activityHandler =
+      HandlerForProtocol(dispatcher, ActivityServiceCommands);
+  actionHandler.menuHandler = HandlerForProtocol(dispatcher, PopupMenuCommands);
+  actionHandler.findHandler =
+      HandlerForProtocol(dispatcher, FindInPageCommands);
+  actionHandler.omniboxHandler =
+      HandlerForProtocol(dispatcher, OmniboxCommands);
+
+  actionHandler.incognito = isIncognito;
+  actionHandler.navigationAgent =
+      WebNavigationBrowserAgent::FromBrowser(self.browser);
+
+  self.actionHandler = actionHandler;
 
   ToolbarButtonFactory* buttonFactory =
       [[ToolbarButtonFactory alloc] initWithStyle:style];
-  buttonFactory.actionHandler = self.actionHandler;
+  buttonFactory.actionHandler = actionHandler;
   buttonFactory.visibilityConfiguration =
       [[ToolbarButtonVisibilityConfiguration alloc] initWithType:type];
 
@@ -139,8 +193,8 @@
 }
 
 - (void)resetToolbarAfterSideSwipeSnapshot {
-  [self.mediator
-      updateConsumerForWebState:self.webStateList->GetActiveWebState()];
+  [self.mediator updateConsumerForWebState:self.browser->GetWebStateList()
+                                               ->GetActiveWebState()];
   [self.viewController resetAfterSideSwipeSnapshot];
 }
 

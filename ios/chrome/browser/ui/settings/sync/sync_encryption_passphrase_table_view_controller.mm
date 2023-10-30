@@ -1,48 +1,61 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/sync/sync_encryption_passphrase_table_view_controller.h"
 
-#include <memory>
+#import <memory>
 
-#include "base/i18n/time_formatting.h"
-#include "base/mac/foundation_util.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/google/core/common/google_util.h"
+#import "base/i18n/time_formatting.h"
+#import "base/ios/ios_util.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/google/core/common/google_util.h"
 #import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
-#include "components/strings/grit/components_strings.h"
-#include "components/sync/driver/sync_service.h"
-#include "components/sync/driver/sync_user_settings.h"
-#include "ios/chrome/browser/application_context.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/sync/driver/sync_service.h"
+#import "components/sync/driver/sync_user_settings.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/net/crurl.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
-#include "ios/chrome/browser/signin/authentication_service_factory.h"
-#include "ios/chrome/browser/signin/identity_manager_factory.h"
-#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
-#include "ios/chrome/browser/sync/sync_setup_service.h"
-#include "ios/chrome/browser/sync/sync_setup_service_factory.h"
+#import "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/identity_manager_factory.h"
+#import "ios/chrome/browser/sync/sync_service_factory.h"
+#import "ios/chrome/browser/sync/sync_setup_service.h"
+#import "ios/chrome/browser/sync/sync_setup_service_factory.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
+#import "ios/chrome/browser/ui/scoped_ui_blocker/scoped_ui_blocker.h"
 #import "ios/chrome/browser/ui/settings/cells/byo_textfield_item.h"
 #import "ios/chrome/browser/ui/settings/cells/passphrase_error_item.h"
+#import "ios/chrome/browser/ui/settings/google_services/google_services_settings_constants.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #import "ios/chrome/browser/ui/settings/sync/utils/sync_util.h"
-#import "ios/chrome/browser/ui/settings/utils/settings_utils.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_link_header_footer_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/table_view/table_view_utils.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/l10n_util_mac.h"
-#include "url/gurl.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/base/l10n/l10n_util_mac.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-using namespace sync_encryption_passphrase;
+using sync_encryption_passphrase::ItemTypeEnterPassphrase;
+using sync_encryption_passphrase::ItemTypeError;
+using sync_encryption_passphrase::ItemTypeFooter;
+using sync_encryption_passphrase::ItemTypeMessage;
+using sync_encryption_passphrase::SectionIdentifierPassphrase;
 
 namespace {
 
@@ -54,85 +67,91 @@ const CGFloat kSpinnerButtonPadding = 18;
 @interface SyncEncryptionPassphraseTableViewController () <
     IdentityManagerObserverBridgeDelegate,
     SettingsControllerProtocol> {
-  ios::ChromeBrowserState* browserState_;
   // Whether the decryption progress is currently being shown.
-  BOOL isDecryptionProgressShown_;
-  NSString* savedTitle_;
-  UIBarButtonItem* savedLeftButton_;
-  std::unique_ptr<SyncObserverBridge> syncObserver_;
+  BOOL _isDecryptionProgressShown;
+  NSString* _savedTitle;
+  UIBarButtonItem* _savedLeftButton;
+  std::unique_ptr<SyncObserverBridge> _syncObserver;
   std::unique_ptr<signin::IdentityManagerObserverBridge>
-      identityManagerObserver_;
-  UITextField* passphrase_;
+      _identityManagerObserver;
+  UITextField* _passphrase;
+  std::unique_ptr<ScopedUIBlocker> _uiBlocker;
 }
+
+@property(nonatomic, assign, readonly) Browser* browser;
 
 @end
 
 @implementation SyncEncryptionPassphraseTableViewController
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
-  DCHECK(browserState);
-  UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
-                               ? UITableViewStylePlain
-                               : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
-  if (self) {
-    self.title = l10n_util::GetNSString(IDS_IOS_SYNC_ENTER_PASSPHRASE_TITLE);
-    self.shouldHideDoneButton = YES;
-    browserState_ = browserState;
-    NSString* userEmail =
-        [AuthenticationServiceFactory::GetForBrowserState(browserState_)
-                ->GetAuthenticatedIdentity() userEmail];
-    DCHECK(userEmail);
-    syncer::SyncService* service =
-        ProfileSyncServiceFactory::GetForBrowserState(browserState_);
-    if (service->IsEngineInitialized() &&
-        service->GetUserSettings()->IsUsingSecondaryPassphrase()) {
-      base::Time passphrase_time =
-          service->GetUserSettings()->GetExplicitPassphraseTime();
-      if (!passphrase_time.is_null()) {
-        base::string16 passphrase_time_str =
-            base::TimeFormatShortDate(passphrase_time);
-        _headerMessage = l10n_util::GetNSStringF(
-            IDS_IOS_SYNC_ENTER_PASSPHRASE_BODY_WITH_EMAIL_AND_DATE,
-            base::SysNSStringToUTF16(userEmail), passphrase_time_str);
-      } else {
-        _headerMessage = l10n_util::GetNSStringF(
-            IDS_IOS_SYNC_ENTER_PASSPHRASE_BODY_WITH_EMAIL,
-            base::SysNSStringToUTF16(userEmail));
-      }
-    } else {
-      _headerMessage =
-          l10n_util::GetNSString(IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY);
-    }
-    _processingMessage = l10n_util::GetNSString(IDS_SYNC_LOGIN_SETTING_UP);
-    _footerMessage = l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER);
+@synthesize browser = _browser;
 
-    identityManagerObserver_ =
-        std::make_unique<signin::IdentityManagerObserverBridge>(
-            IdentityManagerFactory::GetForBrowserState(browserState_), self);
+- (instancetype)initWithBrowser:(Browser*)browser {
+  DCHECK(browser);
+
+  self = [super initWithStyle:ChromeTableViewStyle()];
+  if (!self) {
+    return nullptr;
   }
+
+  _browser = browser;
+  _processingMessage = l10n_util::GetNSString(IDS_SYNC_LOGIN_SETTING_UP);
+  _footerMessage = l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER);
+  self.title = l10n_util::GetNSString(IDS_IOS_SYNC_ENTER_PASSPHRASE_TITLE);
+  self.shouldHideDoneButton = YES;
+
+  ChromeBrowserState* browserState = _browser->GetBrowserState();
+  syncer::SyncService* service =
+      SyncServiceFactory::GetForBrowserState(browserState);
+  // TODO(crbug.com/1208307): The reason this is an if and not a DCHECK is
+  // because SyncCreatePassphraseTableViewController inherits from this class.
+  // This should be changed, i.e. either extract the minimum common logic
+  // between the 2 to a new base class, or not share code at all.
+  if (service->IsEngineInitialized() &&
+      service->GetUserSettings()->IsUsingExplicitPassphrase()) {
+    base::Time passphraseTime =
+        service->GetUserSettings()->GetExplicitPassphraseTime();
+    NSString* userEmail =
+        AuthenticationServiceFactory::GetForBrowserState(browserState)
+            ->GetPrimaryIdentity(signin::ConsentLevel::kSignin)
+            .userEmail;
+    DCHECK(userEmail);
+    _headerMessage =
+        passphraseTime.is_null()
+            ? l10n_util::GetNSStringF(
+                  IDS_IOS_SYNC_ENTER_PASSPHRASE_BODY_WITH_EMAIL,
+                  base::SysNSStringToUTF16(userEmail))
+            : l10n_util::GetNSStringF(
+                  IDS_IOS_SYNC_ENTER_PASSPHRASE_BODY_WITH_EMAIL_AND_DATE,
+                  base::SysNSStringToUTF16(userEmail),
+                  base::TimeFormatShortDate(passphraseTime));
+  }
+
+  _identityManagerObserver =
+      std::make_unique<signin::IdentityManagerObserverBridge>(
+          IdentityManagerFactory::GetForBrowserState(browserState), self);
   return self;
 }
 
 - (UITextField*)passphrase {
-  return passphrase_;
+  return _passphrase;
 }
 
 - (NSString*)syncErrorMessage {
   if (_syncErrorMessage)
     return _syncErrorMessage;
+  ChromeBrowserState* browserState = self.browser->GetBrowserState();
   SyncSetupService* service =
-      SyncSetupServiceFactory::GetForBrowserState(browserState_);
+      SyncSetupServiceFactory::GetForBrowserState(browserState);
   DCHECK(service);
   SyncSetupService::SyncServiceState syncServiceState =
       service->GetSyncServiceState();
 
-  // Passphrase error directly set |_syncErrorMessage|.
+  // Passphrase error directly set `_syncErrorMessage`.
   if (syncServiceState == SyncSetupService::kSyncServiceNeedsPassphrase)
     return nil;
 
-  return GetSyncErrorMessageForBrowserState(browserState_);
+  return GetSyncErrorMessageForBrowserState(browserState);
 }
 
 #pragma mark - View lifecycle
@@ -141,12 +160,16 @@ const CGFloat kSpinnerButtonPadding = 18;
   [super viewDidLoad];
   [self loadModel];
   [self setRightNavBarItem];
+
+  SceneState* sceneState =
+      SceneStateBrowserAgent::FromBrowser(self.browser)->GetSceneState();
+  _uiBlocker = std::make_unique<ScopedUIBlocker>(sceneState);
 }
 
 - (void)didReceiveMemoryWarning {
   [super didReceiveMemoryWarning];
   if (![self isViewLoaded]) {
-    passphrase_ = nil;
+    _passphrase = nil;
   }
 }
 
@@ -160,6 +183,7 @@ const CGFloat kSpinnerButtonPadding = 18;
   if ([self isMovingFromParentViewController]) {
     [self unregisterTextField:self.passphrase];
   }
+  _uiBlocker.reset();
 }
 
 #pragma mark - SettingsRootTableViewController
@@ -185,6 +209,13 @@ const CGFloat kSpinnerButtonPadding = 18;
       forSectionWithIdentifier:SectionIdentifierPassphrase];
 }
 
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (BOOL)presentationControllerShouldDismiss:
+    (UIPresentationController*)presentationController {
+  return ![_passphrase.text length];
+}
+
 #pragma mark - Items
 
 // Returns a passphrase message item.
@@ -198,25 +229,27 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 // Returns a passphrase item.
 - (TableViewItem*)passphraseItem {
-  if (passphrase_) {
-    [self unregisterTextField:passphrase_];
+  if (_passphrase) {
+    [self unregisterTextField:_passphrase];
   }
-  passphrase_ = [[UITextField alloc] init];
-  passphrase_.secureTextEntry = YES;
-  passphrase_.backgroundColor = UIColor.clearColor;
-  passphrase_.autocorrectionType = UITextAutocorrectionTypeNo;
-  passphrase_.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-  passphrase_.adjustsFontForContentSizeCategory = YES;
-  passphrase_.placeholder = l10n_util::GetNSString(IDS_SYNC_PASSPHRASE_LABEL);
-  [self registerTextField:passphrase_];
+  _passphrase = [[UITextField alloc] init];
+  _passphrase.secureTextEntry = YES;
+  _passphrase.backgroundColor = UIColor.clearColor;
+  _passphrase.autocorrectionType = UITextAutocorrectionTypeNo;
+  _passphrase.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+  _passphrase.adjustsFontForContentSizeCategory = YES;
+  _passphrase.placeholder = l10n_util::GetNSString(IDS_SYNC_PASSPHRASE_LABEL);
+  _passphrase.accessibilityIdentifier =
+      kSyncEncryptionPassphraseTextFieldAccessibilityIdentifier;
+  [self registerTextField:_passphrase];
 
   BYOTextFieldItem* item =
       [[BYOTextFieldItem alloc] initWithType:ItemTypeEnterPassphrase];
-  item.textField = passphrase_;
+  item.textField = _passphrase;
   return item;
 }
 
-// Returns a passphrase error item having |errorMessage| as title.
+// Returns a passphrase error item having `errorMessage` as title.
 - (TableViewItem*)passphraseErrorItemWithMessage:(NSString*)errorMessage {
   PassphraseErrorItem* item =
       [[PassphraseErrorItem alloc] initWithType:ItemTypeError];
@@ -229,9 +262,10 @@ const CGFloat kSpinnerButtonPadding = 18;
   TableViewLinkHeaderFooterItem* footerItem =
       [[TableViewLinkHeaderFooterItem alloc] initWithType:ItemTypeFooter];
   footerItem.text = self.footerMessage;
-  footerItem.linkURL = google_util::AppendGoogleLocaleParam(
-      GURL(kSyncGoogleDashboardURL),
-      GetApplicationContext()->GetApplicationLocale());
+  footerItem.urls = @[ [[CrURL alloc]
+      initWithGURL:google_util::AppendGoogleLocaleParam(
+                       GURL(kSyncGoogleDashboardURL),
+                       GetApplicationContext()->GetApplicationLocale())] ];
   return footerItem;
 }
 
@@ -242,7 +276,7 @@ const CGFloat kSpinnerButtonPadding = 18;
   [super tableView:tableView didSelectRowAtIndexPath:indexPath];
   NSInteger itemType = [self.tableViewModel itemTypeForIndexPath:indexPath];
   if (itemType == ItemTypeEnterPassphrase) {
-    [passphrase_ becomeFirstResponder];
+    [_passphrase becomeFirstResponder];
   }
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 }
@@ -251,7 +285,7 @@ const CGFloat kSpinnerButtonPadding = 18;
     viewForFooterInSection:(NSInteger)section {
   UIView* view = [super tableView:tableView viewForFooterInSection:section];
   if (SectionIdentifierPassphrase ==
-      [self.tableViewModel sectionIdentifierForSection:section]) {
+      [self.tableViewModel sectionIdentifierForSectionIndex:section]) {
     TableViewLinkHeaderFooterView* linkView =
         base::mac::ObjCCastStrict<TableViewLinkHeaderFooterView>(view);
     linkView.delegate = self;
@@ -266,18 +300,19 @@ const CGFloat kSpinnerButtonPadding = 18;
 }
 
 - (void)signInPressed {
-  DCHECK([passphrase_ text].length);
+  DCHECK([_passphrase text].length);
+  ChromeBrowserState* browserState = self.browser->GetBrowserState();
 
-  if (!syncObserver_.get()) {
-    syncObserver_.reset(new SyncObserverBridge(
-        self, ProfileSyncServiceFactory::GetForBrowserState(browserState_)));
+  if (!_syncObserver.get()) {
+    _syncObserver.reset(new SyncObserverBridge(
+        self, SyncServiceFactory::GetForBrowserState(browserState)));
   }
 
   // Clear out the error message.
   self.syncErrorMessage = nil;
 
   syncer::SyncService* service =
-      ProfileSyncServiceFactory::GetForBrowserState(browserState_);
+      SyncServiceFactory::GetForBrowserState(browserState);
   DCHECK(service);
   // It is possible for a race condition to happen where a user is allowed
   // to call the backend with the passphrase before the backend is
@@ -289,23 +324,22 @@ const CGFloat kSpinnerButtonPadding = 18;
     return;
 
   [self showDecryptionProgress];
-  std::string passphrase = base::SysNSStringToUTF8([passphrase_ text]);
+  std::string passphrase = base::SysNSStringToUTF8([_passphrase text]);
   if ([self forDecryption]) {
     if (!service->GetUserSettings()->SetDecryptionPassphrase(passphrase)) {
-      syncObserver_.reset();
+      _syncObserver.reset();
       [self clearFieldsOnError:l10n_util::GetNSString(
                                    IDS_IOS_SYNC_INCORRECT_PASSPHRASE)];
       [self hideDecryptionProgress];
     }
   } else {
-    service->GetUserSettings()->EnableEncryptEverything();
     service->GetUserSettings()->SetEncryptionPassphrase(passphrase);
   }
   [self reloadData];
 }
 
 // Sets up the navigation bar's right button. The button will be enabled iff
-// |-areAllFieldsFilled| returns YES.
+// `-areAllFieldsFilled` returns YES.
 - (void)setRightNavBarItem {
   UIBarButtonItem* submitButtonItem = self.navigationItem.rightBarButtonItem;
   if (!submitButtonItem) {
@@ -333,32 +367,32 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 // Shows the UI to indicate the decryption is being attempted.
 - (void)showDecryptionProgress {
-  if (isDecryptionProgressShown_)
+  if (_isDecryptionProgressShown)
     return;
-  isDecryptionProgressShown_ = YES;
+  _isDecryptionProgressShown = YES;
 
   // Hide the button.
   self.navigationItem.rightBarButtonItem = nil;
 
   // Custom title view with spinner.
-  DCHECK(!savedTitle_);
-  DCHECK(!savedLeftButton_);
-  savedLeftButton_ = self.navigationItem.leftBarButtonItem;
+  DCHECK(!_savedTitle);
+  DCHECK(!_savedLeftButton);
+  _savedLeftButton = self.navigationItem.leftBarButtonItem;
   self.navigationItem.leftBarButtonItem = [self spinnerButton];
-  savedTitle_ = [self.title copy];
+  _savedTitle = [self.title copy];
   self.title = self.processingMessage;
 }
 
 // Hides the UI to indicate decryption is in process.
 - (void)hideDecryptionProgress {
-  if (!isDecryptionProgressShown_)
+  if (!_isDecryptionProgressShown)
     return;
-  isDecryptionProgressShown_ = NO;
+  _isDecryptionProgressShown = NO;
 
-  self.navigationItem.leftBarButtonItem = savedLeftButton_;
-  savedLeftButton_ = nil;
-  self.title = savedTitle_;
-  savedTitle_ = nil;
+  self.navigationItem.leftBarButtonItem = _savedLeftButton;
+  _savedLeftButton = nil;
+  self.title = _savedTitle;
+  _savedTitle = nil;
   [self setRightNavBarItem];
 }
 
@@ -392,8 +426,7 @@ const CGFloat kSpinnerButtonPadding = 18;
                                       kSpinnerButtonCustomViewSize);
   UIView* customView = [[UIView alloc] initWithFrame:customViewFrame];
 
-  UIActivityIndicatorView* spinner = [[UIActivityIndicatorView alloc]
-      initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+  UIActivityIndicatorView* spinner = GetMediumUIActivityIndicatorView();
 
   CGRect spinnerFrame = [spinner bounds];
   spinnerFrame.origin.x = kSpinnerButtonPadding;
@@ -414,8 +447,8 @@ const CGFloat kSpinnerButtonPadding = 18;
   // Stops observing the sync service. This is required during the shutdown
   // phase to avoid observing sync events for a browser state that is being
   // killed.
-  syncObserver_.reset();
-  identityManagerObserver_.reset();
+  _syncObserver.reset();
+  _identityManagerObserver.reset();
 }
 
 #pragma mark - UIControl events listener
@@ -456,8 +489,9 @@ const CGFloat kSpinnerButtonPadding = 18;
 #pragma mark - SyncObserverModelBridge
 
 - (void)onSyncStateChanged {
+  ChromeBrowserState* browserState = self.browser->GetBrowserState();
   syncer::SyncService* service =
-      ProfileSyncServiceFactory::GetForBrowserState(browserState_);
+      SyncServiceFactory::GetForBrowserState(browserState);
 
   if (!service->IsEngineInitialized()) {
     return;
@@ -465,12 +499,23 @@ const CGFloat kSpinnerButtonPadding = 18;
 
   // Checking if the operation succeeded.
   if (!service->GetUserSettings()->IsPassphraseRequired() &&
-      (service->GetUserSettings()->IsUsingSecondaryPassphrase() ||
+      (service->GetUserSettings()->IsUsingExplicitPassphrase() ||
        [self forDecryption])) {
-    syncObserver_.reset();
-    [base::mac::ObjCCastStrict<SettingsNavigationController>(
-        self.navigationController)
-        popViewControllerOrCloseSettingsAnimated:YES];
+    _syncObserver.reset();
+    SettingsNavigationController* settingsNavigationController =
+        base::mac::ObjCCast<SettingsNavigationController>(
+            self.navigationController);
+    // During the sign-in flow it is possible for the Sync state to
+    // change when the user is in the Advanced Settings (e.g., if the user
+    // confirms a Sync passphrase). Because these navigation controllers are
+    // not directly related to Settings, we check the type before dismissal.
+    // TODO(crbug.com/1151287): Revisit with Advanced Sync Settings changes.
+    if (settingsNavigationController) {
+      [settingsNavigationController
+          popViewControllerOrCloseSettingsAnimated:YES];
+    } else {
+      [self.navigationController popViewControllerAnimated:YES];
+    }
     return;
   }
 
@@ -486,8 +531,9 @@ const CGFloat kSpinnerButtonPadding = 18;
 #pragma mark - IdentityManagerObserverBridgeDelegate
 
 - (void)onEndBatchOfRefreshTokenStateChanges {
-  if (AuthenticationServiceFactory::GetForBrowserState(browserState_)
-          ->IsAuthenticated()) {
+  ChromeBrowserState* browserState = self.browser->GetBrowserState();
+  if (AuthenticationServiceFactory::GetForBrowserState(browserState)
+          ->HasPrimaryIdentity(signin::ConsentLevel::kSignin)) {
     return;
   }
   [base::mac::ObjCCastStrict<SettingsNavigationController>(
@@ -496,8 +542,27 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 #pragma mark - SettingsControllerProtocol callbacks
 
+- (void)reportDismissalUserAction {
+  // Sync Passphrase Settings screen can be closed when being presented from
+  // an infobar.
+  base::RecordAction(
+      base::UserMetricsAction("MobileSyncPassphraseSettingsClose"));
+}
+
+- (void)reportBackUserAction {
+  NOTREACHED();
+}
+
 - (void)settingsWillBeDismissed {
   [self stopObserving];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  base::RecordAction(base::UserMetricsAction(
+      "IOSSyncEncryptionPassphraseSettingsCloseWithSwipe"));
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,6 @@
 #define IOS_CHROME_BROWSER_UI_SETTINGS_CELLS_SETTINGS_CELLS_CONSTANTS_H_
 
 #import <UIKit/UIKit.h>
-
-// The color of the detail text for the settings cells.
-extern const int kSettingsCellsDetailTextColor;
-
-// The color of the URL text for the settings cells.
-extern const int kSettingsCellsURLTextColor;
 
 // Default height for the settings cells.
 extern const CGFloat kSettingsCellDefaultHeight;

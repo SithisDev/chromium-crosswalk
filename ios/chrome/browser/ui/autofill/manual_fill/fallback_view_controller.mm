@@ -1,18 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/autofill/manual_fill/fallback_view_controller.h"
 
-#include "base/ios/ios_util.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/action_cell.h"
+#import "base/ios/ios_util.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_action_cell.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/device_form_factor.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -25,19 +24,25 @@ typedef NS_ENUM(NSInteger, SectionIdentifier) {
 
 namespace {
 
-// This is the width used for |self.preferredContentSize|.
+// This is the width used for `self.preferredContentSize`.
 constexpr CGFloat PopoverPreferredWidth = 320;
 
-// This is the maximum height used for |self.preferredContentSize|.
+// This is the maximum height used for `self.preferredContentSize`.
 constexpr CGFloat PopoverMaxHeight = 360;
 
-// This is the height used for |self.preferredContentSize| when showing the
+// This is the height used for `self.preferredContentSize` when showing the
 // loading indicator on iPad.
 constexpr CGFloat PopoverLoadingHeight = 185.5;
 
 // If the loading indicator was shown, it will be on screen for at least this
 // amount of seconds.
 constexpr CGFloat kMinimumLoadingTime = 0.5;
+
+// Height of the section header.
+constexpr CGFloat kSectionHeaderHeight = 6;
+
+// Height of the section footer.
+constexpr CGFloat kSectionFooterHeight = 8;
 
 }  // namespace
 
@@ -58,42 +63,29 @@ constexpr CGFloat kMinimumLoadingTime = 0.5;
 @implementation FallbackViewController
 
 - (instancetype)init {
-  self = [super initWithTableViewStyle:UITableViewStylePlain
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:UITableViewStylePlain];
   if (self) {
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(handleKeyboardWillShow:)
-               name:UIKeyboardWillShowNotification
-             object:nil];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(handleKeyboardDidHide:)
-               name:UIKeyboardDidHideNotification
-             object:nil];
     _loadingIndicatorStartingDate = [NSDate distantPast];
   }
   return self;
 }
 
 - (void)viewDidLoad {
-  // Super's |viewDidLoad| uses |styler.tableViewBackgroundColor| so it needs to
+  // Super's `viewDidLoad` uses `styler.tableViewBackgroundColor` so it needs to
   // be set before.
-  self.styler.tableViewBackgroundColor = UIColor.cr_systemBackgroundColor;
+  self.styler.tableViewBackgroundColor = [UIColor colorNamed:kBackgroundColor];
 
   [super viewDidLoad];
 
-  self.view.tintColor = [UIColor colorNamed:kTintColor];
-
   self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-  self.tableView.sectionHeaderHeight = 0;
-  self.tableView.sectionFooterHeight = 20.0;
+  self.tableView.sectionHeaderHeight = kSectionHeaderHeight;
+  self.tableView.sectionFooterHeight = kSectionFooterHeight;
   self.tableView.estimatedRowHeight = 1;
   self.tableView.separatorInset = UIEdgeInsetsMake(0, 0, 0, 0);
   self.tableView.allowsSelection = NO;
   self.definesPresentationContext = YES;
   if (!self.tableViewModel) {
-    if (IsIPadIdiom()) {
+    if (self.popoverPresentationController) {
       self.preferredContentSize = CGSizeMake(
           PopoverPreferredWidth, AlignValueToPixel(PopoverLoadingHeight));
     }
@@ -200,30 +192,7 @@ constexpr CGFloat kMinimumLoadingTime = 0.5;
   }
 }
 
-- (void)handleKeyboardDidHide:(NSNotification*)notification {
-  if (self.contentInsetsAlwaysEqualToSafeArea && !IsIPadIdiom()) {
-    // Resets the table view content inssets to be equal to the safe area
-    // insets.
-    self.tableView.contentInset = UIEdgeInsetsZero;
-  }
-}
-
-- (void)handleKeyboardWillShow:(NSNotification*)notification {
-  if (self.contentInsetsAlwaysEqualToSafeArea && !IsIPadIdiom()) {
-    // Sets the bottom inset to be equal to the height of the keyboard to
-    // override the behaviour in UITableViewController. Which adjust the scroll
-    // view insets to accommodate for the keyboard.
-    CGRect keyboardFrame =
-        [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    CGFloat keyboardHeight = keyboardFrame.size.height;
-    UIEdgeInsets safeInsets = self.view.safeAreaInsets;
-    // |contentInset| already contemplates the safe area.
-    self.tableView.contentInset =
-        UIEdgeInsetsMake(0, 0, safeInsets.bottom - keyboardHeight, 0);
-  }
-}
-
-// Presents |items| in the respective section. Handles creating or deleting the
+// Presents `items` in the respective section. Handles creating or deleting the
 // section accordingly.
 - (void)presentFallbackItems:(NSArray<TableViewItem*>*)items
                    inSection:(SectionIdentifier)sectionIdentifier {
@@ -237,7 +206,7 @@ constexpr CGFloat kMinimumLoadingTime = 0.5;
     }
   }
   [self.tableView reloadData];
-  if (IsIPadIdiom()) {
+  if (self.popoverPresentationController) {
     // Update the preffered content size on iPad so the popover shows the right
     // size.
     [self.tableView layoutIfNeeded];

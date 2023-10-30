@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,9 +11,7 @@ source_set("list_model") {
     "list_model.h",
     "list_model.mm",
   ]
-  deps = [
-    "//base",
-  ]
+  deps = [ "//base" ]
 }
 
 source_set("unit_tests") {
@@ -28,7 +26,6 @@ source_set("unit_tests") {
     ":list_model",
     "//base",
     "//ios/chrome/test:test_support",
-    "//ios/chrome/test/base",
     "//testing/gtest",
   ]
 }

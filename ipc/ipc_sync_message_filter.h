@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,13 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/ipc_sync_message.h"
 #include "ipc/message_filter.h"
-#include "mojo/public/cpp/bindings/associated_interface_ptr.h"
-#include "mojo/public/cpp/bindings/associated_interface_request.h"
+#include "mojo/public/cpp/bindings/generic_pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 
 namespace base {
@@ -35,6 +34,9 @@ class SyncChannel;
 class COMPONENT_EXPORT(IPC) SyncMessageFilter : public MessageFilter,
                                                 public Sender {
  public:
+  SyncMessageFilter(const SyncMessageFilter&) = delete;
+  SyncMessageFilter& operator=(const SyncMessageFilter&) = delete;
+
   // Sender implementation.
   bool Send(Message* message) override;
 
@@ -50,11 +52,13 @@ class COMPONENT_EXPORT(IPC) SyncMessageFilter : public MessageFilter,
   //
   // NOTE: This must ONLY be called on the Channel's thread, after
   // OnFilterAdded.
+  void GetRemoteAssociatedInterface(
+      mojo::GenericPendingAssociatedReceiver receiver);
+
   template <typename Interface>
   void GetRemoteAssociatedInterface(
-      mojo::AssociatedInterfacePtr<Interface>* proxy) {
-    auto request = mojo::MakeRequest(proxy);
-    GetGenericRemoteAssociatedInterface(Interface::Name_, request.PassHandle());
+      mojo::PendingAssociatedRemote<Interface>* proxy) {
+    GetRemoteAssociatedInterface(proxy->InitWithNewEndpointAndPassReceiver());
   }
 
  protected:
@@ -68,13 +72,8 @@ class COMPONENT_EXPORT(IPC) SyncMessageFilter : public MessageFilter,
   // Signal all the pending sends as done, used in an error condition.
   void SignalAllEvents();
 
-  // NOTE: This must ONLY be called on the Channel's thread.
-  void GetGenericRemoteAssociatedInterface(
-      const std::string& interface_name,
-      mojo::ScopedInterfaceEndpointHandle handle);
-
   // The channel to which this filter was added.
-  Channel* channel_;
+  raw_ptr<Channel> channel_;
 
   // The process's main thread.
   scoped_refptr<base::SingleThreadTaskRunner> listener_task_runner_;
@@ -91,9 +90,7 @@ class COMPONENT_EXPORT(IPC) SyncMessageFilter : public MessageFilter,
   // Locks data members above.
   base::Lock lock_;
 
-  base::WaitableEvent* const shutdown_event_;
-
-  DISALLOW_COPY_AND_ASSIGN(SyncMessageFilter);
+  const raw_ptr<base::WaitableEvent> shutdown_event_;
 };
 
 }  // namespace IPC

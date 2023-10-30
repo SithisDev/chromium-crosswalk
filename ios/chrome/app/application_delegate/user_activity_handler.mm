@@ -1,39 +1,46 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/app/application_delegate/user_activity_handler.h"
 
 #import <CoreSpotlight/CoreSpotlight.h>
+#import <Intents/Intents.h>
 #import <UIKit/UIKit.h>
 
-#include "base/ios/block_types.h"
-#include "base/mac/foundation_util.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/metrics/user_metrics_action.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/handoff/handoff_utility.h"
-#include "components/search_engines/template_url_service.h"
+#import "base/ios/block_types.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_macros.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/handoff/handoff_utility.h"
+#import "components/search_engines/template_url_service.h"
 #import "ios/chrome/app/app_startup_parameters.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
 #import "ios/chrome/app/application_delegate/tab_opening.h"
-#include "ios/chrome/app/application_mode.h"
+#import "ios/chrome/app/application_mode.h"
 #import "ios/chrome/app/spotlight/actions_spotlight_manager.h"
 #import "ios/chrome/app/spotlight/spotlight_util.h"
-#include "ios/chrome/app/startup/chrome_app_startup_parameters.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/metrics/first_user_action_recorder.h"
-#include "ios/chrome/browser/search_engines/template_url_service_factory.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
-#import "ios/chrome/browser/u2f/u2f_tab_helper.h"
+#import "ios/chrome/app/startup/chrome_app_startup_parameters.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/main/browser_list.h"
+#import "ios/chrome/browser/main/browser_list_factory.h"
+#import "ios/chrome/browser/metrics/first_user_action_recorder.h"
+#import "ios/chrome/browser/policy/policy_util.h"
+#import "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #import "ios/chrome/browser/ui/main/browser_interface_provider.h"
+#import "ios/chrome/browser/ui/main/connection_information.h"
 #import "ios/chrome/browser/url_loading/image_search_param_generator.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
-#import "ios/chrome/browser/web/tab_id_tab_helper.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/common/intents/OpenInChromeIncognitoIntent.h"
+#import "ios/chrome/common/intents/OpenInChromeIntent.h"
+#import "ios/chrome/common/intents/SearchInChromeIntent.h"
 #import "net/base/mac/url_conversions.h"
-#include "ui/base/page_transition_types.h"
-#include "url/gurl.h"
+#import "ui/base/page_transition_types.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -43,20 +50,54 @@ using base::UserMetricsAction;
 
 namespace {
 // Constants for 3D touch application static shortcuts.
-NSString* const kShortcutNewTab = @"OpenNewTab";
-NSString* const kShortcutNewIncognitoTab = @"OpenIncognitoTab";
+NSString* const kShortcutNewSearch = @"OpenNewSearch";
+NSString* const kShortcutNewIncognitoSearch = @"OpenIncognitoSearch";
 NSString* const kShortcutVoiceSearch = @"OpenVoiceSearch";
 NSString* const kShortcutQRScanner = @"OpenQRScanner";
+
+// Constants for Siri shortcut.
+NSString* const kSiriShortcutOpenInChrome = @"OpenInChromeIntent";
+NSString* const kSiriShortcutSearchInChrome = @"SearchInChromeIntent";
+NSString* const kSiriShortcutOpenInIncognito = @"OpenInChromeIncognitoIntent";
+
+// Constants for compatible mode for user activities.
+NSString* const kRegularMode = @"RegularMode";
+NSString* const kIncognitoMode = @"IncognitoMode";
+
+std::vector<GURL> createGURLVectorFromIntentURLs(NSArray<NSURL*>* intentURLs) {
+  std::vector<GURL> URLs;
+  for (NSURL* URL in intentURLs) {
+    URLs.push_back(net::GURLWithNSURL(URL));
+  }
+  return URLs;
+}
+
+// Returns the compatible mode array for an user activity.
+NSArray* CompatibleModeForActivityType(NSString* activityType) {
+  if ([activityType isEqualToString:CSSearchableItemActionType] ||
+      [activityType isEqualToString:kShortcutNewSearch] ||
+      [activityType isEqualToString:kShortcutVoiceSearch] ||
+      [activityType isEqualToString:kShortcutQRScanner] ||
+      [activityType isEqualToString:kSiriShortcutSearchInChrome]) {
+    return @[ kRegularMode, kIncognitoMode ];
+  } else if ([activityType isEqualToString:kSiriShortcutOpenInChrome]) {
+    return @[ kRegularMode ];
+  } else if ([activityType isEqualToString:kShortcutNewIncognitoSearch] ||
+             [activityType isEqualToString:kSiriShortcutOpenInIncognito]) {
+    return @[ kIncognitoMode ];
+  } else {
+    NOTREACHED();
+  }
+  return nil;
+}
 
 }  // namespace
 
 @interface UserActivityHandler ()
 // Handles the 3D touch application static items. Does nothing if in first run.
 + (BOOL)handleShortcutItem:(UIApplicationShortcutItem*)shortcutItem
-        startupInformation:(id<StartupInformation>)startupInformation;
-// Routes Universal 2nd Factor (U2F) callback to the correct Tab.
-+ (void)routeU2FURL:(const GURL&)URL
-    interfaceProvider:(id<BrowserInterfaceProvider>)interfaceProvider;
+     connectionInformation:(id<ConnectionInformation>)connectionInformation
+                 initStage:(InitStage)initStage;
 @end
 
 @implementation UserActivityHandler
@@ -66,34 +107,22 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
 + (BOOL)continueUserActivity:(NSUserActivity*)userActivity
          applicationIsActive:(BOOL)applicationIsActive
                    tabOpener:(id<TabOpening>)tabOpener
-          startupInformation:(id<StartupInformation>)startupInformation {
+       connectionInformation:(id<ConnectionInformation>)connectionInformation
+          startupInformation:(id<StartupInformation>)startupInformation
+                browserState:(ChromeBrowserState*)browserState
+                   initStage:(InitStage)initStage {
   NSURL* webpageURL = userActivity.webpageURL;
 
   if ([userActivity.activityType
-          isEqualToString:handoff::kChromeHandoffActivityType]) {
+          isEqualToString:handoff::kChromeHandoffActivityType] ||
+      [userActivity.activityType
+          isEqualToString:NSUserActivityTypeBrowsingWeb]) {
     // App was launched by iOS as a result of Handoff.
     NSString* originString = base::mac::ObjCCast<NSString>(
         userActivity.userInfo[handoff::kOriginKey]);
     handoff::Origin origin = handoff::OriginFromString(originString);
     UMA_HISTOGRAM_ENUMERATION("IOS.Handoff.Origin", origin,
                               handoff::ORIGIN_COUNT);
-  } else if ([userActivity.activityType
-                 isEqualToString:NSUserActivityTypeBrowsingWeb]) {
-    // App was launched as the result of a Universal Link navigation.
-    GURL gurl = net::GURLWithNSURL(webpageURL);
-    AppStartupParameters* startupParams =
-        [[AppStartupParameters alloc] initWithUniversalLink:gurl];
-    [startupInformation setStartupParameters:startupParams];
-    base::RecordAction(base::UserMetricsAction("IOSLaunchedByUniversalLink"));
-
-    if (startupParams)
-      webpageURL = net::NSURLWithGURL([startupParams externalURL]);
-
-    // Don't call continueUserActivityURL if the completePaymentRequest flag
-    // is set since the startup parameters need to be handled in
-    // -handleStartupParametersWithTabOpener:
-    if (startupParams && startupParams.completePaymentRequest)
-      return YES;
   } else if (spotlight::IsSpotlightAvailable() &&
              [userActivity.activityType
                  isEqualToString:CSSearchableItemActionType]) {
@@ -113,13 +142,14 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
           [NSURL URLWithString:base::SysUTF8ToNSString(kChromeUINewTabURL)];
       AppStartupParameters* startupParams = [[AppStartupParameters alloc]
           initWithExternalURL:GURL(kChromeUINewTabURL)
-                  completeURL:GURL(kChromeUINewTabURL)];
+                  completeURL:GURL(kChromeUINewTabURL)
+              applicationMode:ApplicationModeForTabOpening::UNDETERMINED];
       BOOL startupParamsSet = spotlight::SetStartupParametersForSpotlightAction(
           itemID, startupParams);
       if (!startupParamsSet) {
         return NO;
       }
-      [startupInformation setStartupParameters:startupParams];
+      [connectionInformation setStartupParameters:startupParams];
     } else if (!webpageURL) {
       spotlight::GetURLForSpotlightItemID(itemID, ^(NSURL* contentURL) {
         if (!contentURL) {
@@ -133,20 +163,118 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
           [self continueUserActivityURL:contentURL
                     applicationIsActive:isActive
                               tabOpener:tabOpener
-                     startupInformation:startupInformation];
+                  connectionInformation:connectionInformation
+                     startupInformation:startupInformation
+                           browserState:browserState
+                              initStage:initStage];
         });
       });
       return YES;
     }
   } else if ([userActivity.activityType
-                 isEqualToString:@"SearchInChromeIntent"]) {
+                 isEqualToString:kSiriShortcutSearchInChrome]) {
     base::RecordAction(UserMetricsAction("IOSLaunchedBySearchInChromeIntent"));
+
     AppStartupParameters* startupParams = [[AppStartupParameters alloc]
         initWithExternalURL:GURL(kChromeUINewTabURL)
-                completeURL:GURL(kChromeUINewTabURL)];
-    [startupParams setPostOpeningAction:FOCUS_OMNIBOX];
-    [startupInformation setStartupParameters:startupParams];
-    return YES;
+                completeURL:GURL(kChromeUINewTabURL)
+            applicationMode:ApplicationModeForTabOpening::NORMAL];
+
+    if (IsIncognitoModeForced(browserState->GetPrefs())) {
+      // Set incognito mode to yes if only incognito mode is available.
+      startupParams.applicationMode = ApplicationModeForTabOpening::INCOGNITO;
+    }
+
+    SearchInChromeIntent* intent =
+        base::mac::ObjCCastStrict<SearchInChromeIntent>(
+            userActivity.interaction.intent);
+
+    if (!intent) {
+      return NO;
+    }
+
+    id searchPhrase = [intent valueForKey:@"searchPhrase"];
+
+    if ([searchPhrase isKindOfClass:[NSString class]] &&
+        [searchPhrase
+            stringByTrimmingCharactersInSet:[NSCharacterSet
+                                                whitespaceCharacterSet]]
+                .length > 0) {
+      startupParams.textQuery = searchPhrase;
+    } else {
+      startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    }
+
+    [connectionInformation setStartupParameters:startupParams];
+    webpageURL =
+        [NSURL URLWithString:base::SysUTF8ToNSString(kChromeUINewTabURL)];
+
+  } else if ([userActivity.activityType
+                 isEqualToString:kSiriShortcutOpenInChrome]) {
+    base::RecordAction(UserMetricsAction("IOSLaunchedByOpenInChromeIntent"));
+    OpenInChromeIntent* intent = base::mac::ObjCCastStrict<OpenInChromeIntent>(
+        userActivity.interaction.intent);
+
+    if (!intent.url) {
+      return NO;
+    }
+
+    std::vector<GURL> URLs;
+
+    if ([intent.url isKindOfClass:[NSURL class]]) {
+      // Old intent version where `url` is of type NSURL rather than an array.
+      GURL webpageGURL(
+          net::GURLWithNSURL(base::mac::ObjCCastStrict<NSURL>(intent.url)));
+      if (!webpageGURL.is_valid())
+        return NO;
+      URLs.push_back(webpageGURL);
+    } else if ([intent.url isKindOfClass:[NSArray class]] &&
+               intent.url.count > 0) {
+      URLs = createGURLVectorFromIntentURLs(intent.url);
+    } else {
+      // Unknown or invalid intent object.
+      return NO;
+    }
+
+    AppStartupParameters* startupParams = [[AppStartupParameters alloc]
+           initWithURLs:URLs
+        applicationMode:ApplicationModeForTabOpening::NORMAL];
+
+    [connectionInformation setStartupParameters:startupParams];
+    return [self continueUserActivityURLs:URLs
+                      applicationIsActive:applicationIsActive
+                                tabOpener:tabOpener
+                    connectionInformation:connectionInformation
+                       startupInformation:startupInformation
+                                Incognito:NO
+                                initStage:initStage];
+
+  } else if ([userActivity.activityType
+                 isEqualToString:kSiriShortcutOpenInIncognito]) {
+    base::RecordAction(UserMetricsAction("IOSLaunchedByOpenInIncognitoIntent"));
+    OpenInChromeIncognitoIntent* intent =
+        base::mac::ObjCCastStrict<OpenInChromeIncognitoIntent>(
+            userActivity.interaction.intent);
+
+    if (!intent.url || intent.url.count == 0) {
+      return NO;
+    }
+
+    std::vector<GURL> URLs = createGURLVectorFromIntentURLs(intent.url);
+
+    AppStartupParameters* startupParams = [[AppStartupParameters alloc]
+           initWithURLs:URLs
+        applicationMode:ApplicationModeForTabOpening::INCOGNITO];
+
+    [connectionInformation setStartupParameters:startupParams];
+    return [self continueUserActivityURLs:URLs
+                      applicationIsActive:applicationIsActive
+                                tabOpener:tabOpener
+                    connectionInformation:connectionInformation
+                       startupInformation:startupInformation
+                                Incognito:YES
+                                initStage:initStage];
+
   } else {
     // Do nothing for unknown activity type.
     return NO;
@@ -155,13 +283,19 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   return [self continueUserActivityURL:webpageURL
                    applicationIsActive:applicationIsActive
                              tabOpener:tabOpener
-                    startupInformation:startupInformation];
+                 connectionInformation:connectionInformation
+                    startupInformation:startupInformation
+                          browserState:browserState
+                             initStage:initStage];
 }
 
 + (BOOL)continueUserActivityURL:(NSURL*)webpageURL
             applicationIsActive:(BOOL)applicationIsActive
                       tabOpener:(id<TabOpening>)tabOpener
-             startupInformation:(id<StartupInformation>)startupInformation {
+          connectionInformation:(id<ConnectionInformation>)connectionInformation
+             startupInformation:(id<StartupInformation>)startupInformation
+                   browserState:(ChromeBrowserState*)browserState
+                      initStage:(InitStage)initStage {
   if (!webpageURL)
     return NO;
 
@@ -169,21 +303,33 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   if (!webpageGURL.is_valid())
     return NO;
 
-  if (applicationIsActive && ![startupInformation isPresentingFirstRunUI]) {
+  if (applicationIsActive && initStage > InitStageFirstRun) {
     // The app is already active so the applicationDidBecomeActive: method will
     // never be called. Open the requested URL immediately.
     ApplicationModeForTabOpening targetMode =
-        [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationModeForTabOpening::INCOGNITO
-            : ApplicationModeForTabOpening::NORMAL;
+        [[connectionInformation startupParameters] applicationMode];
     UrlLoadParams params = UrlLoadParams::InNewTab(webpageGURL);
-    [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
-                                   withUrlLoadParams:params
-                                      dismissOmnibox:YES
-                                          completion:^{
-                                            [startupInformation
-                                                setStartupParameters:nil];
-                                          }];
+
+    if (connectionInformation.startupParameters.textQuery) {
+      NSString* query = connectionInformation.startupParameters.textQuery;
+
+      GURL result = [self generateResultGURLFromSearchQuery:query
+                                               browserState:browserState];
+      params.web_params.url = result;
+    }
+
+    if ([[connectionInformation startupParameters] applicationMode] !=
+            ApplicationModeForTabOpening::INCOGNITO &&
+        [tabOpener URLIsOpenedInRegularMode:webpageGURL]) {
+      // Record metric.
+    }
+    [tabOpener dismissModalsAndMaybeOpenSelectedTabInMode:targetMode
+                                        withUrlLoadParams:params
+                                           dismissOmnibox:YES
+                                               completion:^{
+                                                 [connectionInformation
+                                                     setStartupParameters:nil];
+                                               }];
     return YES;
   }
 
@@ -191,11 +337,75 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   // initiated by the user.
   [startupInformation resetFirstUserActionRecorder];
 
-  if (![startupInformation startupParameters]) {
-    AppStartupParameters* startupParams =
-        [[AppStartupParameters alloc] initWithExternalURL:webpageGURL
-                                              completeURL:webpageGURL];
-    [startupInformation setStartupParameters:startupParams];
+  if (![connectionInformation startupParameters]) {
+    AppStartupParameters* startupParams = [[AppStartupParameters alloc]
+        initWithExternalURL:webpageGURL
+                completeURL:webpageGURL
+            applicationMode:ApplicationModeForTabOpening::NORMAL];
+    [connectionInformation setStartupParameters:startupParams];
+  }
+  return YES;
+}
+
++ (void)openMultipleTabsWithConnectionInformation:
+            (id<ConnectionInformation>)connectionInformation
+                                        tabOpener:(id<TabOpening>)tabOpener {
+  BOOL incognitoMode =
+      connectionInformation.startupParameters.applicationMode ==
+      ApplicationModeForTabOpening::INCOGNITO;
+  BOOL dismissOmnibox = [[connectionInformation startupParameters]
+                            postOpeningAction] != FOCUS_OMNIBOX;
+
+  // Using a weak reference to `connectionInformation` to solve a memory leak
+  // issue. `tabOpener` and `connectionInformation` are the same object in
+  // some cases (SceneController). This retains the object while the block
+  // exists. Then this block is passed around and in some cases it ends up
+  // stored in BrowserViewController. This results in a memory leak that looks
+  // like this: SceneController -> BrowserViewWrangler -> BrowserCoordinator
+  // -> BrowserViewController -> SceneController
+  __weak id<ConnectionInformation> weakConnectionInfo = connectionInformation;
+
+  [tabOpener
+      dismissModalsAndOpenMultipleTabsWithURLs:weakConnectionInfo
+                                                   .startupParameters.URLs
+                               inIncognitoMode:incognitoMode
+                                dismissOmnibox:dismissOmnibox
+                                    completion:^{
+                                      weakConnectionInfo.startupParameters =
+                                          nil;
+                                    }];
+}
+
++ (BOOL)continueUserActivityURLs:(const std::vector<GURL>&)webpageURLs
+             applicationIsActive:(BOOL)applicationIsActive
+                       tabOpener:(id<TabOpening>)tabOpener
+           connectionInformation:
+               (id<ConnectionInformation>)connectionInformation
+              startupInformation:(id<StartupInformation>)startupInformation
+                       Incognito:(BOOL)Incognito
+                       initStage:(InitStage)initStage
+
+{
+  if (applicationIsActive && initStage > InitStageFirstRun) {
+    // The app is already active so the applicationDidBecomeActive: method will
+    // never be called. Open the requested URLs immediately.
+    [self openMultipleTabsWithConnectionInformation:connectionInformation
+                                          tabOpener:tabOpener];
+    return YES;
+  }
+
+  // Don't record the first action as a user action, since it will not be
+  // initiated by the user.
+  [startupInformation resetFirstUserActionRecorder];
+
+  if (![connectionInformation startupParameters]) {
+    AppStartupParameters* startupParams = [[AppStartupParameters alloc]
+           initWithURLs:webpageURLs
+        applicationMode:ApplicationModeForTabOpening::UNDETERMINED];
+    if (Incognito) {
+      startupParams.applicationMode = ApplicationModeForTabOpening::INCOGNITO;
+    }
+    [connectionInformation setStartupParameters:startupParams];
   }
   return YES;
 }
@@ -203,19 +413,30 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
 + (void)performActionForShortcutItem:(UIApplicationShortcutItem*)shortcutItem
                    completionHandler:(void (^)(BOOL succeeded))completionHandler
                            tabOpener:(id<TabOpening>)tabOpener
+               connectionInformation:
+                   (id<ConnectionInformation>)connectionInformation
                   startupInformation:(id<StartupInformation>)startupInformation
                    interfaceProvider:
-                       (id<BrowserInterfaceProvider>)interfaceProvider {
+                       (id<BrowserInterfaceProvider>)interfaceProvider
+                           initStage:(InitStage)initStage {
   BOOL handledShortcutItem =
       [UserActivityHandler handleShortcutItem:shortcutItem
-                           startupInformation:startupInformation];
-  if (handledShortcutItem) {
+                        connectionInformation:connectionInformation
+                                    initStage:initStage];
+  BOOL isActive = [[UIApplication sharedApplication] applicationState] ==
+                  UIApplicationStateActive;
+  if (handledShortcutItem && isActive) {
     [UserActivityHandler
         handleStartupParametersWithTabOpener:tabOpener
+                       connectionInformation:connectionInformation
                           startupInformation:startupInformation
-                           interfaceProvider:interfaceProvider];
+                                browserState:interfaceProvider.currentInterface
+                                                 .browserState
+                                   initStage:initStage];
   }
-  completionHandler(handledShortcutItem);
+  if (completionHandler) {
+    completionHandler(handledShortcutItem);
+  }
 }
 
 + (BOOL)willContinueUserActivityWithType:(NSString*)userActivityType {
@@ -225,170 +446,183 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
        [userActivityType isEqualToString:CSSearchableItemActionType]);
 }
 
++ (GURL)generateResultGURLFromSearchQuery:(NSString*)searchQuery
+                             browserState:(ChromeBrowserState*)browserState {
+  TemplateURLService* templateURLService =
+      ios::TemplateURLServiceFactory::GetForBrowserState(browserState);
+
+  const TemplateURL* defaultURL =
+      templateURLService->GetDefaultSearchProvider();
+  DCHECK(!defaultURL->url().empty());
+  DCHECK(
+      defaultURL->url_ref().IsValid(templateURLService->search_terms_data()));
+  std::u16string queryString = base::SysNSStringToUTF16(searchQuery);
+  TemplateURLRef::SearchTermsArgs search_args(queryString);
+
+  GURL result(defaultURL->url_ref().ReplaceSearchTerms(
+      search_args, templateURLService->search_terms_data()));
+
+  return result;
+}
+
 + (void)handleStartupParametersWithTabOpener:(id<TabOpening>)tabOpener
+                       connectionInformation:
+                           (id<ConnectionInformation>)connectionInformation
                           startupInformation:
                               (id<StartupInformation>)startupInformation
-                           interfaceProvider:
-                               (id<BrowserInterfaceProvider>)interfaceProvider {
-  DCHECK([startupInformation startupParameters]);
+                                browserState:(ChromeBrowserState*)browserState
+                                   initStage:(InitStage)initStage {
   // Do not load the external URL if the user has not accepted the terms of
   // service. This corresponds to the case when the user installed Chrome,
   // has never launched it and attempts to open an external URL in Chrome.
-  if ([startupInformation isPresentingFirstRunUI])
+  if (initStage <= InitStageFirstRun) {
     return;
-
-  GURL externalURL = startupInformation.startupParameters.externalURL;
-  // Check if it's an U2F call. If so, route it to correct tab.
-  // If not, open or reuse tab in main BVC.
-  if (U2FTabHelper::IsU2FUrl(externalURL)) {
-    [UserActivityHandler routeU2FURL:externalURL
-                   interfaceProvider:interfaceProvider];
-    // It's OK to clear startup parameters here because routeU2FURL works
-    // synchronously.
-    [startupInformation setStartupParameters:nil];
-  } else {
-    // Depending on the startup parameters the user may need to stay on the
-    // current tab rather than open a new one in order to complete a Payment
-    // Request. This attempts to complete any Payment Request instances on
-    // the current tab, and returns if successful.
-    if ([tabOpener shouldCompletePaymentRequestOnCurrentTab:startupInformation])
-      return;
-
-    // TODO(crbug.com/935019): Exacly the same copy of this code is present in
-    // +[URLOpener
-    // openURL:applicationActive:options:tabOpener:startupInformation:]
-
-    // The app is already active so the applicationDidBecomeActive: method
-    // will never be called. Open the requested URL after all modal UIs have
-    // been dismissed. |_startupParameters| must be retained until all deferred
-    // modal UIs are dismissed and tab opened with requested URL.
-    ApplicationModeForTabOpening targetMode =
-        [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationModeForTabOpening::INCOGNITO
-            : ApplicationModeForTabOpening::NORMAL;
-    GURL URL;
-    GURL virtualURL;
-    GURL completeURL = startupInformation.startupParameters.completeURL;
-    if (completeURL.SchemeIsFile()) {
-      // External URL will be loaded by WebState, which expects |completeURL|.
-      // Omnibox however suppose to display |externalURL|, which is used as
-      // virtual URL.
-      URL = completeURL;
-      virtualURL = externalURL;
-    } else {
-      URL = externalURL;
-    }
-    UrlLoadParams params = UrlLoadParams::InNewTab(URL, virtualURL);
-
-    if (startupInformation.startupParameters.imageSearchData) {
-      TemplateURLService* templateURLService =
-          ios::TemplateURLServiceFactory::GetForBrowserState(
-              interfaceProvider.mainInterface.browserState);
-
-      NSData* imageData = startupInformation.startupParameters.imageSearchData;
-      web::NavigationManager::WebLoadParams webLoadParams =
-          ImageSearchParamGenerator::LoadParamsForImageData(imageData, GURL(),
-                                                            templateURLService);
-
-      params.web_params = webLoadParams;
-    } else if (startupInformation.startupParameters.textQuery) {
-      NSString* query = startupInformation.startupParameters.textQuery;
-
-      TemplateURLService* templateURLService =
-          ios::TemplateURLServiceFactory::GetForBrowserState(
-              interfaceProvider.mainInterface.browserState);
-
-      const TemplateURL* defaultURL =
-          templateURLService->GetDefaultSearchProvider();
-      DCHECK(!defaultURL->url().empty());
-      DCHECK(defaultURL->url_ref().IsValid(
-          templateURLService->search_terms_data()));
-      base::string16 queryString = base::SysNSStringToUTF16(query);
-      TemplateURLRef::SearchTermsArgs search_args(queryString);
-
-      GURL result(defaultURL->url_ref().ReplaceSearchTerms(
-          search_args, templateURLService->search_terms_data()));
-      params.web_params.url = result;
-    }
-
-    [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
-                                   withUrlLoadParams:params
-                                      dismissOmnibox:[[startupInformation
-                                                         startupParameters]
-                                                         postOpeningAction] !=
-                                                     FOCUS_OMNIBOX
-                                          completion:^{
-                                            [startupInformation
-                                                setStartupParameters:nil];
-                                          }];
   }
+
+  // Do not handle the parameters that are/were already handled.
+  if (connectionInformation.startupParametersAreBeingHandled) {
+    return;
+  }
+
+  connectionInformation.startupParametersAreBeingHandled = YES;
+
+  if (!connectionInformation.startupParameters.URLs.empty() &&
+      !connectionInformation.startupParameters.isUnexpectedMode) {
+    [self openMultipleTabsWithConnectionInformation:connectionInformation
+                                          tabOpener:tabOpener];
+    return;
+  }
+
+  GURL externalURL = connectionInformation.startupParameters.externalURL;
+
+  // If the user intent to open a url in a unavailable mode, don't fulfill the
+  // request.
+  if (externalURL != kChromeUINewTabURL &&
+      connectionInformation.startupParameters.isUnexpectedMode) {
+    return;
+  }
+
+  // TODO(crbug.com/935019): Exacly the same copy of this code is present in
+  // +[URLOpener
+  // openURL:applicationActive:options:tabOpener:startupInformation:]
+
+  // The app is already active so the applicationDidBecomeActive: method
+  // will never be called. Open the requested URL after all modal UIs have
+  // been dismissed. `_startupParameters` must be retained until all deferred
+  // modal UIs are dismissed and tab opened (or Incognito interstitial shown)
+  // with requested URL.
+  ApplicationModeForTabOpening targetMode =
+      [[connectionInformation startupParameters] applicationMode];
+  GURL URL;
+  GURL virtualURL;
+  GURL completeURL = connectionInformation.startupParameters.completeURL;
+  if (completeURL.SchemeIsFile()) {
+    // External URL will be loaded by WebState, which expects `completeURL`.
+    // Omnibox however suppose to display `externalURL`, which is used as
+    // virtual URL.
+    URL = completeURL;
+    virtualURL = externalURL;
+  } else {
+    URL = externalURL;
+  }
+  UrlLoadParams params = UrlLoadParams::InNewTab(URL, virtualURL);
+
+  if (connectionInformation.startupParameters.imageSearchData) {
+    TemplateURLService* templateURLService =
+        ios::TemplateURLServiceFactory::GetForBrowserState(browserState);
+
+    NSData* imageData = connectionInformation.startupParameters.imageSearchData;
+    web::NavigationManager::WebLoadParams webLoadParams =
+        ImageSearchParamGenerator::LoadParamsForImageData(imageData, GURL(),
+                                                          templateURLService);
+
+    params.web_params = webLoadParams;
+  } else if (connectionInformation.startupParameters.textQuery) {
+    NSString* query = connectionInformation.startupParameters.textQuery;
+
+    GURL result = [self generateResultGURLFromSearchQuery:query
+                                             browserState:browserState];
+    params.web_params.url = result;
+  }
+
+  if ([[connectionInformation startupParameters] applicationMode] !=
+          ApplicationModeForTabOpening::INCOGNITO &&
+      [tabOpener URLIsOpenedInRegularMode:params.web_params.url]) {
+    // Record metric.
+  }
+
+  [tabOpener
+      dismissModalsAndMaybeOpenSelectedTabInMode:targetMode
+                               withUrlLoadParams:params
+                                  dismissOmnibox:[[connectionInformation
+                                                     startupParameters]
+                                                     postOpeningAction] !=
+                                                 FOCUS_OMNIBOX
+                                      completion:^{
+                                        [connectionInformation
+                                            setStartupParameters:nil];
+                                      }];
+}
+
++ (BOOL)canProceedWithUserActivity:(NSUserActivity*)userActivity
+                       prefService:(PrefService*)prefService {
+  NSArray* array = CompatibleModeForActivityType(userActivity.activityType);
+
+  if (IsIncognitoModeDisabled(prefService)) {
+    return [array containsObject:kRegularMode];
+  } else if (IsIncognitoModeForced(prefService)) {
+    return [array containsObject:kIncognitoMode];
+  }
+
+  // Return YES if the compatible mode array is not nil.
+  return array != nil;
 }
 
 #pragma mark - Internal methods.
 
 + (BOOL)handleShortcutItem:(UIApplicationShortcutItem*)shortcutItem
-        startupInformation:(id<StartupInformation>)startupInformation {
-  if ([startupInformation isPresentingFirstRunUI])
+     connectionInformation:(id<ConnectionInformation>)connectionInformation
+                 initStage:(InitStage)initStage {
+  if (initStage <= InitStageFirstRun)
     return NO;
 
   AppStartupParameters* startupParams = [[AppStartupParameters alloc]
       initWithExternalURL:GURL(kChromeUINewTabURL)
-              completeURL:GURL(kChromeUINewTabURL)];
+              completeURL:GURL(kChromeUINewTabURL)
+          applicationMode:ApplicationModeForTabOpening::NORMAL];
 
-  if ([shortcutItem.type isEqualToString:kShortcutNewTab]) {
-    base::RecordAction(UserMetricsAction("ApplicationShortcut.NewTabPressed"));
-    [startupInformation setStartupParameters:startupParams];
+  if ([shortcutItem.type isEqualToString:kShortcutNewSearch]) {
+    base::RecordAction(
+        UserMetricsAction("ApplicationShortcut.NewSearchPressed"));
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    connectionInformation.startupParameters = startupParams;
     return YES;
 
-  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoTab]) {
+  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoSearch]) {
     base::RecordAction(
-        UserMetricsAction("ApplicationShortcut.NewIncognitoTabPressed"));
-    [startupParams setLaunchInIncognito:YES];
-    [startupInformation setStartupParameters:startupParams];
+        UserMetricsAction("ApplicationShortcut.NewIncognitoSearchPressed"));
+    startupParams.applicationMode = ApplicationModeForTabOpening::INCOGNITO;
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    connectionInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutVoiceSearch]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.VoiceSearchPressed"));
-    [startupParams setPostOpeningAction:START_VOICE_SEARCH];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_VOICE_SEARCH;
+    connectionInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutQRScanner]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.ScanQRCodePressed"));
-    [startupParams setPostOpeningAction:START_QR_CODE_SCANNER];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_QR_CODE_SCANNER;
+    connectionInformation.startupParameters = startupParams;
     return YES;
   }
 
   NOTREACHED();
   return NO;
-}
-
-+ (void)routeU2FURL:(const GURL&)URL
-    interfaceProvider:(id<BrowserInterfaceProvider>)interfaceProvider {
-  // Retrieve the designated TabID from U2F URL.
-  NSString* tabID = U2FTabHelper::GetTabIdFromU2FUrl(URL);
-  if (!tabID) {
-    return;
-  }
-
-  // Iterate through mainTabModel and OTRTabModel to find the corresponding tab.
-  NSArray* tabModels = @[
-    interfaceProvider.mainInterface.tabModel,
-    interfaceProvider.incognitoInterface.tabModel
-  ];
-  for (TabModel* tabModel in tabModels) {
-    WebStateList* webStateList = tabModel.webStateList;
-    for (int index = 0; index < webStateList->count(); ++index) {
-      web::WebState* webState = webStateList->GetWebStateAt(index);
-      NSString* currentTabID = TabIdTabHelper::FromWebState(webState)->tab_id();
-      if ([currentTabID isEqualToString:tabID]) {
-        U2FTabHelper::FromWebState(webState)->EvaluateU2FResult(URL);
-      }
-    }
-  }
 }
 
 @end

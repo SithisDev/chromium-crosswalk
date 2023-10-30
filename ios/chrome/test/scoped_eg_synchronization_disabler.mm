@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 
-#import <EarlGrey/EarlGrey.h>
+#import "ios/testing/earl_grey/earl_grey_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -20,12 +20,12 @@ ScopedSynchronizationDisabler::~ScopedSynchronizationDisabler() {
 }
 
 bool ScopedSynchronizationDisabler::GetEgSynchronizationEnabled() {
-  return [[GREYConfiguration sharedInstance]
+  return [[GREYConfiguration sharedConfiguration]
       boolValueForConfigKey:kGREYConfigKeySynchronizationEnabled];
 }
 
 void ScopedSynchronizationDisabler::SetEgSynchronizationEnabled(BOOL flag) {
-  [[GREYConfiguration sharedInstance]
+  [[GREYConfiguration sharedConfiguration]
           setValue:@(flag)
       forConfigKey:kGREYConfigKeySynchronizationEnabled];
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,21 @@
 
 #import <Foundation/Foundation.h>
 
+#import "base/check_op.h"
 #import "base/ios/ns_error_util.h"
-#include "base/logging.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/values.h"
-#include "components/error_page/common/error.h"
-#include "components/error_page/common/error_page_params.h"
-#include "components/error_page/common/localized_error.h"
-#include "components/grit/components_resources.h"
-#include "ios/chrome/browser/application_context.h"
+#import "base/notreached.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/values.h"
+#import "components/error_page/common/error.h"
+#import "components/error_page/common/localized_error.h"
+#import "components/grit/components_resources.h"
+#import "ios/chrome/browser/application_context/application_context.h"
 #import "ios/net/protocol_handler_util.h"
-#include "net/base/net_errors.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/base/resource/scale_factor.h"
-#include "ui/base/webui/jstemplate_builder.h"
-#include "url/gurl.h"
+#import "net/base/net_errors.h"
+#import "ui/base/resource/resource_bundle.h"
+#import "ui/base/resource/resource_scale_factor.h"
+#import "ui/base/webui/jstemplate_builder.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -45,21 +45,25 @@ NSString* GetErrorPage(const GURL& url,
     NOTREACHED();
   }
 
+  // Secure DNS is not supported on iOS, so we can assume there is no secure
+  // DNS network error when fetching the page state.
   error_page::LocalizedError::PageState page_state =
       error_page::LocalizedError::GetPageState(
           net_error, error_page::Error::kNetErrorDomain, url, is_post,
+          /*is_secure_dns_network_error=*/false,
           /*stale_copy_in_cache=*/false,
           /*can_show_network_diagnostics_dialog=*/false, is_off_the_record,
           /*offline_content_feature_enabled=*/false,
           /*auto_fetch_feature_enabled=*/false,
+          /*is_kiosk_mode=*/false,
           GetApplicationContext()->GetApplicationLocale(),
-          /*params=*/nullptr);
+          /*is_blocked_by_extension=*/false);
 
-  ui::ScaleFactor scale_factor =
-      ui::ResourceBundle::GetSharedInstance().GetMaxScaleFactor();
+  ui::ResourceScaleFactor scale_factor =
+      ui::ResourceBundle::GetSharedInstance().GetMaxResourceScaleFactor();
 
   std::string extracted_string =
-      ui::ResourceBundle::GetSharedInstance().DecompressDataResourceScaled(
+      ui::ResourceBundle::GetSharedInstance().LoadDataResourceStringForScale(
           IDR_NET_ERROR_HTML, scale_factor);
   base::StringPiece template_html(extracted_string.data(),
                                   extracted_string.size());
@@ -67,5 +71,5 @@ NSString* GetErrorPage(const GURL& url,
   if (template_html.empty())
     NOTREACHED() << "unable to load template. ID: " << IDR_NET_ERROR_HTML;
   return base::SysUTF8ToNSString(webui::GetTemplatesHtml(
-      template_html, &page_state.strings, /*template_id=*/"t"));
+      template_html, page_state.strings, /*template_id=*/"t"));
 }

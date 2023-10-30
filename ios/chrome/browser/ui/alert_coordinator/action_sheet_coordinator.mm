@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
 
-#include "base/logging.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/strings/grit/ui_strings.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -23,12 +24,12 @@ enum class AnchorMode {
   // The anchor mode for the popover alert.
   AnchorMode _anchorMode;
 
-  // Rectangle for the popover alert. Only used when |_anchorMode| is VIEW.
+  // Rectangle for the popover alert. Only used when `_anchorMode` is VIEW.
   CGRect _rect;
-  // View for the popovert alert. Only used when |_anchorMode| is VIEW.
+  // View for the popovert alert. Only used when `_anchorMode` is VIEW.
   __weak UIView* _view;
 
-  // Bar button item for the popover alert.  Only used when |_anchorMode| is
+  // Bar button item for the popover alert.  Only used when `_anchorMode` is
   // BAR_BUTTON_ITEM.
   UIBarButtonItem* _barButtonItem;
 }
@@ -38,11 +39,13 @@ enum class AnchorMode {
 @implementation ActionSheetCoordinator
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message
                                       rect:(CGRect)rect
                                       view:(UIView*)view {
   self = [super initWithBaseViewController:viewController
+                                   browser:browser
                                      title:title
                                    message:message];
   if (self) {
@@ -56,10 +59,12 @@ enum class AnchorMode {
 }
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                    message:(NSString*)message
                              barButtonItem:(UIBarButtonItem*)barButtonItem {
   self = [super initWithBaseViewController:viewController
+                                   browser:browser
                                      title:title
                                    message:message];
   if (self) {
@@ -70,6 +75,19 @@ enum class AnchorMode {
   }
   return self;
 }
+
+#pragma mark - ChromeCoordinator
+
+- (void)start {
+  if (!self.cancelButtonAdded) {
+    [self addItemWithTitle:l10n_util::GetNSString(IDS_APP_CANCEL)
+                    action:nil
+                     style:UIAlertActionStyleCancel];
+  }
+  [super start];
+}
+
+#pragma mark - AlertCoordinator
 
 - (UIAlertController*)alertControllerWithTitle:(NSString*)title
                                        message:(NSString*)message {
@@ -92,6 +110,8 @@ enum class AnchorMode {
 
   return alert;
 }
+
+#pragma mark - Public Methods
 
 - (void)updateAttributedText {
   // Use setValue to access unexposed attributed strings for title and message.

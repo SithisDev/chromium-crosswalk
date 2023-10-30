@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,12 @@ typedef NS_ENUM(NSUInteger, IOSNTPImpression) {
 
 // Returns the accessibility identifier used by the fake omnibox.
 NSString* FakeOmniboxAccessibilityID();
+
+// Returns the accessibility identifier used by the Discover header title.
+NSString* DiscoverHeaderTitleAccessibilityID();
+
+// Returns the accessibility identifier used by the NTP logo.
+NSString* NTPLogoAccessibilityID();
 
 // Distance between the Most Visited tiles and the suggestions on iPad.
 extern const CGFloat kMostVisitedBottomMarginIPad;

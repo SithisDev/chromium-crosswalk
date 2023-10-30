@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IOS_CHROME_BROWSER_UI_INFOBARS_INFOBAR_CONSTANTS_H_
 #define IOS_CHROME_BROWSER_UI_INFOBARS_INFOBAR_CONSTANTS_H_
 
-#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 extern const int kInfobarBackgroundColor;
 
@@ -15,6 +15,9 @@ extern NSString* const kConfirmInfobarButton2AccessibilityIdentifier;
 
 // The duration in seconds that the InfobarCoordinator banner will be presented
 // for.
-extern const NSTimeInterval kInfobarBannerPresentationDurationInSeconds;
+extern const NSTimeInterval kInfobarBannerDefaultPresentationDurationInSeconds;
+// The duration in seconds that a high priority presentation InfobarCoordinator
+// banner will be presented for.
+extern const NSTimeInterval kInfobarBannerLongPresentationDurationInSeconds;
 
 #endif  // IOS_CHROME_BROWSER_UI_INFOBARS_INFOBAR_CONSTANTS_H_

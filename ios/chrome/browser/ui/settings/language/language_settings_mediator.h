@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,13 @@
 #import "ios/chrome/browser/ui/settings/language/language_settings_commands.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_data_source.h"
 
-namespace ios {
 class ChromeBrowserState;
-}  // namespace ios
 
 @interface LanguageSettingsMediator
     : NSObject <LanguageSettingsDataSource, LanguageSettingsCommands>
 
-// The designated initializer. |browserState| must not be nil.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+// The designated initializer. `browserState` must not be nil.
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 

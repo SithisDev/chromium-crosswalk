@@ -1,27 +1,23 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/compiler_specific.h"
-#include "base/memory/ptr_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
+#import "base/memory/ptr_util.h"
+#import "base/strings/string_number_conversions.h"
+#import "base/strings/sys_string_conversions.h"
+#import "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_feature_list.h"
-#include "ios/web/common/features.h"
 #import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
-#import "ios/web/public/test/http_server/http_server.h"
-#include "ios/web/public/test/http_server/http_server_util.h"
 #import "ios/web/public/test/web_view_interaction_test_util.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #import "ios/web/test/web_int_test.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "testing/gtest_mac.h"
-#include "url/url_canon.h"
+#import "net/test/embedded_test_server/embedded_test_server.h"
+#import "testing/gtest/include/gtest/gtest.h"
+#import "testing/gtest_mac.h"
+#import "url/url_canon.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -43,8 +39,7 @@ namespace {
 //   and is removed once a button is tapped.  Verifying that the onload text is
 //   visible after tapping a button is equivalent to checking that a load has
 //   occurred as the result of the button tap.
-const char kHistoryStateOperationsTestUrl[] =
-    "http://ios/testing/data/http_server_files/state_operations.html";
+const char kHistoryStateOperationsTestUrl[] = "/state_operations.html";
 
 // Button IDs used in the window.location test page.
 const char kPushStateId[] = "push-state";
@@ -53,43 +48,29 @@ const char kReplaceStateId[] = "replace-state";
 // JavaScript functions on the history state test page.
 NSString* const kUpdateStateParamsScriptFormat =
     @"updateStateParams('%s', '%s', '%s')";
-NSString* const kOnLoadCheckScript = @"isOnLoadPlaceholderTextVisible()";
-NSString* const kNoOpCheckScript = @"isNoOpPlaceholderTextVisible()";
+const char kOnLoadCheckScript[] = "isOnLoadPlaceholderTextVisible()";
+const char kNoOpCheckScript[] = "isNoOpPlaceholderTextVisible()";
 
 // Wait timeout for state updates.
 const NSTimeInterval kWaitForStateUpdateTimeout = 5.0;
-
-// HistoryStateOperationsTest is parameterized on this enum to test both
-// LegacyNavigationManager and WKBasedNavigationManager.
-enum class NavigationManagerChoice {
-  LEGACY,
-  WK_BASED,
-};
 
 }  // namespace
 
 // Test fixture for integration tests involving html5 window.history state
 // operations.
-class HistoryStateOperationsTest
-    : public web::WebIntTest,
-      public ::testing::WithParamInterface<NavigationManagerChoice> {
+class HistoryStateOperationsTest : public web::WebIntTest {
  protected:
   void SetUp() override {
-    if (GetParam() == NavigationManagerChoice::LEGACY) {
-      scoped_feature_list_.InitAndDisableFeature(
-          web::features::kSlimNavigationManager);
-    } else {
-      scoped_feature_list_.InitAndEnableFeature(
-          web::features::kSlimNavigationManager);
-    }
     web::WebIntTest::SetUp();
 
-    // History state tests use file-based test pages.
-    web::test::SetUpFileBasedHttpServer();
-
     // Load the history state test page.
+    test_server_ = std::make_unique<net::EmbeddedTestServer>();
+    test_server_->ServeFilesFromSourceDirectory(
+        base::FilePath("ios/testing/data/http_server_files/"));
+    ASSERT_TRUE(test_server_->Start());
+
     state_operations_url_ =
-        web::test::HttpServer::MakeUrl(kHistoryStateOperationsTestUrl);
+        test_server_->GetURL(kHistoryStateOperationsTestUrl);
     ASSERT_TRUE(LoadUrl(state_operations_url()));
   }
 
@@ -97,11 +78,11 @@ class HistoryStateOperationsTest
   const GURL& state_operations_url() { return state_operations_url_; }
 
   // Reloads the page and waits for the load to finish.
-  bool Reload() WARN_UNUSED_RESULT {
+  [[nodiscard]] bool Reload() {
     return ExecuteBlockAndWaitForLoad(GetLastCommittedItem()->GetURL(), ^{
       // TODO(crbug.com/677364): Use NavigationManager::Reload() once it no
       // longer requires a web delegate.
-      web_state()->ExecuteJavaScript(ASCIIToUTF16("window.location.reload()"));
+      web_state()->ExecuteJavaScript(u"window.location.reload()");
     });
   }
 
@@ -117,22 +98,26 @@ class HistoryStateOperationsTest
     NSString* set_params_script = [NSString
         stringWithFormat:kUpdateStateParamsScriptFormat, state_object.c_str(),
                          title.c_str(), url_spec.c_str()];
-    ExecuteJavaScript(set_params_script);
+    web::test::ExecuteJavaScript(web_state(),
+                                 base::SysNSStringToUTF8(set_params_script));
   }
 
   // Returns the state object returned by JavaScript.
   std::string GetJavaScriptState() {
-    return base::SysNSStringToUTF8(ExecuteJavaScript(@"window.history.state"));
+    return web::test::ExecuteJavaScript(web_state(), "window.history.state")
+        ->GetString();
   }
 
   // Executes JavaScript to check whether the onload text is visible.
   bool IsOnLoadTextVisible() {
-    return [ExecuteJavaScript(kOnLoadCheckScript) boolValue];
+    return web::test::ExecuteJavaScript(web_state(), kOnLoadCheckScript)
+        ->GetBool();
   }
 
   // Executes JavaScript to check whether the no-op text is visible.
   bool IsNoOpTextVisible() {
-    return [ExecuteJavaScript(kNoOpCheckScript) boolValue];
+    return web::test::ExecuteJavaScript(web_state(), kNoOpCheckScript)
+        ->GetBool();
   }
 
   // Waits for the NoOp text to be visible.
@@ -144,14 +129,15 @@ class HistoryStateOperationsTest
     EXPECT_TRUE(completed) << "NoOp text failed to be visible.";
   }
 
+  std::unique_ptr<net::EmbeddedTestServer> test_server_;
+
  private:
   GURL state_operations_url_;
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests that calling window.history.pushState() is a no-op for unresolvable
 // URLs.
-TEST_P(HistoryStateOperationsTest, NoOpPushUnresolvable) {
+TEST_F(HistoryStateOperationsTest, NoOpPushUnresolvable) {
   // Perform a window.history.pushState() with an unresolvable URL.  This will
   // clear the OnLoad and NoOp text, so checking below that the NoOp text is
   // displayed and the OnLoad text is empty ensures that no navigation occurred
@@ -166,7 +152,7 @@ TEST_P(HistoryStateOperationsTest, NoOpPushUnresolvable) {
 
 // Tests that calling window.history.replaceState() is a no-op for unresolvable
 // URLs.
-TEST_P(HistoryStateOperationsTest, NoOpReplaceUnresolvable) {
+TEST_F(HistoryStateOperationsTest, NoOpReplaceUnresolvable) {
   // Perform a window.history.replaceState() with an unresolvable URL.  This
   // will clear the OnLoad and NoOp text, so checking below that the NoOp text
   // is displayed and the OnLoad text is empty ensures that no navigation
@@ -181,7 +167,7 @@ TEST_P(HistoryStateOperationsTest, NoOpReplaceUnresolvable) {
 
 // Tests that calling window.history.pushState() is a no-op for URLs with a
 // different scheme.
-TEST_P(HistoryStateOperationsTest, NoOpPushDifferentScheme) {
+TEST_F(HistoryStateOperationsTest, NoOpPushDifferentScheme) {
   // Perform a window.history.pushState() with a URL with a different scheme.
   // This will clear the OnLoad and NoOp text, so checking below that the NoOp
   // text is displayed and the OnLoad text is empty ensures that no navigation
@@ -197,7 +183,7 @@ TEST_P(HistoryStateOperationsTest, NoOpPushDifferentScheme) {
 
 // Tests that calling window.history.replaceState() is a no-op for URLs with a
 // different scheme.
-TEST_P(HistoryStateOperationsTest, NoOpRelaceDifferentScheme) {
+TEST_F(HistoryStateOperationsTest, NoOpRelaceDifferentScheme) {
   // Perform a window.history.replaceState() with a URL with a different scheme.
   // This will clear the OnLoad and NoOp text, so checking below that the NoOp
   // text is displayed and the OnLoad text is empty ensures that no navigation
@@ -213,18 +199,16 @@ TEST_P(HistoryStateOperationsTest, NoOpRelaceDifferentScheme) {
 
 // Tests that calling window.history.pushState() is a no-op for URLs with a
 // origin differing from that of the current page.
-TEST_P(HistoryStateOperationsTest, NoOpPushDifferentOrigin) {
+TEST_F(HistoryStateOperationsTest, NoOpPushDifferentOrigin) {
   // Perform a window.history.pushState() with a URL with a different origin.
   // This will clear the OnLoad and NoOp text, so checking below that the NoOp
   // text is displayed and the OnLoad text is empty ensures that no navigation
   // occurred as the result of the pushState() call.
   std::string empty_state;
   std::string empty_title;
-  std::string new_port_string = base::NumberToString(
-      web::test::HttpServer::GetSharedInstance().GetPort() + 1);
-  url::Replacements<char> port_replacement;
-  port_replacement.SetPort(new_port_string.c_str(),
-                           url::Component(0, new_port_string.length()));
+  std::string new_port_string = base::NumberToString(test_server_->port() + 1);
+  GURL::Replacements port_replacement;
+  port_replacement.SetPortStr(new_port_string);
   GURL different_origin_url =
       state_operations_url().ReplaceComponents(port_replacement);
   ASSERT_TRUE(IsOnLoadTextVisible());
@@ -235,18 +219,16 @@ TEST_P(HistoryStateOperationsTest, NoOpPushDifferentOrigin) {
 
 // Tests that calling window.history.replaceState() is a no-op for URLs with a
 // origin differing from that of the current page.
-TEST_P(HistoryStateOperationsTest, NoOpReplaceDifferentOrigin) {
+TEST_F(HistoryStateOperationsTest, NoOpReplaceDifferentOrigin) {
   // Perform a window.history.replaceState() with a URL with a different origin.
   // This will clear the OnLoad and NoOp text, so checking below that the NoOp
   // text is displayed and the OnLoad text is empty ensures that no navigation
   // occurred as the result of the pushState() call.
   std::string empty_state;
   std::string empty_title;
-  std::string new_port_string = base::NumberToString(
-      web::test::HttpServer::GetSharedInstance().GetPort() + 1);
-  url::Replacements<char> port_replacement;
-  port_replacement.SetPort(new_port_string.c_str(),
-                           url::Component(0, new_port_string.length()));
+  std::string new_port_string = base::NumberToString(test_server_->port() + 1);
+  GURL::Replacements port_replacement;
+  port_replacement.SetPortStr(new_port_string);
   GURL different_origin_url =
       state_operations_url().ReplaceComponents(port_replacement);
   ASSERT_TRUE(IsOnLoadTextVisible());
@@ -259,7 +241,7 @@ TEST_P(HistoryStateOperationsTest, NoOpReplaceDifferentOrigin) {
 // successfully replaces the current NavigationItem's title.
 // TODO(crbug.com/677356): Enable this test once the NavigationItem's title is
 // updated from within the web layer.
-TEST_P(HistoryStateOperationsTest, DISABLED_TitleReplacement) {
+TEST_F(HistoryStateOperationsTest, DISABLED_TitleReplacement) {
   // Navigate to about:blank then navigate back to the test page.  The created
   // NavigationItem can be used later to verify that the title is replaced
   // rather than pushed.
@@ -289,7 +271,7 @@ TEST_P(HistoryStateOperationsTest, DISABLED_TitleReplacement) {
 
 // Tests that calling window.history.replaceState() with a new state object
 // replaces the state object for the current NavigationItem.
-TEST_P(HistoryStateOperationsTest, StateReplacement) {
+TEST_F(HistoryStateOperationsTest, StateReplacement) {
   // Navigate to about:blank then navigate back to the test page.  The created
   // NavigationItem can be used later to verify that the state is replaced
   // rather than pushed.
@@ -340,7 +322,7 @@ TEST_P(HistoryStateOperationsTest, StateReplacement) {
 #define MAYBE_StateReplacementReload DISABLED_StateReplacementReload
 #endif
 // TODO(crbug.com/720381): Enable this test on device.
-TEST_P(HistoryStateOperationsTest, MAYBE_StateReplacementReload) {
+TEST_F(HistoryStateOperationsTest, MAYBE_StateReplacementReload) {
   // Set up the state parameters and tap the replace state button.
   std::string new_state("STATE OBJECT");
   std::string empty_title;
@@ -359,7 +341,7 @@ TEST_P(HistoryStateOperationsTest, MAYBE_StateReplacementReload) {
 
 // Tests that the state object is correctly set for a page after a back/forward
 // navigation.
-TEST_P(HistoryStateOperationsTest, StateReplacementBackForward) {
+TEST_F(HistoryStateOperationsTest, StateReplacementBackForward) {
   // Navigate to about:blank then navigate back to the test page.  The created
   // NavigationItem can be used later to verify that the state is replaced
   // rather than pushed.
@@ -383,13 +365,9 @@ TEST_P(HistoryStateOperationsTest, StateReplacementBackForward) {
     navigation_manager()->GoBack();
   }));
 
-  if (GetParam() == NavigationManagerChoice::LEGACY) {
-    ASSERT_TRUE(IsOnLoadTextVisible());
-  } else {
-    // WebKit doesn't trigger onload on back. WKBasedNavigationManager inherits
-    // this behavior.
-    WaitForNoOpText();
-  }
+  // WebKit doesn't trigger onload on back. NavigationManagerImpl inherits
+  // this behavior.
+  WaitForNoOpText();
 
   BOOL completed = base::test::ios::WaitUntilConditionOrTimeout(
       base::test::ios::kWaitForJSCompletionTimeout, ^{
@@ -400,7 +378,7 @@ TEST_P(HistoryStateOperationsTest, StateReplacementBackForward) {
 
 // Tests that calling window.history.pushState() creates a new NavigationItem
 // and prunes trailing items.
-TEST_P(HistoryStateOperationsTest, PushState) {
+TEST_F(HistoryStateOperationsTest, PushState) {
   // Navigate to about:blank then navigate back to the test page.  The created
   // NavigationItem can be used later to verify that the state is replaced
   // rather than pushed.
@@ -433,7 +411,7 @@ TEST_P(HistoryStateOperationsTest, PushState) {
 
 // Tests that performing a replaceState() on a page created with a POST request
 // resets the page to a GET request.
-TEST_P(HistoryStateOperationsTest, ReplaceStatePostRequest) {
+TEST_F(HistoryStateOperationsTest, ReplaceStatePostRequest) {
   // Add POST data to the current NavigationItem.
   NSData* post_data = [NSData data];
   static_cast<web::NavigationItemImpl*>(GetLastCommittedItem())
@@ -457,7 +435,7 @@ TEST_P(HistoryStateOperationsTest, ReplaceStatePostRequest) {
 
 // Tests that performing a replaceState() on a page where only the URL fragment
 // is updated does not trigger a hashchange event.
-TEST_P(HistoryStateOperationsTest, ReplaceStateNoHashChangeEvent) {
+TEST_F(HistoryStateOperationsTest, ReplaceStateNoHashChangeEvent) {
   // Set up the state parameters and tap the replace state button.
   std::string empty_state;
   std::string empty_title;
@@ -476,21 +454,13 @@ TEST_P(HistoryStateOperationsTest, ReplaceStateNoHashChangeEvent) {
 }
 
 // Regression test for crbug.com/788464.
-TEST_P(HistoryStateOperationsTest, ReplaceStateThenReload) {
-  GURL url = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/"
-      "onload_replacestate_reload.html");
+TEST_F(HistoryStateOperationsTest, ReplaceStateThenReload) {
+  GURL url = test_server_->GetURL("/onload_replacestate_reload.html");
   ASSERT_TRUE(LoadUrl(url));
-  GURL new_url = web::test::HttpServer::MakeUrl(
-      "http://ios/testing/data/http_server_files/pony.html");
+  GURL new_url = test_server_->GetURL("/pony.html");
   BOOL completed = base::test::ios::WaitUntilConditionOrTimeout(
       kWaitForStateUpdateTimeout, ^{
         return GetLastCommittedItem()->GetURL() == new_url;
       });
   EXPECT_TRUE(completed);
 }
-
-INSTANTIATE_TEST_SUITE_P(ProgrammaticHistoryStateOperationsTest,
-                         HistoryStateOperationsTest,
-                         ::testing::Values(NavigationManagerChoice::LEGACY,
-                                           NavigationManagerChoice::WK_BASED));

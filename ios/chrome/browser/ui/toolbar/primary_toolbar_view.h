@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 // toolbar always displayed.
 @interface PrimaryToolbarView : UIView<AdaptiveToolbarView>
 
-// Initialize this View with the button |factory|. To finish the initialization
-// of the view, a call to |setUp| is needed.
+// Initialize this View with the button `factory`. To finish the initialization
+// of the view, a call to `setUp` is needed.
 - (instancetype)initWithButtonFactory:(ToolbarButtonFactory*)factory
     NS_DESIGNATED_INITIALIZER;
 
@@ -30,7 +30,7 @@
 // Container for the location bar.
 @property(nonatomic, strong, readonly) UIView* locationBarContainer;
 
-// A tappable view overlapping |locationBarContainer| used when the omnibox is
+// A tappable view overlapping `locationBarContainer` used when the omnibox is
 // hidden by the NTP.
 @property(nonatomic, strong) UIView* fakeOmniboxTarget;
 
@@ -66,21 +66,20 @@
 // Constraint for the bottom of the location bar.
 @property(nonatomic, strong, readwrite)
     NSLayoutConstraint* locationBarBottomConstraint;
-// Constraint for extra padding on the bottom of the location bar. This padding
-// is considered as "extra" as it is added to the one defined in
-// |locationBarBottomConstraint|. See comment for -[PrimaryToolbarViewController
-// verticalMarginForLocationBarForFullscreenProgress:] for more explanations.
-@property(nonatomic, strong) NSLayoutConstraint* locationBarExtraBottomPadding;
 
-// Sets all the subviews and constraints of the view. The |topSafeAnchor| needs
+// Whether the top-left and top-right corners of the toolbar are rounded or
+// square.
+@property(nonatomic, assign) BOOL topCornersRounded;
+
+// Sets all the subviews and constraints of the view. The `topSafeAnchor` needs
 // to be set before calling this.
 - (void)setUp;
 
-// Adds a view overlapping |locationBarContainer| for use when the omnibox is
+// Adds a view overlapping `locationBarContainer` for use when the omnibox is
 // hidden by the NTP.
 - (void)addFakeOmniboxTarget;
 
-// Removes |fakeOmniboxTarget| from the view hierarchy.
+// Removes `fakeOmniboxTarget` from the view hierarchy.
 - (void)removeFakeOmniboxTarget;
 
 @end

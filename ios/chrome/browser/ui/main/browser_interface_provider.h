@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,11 @@
 
 #include "base/ios/block_types.h"
 
+class Browser;
 @class BrowserCoordinator;
 @class BrowserViewController;
-@class TabModel;
-
-namespace ios {
 class ChromeBrowserState;
-}
+@protocol SyncPresenter;
 
 // A BrowserInterface is an abstraction that exposes an interface to the Chrome
 // user interface (and related model objects) to the application layer. Each
@@ -27,27 +25,29 @@ class ChromeBrowserState;
 // interface; this protocol allows for easy encapsulation of that process.
 // For legacy reasons, the primary UI entry point for an interface is a visible
 // tab.
-// A given interface is scoped (currently) to a browser state; thus there can
-// be two interfaces available (a one incognito and the other not).
 @protocol BrowserInterface
 
 // The view controller showing the current tab for this interface. This property
-// should be used wherever possible instead of the |bvc| property.
+// should be used wherever possible instead of the `bvc` property.
 @property(nonatomic, readonly) UIViewController* viewController;
 // The BrowserViewController showing the current tab. The API surface this
 // property exposes will be refactored so that the BVC class isn't exposed.
 @property(nonatomic, readonly) BrowserViewController* bvc;
-// The tab model to which the current tab belongs.
-@property(nonatomic, readonly) TabModel* tabModel;
-// The browser state for this interface.
-@property(nonatomic, readonly) ios::ChromeBrowserState* browserState;
+@property(nonatomic, readonly) id<SyncPresenter> syncPresenter;
+// The active browser. This can never be nullptr.
+@property(nonatomic, readonly) Browser* browser;
+// The browser state for this interface. This can never be nullptr.
+@property(nonatomic, readonly) ChromeBrowserState* browserState;
 // YES if the tab view is available for user interaction.
 @property(nonatomic) BOOL userInteractionEnabled;
 // YES if this interface is incognito.
 @property(nonatomic, readonly) BOOL incognito;
 
+// Sets the interface as "primary".
+- (void)setPrimary:(BOOL)primary;
+
 // Asks the implementor to clear any presented state, dismissing the omnibox if
-// |dismissOmnibox| is YES, and calling |completion| once any animations are
+// `dismissOmnibox` is YES, and calling `completion` once any animations are
 // complete.
 - (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion
                            dismissOmnibox:(BOOL)dismissOmnibox;
@@ -60,22 +60,19 @@ class ChromeBrowserState;
 
 // One interface must be designated as being the "current" interface.
 // It's typically an error to assign this an interface which is neither of
-// mainInterface| or |incognitoInterface|. The initial value of
-// |currentInterface| is an implementation decision, but |mainInterface| is
+// mainInterface` or `incognitoInterface`. The initial value of
+// `currentInterface` is an implementation decision, but `mainInterface` is
 // typical.
 // Changing this value may or may not trigger actual UI changes, or may just be
-// bookkeeping associated with UI changes handled elsewhere. The only invariant
-// is that |currentInterface.current| must be YES, and the |current| value of
-// any other interface must be NO.
+// bookkeeping associated with UI changes handled elsewhere.
 @property(nonatomic, weak) id<BrowserInterface> currentInterface;
 // The "main" (meaning non-incognito -- the nomenclature is legacy) interface.
-// This interface's |incognito| property is expected to be NO.
+// This interface's `incognito` property is expected to be NO.
 @property(nonatomic, readonly) id<BrowserInterface> mainInterface;
-// The incognito interface. Its |incognito| property must be YES.
+// The incognito interface. Its `incognito` property must be YES.
 @property(nonatomic, readonly) id<BrowserInterface> incognitoInterface;
-
-// Clean up the device sharing manager.
-- (void)cleanDeviceSharingManager;
+// YES iff `incognitoInterface` is already created.
+@property(nonatomic, assign, readonly) BOOL hasIncognitoInterface;
 
 @end
 

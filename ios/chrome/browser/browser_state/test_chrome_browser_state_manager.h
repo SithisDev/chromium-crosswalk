@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ios/chrome/browser/browser_state/browser_state_info_cache.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
@@ -18,24 +17,28 @@ class TestChromeBrowserStateManager : public ios::ChromeBrowserStateManager {
  public:
   explicit TestChromeBrowserStateManager(const base::FilePath& user_data_dir);
   explicit TestChromeBrowserStateManager(
-      std::unique_ptr<ios::ChromeBrowserState> browser_state);
-  TestChromeBrowserStateManager(
-      std::unique_ptr<ios::ChromeBrowserState> browser_state,
-      const base::FilePath& user_data_dir);
+      std::unique_ptr<ChromeBrowserState> browser_state);
+
+  TestChromeBrowserStateManager(const TestChromeBrowserStateManager&) = delete;
+  TestChromeBrowserStateManager& operator=(
+      const TestChromeBrowserStateManager&) = delete;
+
   ~TestChromeBrowserStateManager() override;
 
   // ChromeBrowserStateManager:
-  ios::ChromeBrowserState* GetLastUsedBrowserState() override;
-  ios::ChromeBrowserState* GetBrowserState(const base::FilePath& path) override;
+  ChromeBrowserState* GetLastUsedBrowserState() override;
+  ChromeBrowserState* GetBrowserState(const base::FilePath& path) override;
   BrowserStateInfoCache* GetBrowserStateInfoCache() override;
-  std::vector<ios::ChromeBrowserState*> GetLoadedBrowserStates() override;
+  std::vector<ChromeBrowserState*> GetLoadedBrowserStates() override;
 
  private:
-  IOSChromeScopedTestingLocalState local_state_;
-  std::unique_ptr<ios::ChromeBrowserState> browser_state_;
-  BrowserStateInfoCache browser_state_info_cache_;
+  TestChromeBrowserStateManager(
+      std::unique_ptr<ChromeBrowserState> browser_state,
+      const base::FilePath& user_data_dir);
 
-  DISALLOW_COPY_AND_ASSIGN(TestChromeBrowserStateManager);
+  IOSChromeScopedTestingLocalState local_state_;
+  std::unique_ptr<ChromeBrowserState> browser_state_;
+  BrowserStateInfoCache browser_state_info_cache_;
 };
 
 #endif  // IOS_CHROME_BROWSER_BROWSER_STATE_TEST_CHROME_BROWSER_STATE_MANAGER_H_

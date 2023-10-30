@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 - (void)addSubview:(UIView*)view {
   self.hidden = YES;
-  UIWindow* keyWindow = [UIApplication sharedApplication].keyWindow;
+  UIWindow* keyWindow = GetAnyKeyWindow();
   if (self.superview != keyWindow)
     [keyWindow insertSubview:self atIndex:0];
 
@@ -23,9 +23,9 @@
 
   [super addSubview:view];
 
-  // Don't let the hidden |view| take the first responder.  Without the call to
+  // Don't let the hidden `view` take the first responder.  Without the call to
   // -resignFirstResponder below, the keyboard would still appear for the hidden
-  // |view|'s focused element.
+  // `view`'s focused element.
   [GetFirstResponderSubview(view) resignFirstResponder];
 }
 

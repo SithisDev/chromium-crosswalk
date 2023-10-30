@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,5 @@
 #define IOS_CHROME_BROWSER_METRICS_FEATURES_H_
 
 #include "base/feature_list.h"
-
-// Feature flag to move -LogLoadStarted() to WebStateDidStartNavigation().
-extern const base::Feature kLogLoadStartedInDidStartNavigation;
 
 #endif  // IOS_CHROME_BROWSER_METRICS_FEATURES_H_

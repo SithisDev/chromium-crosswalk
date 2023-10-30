@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,5 +13,9 @@ extern NSString* const kCollapsedSectionsKey;
 extern NSString* const kRecentTabsTableViewControllerAccessibilityIdentifier;
 // Accessibility identifier for the "Show History" cell.
 extern NSString* const kRecentTabsShowFullHistoryCellAccessibilityIdentifier;
+// Accessibility identifier for the Illustrated cell in the Other Devices
+// section used on empty states.
+extern NSString* const
+    kRecentTabsOtherDevicesIllustratedCellAccessibilityIdentifier;
 
 #endif  // IOS_CHROME_BROWSER_UI_RECENT_TABS_RECENT_TABS_CONSTANTS_H_

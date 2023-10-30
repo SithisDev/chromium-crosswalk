@@ -1,33 +1,31 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/infobars/modals/infobar_password_table_view_controller.h"
 
-#include "base/logging.h"
-#include "base/mac/foundation_util.h"
-#include "base/metrics/user_metrics.h"
-#include "base/metrics/user_metrics_action.h"
-#include "ios/chrome/browser/infobars/infobar_metrics_recorder.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/user_metrics.h"
+#import "base/metrics/user_metrics_action.h"
+#import "base/notreached.h"
+#import "ios/chrome/browser/infobars/infobar_metrics_recorder.h"
 #import "ios/chrome/browser/passwords/ios_chrome_password_infobar_metrics_recorder.h"
+#import "ios/chrome/browser/ui/icons/chrome_symbol.h"
+#import "ios/chrome/browser/ui/icons/infobar_icon.h"
 #import "ios/chrome/browser/ui/infobars/modals/infobar_modal_constants.h"
 #import "ios/chrome/browser/ui/infobars/modals/infobar_password_modal_delegate.h"
-#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_button_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_edit_item.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-namespace {
-// Text color for the Cancel button.
-const CGFloat kCancelButtonTextColorBlue = 0x1A73E8;
-}  // namespace
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierContent = kSectionIdentifierEnumZero,
@@ -42,6 +40,15 @@ typedef NS_ENUM(NSInteger, ItemType) {
 };
 
 @interface InfobarPasswordTableViewController () <UITextFieldDelegate>
+// Properties backing InfobarPasswordModalConsumer interface.
+@property(nonatomic, copy) NSString* username;
+@property(nonatomic, copy) NSString* maskedPassword;
+@property(nonatomic, copy) NSString* unmaskedPassword;
+@property(nonatomic, copy) NSString* detailsTextMessage;
+@property(nonatomic, copy) NSString* URL;
+@property(nonatomic, copy) NSString* saveButtonText;
+@property(nonatomic, copy) NSString* cancelButtonText;
+@property(nonatomic, assign) BOOL currentCredentialsSaved;
 // Item that holds the Username TextField information.
 @property(nonatomic, strong) TableViewTextEditItem* usernameItem;
 // Item that holds the Password TextField information.
@@ -69,8 +76,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (instancetype)initWithDelegate:(id<InfobarPasswordModalDelegate>)modalDelegate
                             type:(InfobarType)infobarType {
-  self = [super initWithTableViewStyle:UITableViewStylePlain
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:UITableViewStylePlain];
   if (self) {
     _infobarModalDelegate = modalDelegate;
     _metricsRecorder =
@@ -98,8 +104,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.view.backgroundColor = [UIColor whiteColor];
-  self.styler.cellBackgroundColor = [UIColor whiteColor];
+  self.view.backgroundColor = [UIColor colorNamed:kBackgroundColor];
+  self.styler.cellBackgroundColor = [UIColor colorNamed:kBackgroundColor];
   self.tableView.sectionHeaderHeight = 0;
   [self.tableView
       setSeparatorInset:UIEdgeInsetsMake(0, kTableViewHorizontalSpacing, 0, 0)];
@@ -108,12 +114,17 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UIBarButtonItem* cancelButton = [[UIBarButtonItem alloc]
       initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                            target:self
-                           action:@selector(dismissInfobarModal:)];
+                           action:@selector(dismissInfobarModal)];
   cancelButton.accessibilityIdentifier = kInfobarModalCancelButton;
-  UIImage* settingsImage = [[UIImage imageNamed:@"infobar_settings_icon"]
-      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+
+  UIImage* gearImage =
+      UseSymbols()
+          ? DefaultSymbolWithPointSize(kGearShapeSymbol, kSymbolImagePointSize)
+          : [UIImage imageNamed:@"infobar_settings_icon"];
+  gearImage =
+      [gearImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   UIBarButtonItem* settingsButton = [[UIBarButtonItem alloc]
-      initWithImage:settingsImage
+      initWithImage:gearImage
               style:UIBarButtonItemStylePlain
              target:self
              action:@selector(presentPasswordSettings)];
@@ -156,6 +167,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   URLItem.textFieldName =
       l10n_util::GetNSString(IDS_IOS_SHOW_PASSWORD_VIEW_SITE);
   URLItem.textFieldValue = self.URL;
+  URLItem.hideIcon = YES;
   [model addItem:URLItem toSectionWithIdentifier:SectionIdentifierContent];
 
   self.originalUsername = self.username;
@@ -178,6 +190,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   self.passwordItem.identifyingIcon =
       [UIImage imageNamed:@"infobar_reveal_password_icon"];
   self.passwordItem.identifyingIconEnabled = YES;
+  self.passwordItem.hideIcon = YES;
   self.passwordItem.identifyingIconAccessibilityLabel = l10n_util::GetNSString(
       IDS_IOS_INFOBAR_MODAL_PASSWORD_REVEAL_PASSWORD_HINT);
   [model addItem:self.passwordItem
@@ -199,8 +212,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     self.cancelInfobarItem =
         [[TableViewTextButtonItem alloc] initWithType:ItemTypeCancel];
     self.cancelInfobarItem.buttonText = self.cancelButtonText;
-    self.cancelInfobarItem.buttonTextColor =
-        UIColorFromRGB(kCancelButtonTextColorBlue);
+    self.cancelInfobarItem.buttonTextColor = [UIColor colorNamed:kBlueColor];
     self.cancelInfobarItem.buttonBackgroundColor = [UIColor clearColor];
     self.cancelInfobarItem.boldButtonText = NO;
     [model addItem:self.cancelInfobarItem
@@ -308,13 +320,11 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
 }
 
-- (void)dismissInfobarModal:(UIButton*)sender {
+- (void)dismissInfobarModal {
   base::RecordAction(
       base::UserMetricsAction("MobileMessagesModalCancelledTapped"));
   [self.metricsRecorder recordModalEvent:MobileMessagesModalEvent::Canceled];
-  [self.infobarModalDelegate dismissInfobarModal:sender
-                                        animated:YES
-                                      completion:nil];
+  [self.infobarModalDelegate dismissInfobarModal:self];
 }
 
 - (void)saveCredentialsButtonWasPressed:(UIButton*)sender {

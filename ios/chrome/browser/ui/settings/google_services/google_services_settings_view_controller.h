@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #import "ios/chrome/browser/ui/settings/settings_root_table_view_controller.h"
 
 #import "ios/chrome/browser/ui/settings/google_services/google_services_settings_consumer.h"
+#import "ios/chrome/browser/ui/settings/settings_controller_protocol.h"
 
 @class GoogleServicesSettingsViewController;
 @protocol GoogleServicesSettingsServiceDelegate;
@@ -25,7 +26,8 @@
 
 // View controller to related to Google services settings.
 @interface GoogleServicesSettingsViewController
-    : SettingsRootTableViewController <GoogleServicesSettingsConsumer>
+    : SettingsRootTableViewController <GoogleServicesSettingsConsumer,
+                                       SettingsControllerProtocol>
 
 // Presentation delegate.
 @property(nonatomic, weak)
@@ -37,6 +39,9 @@
 // Handler for GoogleServicesSettingsCommand.
 @property(nonatomic, weak) id<GoogleServicesSettingsServiceDelegate>
     serviceDelegate;
+// YES if the forced sign-in policy is enabled which provides its own
+// information.
+@property(nonatomic, assign) BOOL forcedSigninEnabled;
 
 @end
 

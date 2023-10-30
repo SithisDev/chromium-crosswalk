@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,13 @@
 
 @interface OpenInToolbar : UIView
 
-- (instancetype)initWithTarget:(id)target action:(SEL)action;
+// Init with the given local target and action.
+- (instancetype)initWithTarget:(id)target
+                        action:(SEL)action NS_DESIGNATED_INITIALIZER;
 
-// Updates the constraint managing the bottom margin height using NamedGuides.
-- (void)updateBottomMarginHeight;
+- (instancetype)initWithFrame:(CGRect)aRect NS_UNAVAILABLE;
+
+- (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
 @end
 

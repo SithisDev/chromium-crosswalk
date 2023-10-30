@@ -1,30 +1,75 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/util/keyboard_observer_helper.h"
 
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "base/check.h"
+#import "base/check_op.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ui/base/device_form_factor.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-// TODO(crbug.com/974226): look into making this a singleton with multiple
-// listeners.
 @interface KeyboardObserverHelper ()
 
 // Flag that indicates if the keyboard is on screen.
-@property(nonatomic, readwrite, getter=isKeyboardOnScreen)
-    BOOL keyboardOnScreen;
+@property(nonatomic, readwrite, getter=isKeyboardVisible) BOOL keyboardVisible;
 
 // Current keyboard state.
 @property(nonatomic, readwrite, getter=getKeyboardState)
     KeyboardState keyboardState;
 
+// The last known keyboard view. If this changes, it probably means that the
+// application lost focus in multiwindow mode.
+@property(nonatomic, weak) UIView* keyboardView;
+
+// Mutable array storing weak pointers to consumers.
+@property(nonatomic, strong) NSPointerArray* consumers;
+
 @end
 
 @implementation KeyboardObserverHelper
+
+#pragma mark - Public class methods
+
++ (instancetype)sharedKeyboardObserver {
+  static KeyboardObserverHelper* sharedInstance;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    sharedInstance = [[KeyboardObserverHelper alloc] init];
+  });
+  return sharedInstance;
+}
+
+#pragma mark - Public instance methods
+
+- (void)addConsumer:(id<KeyboardObserverHelperConsumer>)consumer {
+  [self.consumers addPointer:(__bridge void*)consumer];
+  [self.consumers compact];
+}
+
+- (CGFloat)visibleKeyboardHeight {
+  if (self.keyboardState.isVisible && !self.keyboardState.isHardware &&
+      !self.keyboardState.isUndocked) {
+    // Software keyboard is visible and covers the full width of the screen
+    // (docked). Returns the keyboard + accessory height.
+    return CGRectGetHeight(self.keyboardView.frame);
+  } else if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE &&
+             self.keyboardState.isVisible && !self.keyboardState.isUndocked) {
+    // Keyboard is visible but hardware, only the accessory covers the full
+    // width of the display, the keyboard is hidden below the display. Returns
+    // the accessory's height.
+    return CurrentScreenHeight() - self.keyboardView.frame.origin.y;
+  } else {
+    return 0;
+  }
+}
+
+#pragma mark - Private instance methods
 
 - (instancetype)init {
   self = [super init];
@@ -49,60 +94,18 @@
            selector:@selector(keyboardWillDidChangeFrame:)
                name:UIKeyboardDidChangeFrameNotification
              object:nil];
+    _consumers =
+        [[NSPointerArray alloc] initWithOptions:NSPointerFunctionsWeakMemory];
   }
   return self;
 }
 
-- (void)keyboardWillDidChangeFrame:(NSNotification*)notification {
-  [self updateKeyboardState];
-}
+#pragma mark - Private class methods
 
-- (void)keyboardWillShow:(NSNotification*)notification {
-  self.keyboardOnScreen = YES;
-}
-
-- (void)keyboardWillHide:(NSNotification*)notification {
-  self.keyboardOnScreen = NO;
-  dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.keyboardOnScreen) {
-      [self.consumer keyboardDidStayOnScreen];
-    }
-  });
-}
-
-#pragma mark - keyboard state detection
-
-// Update keyboard state by looking at keyboard frame and the existence of some
-// classes to detect split view or pickers.
-- (void)updateKeyboardState {
-  UIView* keyboardView = [self keyboardView];
-
-  CGFloat windowHeight = [UIScreen mainScreen].bounds.size.height;
-  CGRect keyboardFrame = keyboardView.frame;
-  BOOL isVisible = CGRectGetMinY(keyboardFrame) < windowHeight;
-  BOOL isUndocked = CGRectGetMaxY(keyboardFrame) < windowHeight;
-  BOOL isHardware = isVisible && CGRectGetMaxY(keyboardFrame) > windowHeight;
-  BOOL isSplit = [self viewIsSplit:keyboardView];
-  BOOL isPicker = [self containsPickerView:keyboardView];
-
-  // Only notify if a change is detected.
-  if (isVisible != self.keyboardState.isVisible ||
-      isUndocked != self.keyboardState.isUndocked ||
-      isSplit != self.keyboardState.isSplit ||
-      isHardware != self.keyboardState.isHardware ||
-      isPicker != self.keyboardState.isPicker) {
-    self.keyboardState = {isVisible, isUndocked, isSplit, isHardware, isPicker};
-    dispatch_async(dispatch_get_main_queue(), ^{
-      [self.consumer keyboardWillChangeToState:self.keyboardState];
-    });
-  }
-}
-
-// Finds the keyboard UIView based on some known, undocumented classes.
-// This can break on any iOS update to keyboard architecture.
-- (UIView*)keyboardView {
++ (UIView*)keyboardView {
   NSArray* windows = [UIApplication sharedApplication].windows;
-  NSUInteger expectedMinWindows = IsIPadIdiom() ? 2 : 3;
+  NSUInteger expectedMinWindows =
+      (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) ? 2 : 3;
   if (windows.count < expectedMinWindows)
     return nil;
 
@@ -127,35 +130,51 @@
   return nil;
 }
 
-// Checks for a picker UIView* under the given |view|.
-- (BOOL)containsPickerView:(UIView*)view {
-  for (UIView* subview in view.subviews) {
-    if ([NSStringFromClass([subview class]) rangeOfString:@"Picker"].location !=
-        NSNotFound) {
-      return YES;
-    }
-  }
-  return NO;
++ (UIScreen*)keyboardScreen {
+  UIView* keyboardView = [self keyboardView];
+  return keyboardView.window.screen;
 }
 
-// Checks for the presence of split image views under the given |view|.
-- (BOOL)viewIsSplit:(UIView*)view {
-  // Don't waste time going through the accessory views.
-  if ([NSStringFromClass([view class]) rangeOfString:@"FormInputAccessoryView"]
-          .location != NSNotFound) {
-    return NO;
-  }
+#pragma mark - Keyboard Notifications
 
-  for (UIView* subview in view.subviews) {
-    if ([NSStringFromClass([subview class]) rangeOfString:@"SplitImage"]
-            .location != NSNotFound) {
-      return subview.subviews.count > 1;
-    }
-    if ([self viewIsSplit:subview])
-      return YES;
-  }
+- (void)keyboardWillShow:(NSNotification*)notification {
+  self.keyboardVisible = YES;
+}
 
-  return NO;
+- (void)keyboardWillHide:(NSNotification*)notification {
+  self.keyboardVisible = NO;
+}
+
+- (void)keyboardWillDidChangeFrame:(NSNotification*)notification {
+  [self updateKeyboardState];
+}
+
+#pragma mark Keyboard State Detection
+
+// Update keyboard state by looking at keyboard frame.
+- (void)updateKeyboardState {
+  UIView* keyboardView = KeyboardObserverHelper.keyboardView;
+
+  CGFloat windowHeight = [UIScreen mainScreen].bounds.size.height;
+  CGRect keyboardFrame = keyboardView.frame;
+  BOOL isVisible = CGRectGetMinY(keyboardFrame) < windowHeight;
+  BOOL isUndocked = CGRectGetMaxY(keyboardFrame) < windowHeight;
+  BOOL isHardware = isVisible && CGRectGetMaxY(keyboardFrame) > windowHeight;
+
+  // Only notify if a change is detected.
+  if (isVisible != self.keyboardState.isVisible ||
+      isUndocked != self.keyboardState.isUndocked ||
+      isHardware != self.keyboardState.isHardware ||
+      keyboardView != self.keyboardView) {
+    self.keyboardState = {isVisible, isUndocked, isHardware};
+    self.keyboardView = keyboardView;
+    // Notify on the next cycle.
+    dispatch_async(dispatch_get_main_queue(), ^{
+      for (id<KeyboardObserverHelperConsumer> consumer in self.consumers) {
+        [consumer keyboardWillChangeToState:self.keyboardState];
+      }
+    });
+  }
 }
 
 @end

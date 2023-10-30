@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/process/process.h"
 #include "base/test/multiprocess_test.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_factory.h"
@@ -19,19 +18,16 @@
 #include "mojo/core/test/mojo_test_base.h"
 #include "mojo/core/test/multiprocess_test_helper.h"
 
-namespace base {
-class MessageLoop;
-}
-
 class IPCChannelMojoTestBase : public testing::Test {
  public:
   IPCChannelMojoTestBase();
+
+  IPCChannelMojoTestBase(const IPCChannelMojoTestBase&) = delete;
+  IPCChannelMojoTestBase& operator=(const IPCChannelMojoTestBase&) = delete;
+
   ~IPCChannelMojoTestBase() override;
 
   void Init(const std::string& test_client_name);
-  void InitWithCustomMessageLoop(
-      const std::string& test_client_name,
-      std::unique_ptr<base::MessageLoop> message_loop);
 
   bool WaitForClientShutdown();
 
@@ -51,14 +47,12 @@ class IPCChannelMojoTestBase : public testing::Test {
   mojo::ScopedMessagePipeHandle TakeHandle();
 
  private:
-  std::unique_ptr<base::MessageLoop> message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   mojo::ScopedMessagePipeHandle handle_;
   mojo::core::test::MultiprocessTestHelper helper_;
 
   std::unique_ptr<IPC::Channel> channel_;
-
-  DISALLOW_COPY_AND_ASSIGN(IPCChannelMojoTestBase);
 };
 
 class IpcChannelMojoTestClient {
@@ -75,7 +69,8 @@ class IpcChannelMojoTestClient {
   IPC::Channel* channel() const { return channel_.get(); }
 
  private:
-  base::MessageLoopForIO main_message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   mojo::ScopedMessagePipeHandle handle_;
   std::unique_ptr<IPC::Channel> channel_;
 };

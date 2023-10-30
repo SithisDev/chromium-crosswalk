@@ -1,17 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_web_view_resizer.h"
 
-#include "base/ios/ios_util.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
+#import "base/ios/ios_util.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/web/common/features.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -82,7 +82,7 @@
 #pragma mark - Private
 
 // Updates the WebView of the current webState to adjust it to the current
-// fullscreen |progress|. |progress| should be between 0 and 1, 0 meaning that
+// fullscreen `progress`. `progress` should be between 0 and 1, 0 meaning that
 // the application is in fullscreen, 1 that it is out of fullscreen.
 - (void)updateForFullscreenProgress:(CGFloat)progress {
   if (!self.webState || !self.webState->GetView().superview)
@@ -92,7 +92,7 @@
   self.model->SetWebViewSafeAreaInsets(self.webState->GetView().safeAreaInsets);
 }
 
-// Updates the WebState view, resizing it such as |insets| is the insets between
+// Updates the WebState view, resizing it such as `insets` is the insets between
 // the WebState view and its superview.
 - (void)updateForInsets:(UIEdgeInsets)insets {
   UIView* webView = self.webState->GetView();
@@ -101,9 +101,6 @@
   CRWWebViewScrollViewProxy* scrollViewProxy = webViewProxy.scrollViewProxy;
 
   if (self.webState->GetContentsMimeType() == "application/pdf") {
-    if (!base::ios::IsRunningOnIOS12OrLater()) {
-      insets.top -= webView.safeAreaInsets.top;
-    }
     scrollViewProxy.contentInset = insets;
     if (!CGRectEqualToRect(webView.frame, webView.superview.bounds)) {
       webView.frame = webView.superview.bounds;
@@ -142,7 +139,7 @@
   }
 }
 
-// Observes the frame property of the view of the |webState| using KVO.
+// Observes the frame property of the view of the `webState` using KVO.
 - (void)observeWebStateViewFrame:(web::WebState*)webState {
   if (!webState->GetView())
     return;

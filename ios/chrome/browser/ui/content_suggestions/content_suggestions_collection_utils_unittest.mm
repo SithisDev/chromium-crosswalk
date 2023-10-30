@@ -1,14 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
 
-#include <memory>
+#import <memory>
 
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/test/base/scoped_block_swizzler.h"
-#include "testing/platform_test.h"
+#import "base/test/scoped_feature_list.h"
+#import "ios/chrome/browser/ui/start_surface/start_surface_features.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/testing/scoped_block_swizzler.h"
+#import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -18,187 +20,131 @@
 namespace content_suggestions {
 
 CGFloat kTopInset = 20;
+CGFloat kDoodleHeightNoLogo = 0;
 
 class ContentSuggestionsCollectionUtilsTest : public PlatformTest {
  public:
-  void SetAsIPad() {
+  UITraitCollection* IPadTraitCollection() {
     UITraitCollection* horizontalRegular = [UITraitCollection
         traitCollectionWithHorizontalSizeClass:UIUserInterfaceSizeClassRegular];
     UITraitCollection* verticalRegular = [UITraitCollection
         traitCollectionWithVerticalSizeClass:UIUserInterfaceSizeClassRegular];
-    customTraitCollection_ =
-        [UITraitCollection traitCollectionWithTraitsFromCollections:@[
-          verticalRegular, horizontalRegular
-        ]];
-
-    trait_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIWindow class], @selector(traitCollection),
-        ^UITraitCollection*(id self) {
-          return customTraitCollection_;
-        });
-
-    device_type_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIDevice class], @selector(userInterfaceIdiom),
-        ^UIUserInterfaceIdiom(id self) {
-          return UIUserInterfaceIdiomPad;
-        });
+    return [UITraitCollection traitCollectionWithTraitsFromCollections:@[
+      verticalRegular, horizontalRegular
+    ]];
   }
-  void SetAsIPhone() {
+
+  UITraitCollection* IPhoneLandscapeTraitCollection() {
     UITraitCollection* horizontalCompact = [UITraitCollection
         traitCollectionWithHorizontalSizeClass:UIUserInterfaceSizeClassCompact];
     UITraitCollection* verticalCompact = [UITraitCollection
         traitCollectionWithVerticalSizeClass:UIUserInterfaceSizeClassCompact];
-    customTraitCollection_ =
-        [UITraitCollection traitCollectionWithTraitsFromCollections:@[
-          verticalCompact, horizontalCompact
-        ]];
-
-    trait_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIWindow class], @selector(traitCollection),
-        ^UITraitCollection*(id self) {
-          return customTraitCollection_;
-        });
-
-    device_type_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIDevice class], @selector(userInterfaceIdiom),
-        ^UIUserInterfaceIdiom(id self) {
-          return UIUserInterfaceIdiomPhone;
-        });
-  }
-  void SetAsPortrait() {
-    orientation_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIApplication class], @selector(statusBarOrientation),
-        ^UIInterfaceOrientation(id self) {
-          return UIInterfaceOrientationPortrait;
-        });
-  }
-  void SetAsLandscape() {
-    orientation_swizzler_ = std::make_unique<ScopedBlockSwizzler>(
-        [UIApplication class], @selector(statusBarOrientation),
-        ^UIInterfaceOrientation(id self) {
-          return UIInterfaceOrientationLandscapeLeft;
-        });
+    return [UITraitCollection traitCollectionWithTraitsFromCollections:@[
+      verticalCompact, horizontalCompact
+    ]];
   }
 
- private:
-  UITraitCollection* customTraitCollection_;
-  std::unique_ptr<ScopedBlockSwizzler> trait_swizzler_;
-  std::unique_ptr<ScopedBlockSwizzler> device_type_swizzler_;
-  std::unique_ptr<ScopedBlockSwizzler> orientation_swizzler_;
+  UITraitCollection* IPhonePortraitTraitCollection() {
+    UITraitCollection* horizontalCompact = [UITraitCollection
+        traitCollectionWithHorizontalSizeClass:UIUserInterfaceSizeClassCompact];
+    UITraitCollection* verticalRegular = [UITraitCollection
+        traitCollectionWithVerticalSizeClass:UIUserInterfaceSizeClassRegular];
+    return [UITraitCollection traitCollectionWithTraitsFromCollections:@[
+      verticalRegular, horizontalCompact
+    ]];
+  }
 };
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPad) {
-  // Setup.
-  SetAsIPad();
-
   // Action.
-  CGFloat height = doodleHeight(YES);
-  CGFloat topMargin = doodleTopMargin(YES, kTopInset);
+  CGFloat height = doodleHeight(YES, YES, IPadTraitCollection());
+  CGFloat topMargin = doodleTopMargin(kTopInset, IPadTraitCollection());
 
   // Test.
-  EXPECT_EQ(120, height);
+  EXPECT_EQ(68, height);
   EXPECT_EQ(162, topMargin);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhonePortrait) {
-  // Setup.
-  SetAsIPhone();
-  SetAsPortrait();
-
   // Action.
-  CGFloat heightLogo = doodleHeight(YES);
-  CGFloat heightNoLogo = doodleHeight(NO);
-  CGFloat topMargin = doodleTopMargin(YES, kTopInset);
+  CGFloat heightLogo = doodleHeight(YES, YES, IPhonePortraitTraitCollection());
+  CGFloat heightNoLogo = doodleHeight(NO, NO, IPhonePortraitTraitCollection());
+  CGFloat topMargin =
+      doodleTopMargin(kTopInset, IPhonePortraitTraitCollection());
 
   // Test.
-  EXPECT_EQ(120, heightLogo);
-  EXPECT_EQ(60, heightNoLogo);
-  EXPECT_EQ(58 + kTopInset, topMargin);
+  EXPECT_EQ(68, heightLogo);
+  EXPECT_EQ(kDoodleHeightNoLogo, heightNoLogo);
+  EXPECT_EQ(75 + kTopInset, topMargin);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, doodleFrameIPhoneLandscape) {
-  // Setup.
-  SetAsIPhone();
-  SetAsLandscape();
-
   // Action.
-  CGFloat heightLogo = doodleHeight(YES);
-  CGFloat heightNoLogo = doodleHeight(NO);
-  CGFloat topMargin = doodleTopMargin(YES, kTopInset);
+  CGFloat heightLogo = doodleHeight(YES, YES, IPhoneLandscapeTraitCollection());
+  CGFloat heightNoLogo = doodleHeight(NO, NO, IPhoneLandscapeTraitCollection());
+  CGFloat topMargin =
+      doodleTopMargin(kTopInset, IPhoneLandscapeTraitCollection());
 
   // Test.
-  EXPECT_EQ(120, heightLogo);
-  EXPECT_EQ(60, heightNoLogo);
-  EXPECT_EQ(58 + kTopInset, topMargin);
+  EXPECT_EQ(68, heightLogo);
+  EXPECT_EQ(kDoodleHeightNoLogo, heightNoLogo);
+  EXPECT_EQ(78, topMargin);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPad) {
   // Setup.
-  SetAsIPad();
   CGFloat width = 500;
   CGFloat largeIPadWidth = 1366;
 
   // Action.
-  CGFloat resultWidth = searchFieldWidth(width);
-  CGFloat resultWidthLargeIPad = searchFieldWidth(largeIPadWidth);
+  CGFloat resultWidth = searchFieldWidth(width, IPadTraitCollection());
+  CGFloat resultWidthLargeIPad =
+      searchFieldWidth(largeIPadWidth, IPadTraitCollection());
   CGFloat topMargin = searchFieldTopMargin();
 
   // Test.
-  EXPECT_EQ(32, topMargin);
+  EXPECT_EQ(22, topMargin);
   EXPECT_EQ(432, resultWidth);
   EXPECT_EQ(432, resultWidthLargeIPad);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPhonePortrait) {
   // Setup.
-  SetAsIPhone();
-  SetAsPortrait();
   CGFloat width = 500;
 
   // Action.
-  CGFloat resultWidth = searchFieldWidth(width);
+  CGFloat resultWidth =
+      searchFieldWidth(width, IPhonePortraitTraitCollection());
   CGFloat topMargin = searchFieldTopMargin();
 
   // Test.
-  EXPECT_EQ(32, topMargin);
+  EXPECT_EQ(22, topMargin);
   EXPECT_EQ(343, resultWidth);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, searchFieldFrameIPhoneLandscape) {
   // Setup.
-  SetAsIPhone();
-  SetAsLandscape();
   CGFloat width = 500;
 
   // Action.
-  CGFloat resultWidth = searchFieldWidth(width);
+  CGFloat resultWidth =
+      searchFieldWidth(width, IPhoneLandscapeTraitCollection());
   CGFloat topMargin = searchFieldTopMargin();
 
   // Test.
-  EXPECT_EQ(32, topMargin);
+  EXPECT_EQ(22, topMargin);
   EXPECT_EQ(343, resultWidth);
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, heightForLogoHeaderIPad) {
-  // Setup.
-  SetAsIPad();
-
   // Action, tests.
-  EXPECT_EQ(380, heightForLogoHeader(YES, YES, YES, 0));
-  EXPECT_EQ(404, heightForLogoHeader(YES, NO, YES, 0));
-  EXPECT_EQ(380, heightForLogoHeader(YES, YES, NO, 0));
-  EXPECT_EQ(404, heightForLogoHeader(YES, NO, NO, 0));
+  EXPECT_EQ(346, heightForLogoHeader(YES, YES, 0, IPadTraitCollection()));
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, heightForLogoHeaderIPhone) {
-  // Setup.
-  SetAsIPhone();
-
   // Action, tests.
-  EXPECT_EQ(276, heightForLogoHeader(YES, YES, YES, 0));
-  EXPECT_EQ(276, heightForLogoHeader(YES, NO, YES, 0));
-  EXPECT_EQ(276, heightForLogoHeader(YES, YES, NO, 0));
-  EXPECT_EQ(276, heightForLogoHeader(YES, NO, NO, 0));
+  EXPECT_EQ(235,
+            heightForLogoHeader(YES, YES, 0, IPhonePortraitTraitCollection()));
 }
 
 TEST_F(ContentSuggestionsCollectionUtilsTest, NearestAncestor) {
@@ -215,6 +161,35 @@ TEST_F(ContentSuggestionsCollectionUtilsTest, NearestAncestor) {
   EXPECT_EQ(leafView, nearestAncestor(leafView, [UIView class]));
   EXPECT_EQ(rootView, nearestAncestor(leafView, [UILabel class]));
   EXPECT_EQ(nil, nearestAncestor(leafView, [UITextView class]));
+}
+
+TEST_F(ContentSuggestionsCollectionUtilsTest, shrunkDoodleFrameIPhone) {
+  base::test::ScopedFeatureList feature_list;
+  std::map<std::string, std::string> parameters;
+  parameters[kStartSurfaceShrinkLogoParam] = "true";
+  feature_list.InitAndEnableFeatureWithParameters(kStartSurface, parameters);
+
+  // Landscape.
+  CGFloat heightLogoLandscape =
+      doodleHeight(YES, YES, IPhoneLandscapeTraitCollection());
+  CGFloat heightNoLogoLandscape =
+      doodleHeight(NO, NO, IPhoneLandscapeTraitCollection());
+  CGFloat topMarginLandscape =
+      doodleTopMargin(kTopInset, IPhoneLandscapeTraitCollection());
+  EXPECT_EQ(68, heightLogoLandscape);
+  EXPECT_EQ(kDoodleHeightNoLogo, heightNoLogoLandscape);
+  EXPECT_EQ(78, topMarginLandscape);
+
+  // Portrait
+  CGFloat heightLogoPortrait =
+      doodleHeight(YES, YES, IPhonePortraitTraitCollection());
+  CGFloat heightNoLogoPortrait =
+      doodleHeight(NO, NO, IPhonePortraitTraitCollection());
+  CGFloat topMarginPortrait =
+      doodleTopMargin(kTopInset, IPhonePortraitTraitCollection());
+  EXPECT_EQ(68, heightLogoPortrait);
+  EXPECT_EQ(kDoodleHeightNoLogo, heightNoLogoPortrait);
+  EXPECT_EQ(95, topMarginPortrait);
 }
 
 }  // namespace content_suggestions

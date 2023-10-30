@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define IOS_WEB_SHELL_SHELL_BROWSER_STATE_H_
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "ios/web/public/browser_state.h"
 
@@ -16,24 +15,23 @@ class ShellURLRequestContextGetter;
 
 // Shell-specific implementation of BrowserState.  Can only be called from the
 // UI thread.
-class ShellBrowserState : public BrowserState {
+class ShellBrowserState final : public BrowserState {
  public:
   ShellBrowserState();
+
+  ShellBrowserState(const ShellBrowserState&) = delete;
+  ShellBrowserState& operator=(const ShellBrowserState&) = delete;
+
   ~ShellBrowserState() override;
 
   // BrowserState implementation.
   bool IsOffTheRecord() const override;
   base::FilePath GetStatePath() const override;
   net::URLRequestContextGetter* GetRequestContext() override;
-  std::unique_ptr<service_manager::Service> HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
 
  private:
   base::FilePath path_;
   scoped_refptr<ShellURLRequestContextGetter> request_context_getter_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShellBrowserState);
 };
 
 }  // namespace web

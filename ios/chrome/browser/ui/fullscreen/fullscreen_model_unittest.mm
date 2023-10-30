@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model.h"
 
-#include "base/strings/sys_string_conversions.h"
+#import "base/strings/sys_string_conversions.h"
 #import "ios/chrome/browser/ui/fullscreen/test/fullscreen_model_test_util.h"
 #import "ios/chrome/browser/ui/fullscreen/test/test_fullscreen_model_observer.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
-#include "testing/platform_test.h"
+#import "ios/chrome/browser/ui/util/ui_util.h"
+#import "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -21,7 +21,7 @@ const CGFloat kToolbarHeight = 50.0;
 const CGFloat kScrollViewHeight = 400.0;
 // The content height used for tests.
 const CGFloat kContentHeight = 5000.0;
-// Converts |insets| to a string for debugging.
+// Converts `insets` to a string for debugging.
 std::string GetStringFromInsets(UIEdgeInsets insets) {
   return base::SysNSStringToUTF8(NSStringFromUIEdgeInsets(insets));
 }
@@ -227,7 +227,7 @@ TEST_F(FullscreenModelTest, DraggingStarted) {
 
 // Tests that toolbar_insets() returns the correct values.
 TEST_F(FullscreenModelTest, ToolbarInsets) {
-  // Checks whether |insets| are equal to the expected insets at |progress|.
+  // Checks whether `insets` are equal to the expected insets at `progress`.
   void (^check_insets)(UIEdgeInsets insets, CGFloat progress) =
       ^void(UIEdgeInsets insets, CGFloat progress) {
         UIEdgeInsets expected_insets = UIEdgeInsetsMake(
@@ -292,4 +292,38 @@ TEST_F(FullscreenModelTest, IgnoreContentHeightChangesWhileScrolling) {
   // disabled for the short content height.
   model().SetScrollViewIsDragging(true);
   EXPECT_FALSE(model().enabled());
+}
+
+// Tests that the model detects when the page is scrolled to the top and bottom.
+TEST_F(FullscreenModelTest, ScrolledToTopAndBottom) {
+  // Scroll to the top of the page and verify that only is_scrolled_to_top()
+  // returns true.
+  model().SetYContentOffset(-kToolbarHeight);
+  EXPECT_TRUE(model().is_scrolled_to_top());
+  EXPECT_FALSE(model().is_scrolled_to_bottom());
+
+  // Scroll to the middle of the page and verify that neither
+  // is_scrolled_to_top() nor is_scrolled_to_bottom() returns true.
+  model().SetYContentOffset(kContentHeight / 2.0);
+  EXPECT_FALSE(model().is_scrolled_to_top());
+  EXPECT_FALSE(model().is_scrolled_to_bottom());
+
+  // Scroll to the bottom of the page and verify that only
+  // is_scrolled_to_bottom() returns true.
+  model().SetYContentOffset(kContentHeight - kScrollViewHeight);
+  EXPECT_FALSE(model().is_scrolled_to_top());
+  EXPECT_TRUE(model().is_scrolled_to_bottom());
+}
+
+// Tests that when the toolbar height is frozen, setting the height doesn't
+// change the returned height until the toolbar is unfrozen.
+TEST_F(FullscreenModelTest, FreezeToolbarHeight) {
+  model().SetFreezeToolbarHeight(true);
+  EXPECT_EQ(model().GetExpandedToolbarHeight(), 0);
+
+  model().SetExpandedToolbarHeight(100);
+  EXPECT_EQ(model().GetExpandedToolbarHeight(), 0);
+
+  model().SetFreezeToolbarHeight(false);
+  EXPECT_EQ(model().GetExpandedToolbarHeight(), 100);
 }

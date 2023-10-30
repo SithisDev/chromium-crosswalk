@@ -1,22 +1,24 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/settings/language/language_details_table_view_controller.h"
 
-#include "base/feature_list.h"
-#include "base/metrics/histogram_macros.h"
+#import "base/feature_list.h"
+#import "base/metrics/histogram_macros.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #import "ios/chrome/browser/ui/settings/language/cells/language_item.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_data_source.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_histograms.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_ui_constants.h"
-#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/table_view/table_view_utils.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util_mac.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
+#import "ios/chrome/grit/ios_strings.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -54,11 +56,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
                                     delegate {
   DCHECK(languageItem);
   DCHECK(delegate);
-  UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
-                               ? UITableViewStylePlain
-                               : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+
+  self = [super initWithStyle:ChromeTableViewStyle()];
   if (self) {
     _languageItem = languageItem;
     _delegate = delegate;
@@ -115,8 +114,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   }
   if (!self.languageItem.canOfferTranslate) {
     offerTranslateItem.enabled = NO;
-    offerTranslateItem.textColor =
-        UIColorFromRGB(kSettingsCellsDetailTextColor);
+    offerTranslateItem.textColor = [UIColor colorNamed:kTextSecondaryColor];
   }
   [model addItem:offerTranslateItem
       toSectionWithIdentifier:SectionIdentifierOptions];

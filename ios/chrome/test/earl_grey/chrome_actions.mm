@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,6 @@
 #error "This file requires ARC support."
 #endif
 
-#if defined(CHROME_EARL_GREY_2)
-GREY_STUB_CLASS_IN_APP_MAIN_QUEUE(ChromeActionsAppInterface)
-#endif
-
 namespace chrome_test_util {
 
 id<GREYAction> LongPressElementForContextMenu(ElementSelector* selector,
@@ -25,24 +21,43 @@ id<GREYAction> LongPressElementForContextMenu(ElementSelector* selector,
                                   triggerContextMenu:triggers_context_menu];
 }
 
-id<GREYAction> TurnSettingsSwitchOn(BOOL on) {
-  return [ChromeActionsAppInterface turnSettingsSwitchOn:on];
+id<GREYAction> ScrollElementToVisible(ElementSelector* selector) {
+  return [ChromeActionsAppInterface scrollElementToVisible:selector];
+}
+
+id<GREYAction> TurnTableViewSwitchOn(BOOL on) {
+  return [ChromeActionsAppInterface turnTableViewSwitchOn:on];
 }
 
 id<GREYAction> TurnSyncSwitchOn(BOOL on) {
   return [ChromeActionsAppInterface turnSyncSwitchOn:on];
 }
 
-id<GREYAction> TapWebElement(const std::string& element_id) {
+id<GREYAction> TapWebElement(ElementSelector* selector) {
+  return [ChromeActionsAppInterface tapWebElement:selector];
+}
+
+id<GREYAction> TapWebElementWithId(const std::string& element_id) {
   return [ChromeActionsAppInterface
       tapWebElement:[ElementSelector selectorWithElementID:element_id]];
 }
 
-id<GREYAction> TapWebElementInFrame(const std::string& element_id,
-                                    const int frame_index) {
+id<GREYAction> TapWebElementWithIdInFrame(const std::string& element_id,
+                                          const int frame_index) {
   return [ChromeActionsAppInterface
       tapWebElement:[ElementSelector selectorWithElementID:element_id
                                           inFrameWithIndex:frame_index]];
+}
+
+id<GREYAction> ScrollToTop() {
+  return [ChromeActionsAppInterface scrollToTop];
+}
+
+id<GREYAction> TapAtPointPercentage(CGFloat xOriginStartPercentage,
+                                    CGFloat yOriginStartPercentage) {
+  return [ChromeActionsAppInterface
+      tapAtPointAtxOriginStartPercentage:xOriginStartPercentage
+                  yOriginStartPercentage:yOriginStartPercentage];
 }
 
 }  // namespace chrome_test_util
