@@ -82,7 +82,7 @@ opus_int silk_InitEncoder(                              /* O    Returns error co
     silk_memset( psEnc, 0, sizeof( silk_encoder ) );
     for( n = 0; n < ENCODER_NUM_CHANNELS; n++ ) {
         if( ret += silk_init_encoder( &psEnc->state_Fxx[ n ], arch ) ) {
-            silk_assert( 0 );
+            celt_assert( 0 );
         }
     }
 
@@ -91,7 +91,7 @@ opus_int silk_InitEncoder(                              /* O    Returns error co
 
     /* Read control structure */
     if( ret += silk_QueryEncoder( encState, encStatus ) ) {
-        silk_assert( 0 );
+        celt_assert( 0 );
     }
 
     return ret;
@@ -167,7 +167,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
 
     /* Check values in encoder control structure */
     if( ( ret = check_control_input( encControl ) ) != 0 ) {
-        silk_assert( 0 );
+        celt_assert( 0 );
         RESTORE_STACK;
         return ret;
     }
@@ -200,16 +200,26 @@ opus_int silk_Encode(                                   /* O    Returns error co
     tot_blocks = ( nBlocksOf10ms > 1 ) ? nBlocksOf10ms >> 1 : 1;
     curr_block = 0;
     if( prefillFlag ) {
+        silk_LP_state save_LP;
         /* Only accept input length of 10 ms */
         if( nBlocksOf10ms != 1 ) {
-            silk_assert( 0 );
+            celt_assert( 0 );
             RESTORE_STACK;
             return SILK_ENC_INPUT_INVALID_NO_OF_SAMPLES;
+        }
+        if ( prefillFlag == 2 ) {
+            save_LP = psEnc->state_Fxx[ 0 ].sCmn.sLP;
+            /* Save the sampling rate so the bandwidth switching code can keep handling transitions. */
+            save_LP.saved_fs_kHz = psEnc->state_Fxx[ 0 ].sCmn.fs_kHz;
         }
         /* Reset Encoder */
         for( n = 0; n < encControl->nChannelsInternal; n++ ) {
             ret = silk_init_encoder( &psEnc->state_Fxx[ n ], psEnc->state_Fxx[ n ].sCmn.arch );
-            silk_assert( !ret );
+            /* Restore the variable LP state. */
+            if ( prefillFlag == 2 ) {
+                psEnc->state_Fxx[ n ].sCmn.sLP = save_LP;
+            }
+            celt_assert( !ret );
         }
         tmp_payloadSize_ms = encControl->payloadSize_ms;
         encControl->payloadSize_ms = 10;
@@ -222,13 +232,13 @@ opus_int silk_Encode(                                   /* O    Returns error co
     } else {
         /* Only accept input lengths that are a multiple of 10 ms */
         if( nBlocksOf10ms * encControl->API_sampleRate != 100 * nSamplesIn || nSamplesIn < 0 ) {
-            silk_assert( 0 );
+            celt_assert( 0 );
             RESTORE_STACK;
             return SILK_ENC_INPUT_INVALID_NO_OF_SAMPLES;
         }
         /* Make sure no more than one packet can be produced */
         if( 1000 * (opus_int32)nSamplesIn > encControl->payloadSize_ms * encControl->API_sampleRate ) {
-            silk_assert( 0 );
+            celt_assert( 0 );
             RESTORE_STACK;
             return SILK_ENC_INPUT_INVALID_NO_OF_SAMPLES;
         }
@@ -249,7 +259,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
         }
         psEnc->state_Fxx[ n ].sCmn.inDTX = psEnc->state_Fxx[ n ].sCmn.useDTX;
     }
-    silk_assert( encControl->nChannelsInternal == 1 || psEnc->state_Fxx[ 0 ].sCmn.fs_kHz == psEnc->state_Fxx[ 1 ].sCmn.fs_kHz );
+    celt_assert( encControl->nChannelsInternal == 1 || psEnc->state_Fxx[ 0 ].sCmn.fs_kHz == psEnc->state_Fxx[ 1 ].sCmn.fs_kHz );
 
     /* Input buffering/resampling and encoding */
     nSamplesToBufferMax =
@@ -260,6 +270,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
                        psEnc->state_Fxx[ 0 ].sCmn.fs_kHz * 1000 );
     ALLOC( buf, nSamplesFromInputMax, opus_int16 );
     while( 1 ) {
+        int curr_nBitsUsedLBRR = 0;
         nSamplesToBuffer  = psEnc->state_Fxx[ 0 ].sCmn.frame_length - psEnc->state_Fxx[ 0 ].sCmn.inputBufIx;
         nSamplesToBuffer  = silk_min( nSamplesToBuffer, nSamplesToBufferMax );
         nSamplesFromInput = silk_DIV32_16( nSamplesToBuffer * psEnc->state_Fxx[ 0 ].sCmn.API_fs_Hz, psEnc->state_Fxx[ 0 ].sCmn.fs_kHz * 1000 );
@@ -307,7 +318,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
             }
             psEnc->state_Fxx[ 0 ].sCmn.inputBufIx += nSamplesToBuffer;
         } else {
-            silk_assert( encControl->nChannelsAPI == 1 && encControl->nChannelsInternal == 1 );
+            celt_assert( encControl->nChannelsAPI == 1 && encControl->nChannelsInternal == 1 );
             silk_memcpy(buf, samplesIn, nSamplesFromInput*sizeof(opus_int16));
             ret += silk_resampler( &psEnc->state_Fxx[ 0 ].sCmn.resampler_state,
                 &psEnc->state_Fxx[ 0 ].sCmn.inputBuf[ psEnc->state_Fxx[ 0 ].sCmn.inputBufIx + 2 ], buf, nSamplesFromInput );
@@ -323,8 +334,8 @@ opus_int silk_Encode(                                   /* O    Returns error co
         /* Silk encoder */
         if( psEnc->state_Fxx[ 0 ].sCmn.inputBufIx >= psEnc->state_Fxx[ 0 ].sCmn.frame_length ) {
             /* Enough data in input buffer, so encode */
-            silk_assert( psEnc->state_Fxx[ 0 ].sCmn.inputBufIx == psEnc->state_Fxx[ 0 ].sCmn.frame_length );
-            silk_assert( encControl->nChannelsInternal == 1 || psEnc->state_Fxx[ 1 ].sCmn.inputBufIx == psEnc->state_Fxx[ 1 ].sCmn.frame_length );
+            celt_assert( psEnc->state_Fxx[ 0 ].sCmn.inputBufIx == psEnc->state_Fxx[ 0 ].sCmn.frame_length );
+            celt_assert( encControl->nChannelsInternal == 1 || psEnc->state_Fxx[ 1 ].sCmn.inputBufIx == psEnc->state_Fxx[ 1 ].sCmn.frame_length );
 
             /* Deal with LBRR data */
             if( psEnc->state_Fxx[ 0 ].sCmn.nFramesEncoded == 0 && !prefillFlag ) {
@@ -332,6 +343,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
                 opus_uint8 iCDF[ 2 ] = { 0, 0 };
                 iCDF[ 0 ] = 256 - silk_RSHIFT( 256, ( psEnc->state_Fxx[ 0 ].sCmn.nFramesPerPacket + 1 ) * encControl->nChannelsInternal );
                 ec_enc_icdf( psRangeEnc, 0, iCDF, 8 );
+                curr_nBitsUsedLBRR = ec_tell( psRangeEnc );
 
                 /* Encode any LBRR data from previous packet */
                 /* Encode LBRR flags */
@@ -376,8 +388,7 @@ opus_int silk_Encode(                                   /* O    Returns error co
                 for( n = 0; n < encControl->nChannelsInternal; n++ ) {
                     silk_memset( psEnc->state_Fxx[ n ].sCmn.LBRR_flags, 0, sizeof( psEnc->state_Fxx[ n ].sCmn.LBRR_flags ) );
                 }
-
-                psEnc->nBitsUsedLBRR = ec_tell( psRangeEnc );
+                curr_nBitsUsedLBRR = ec_tell( psRangeEnc ) - curr_nBitsUsedLBRR;
             }
 
             silk_HP_variable_cutoff( psEnc->state_Fxx );
@@ -386,6 +397,16 @@ opus_int silk_Encode(                                   /* O    Returns error co
             nBits = silk_DIV32_16( silk_MUL( encControl->bitRate, encControl->payloadSize_ms ), 1000 );
             /* Subtract bits used for LBRR */
             if( !prefillFlag ) {
+                /* psEnc->nBitsUsedLBRR is an exponential moving average of the LBRR usage,
+                   except that for the first LBRR frame it does no averaging and for the first
+                   frame after after LBRR, it goes back to zero immediately. */
+                if ( curr_nBitsUsedLBRR < 10 ) {
+                    psEnc->nBitsUsedLBRR = 0;
+                } else if ( psEnc->nBitsUsedLBRR < 10) {
+                    psEnc->nBitsUsedLBRR = curr_nBitsUsedLBRR;
+                } else {
+                    psEnc->nBitsUsedLBRR = ( psEnc->nBitsUsedLBRR + curr_nBitsUsedLBRR ) / 2;
+                }
                 nBits -= psEnc->nBitsUsedLBRR;
             }
             /* Divide by number of uncoded frames left in packet */

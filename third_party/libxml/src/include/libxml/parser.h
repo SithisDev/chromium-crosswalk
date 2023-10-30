@@ -10,8 +10,6 @@
 #ifndef __XML_PARSER_H__
 #define __XML_PARSER_H__
 
-#include <stdarg.h>
-
 #include <libxml/xmlversion.h>
 #include <libxml/tree.h>
 #include <libxml/dict.h>
@@ -79,7 +77,7 @@ struct _xmlParserInput {
 /**
  * xmlParserNodeInfo:
  *
- * The parser can be asked to collect Node informations, i.e. at what
+ * The parser can be asked to collect Node information, i.e. at what
  * place in the file they were detected.
  * NOTE: This is off by default and not very well tested.
  */
@@ -169,6 +167,8 @@ typedef enum {
     XML_PARSE_READER = 5
 } xmlParserMode;
 
+typedef struct _xmlStartTag xmlStartTag;
+
 /**
  * xmlParserCtxt:
  *
@@ -190,7 +190,7 @@ struct _xmlParserCtxt {
     const xmlChar    *version;        /* the XML version string */
     const xmlChar   *encoding;        /* the declared encoding, if any */
     int            standalone;        /* standalone document */
-    int                  html;        /* an HTML(1)/Docbook(2) document
+    int                  html;        /* an HTML(1) document
                                        * 3 is HTML after <head>
                                        * 10 is HTML after <body>
                                        */
@@ -231,7 +231,7 @@ struct _xmlParserCtxt {
     int                nameMax;       /* Max depth of the parsing stack */
     const xmlChar *   *nameTab;       /* array of nodes */
 
-    long               nbChars;       /* number of xmlChar processed */
+    long               nbChars;       /* unused */
     long            checkIndex;       /* used by progressive parsing lookup */
     int             keepBlanks;       /* ugly but ... */
     int             disableSAX;       /* SAX callbacks are disabled */
@@ -280,14 +280,14 @@ struct _xmlParserCtxt {
     int                nsMax;         /* the size of the arrays */
     const xmlChar *   *nsTab;         /* the array of prefix/namespace name */
     int               *attallocs;     /* which attribute were allocated */
-    void *            *pushTab;       /* array of data for push */
+    xmlStartTag       *pushTab;       /* array of data for push */
     xmlHashTablePtr    attsDefault;   /* defaulted attributes if any */
     xmlHashTablePtr    attsSpecial;   /* non-CDATA attributes if any */
-    int                nsWellFormed;  /* is the document XML Nanespace okay */
+    int                nsWellFormed;  /* is the document XML Namespace okay */
     int                options;       /* Extra options */
 
     /*
-     * Those fields are needed only for treaming parsing so far
+     * Those fields are needed only for streaming parsing so far
      */
     int               dictNames;    /* Use dictionary names for the tree */
     int               freeElemsNr;  /* number of freed element nodes */
@@ -296,7 +296,7 @@ struct _xmlParserCtxt {
     xmlAttrPtr        freeAttrs;    /* List of freed attributes nodes */
 
     /*
-     * the complete error informations for the last error.
+     * the complete error information for the last error.
      */
     xmlError          lastError;
     xmlParserMode     parseMode;    /* the parser mode */
@@ -329,7 +329,7 @@ struct _xmlSAXLocator {
  * xmlSAXHandler:
  *
  * A SAX handler is bunch of callbacks called by the parser when processing
- * of the input generate data or structure informations.
+ * of the input generate data or structure information.
  */
 
 /**
@@ -685,7 +685,7 @@ typedef int (*hasExternalSubsetSAXFunc) (void *ctx);
  *               attribute values.
  *
  * SAX2 callback when an element start has been detected by the parser.
- * It provides the namespace informations for the element, as well as
+ * It provides the namespace information for the element, as well as
  * the new namespace declarations on the element.
  */
 
@@ -707,7 +707,7 @@ typedef void (*startElementNsSAX2Func) (void *ctx,
  * @URI:  the element namespace name if available
  *
  * SAX2 callback when an element end has been detected by the parser.
- * It provides the namespace informations for the element.
+ * It provides the namespace information for the element.
  */
 
 typedef void (*endElementNsSAX2Func)   (void *ctx,
@@ -861,11 +861,14 @@ XMLPUBFUN int XMLCALL
 /*
  * Recovery mode
  */
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlRecoverDoc		(const xmlChar *cur);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlRecoverMemory	(const char *buffer,
 					 int size);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlRecoverFile		(const char *filename);
 #endif /* LIBXML_SAX1_ENABLED */
@@ -878,47 +881,59 @@ XMLPUBFUN int XMLCALL
 XMLPUBFUN int XMLCALL
 		xmlParseExtParsedEnt	(xmlParserCtxtPtr ctxt);
 #ifdef LIBXML_SAX1_ENABLED
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlSAXUserParseFile	(xmlSAXHandlerPtr sax,
 					 void *user_data,
 					 const char *filename);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlSAXUserParseMemory	(xmlSAXHandlerPtr sax,
 					 void *user_data,
 					 const char *buffer,
 					 int size);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseDoc		(xmlSAXHandlerPtr sax,
 					 const xmlChar *cur,
 					 int recovery);
+// TODO(https://github.com/google/maldoca/issues/87): Re-Deprecate this when
+//   maldoca stops using xmlSAXParseMemory.
+//XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseMemory	(xmlSAXHandlerPtr sax,
 					 const char *buffer,
 					 int size,
 					 int recovery);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseMemoryWithData (xmlSAXHandlerPtr sax,
 					 const char *buffer,
 					 int size,
 					 int recovery,
 					 void *data);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseFile		(xmlSAXHandlerPtr sax,
 					 const char *filename,
 					 int recovery);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseFileWithData	(xmlSAXHandlerPtr sax,
 					 const char *filename,
 					 int recovery,
 					 void *data);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlSAXParseEntity	(xmlSAXHandlerPtr sax,
 					 const char *filename);
+XML_DEPRECATED
 XMLPUBFUN xmlDocPtr XMLCALL
 		xmlParseEntity		(const char *filename);
 #endif /* LIBXML_SAX1_ENABLED */
 
 #ifdef LIBXML_VALID_ENABLED
+XML_DEPRECATED
 XMLPUBFUN xmlDtdPtr XMLCALL
 		xmlSAXParseDTD		(xmlSAXHandlerPtr sax,
 					 const xmlChar *ExternalID,
@@ -955,6 +970,7 @@ XMLPUBFUN int XMLCALL
                      const xmlChar *string,
                      xmlNodePtr *lst,
                      int recover);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlParseExternalEntity	(xmlDocPtr doc,
 					 xmlSAXHandlerPtr sax,
@@ -975,6 +991,9 @@ XMLPUBFUN int XMLCALL
  */
 XMLPUBFUN xmlParserCtxtPtr XMLCALL
 		xmlNewParserCtxt	(void);
+XMLPUBFUN xmlParserCtxtPtr XMLCALL
+		xmlNewSAXParserCtxt	(const xmlSAXHandler *sax,
+					 void *userData);
 XMLPUBFUN int XMLCALL
 		xmlInitParserCtxt	(xmlParserCtxtPtr ctxt);
 XMLPUBFUN void XMLCALL
@@ -982,6 +1001,7 @@ XMLPUBFUN void XMLCALL
 XMLPUBFUN void XMLCALL
 		xmlFreeParserCtxt	(xmlParserCtxtPtr ctxt);
 #ifdef LIBXML_SAX1_ENABLED
+XML_DEPRECATED
 XMLPUBFUN void XMLCALL
 		xmlSetupParserForBuffer	(xmlParserCtxtPtr ctxt,
 					 const xmlChar* buffer,
@@ -994,13 +1014,16 @@ XMLPUBFUN xmlParserCtxtPtr XMLCALL
 /*
  * Reading/setting optional parsing features.
  */
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlGetFeaturesList	(int *len,
 					 const char **result);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlGetFeature		(xmlParserCtxtPtr ctxt,
 					 const char *name,
 					 void *result);
+XML_DEPRECATED
 XMLPUBFUN int XMLCALL
 		xmlSetFeature		(xmlParserCtxtPtr ctxt,
 					 const char *name,
@@ -1097,7 +1120,7 @@ typedef enum {
     XML_PARSE_PEDANTIC	= 1<<7,	/* pedantic error reporting */
     XML_PARSE_NOBLANKS	= 1<<8,	/* remove blank nodes */
     XML_PARSE_SAX1	= 1<<9,	/* use the SAX1 interface internally */
-    XML_PARSE_XINCLUDE	= 1<<10,/* Implement XInclude substitition  */
+    XML_PARSE_XINCLUDE	= 1<<10,/* Implement XInclude substitution  */
     XML_PARSE_NONET	= 1<<11,/* Forbid network access */
     XML_PARSE_NODICT	= 1<<12,/* Do not reuse the context dictionary */
     XML_PARSE_NSCLEAN	= 1<<13,/* remove redundant namespaces declarations */
@@ -1191,7 +1214,7 @@ XMLPUBFUN xmlDocPtr XMLCALL
 /**
  * xmlFeature:
  *
- * Used to examine the existance of features that can be enabled
+ * Used to examine the existence of features that can be enabled
  * or disabled at compile-time.
  * They used to be called XML_FEATURE_xxx but this clashed with Expat
  */

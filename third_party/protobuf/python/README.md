@@ -1,8 +1,6 @@
 Protocol Buffers - Google's data interchange format
 ===================================================
 
-[![Build Status](https://travis-ci.org/google/protobuf.svg?branch=master)](https://travis-ci.org/google/protobuf)
-
 Copyright 2008 Google Inc.
 
 This directory contains the Python Protocol Buffers runtime library.
@@ -22,15 +20,13 @@ package.
 Development Warning
 ===================
 
-The Python implementation of Protocol Buffers is not as mature as the C++
-and Java implementations.  It may be more buggy, and it is known to be
-pretty slow at this time.  If you would like to help fix these issues,
-join the Protocol Buffers discussion list and let us know!
+The pure python performance is slow. For better performance please
+use python c++ implementation.
 
 Installation
 ============
 
-1) Make sure you have Python 2.6 or newer.  If in doubt, run:
+1) Make sure you have Python 3.7 or newer.  If in doubt, run:
 
        $ python -V
 

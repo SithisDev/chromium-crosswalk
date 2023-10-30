@@ -21,29 +21,31 @@ shared_library("netty-tcnative-so") {
     "src/c/sslutils.c",
     "src/c/tcn.h",
   ]
-  include_dirs = [ "../apache-portable-runtime/src/include" ]
+  include_dirs = [ "//third_party/apache-portable-runtime/src/include" ]
   defines = [ "HAVE_OPENSSL" ]
   cflags = [ "-w" ]
   configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
   deps = [
-    "../apache-portable-runtime:apr",
-    "../boringssl:boringssl",
+    "//third_party/apache-portable-runtime:apr",
+    "//third_party/boringssl:boringssl",
   ]
 }
 
 # Builds the Java part of netty-tcnative library.
 android_library("netty-tcnative_java") {
-  java_files = [
+  sources = [
     "src/java/io/netty/internal/tcnative/Buffer.java",
     "src/java/io/netty/internal/tcnative/CertificateRequestedCallback.java",
     "src/java/io/netty/internal/tcnative/CertificateVerifier.java",
     "src/java/io/netty/internal/tcnative/Library.java",
     "src/java/io/netty/internal/tcnative/NativeStaticallyReferencedJniMethods.java",
-    "src/java/io/netty/internal/tcnative/SessionTicketKey.java",
     "src/java/io/netty/internal/tcnative/SSL.java",
     "src/java/io/netty/internal/tcnative/SSLContext.java",
+    "src/java/io/netty/internal/tcnative/SessionTicketKey.java",
   ]
   deps = [
     "//base:base_java",
+    "//base:jni_java",
+    "//build/android:build_java",
   ]
 }

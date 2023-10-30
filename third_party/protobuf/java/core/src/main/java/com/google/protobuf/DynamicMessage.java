@@ -38,13 +38,14 @@ import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.protobuf.Descriptors.OneofDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
- * An implementation of {@link Message} that can represent arbitrary types,
- * given a {@link Descriptors.Descriptor}.
+ * An implementation of {@link Message} that can represent arbitrary types, given a {@link
+ * Descriptors.Descriptor}.
  *
  * @author kenton@google.com Kenton Varda
  */
@@ -56,88 +57,83 @@ public final class DynamicMessage extends AbstractMessage {
   private int memoizedSize = -1;
 
   /**
-   * Construct a {@code DynamicMessage} using the given {@code FieldSet}.
-   * oneofCases stores the FieldDescriptor for each oneof to indicate
-   * which field is set. Caller should make sure the array is immutable.
+   * Construct a {@code DynamicMessage} using the given {@code FieldSet}. oneofCases stores the
+   * FieldDescriptor for each oneof to indicate which field is set. Caller should make sure the
+   * array is immutable.
    *
-   * This constructor is package private and will be used in
-   * {@code DynamicMutableMessage} to convert a mutable message to an immutable
-   * message.
+   * <p>This constructor is package private and will be used in {@code DynamicMutableMessage} to
+   * convert a mutable message to an immutable message.
    */
-  DynamicMessage(Descriptor type, FieldSet<FieldDescriptor> fields,
-                 FieldDescriptor[] oneofCases,
-                 UnknownFieldSet unknownFields) {
+  DynamicMessage(
+      Descriptor type,
+      FieldSet<FieldDescriptor> fields,
+      FieldDescriptor[] oneofCases,
+      UnknownFieldSet unknownFields) {
     this.type = type;
     this.fields = fields;
     this.oneofCases = oneofCases;
     this.unknownFields = unknownFields;
   }
 
-  /**
-   * Get a {@code DynamicMessage} representing the default instance of the
-   * given type.
-   */
+  /** Get a {@code DynamicMessage} representing the default instance of the given type. */
   public static DynamicMessage getDefaultInstance(Descriptor type) {
     int oneofDeclCount = type.toProto().getOneofDeclCount();
     FieldDescriptor[] oneofCases = new FieldDescriptor[oneofDeclCount];
-    return new DynamicMessage(type, FieldSet.<FieldDescriptor>emptySet(),
-                              oneofCases,
-                              UnknownFieldSet.getDefaultInstance());
+    return new DynamicMessage(
+        type,
+        FieldSet.<FieldDescriptor>emptySet(),
+        oneofCases,
+        UnknownFieldSet.getDefaultInstance());
   }
 
 
   /** Parse a message of the given type from the given input stream. */
-  public static DynamicMessage parseFrom(Descriptor type,
-                                         CodedInputStream input)
-                                         throws IOException {
+  public static DynamicMessage parseFrom(Descriptor type, CodedInputStream input)
+      throws IOException {
     return newBuilder(type).mergeFrom(input).buildParsed();
   }
 
   /** Parse a message of the given type from the given input stream. */
   public static DynamicMessage parseFrom(
-      Descriptor type,
-      CodedInputStream input,
-      ExtensionRegistry extensionRegistry)
+      Descriptor type, CodedInputStream input, ExtensionRegistry extensionRegistry)
       throws IOException {
     return newBuilder(type).mergeFrom(input, extensionRegistry).buildParsed();
   }
 
   /** Parse {@code data} as a message of the given type and return it. */
   public static DynamicMessage parseFrom(Descriptor type, ByteString data)
-                                         throws InvalidProtocolBufferException {
+      throws InvalidProtocolBufferException {
     return newBuilder(type).mergeFrom(data).buildParsed();
   }
 
   /** Parse {@code data} as a message of the given type and return it. */
-  public static DynamicMessage parseFrom(Descriptor type, ByteString data,
-                                         ExtensionRegistry extensionRegistry)
-                                         throws InvalidProtocolBufferException {
+  public static DynamicMessage parseFrom(
+      Descriptor type, ByteString data, ExtensionRegistry extensionRegistry)
+      throws InvalidProtocolBufferException {
     return newBuilder(type).mergeFrom(data, extensionRegistry).buildParsed();
   }
 
   /** Parse {@code data} as a message of the given type and return it. */
   public static DynamicMessage parseFrom(Descriptor type, byte[] data)
-                                         throws InvalidProtocolBufferException {
+      throws InvalidProtocolBufferException {
     return newBuilder(type).mergeFrom(data).buildParsed();
   }
 
   /** Parse {@code data} as a message of the given type and return it. */
-  public static DynamicMessage parseFrom(Descriptor type, byte[] data,
-                                         ExtensionRegistry extensionRegistry)
-                                         throws InvalidProtocolBufferException {
+  public static DynamicMessage parseFrom(
+      Descriptor type, byte[] data, ExtensionRegistry extensionRegistry)
+      throws InvalidProtocolBufferException {
     return newBuilder(type).mergeFrom(data, extensionRegistry).buildParsed();
   }
 
   /** Parse a message of the given type from {@code input} and return it. */
-  public static DynamicMessage parseFrom(Descriptor type, InputStream input)
-                                         throws IOException {
+  public static DynamicMessage parseFrom(Descriptor type, InputStream input) throws IOException {
     return newBuilder(type).mergeFrom(input).buildParsed();
   }
 
   /** Parse a message of the given type from {@code input} and return it. */
-  public static DynamicMessage parseFrom(Descriptor type, InputStream input,
-                                         ExtensionRegistry extensionRegistry)
-                                         throws IOException {
+  public static DynamicMessage parseFrom(
+      Descriptor type, InputStream input, ExtensionRegistry extensionRegistry) throws IOException {
     return newBuilder(type).mergeFrom(input, extensionRegistry).buildParsed();
   }
 
@@ -147,8 +143,8 @@ public final class DynamicMessage extends AbstractMessage {
   }
 
   /**
-   * Construct a {@link Message.Builder} for a message of the same type as
-   * {@code prototype}, and initialize it with {@code prototype}'s contents.
+   * Construct a {@link Message.Builder} for a message of the same type as {@code prototype}, and
+   * initialize it with {@code prototype}'s contents.
    */
   public static Builder newBuilder(Message prototype) {
     return new Builder(prototype.getDescriptorForType()).mergeFrom(prototype);
@@ -227,8 +223,7 @@ public final class DynamicMessage extends AbstractMessage {
     return unknownFields;
   }
 
-  static boolean isInitialized(Descriptor type,
-                               FieldSet<FieldDescriptor> fields) {
+  static boolean isInitialized(Descriptor type, FieldSet<FieldDescriptor> fields) {
     // Check that all required fields are present.
     for (final FieldDescriptor field : type.getFields()) {
       if (field.isRequired()) {
@@ -298,8 +293,7 @@ public final class DynamicMessage extends AbstractMessage {
         } catch (InvalidProtocolBufferException e) {
           throw e.setUnfinishedMessage(builder.buildPartial());
         } catch (IOException e) {
-          throw new InvalidProtocolBufferException(e)
-              .setUnfinishedMessage(builder.buildPartial());
+          throw new InvalidProtocolBufferException(e).setUnfinishedMessage(builder.buildPartial());
         }
         return builder.buildPartial();
       }
@@ -309,50 +303,32 @@ public final class DynamicMessage extends AbstractMessage {
   /** Verifies that the field is a field of this message. */
   private void verifyContainingType(FieldDescriptor field) {
     if (field.getContainingType() != type) {
-      throw new IllegalArgumentException(
-        "FieldDescriptor does not match message type.");
+      throw new IllegalArgumentException("FieldDescriptor does not match message type.");
     }
   }
 
   /** Verifies that the oneof is an oneof of this message. */
   private void verifyOneofContainingType(OneofDescriptor oneof) {
     if (oneof.getContainingType() != type) {
-      throw new IllegalArgumentException(
-        "OneofDescriptor does not match message type.");
+      throw new IllegalArgumentException("OneofDescriptor does not match message type.");
     }
   }
 
   // =================================================================
 
-  /**
-   * Builder for {@link DynamicMessage}s.
-   */
+  /** Builder for {@link DynamicMessage}s. */
   public static final class Builder extends AbstractMessage.Builder<Builder> {
     private final Descriptor type;
-    private FieldSet<FieldDescriptor> fields;
+    private FieldSet.Builder<FieldDescriptor> fields;
     private final FieldDescriptor[] oneofCases;
     private UnknownFieldSet unknownFields;
 
     /** Construct a {@code Builder} for the given type. */
     private Builder(Descriptor type) {
       this.type = type;
-      this.fields = FieldSet.newFieldSet();
+      this.fields = FieldSet.newBuilder();
       this.unknownFields = UnknownFieldSet.getDefaultInstance();
       this.oneofCases = new FieldDescriptor[type.toProto().getOneofDeclCount()];
-      // A MapEntry has all of its fields present at all times.
-      if (type.getOptions().getMapEntry()) {
-        populateMapEntry();
-      }
-    }
-
-    private void populateMapEntry() {
-      for (FieldDescriptor field : type.getFields()) {
-        if (field.getJavaType() == FieldDescriptor.JavaType.MESSAGE) {
-          fields.setField(field, getDefaultInstance(field.getMessageType()));
-        } else {
-          fields.setField(field, field.getDefaultValue());
-        }
-      }
     }
 
     // ---------------------------------------------------------------
@@ -360,15 +336,7 @@ public final class DynamicMessage extends AbstractMessage {
 
     @Override
     public Builder clear() {
-      if (fields.isImmutable()) {
-        fields = FieldSet.newFieldSet();
-      } else {
-        fields.clear();
-      }
-      // A MapEntry has all of its fields present at all times.
-      if (type.getOptions().getMapEntry()) {
-        populateMapEntry();
-      }
+      fields = FieldSet.newBuilder();
       unknownFields = UnknownFieldSet.getDefaultInstance();
       return this;
     }
@@ -380,9 +348,8 @@ public final class DynamicMessage extends AbstractMessage {
         DynamicMessage otherDynamicMessage = (DynamicMessage) other;
         if (otherDynamicMessage.type != type) {
           throw new IllegalArgumentException(
-            "mergeFrom(Message) can only merge messages of the same type.");
+              "mergeFrom(Message) can only merge messages of the same type.");
         }
-        ensureIsMutable();
         fields.mergeFrom(otherDynamicMessage.fields);
         mergeUnknownFields(otherDynamicMessage.unknownFields);
         for (int i = 0; i < oneofCases.length; i++) {
@@ -406,48 +373,72 @@ public final class DynamicMessage extends AbstractMessage {
     public DynamicMessage build() {
       if (!isInitialized()) {
         throw newUninitializedMessageException(
-          new DynamicMessage(type, fields,
-              java.util.Arrays.copyOf(oneofCases, oneofCases.length), unknownFields));
+            new DynamicMessage(
+                type, fields.build(), Arrays.copyOf(oneofCases, oneofCases.length), unknownFields));
       }
       return buildPartial();
     }
 
     /**
-     * Helper for DynamicMessage.parseFrom() methods to call.  Throws
-     * {@link InvalidProtocolBufferException} instead of
-     * {@link UninitializedMessageException}.
+     * Helper for DynamicMessage.parseFrom() methods to call. Throws {@link
+     * InvalidProtocolBufferException} instead of {@link UninitializedMessageException}.
      */
     private DynamicMessage buildParsed() throws InvalidProtocolBufferException {
       if (!isInitialized()) {
         throw newUninitializedMessageException(
-          new DynamicMessage(type, fields,
-              java.util.Arrays.copyOf(oneofCases, oneofCases.length), unknownFields))
-          .asInvalidProtocolBufferException();
+                new DynamicMessage(
+                    type,
+                    fields.build(),
+                    Arrays.copyOf(oneofCases, oneofCases.length),
+                    unknownFields))
+            .asInvalidProtocolBufferException();
       }
       return buildPartial();
     }
 
     @Override
     public DynamicMessage buildPartial() {
-      fields.makeImmutable();
+      // Set default values for all fields in a MapEntry.
+      if (type.getOptions().getMapEntry()) {
+        for (FieldDescriptor field : type.getFields()) {
+          if (field.isOptional() && !fields.hasField(field)) {
+            if (field.getJavaType() == FieldDescriptor.JavaType.MESSAGE) {
+              fields.setField(field, getDefaultInstance(field.getMessageType()));
+            } else {
+              fields.setField(field, field.getDefaultValue());
+            }
+          }
+        }
+      }
+
       DynamicMessage result =
-        new DynamicMessage(type, fields,
-            java.util.Arrays.copyOf(oneofCases, oneofCases.length), unknownFields);
+          new DynamicMessage(
+              type, fields.build(), Arrays.copyOf(oneofCases, oneofCases.length), unknownFields);
       return result;
     }
 
     @Override
     public Builder clone() {
       Builder result = new Builder(type);
-      result.fields.mergeFrom(fields);
+      result.fields.mergeFrom(fields.build());
       result.mergeUnknownFields(unknownFields);
-      System.arraycopy(oneofCases, 0, result.oneofCases, 0 , oneofCases.length);
+      System.arraycopy(oneofCases, 0, result.oneofCases, 0, oneofCases.length);
       return result;
     }
 
     @Override
     public boolean isInitialized() {
-      return DynamicMessage.isInitialized(type, fields);
+      // Check that all required fields are present.
+      for (FieldDescriptor field : type.getFields()) {
+        if (field.isRequired()) {
+          if (!fields.hasField(field)) {
+            return false;
+          }
+        }
+      }
+
+      // Check that embedded messages are initialized.
+      return fields.isInitialized();
     }
 
     @Override
@@ -471,7 +462,7 @@ public final class DynamicMessage extends AbstractMessage {
 
       if (field.getJavaType() != FieldDescriptor.JavaType.MESSAGE) {
         throw new IllegalArgumentException(
-          "newBuilderForField is only valid for fields with message type.");
+            "newBuilderForField is only valid for fields with message type.");
       }
 
       return new Builder(field.getMessageType());
@@ -528,15 +519,12 @@ public final class DynamicMessage extends AbstractMessage {
     @Override
     public Builder setField(FieldDescriptor field, Object value) {
       verifyContainingType(field);
-      ensureIsMutable();
       // TODO(xiaofeng): This check should really be put in FieldSet.setField()
       // where all other such checks are done. However, currently
       // FieldSet.setField() permits Integer value for enum fields probably
       // because of some internal features we support. Should figure it out
       // and move this check to a more appropriate place.
-      if (field.getType() == FieldDescriptor.Type.ENUM) {
-        ensureEnumValueDescriptor(field, value);
-      }
+      verifyType(field, value);
       OneofDescriptor oneofDescriptor = field.getContainingOneof();
       if (oneofDescriptor != null) {
         int index = oneofDescriptor.getIndex();
@@ -561,7 +549,6 @@ public final class DynamicMessage extends AbstractMessage {
     @Override
     public Builder clearField(FieldDescriptor field) {
       verifyContainingType(field);
-      ensureIsMutable();
       OneofDescriptor oneofDescriptor = field.getContainingOneof();
       if (oneofDescriptor != null) {
         int index = oneofDescriptor.getIndex();
@@ -588,7 +575,7 @@ public final class DynamicMessage extends AbstractMessage {
     @Override
     public Builder setRepeatedField(FieldDescriptor field, int index, Object value) {
       verifyContainingType(field);
-      ensureIsMutable();
+      verifySingularValueType(field, value);
       fields.setRepeatedField(field, index, value);
       return this;
     }
@@ -596,7 +583,7 @@ public final class DynamicMessage extends AbstractMessage {
     @Override
     public Builder addRepeatedField(FieldDescriptor field, Object value) {
       verifyContainingType(field);
-      ensureIsMutable();
+      verifySingularValueType(field, value);
       fields.addRepeatedField(field, value);
       return this;
     }
@@ -608,92 +595,141 @@ public final class DynamicMessage extends AbstractMessage {
 
     @Override
     public Builder setUnknownFields(UnknownFieldSet unknownFields) {
-      if (getDescriptorForType().getFile().getSyntax() == Descriptors.FileDescriptor.Syntax.PROTO3
-          && CodedInputStream.getProto3DiscardUnknownFieldsDefault()) {
-        return this;
-      }
       this.unknownFields = unknownFields;
       return this;
     }
 
     @Override
     public Builder mergeUnknownFields(UnknownFieldSet unknownFields) {
-      if (getDescriptorForType().getFile().getSyntax() == Descriptors.FileDescriptor.Syntax.PROTO3
-          && CodedInputStream.getProto3DiscardUnknownFieldsDefault()) {
-        return this;
-      }
       this.unknownFields =
-        UnknownFieldSet.newBuilder(this.unknownFields)
-                       .mergeFrom(unknownFields)
-                       .build();
+          UnknownFieldSet.newBuilder(this.unknownFields).mergeFrom(unknownFields).build();
       return this;
     }
 
     /** Verifies that the field is a field of this message. */
     private void verifyContainingType(FieldDescriptor field) {
       if (field.getContainingType() != type) {
-        throw new IllegalArgumentException(
-          "FieldDescriptor does not match message type.");
+        throw new IllegalArgumentException("FieldDescriptor does not match message type.");
       }
     }
 
     /** Verifies that the oneof is an oneof of this message. */
     private void verifyOneofContainingType(OneofDescriptor oneof) {
       if (oneof.getContainingType() != type) {
-        throw new IllegalArgumentException(
-          "OneofDescriptor does not match message type.");
+        throw new IllegalArgumentException("OneofDescriptor does not match message type.");
       }
     }
 
-    /** Verifies that the value is EnumValueDescriptor and matches Enum Type. */
-    private void ensureSingularEnumValueDescriptor(
-        FieldDescriptor field, Object value) {
-      checkNotNull(value);
-      if (!(value instanceof EnumValueDescriptor)) {
-        throw new IllegalArgumentException(
-          "DynamicMessage should use EnumValueDescriptor to set Enum Value.");
+    /**
+     * Verifies that {@code value} is of the appropriate type, in addition to the checks already
+     * performed by {@link FieldSet.Builder}.
+     */
+    private void verifySingularValueType(FieldDescriptor field, Object value) {
+      // Most type checks are performed by FieldSet.Builder, but FieldSet.Builder is more permissive
+      // than generated Message.Builder subclasses, so we perform extra checks in this class so that
+      // DynamicMessage.Builder's semantics more closely match the semantics of generated builders.
+      switch (field.getType()) {
+        case ENUM:
+          checkNotNull(value);
+          // FieldSet.Builder accepts Integer values for enum fields.
+          if (!(value instanceof EnumValueDescriptor)) {
+            throw new IllegalArgumentException(
+                "DynamicMessage should use EnumValueDescriptor to set Enum Value.");
+          }
+          // TODO(xiaofeng): Re-enable this check after Orgstore is fixed to not
+          // set incorrect EnumValueDescriptors.
+          // EnumDescriptor fieldType = field.getEnumType();
+          // EnumDescriptor fieldValueType = ((EnumValueDescriptor) value).getType();
+          // if (fieldType != fieldValueType) {
+          //  throw new IllegalArgumentException(String.format(
+          //      "EnumDescriptor %s of field doesn't match EnumDescriptor %s of field value",
+          //      fieldType.getFullName(), fieldValueType.getFullName()));
+          // }
+          break;
+        case MESSAGE:
+          // FieldSet.Builder accepts Message.Builder values for message fields.
+          if (value instanceof Message.Builder) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "Wrong object type used with protocol message reflection.\n"
+                        + "Field number: %d, field java type: %s, value type: %s\n",
+                    field.getNumber(),
+                    field.getLiteType().getJavaType(),
+                    value.getClass().getName()));
+          }
+          break;
+        default:
+          break;
       }
-      // TODO(xiaofeng): Re-enable this check after Orgstore is fixed to not
-      // set incorrect EnumValueDescriptors.
-      // EnumDescriptor fieldType = field.getEnumType();
-      // EnumDescriptor fieldValueType = ((EnumValueDescriptor) value).getType();
-      // if (fieldType != fieldValueType) {
-      //  throw new IllegalArgumentException(String.format(
-      //      "EnumDescriptor %s of field doesn't match EnumDescriptor %s of field value",
-      //      fieldType.getFullName(), fieldValueType.getFullName()));
-      // }
     }
 
-    /** Verifies the value for an enum field. */
-    private void ensureEnumValueDescriptor(
-        FieldDescriptor field, Object value) {
+    /**
+     * Verifies that {@code value} is of the appropriate type, in addition to the checks already
+     * performed by {@link FieldSet.Builder}.
+     */
+    private void verifyType(FieldDescriptor field, Object value) {
       if (field.isRepeated()) {
-        for (Object item : (List) value) {
-          ensureSingularEnumValueDescriptor(field, item);
+        for (Object item : (List<?>) value) {
+          verifySingularValueType(field, item);
         }
       } else {
-         ensureSingularEnumValueDescriptor(field, value);
-      }
-    }
-
-    private void ensureIsMutable() {
-      if (fields.isImmutable()) {
-        fields = fields.clone();
+        verifySingularValueType(field, value);
       }
     }
 
     @Override
     public com.google.protobuf.Message.Builder getFieldBuilder(FieldDescriptor field) {
-      // TODO(xiangl): need implementation for dynamic message
-      throw new UnsupportedOperationException(
-        "getFieldBuilder() called on a dynamic message type.");
+      verifyContainingType(field);
+      // Error messages chosen for parity with GeneratedMessage.getFieldBuilder.
+      if (field.isMapField()) {
+        throw new UnsupportedOperationException("Nested builder not supported for map fields.");
+      }
+      if (field.getJavaType() != FieldDescriptor.JavaType.MESSAGE) {
+        throw new UnsupportedOperationException("getFieldBuilder() called on a non-Message type.");
+      }
+
+      Object existingValue = fields.getFieldAllowBuilders(field);
+      Message.Builder builder =
+          existingValue == null
+              ? new Builder(field.getMessageType())
+              : toMessageBuilder(existingValue);
+      fields.setField(field, builder);
+      return builder;
     }
 
     @Override
-    public com.google.protobuf.Message.Builder getRepeatedFieldBuilder(FieldDescriptor field,
-        int index) {
-      throw new UnsupportedOperationException(
-        "getRepeatedFieldBuilder() called on a dynamic message type.");
+    public com.google.protobuf.Message.Builder getRepeatedFieldBuilder(
+        FieldDescriptor field, int index) {
+      verifyContainingType(field);
+      // Error messages chosen for parity with GeneratedMessage.getRepeatedFieldBuilder.
+      if (field.isMapField()) {
+        throw new UnsupportedOperationException("Map fields cannot be repeated");
+      }
+      if (field.getJavaType() != FieldDescriptor.JavaType.MESSAGE) {
+        throw new UnsupportedOperationException(
+            "getRepeatedFieldBuilder() called on a non-Message type.");
+      }
+
+      Message.Builder builder =
+          toMessageBuilder(fields.getRepeatedFieldAllowBuilders(field, index));
+      fields.setRepeatedField(field, index, builder);
+      return builder;
+    }
+
+    private static Message.Builder toMessageBuilder(Object o) {
+      if (o instanceof Message.Builder) {
+        return (Message.Builder) o;
+      }
+
+      if (o instanceof LazyField) {
+        o = ((LazyField) o).getValue();
+      }
+      if (o instanceof Message) {
+        return ((Message) o).toBuilder();
+      }
+
+      throw new IllegalArgumentException(
+          String.format("Cannot convert %s to Message.Builder", o.getClass()));
     }
   }
 }

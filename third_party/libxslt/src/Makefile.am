@@ -1,10 +1,9 @@
-SUBDIRS = \
-	libxslt \
-	libexslt \
-	xsltproc \
-	doc \
-	$(PYTHON_SUBDIR) \
-	tests
+ACLOCAL_AMFLAGS = -I m4
+
+SUBDIRS = libxslt libexslt xsltproc doc tests
+if WITH_PYTHON
+SUBDIRS += python
+endif
 
 DIST_SUBDIRS = libxslt libexslt xsltproc python doc tests
 
@@ -13,19 +12,15 @@ confexec_DATA = xsltConf.sh
 
 bin_SCRIPTS = xslt-config
 
-dist-hook: cleanup libxslt.spec
+dist-hook: cleanup
 	touch $(distdir)/doc/*.xml
 	touch $(distdir)/doc/EXSLT/*.xml
 	touch $(distdir)/libxslt/*.syms
-	(cd $(srcdir) ; tar -cf - --exclude CVS --exclude .svn win32 vms examples) | (cd $(distdir); tar xf -)
+	(cd $(srcdir) ; tar -cf - win32 vms examples) | (cd $(distdir); tar xf -)
 
-CVS_EXTRA_DIST =
-
-EXTRA_DIST = xsltConf.sh.in xslt-config.in libxslt.spec libxslt.spec.in \
-             FEATURES TODO Copyright libxslt.m4 \
-	     win32/libxslt/libxslt.def win32/libxslt/libxslt.dsw \
-	     win32/libxslt/libxslt_so.dsp win32/libxslt/xsltproc.dsp \
-	     $(CVS_EXTRA_DIST)
+EXTRA_DIST = xsltConf.sh.in \
+             FEATURES TODO Copyright \
+	     CMakeLists.txt config.h.cmake.in libxslt-config.cmake.in libxslt-config.cmake.cmake.in
 
 ## We create xsltConf.sh here and not from configure because we want
 ## to get the paths expanded correctly.  Macros like srcdir are given
@@ -38,6 +33,7 @@ xsltConf.sh: xsltConf.sh.in Makefile
 	    -e 's?\@XSLT_INCLUDEDIR\@?$(XSLT_INCLUDEDIR)?g' \
 	    -e 's?\@VERSION\@?$(VERSION)?g' \
 	    -e 's?\@XSLT_LIBS\@?$(XSLT_LIBS) $(EXTRA_LIBS)?g' \
+	    -e 's?\@XSLT_PRIVATE_LIBS\@?$(XSLT_PRIVATE_LIBS)?g' \
 	       < $(srcdir)/xsltConf.sh.in > xsltConf.tmp \
 	&& mv xsltConf.tmp xsltConf.sh
 
@@ -51,7 +47,9 @@ tests: dummy
 	@echo '## Running the regression test suite'
 	@(cd tests ; $(MAKE) -s tests)
 	@(cd xsltproc ; $(MAKE) -s tests)
-	@(if [ "$(PYTHON_SUBDIR)" != "" ] ; then cd python ; $(MAKE) -s tests ; fi)
+if WITH_PYTHON
+	@cd python && $(MAKE) tests
+endif
 
 valgrind:
 	@echo '## Running the regression tests under Valgrind'
@@ -72,6 +70,10 @@ rpm: cleantar
 pkgconfigdir=$(libdir)/pkgconfig
 pkgconfig_DATA = libxslt.pc libexslt.pc
 
+cmakedir = $(libdir)/cmake/libxslt
+dist_cmake_DATA = FindGcrypt.cmake
+cmake_DATA = libxslt-config.cmake
+
 m4datadir = $(datadir)/aclocal
-m4data_DATA = libxslt.m4
+dist_m4data_DATA = libxslt.m4
 

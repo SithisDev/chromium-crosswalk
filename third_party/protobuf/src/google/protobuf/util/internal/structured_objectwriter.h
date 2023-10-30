@@ -28,14 +28,17 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef GOOGLE_PROTOBUF_UTIL_CONVERTER_STRUCTURED_OBJECTWRITER_H__
-#define GOOGLE_PROTOBUF_UTIL_CONVERTER_STRUCTURED_OBJECTWRITER_H__
+#ifndef GOOGLE_PROTOBUF_UTIL_INTERNAL_STRUCTURED_OBJECTWRITER_H__
+#define GOOGLE_PROTOBUF_UTIL_INTERNAL_STRUCTURED_OBJECTWRITER_H__
 
 #include <memory>
 
 #include <google/protobuf/stubs/casts.h>
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/util/internal/object_writer.h>
+
+// Must be included last.
+#include <google/protobuf/port_def.inc>
 
 namespace google {
 namespace protobuf {
@@ -53,9 +56,9 @@ namespace converter {
 // StructuredObjectWriter and its use.
 //
 // Derived classes could be thread-unsafe.
-class LIBPROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
+class PROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
  public:
-  virtual ~StructuredObjectWriter() {}
+  ~StructuredObjectWriter() override {}
 
  protected:
   // A base element class for subclasses to extend, makes tracking state easier.
@@ -63,11 +66,12 @@ class LIBPROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
   // StructuredObjectWriter behaves as a visitor. BaseElement represents a node
   // in the input tree. Implementation of StructuredObjectWriter should also
   // extend BaseElement to keep track of the location in the input tree.
-  class LIBPROTOBUF_EXPORT BaseElement {
+  class PROTOBUF_EXPORT BaseElement {
    public:
     // Takes ownership of the parent Element.
     explicit BaseElement(BaseElement* parent)
-        : parent_(parent), level_(parent == NULL ? 0 : parent->level() + 1) {}
+        : parent_(parent),
+          level_(parent == nullptr ? 0 : parent->level() + 1) {}
     virtual ~BaseElement() {}
 
     // Releases ownership of the parent and returns a pointer to it.
@@ -110,6 +114,8 @@ class LIBPROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
 }  // namespace converter
 }  // namespace util
 }  // namespace protobuf
-
 }  // namespace google
-#endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_STRUCTURED_OBJECTWRITER_H__
+
+#include <google/protobuf/port_undef.inc>
+
+#endif  // GOOGLE_PROTOBUF_UTIL_INTERNAL_STRUCTURED_OBJECTWRITER_H__

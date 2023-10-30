@@ -232,6 +232,8 @@ xsltTemplateParamsCleanup(xsltTransformContextPtr ctxt)
         ctxt->vars = NULL;
 }
 
+#ifdef WITH_PROFILER
+
 /**
  * profPush:
  * @ctxt: the transformation context
@@ -339,6 +341,8 @@ profCallgraphAdd(xsltTemplatePtr templ, xsltTemplatePtr parent)
         templ->templNr++;
     }
 }
+
+#endif /* WITH_PROFILER */
 
 /**
  * xsltPreCompEval:
@@ -633,7 +637,6 @@ xsltNewTransformContext(xsltStylesheetPtr style, xmlDocPtr doc) {
     cur->prof = 0;
 
     cur->style = style;
-    xmlXPathInit();
     cur->xpathCtxt = xmlXPathNewContext(doc);
     if (cur->xpathCtxt == NULL) {
 	xsltTransformError(NULL, NULL, (xmlNodePtr) doc,
@@ -1090,6 +1093,8 @@ xsltCopyText(xsltTransformContextPtr ctxt, xmlNodePtr target,
 	    if ((copy->content = xmlStrdup(cur->content)) == NULL)
 		return NULL;
 	}
+
+	ctxt->lasttext = NULL;
     } else {
         /*
 	 * normal processing. keep counters to extend the text node
@@ -1889,7 +1894,7 @@ static void
 xsltDefaultProcessOneNode(xsltTransformContextPtr ctxt, xmlNodePtr node,
 			  xsltStackElemPtr params) {
     xmlNodePtr copy;
-    xmlNodePtr delete = NULL, cur;
+    xmlNodePtr cur;
     int nbchild = 0, oldSize;
     int childno = 0, oldPos;
     xsltTemplatePtr template;
@@ -1962,54 +1967,13 @@ xsltDefaultProcessOneNode(xsltTransformContextPtr ctxt, xmlNodePtr node,
 	    return;
     }
     /*
-     * Handling of Elements: first pass, cleanup and counting
+     * Handling of Elements: first pass, counting
      */
     cur = node->children;
     while (cur != NULL) {
-	switch (cur->type) {
-	    case XML_TEXT_NODE:
-	    case XML_CDATA_SECTION_NODE:
-	    case XML_DOCUMENT_NODE:
-	    case XML_HTML_DOCUMENT_NODE:
-	    case XML_ELEMENT_NODE:
-	    case XML_PI_NODE:
-	    case XML_COMMENT_NODE:
-		nbchild++;
-		break;
-            case XML_DTD_NODE:
-		/* Unlink the DTD, it's still reachable using doc->intSubset */
-		if (cur->next != NULL)
-		    cur->next->prev = cur->prev;
-		if (cur->prev != NULL)
-		    cur->prev->next = cur->next;
-		break;
-	    default:
-#ifdef WITH_XSLT_DEBUG_PROCESS
-		XSLT_TRACE(ctxt,XSLT_TRACE_PROCESS_NODE,xsltGenericDebug(xsltGenericDebugContext,
-		 "xsltDefaultProcessOneNode: skipping node type %d\n",
-		                 cur->type));
-#endif
-		delete = cur;
-	}
+	if (IS_XSLT_REAL_NODE(cur))
+	    nbchild++;
 	cur = cur->next;
-	if (delete != NULL) {
-#ifdef WITH_XSLT_DEBUG_PROCESS
-	    XSLT_TRACE(ctxt,XSLT_TRACE_PROCESS_NODE,xsltGenericDebug(xsltGenericDebugContext,
-		 "xsltDefaultProcessOneNode: removing ignorable blank node\n"));
-#endif
-	    xmlUnlinkNode(delete);
-	    xmlFreeNode(delete);
-	    delete = NULL;
-	}
-    }
-    if (delete != NULL) {
-#ifdef WITH_XSLT_DEBUG_PROCESS
-	XSLT_TRACE(ctxt,XSLT_TRACE_PROCESS_NODE,xsltGenericDebug(xsltGenericDebugContext,
-	     "xsltDefaultProcessOneNode: removing ignorable blank node\n"));
-#endif
-	xmlUnlinkNode(delete);
-	xmlFreeNode(delete);
-	delete = NULL;
     }
 
     /*
@@ -2205,6 +2169,7 @@ xsltProcessOneNode(xsltTransformContextPtr ctxt, xmlNodePtr contextNode,
     }
 }
 
+#ifdef WITH_DEBUGGER
 static xmlNodePtr
 xsltDebuggerStartSequenceConstructor(xsltTransformContextPtr ctxt,
 				     xmlNodePtr contextNode,
@@ -2240,6 +2205,7 @@ xsltDebuggerStartSequenceConstructor(xsltTransformContextPtr ctxt,
     }
     return(debugedNode);
 }
+#endif /* WITH_DEBUGGER */
 
 /**
  * xsltLocalVariablePush:
@@ -2309,17 +2275,17 @@ xsltReleaseLocalRVTs(xsltTransformContextPtr ctxt, xmlDocPtr base)
     do {
         tmp = cur;
         cur = (xmlDocPtr) cur->next;
-        if (tmp->psvi == XSLT_RVT_LOCAL) {
+        if (tmp->compression == XSLT_RVT_LOCAL) {
             xsltReleaseRVT(ctxt, tmp);
-        } else if (tmp->psvi == XSLT_RVT_GLOBAL) {
+        } else if (tmp->compression == XSLT_RVT_GLOBAL) {
             xsltRegisterPersistRVT(ctxt, tmp);
-        } else if (tmp->psvi == XSLT_RVT_FUNC_RESULT) {
+        } else if (tmp->compression == XSLT_RVT_FUNC_RESULT) {
             /*
              * This will either register the RVT again or move it to the
              * context variable.
              */
             xsltRegisterLocalRVT(ctxt, tmp);
-            tmp->psvi = XSLT_RVT_FUNC_RESULT;
+            tmp->compression = XSLT_RVT_FUNC_RESULT;
         } else {
             xmlGenericError(xmlGenericErrorContext,
                     "xsltReleaseLocalRVTs: Unexpected RVT flag %p\n",
@@ -2411,6 +2377,17 @@ xsltApplySequenceConstructor(xsltTransformContextPtr ctxt,
     */
     cur = list;
     while (cur != NULL) {
+        if (ctxt->opLimit != 0) {
+            if (ctxt->opCount >= ctxt->opLimit) {
+		xsltTransformError(ctxt, NULL, cur,
+		    "xsltApplySequenceConstructor: "
+                    "Operation limit exceeded\n");
+	        ctxt->state = XSLT_STATE_STOPPED;
+                goto error;
+            }
+            ctxt->opCount += 1;
+        }
+
         ctxt->inst = cur;
 
 #ifdef WITH_DEBUGGER
@@ -2867,6 +2844,7 @@ xsltApplySequenceConstructor(xsltTransformContextPtr ctxt,
                 /*
                  * Search if there are fallbacks
                  */
+                ctxt->insert = insert;
                 child = cur->children;
                 while (child != NULL) {
                     if ((IS_XSLT_ELEM(child)) &&
@@ -2878,6 +2856,7 @@ xsltApplySequenceConstructor(xsltTransformContextPtr ctxt,
                     }
                     child = child->next;
                 }
+                ctxt->insert = oldInsert;
 
                 if (!found) {
                     xsltTransformError(ctxt, NULL, cur,
@@ -3086,10 +3065,12 @@ xsltApplyXSLTTemplate(xsltTransformContextPtr ctxt,
 		      xsltStackElemPtr withParams)
 {
     int oldVarsBase = 0;
-    long start = 0;
     xmlNodePtr cur;
     xsltStackElemPtr tmpParam = NULL;
     xmlDocPtr oldUserFragmentTop;
+#ifdef WITH_PROFILER
+    long start = 0;
+#endif
 
 #ifdef XSLT_REFACTORED
     xsltStyleItemParamPtr iparam;
@@ -3144,12 +3125,16 @@ xsltApplyXSLTTemplate(xsltTransformContextPtr ctxt,
     ctxt->varsBase = ctxt->varsNr;
 
     ctxt->node = contextNode;
+
+#ifdef WITH_PROFILER
     if (ctxt->profile) {
 	templ->nbCalls++;
 	start = xsltTimestamp();
 	profPush(ctxt, 0);
 	profCallgraphAdd(templ, ctxt->templ);
     }
+#endif
+
     /*
     * Push the xsl:template declaration onto the stack.
     */
@@ -3257,6 +3242,8 @@ xsltApplyXSLTTemplate(xsltTransformContextPtr ctxt,
     * Pop the xsl:template declaration from the stack.
     */
     templPop(ctxt);
+
+#ifdef WITH_PROFILER
     if (ctxt->profile) {
 	long spent, child, total, end;
 
@@ -3277,6 +3264,7 @@ xsltApplyXSLTTemplate(xsltTransformContextPtr ctxt,
 	if (ctxt->profNr > 0)
 	    ctxt->profTab[ctxt->profNr - 1] += total;
     }
+#endif
 
 #ifdef WITH_DEBUGGER
     if ((ctxt->debugStatus != XSLT_DEBUG_NONE) && (addCallResult)) {
@@ -3434,7 +3422,7 @@ xsltDocumentElem(xsltTransformContextPtr ctxt, xmlNodePtr node,
 		 * XPath expression.
 		 * (see http://xml.apache.org/xalan-j/extensionslib.html#redirect)
 		 */
-		cmp = xmlXPathCompile(URL);
+		cmp = xmlXPathCtxtCompile(ctxt->xpathCtxt, URL);
                 val = xsltEvalXPathString(ctxt, cmp);
 		xmlXPathFreeCompExpr(cmp);
 		xmlFree(URL);
@@ -3642,17 +3630,19 @@ xsltDocumentElem(xsltTransformContextPtr ctxt, xmlNodePtr node,
     if (elements != NULL) {
 	if (style->stripSpaces == NULL)
 	    style->stripSpaces = xmlHashCreate(10);
-	if (style->stripSpaces == NULL)
+	if (style->stripSpaces == NULL) {
+	    xmlFree(elements);
 	    return;
+	}
 
 	element = elements;
 	while (*element != 0) {
-	    while (IS_BLANK_CH(*element))
+	    while (xmlIsBlank_ch(*element))
 		element++;
 	    if (*element == 0)
 		break;
 	    end = element;
-	    while ((*end != 0) && (!IS_BLANK_CH(*end)))
+	    while ((*end != 0) && (!xmlIsBlank_ch(*end)))
 		end++;
 	    element = xmlStrndup(element, end - element);
 	    if (element) {
@@ -4834,7 +4824,7 @@ xsltApplyTemplates(xsltTransformContextPtr ctxt, xmlNodePtr node,
     xsltStylePreCompPtr comp = (xsltStylePreCompPtr) castedComp;
 #endif
     int i;
-    xmlNodePtr cur, delNode = NULL, oldContextNode;
+    xmlNodePtr cur, oldContextNode;
     xmlNodeSetPtr list = NULL, oldList;
     xsltStackElemPtr withParams = NULL;
     int oldXPProximityPosition, oldXPContextSize;
@@ -4968,73 +4958,9 @@ xsltApplyTemplates(xsltTransformContextPtr ctxt, xmlNodePtr node,
 	else
 	    cur = NULL;
 	while (cur != NULL) {
-	    switch (cur->type) {
-		case XML_TEXT_NODE:
-		    if ((IS_BLANK_NODE(cur)) &&
-			(cur->parent != NULL) &&
-			(cur->parent->type == XML_ELEMENT_NODE) &&
-			(ctxt->style->stripSpaces != NULL)) {
-			const xmlChar *val;
-
-			if (cur->parent->ns != NULL) {
-			    val = (const xmlChar *)
-				  xmlHashLookup2(ctxt->style->stripSpaces,
-						 cur->parent->name,
-						 cur->parent->ns->href);
-			    if (val == NULL) {
-				val = (const xmlChar *)
-				  xmlHashLookup2(ctxt->style->stripSpaces,
-						 BAD_CAST "*",
-						 cur->parent->ns->href);
-			    }
-			} else {
-			    val = (const xmlChar *)
-				  xmlHashLookup2(ctxt->style->stripSpaces,
-						 cur->parent->name, NULL);
-			}
-			if ((val != NULL) &&
-			    (xmlStrEqual(val, (xmlChar *) "strip"))) {
-			    delNode = cur;
-			    break;
-			}
-		    }
-		    /* no break on purpose */
-		case XML_ELEMENT_NODE:
-		case XML_DOCUMENT_NODE:
-		case XML_HTML_DOCUMENT_NODE:
-		case XML_CDATA_SECTION_NODE:
-		case XML_PI_NODE:
-		case XML_COMMENT_NODE:
-		    xmlXPathNodeSetAddUnique(list, cur);
-		    break;
-		case XML_DTD_NODE:
-		    /* Unlink the DTD, it's still reachable
-		     * using doc->intSubset */
-		    if (cur->next != NULL)
-			cur->next->prev = cur->prev;
-		    if (cur->prev != NULL)
-			cur->prev->next = cur->next;
-		    break;
-		case XML_NAMESPACE_DECL:
-		    break;
-		default:
-#ifdef WITH_XSLT_DEBUG_PROCESS
-		    XSLT_TRACE(ctxt,XSLT_TRACE_APPLY_TEMPLATES,xsltGenericDebug(xsltGenericDebugContext,
-		     "xsltApplyTemplates: skipping cur type %d\n",
-				     cur->type));
-#endif
-		    delNode = cur;
-	    }
+            if (IS_XSLT_REAL_NODE(cur))
+		xmlXPathNodeSetAddUnique(list, cur);
 	    cur = cur->next;
-	    if (delNode != NULL) {
-#ifdef WITH_XSLT_DEBUG_PROCESS
-		XSLT_TRACE(ctxt,XSLT_TRACE_APPLY_TEMPLATES,xsltGenericDebug(xsltGenericDebugContext,
-		     "xsltApplyTemplates: removing ignorable blank cur\n"));
-#endif
-		xmlUnlinkNode(delNode);
-		xmlFreeNode(delNode);
-		delNode = NULL;
-	    }
 	}
     }
 
@@ -5091,6 +5017,7 @@ xsltApplyTemplates(xsltTransformContextPtr ctxt, xmlNodePtr node,
 		xmlNodePtr sorts[XSLT_MAX_SORT];
 
 		sorts[nbsorts++] = cur;
+		cur = cur->next;
 
 		while (cur) {
 
@@ -5820,6 +5747,47 @@ xsltCountKeys(xsltTransformContextPtr ctxt)
 }
 
 /**
+ * xsltCleanupSourceDoc:
+ * @doc:  Document
+ *
+ * Resets source node flags and ids stored in 'psvi' member.
+ */
+static void
+xsltCleanupSourceDoc(xmlDocPtr doc) {
+    xmlNodePtr cur = (xmlNodePtr) doc;
+    void **psviPtr;
+
+    while (1) {
+        xsltClearSourceNodeFlags(cur, XSLT_SOURCE_NODE_MASK);
+        psviPtr = xsltGetPSVIPtr(cur);
+        if (psviPtr)
+            *psviPtr = NULL;
+
+        if (cur->type == XML_ELEMENT_NODE) {
+            xmlAttrPtr prop = cur->properties;
+
+            while (prop) {
+                prop->atype &= ~(XSLT_SOURCE_NODE_MASK << 27);
+                prop->psvi = NULL;
+                prop = prop->next;
+            }
+        }
+
+        if (cur->children != NULL && cur->type != XML_ENTITY_REF_NODE) {
+            cur = cur->children;
+        } else {
+            while (cur->next == NULL) {
+                cur = cur->parent;
+                if (cur == (xmlNodePtr) doc)
+                    return;
+            }
+
+            cur = cur->next;
+        }
+    }
+}
+
+/**
  * xsltApplyStylesheetInternal:
  * @style:  a parsed XSLT stylesheet
  * @doc:  a parsed XML document
@@ -5898,8 +5866,16 @@ xsltApplyStylesheetInternal(xsltStylesheetPtr style, xmlDocPtr doc,
     ctxt->initialContextDoc = doc;
     ctxt->initialContextNode = (xmlNodePtr) doc;
 
-    if (profile != NULL)
+    if (profile != NULL) {
+#ifdef WITH_PROFILER
         ctxt->profile = 1;
+#else
+        xsltTransformError(ctxt, NULL, (xmlNodePtr) doc,
+                "xsltApplyStylesheetInternal: "
+                "libxslt compiled without profiler\n");
+        goto error;
+#endif
+    }
 
     if (output != NULL)
         ctxt->outputFile = output;
@@ -6174,9 +6150,12 @@ xsltApplyStylesheetInternal(xsltStylesheetPtr style, xmlDocPtr doc,
         }
     }
     xmlXPathFreeNodeSet(ctxt->nodeList);
+
+#ifdef WITH_PROFILER
     if (profile != NULL) {
         xsltSaveProfiling(ctxt, profile);
     }
+#endif
 
     /*
      * Be pedantic.
@@ -6205,6 +6184,9 @@ xsltApplyStylesheetInternal(xsltStylesheetPtr style, xmlDocPtr doc,
     printf("# Reused tree fragments: %d\n", ctxt->cache->dbgReusedRVTs);
     printf("# Reused variables     : %d\n", ctxt->cache->dbgReusedVars);
 #endif
+
+    if (ctxt->sourceDocDirty)
+        xsltCleanupSourceDoc(doc);
 
     if ((ctxt != NULL) && (userCtxt == NULL))
 	xsltFreeTransformContext(ctxt);

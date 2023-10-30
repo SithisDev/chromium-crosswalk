@@ -30,11 +30,11 @@
 
 #include <google/protobuf/compiler/java/java_map_field.h>
 
+#include <google/protobuf/io/printer.h>
 #include <google/protobuf/compiler/java/java_context.h>
 #include <google/protobuf/compiler/java/java_doc_comment.h>
 #include <google/protobuf/compiler/java/java_helpers.h>
 #include <google/protobuf/compiler/java/java_name_resolver.h>
-#include <google/protobuf/io/printer.h>
 
 namespace google {
 namespace protobuf {
@@ -47,19 +47,18 @@ const FieldDescriptor* KeyField(const FieldDescriptor* descriptor) {
   GOOGLE_CHECK_EQ(FieldDescriptor::TYPE_MESSAGE, descriptor->type());
   const Descriptor* message = descriptor->message_type();
   GOOGLE_CHECK(message->options().map_entry());
-  return message->FindFieldByName("key");
+  return message->map_key();
 }
 
 const FieldDescriptor* ValueField(const FieldDescriptor* descriptor) {
   GOOGLE_CHECK_EQ(FieldDescriptor::TYPE_MESSAGE, descriptor->type());
   const Descriptor* message = descriptor->message_type();
   GOOGLE_CHECK(message->options().map_entry());
-  return message->FindFieldByName("value");
+  return message->map_value();
 }
 
-string TypeName(const FieldDescriptor* field,
-                ClassNameResolver* name_resolver,
-                bool boxed) {
+std::string TypeName(const FieldDescriptor* field,
+                     ClassNameResolver* name_resolver, bool boxed) {
   if (GetJavaType(field) == JAVATYPE_MESSAGE) {
     return name_resolver->GetImmutableClassName(field->message_type());
   } else if (GetJavaType(field) == JAVATYPE_ENUM) {
@@ -70,17 +69,26 @@ string TypeName(const FieldDescriptor* field,
   }
 }
 
-string WireType(const FieldDescriptor* field) {
-  return "com.google.protobuf.WireFormat.FieldType." +
-      string(FieldTypeName(field->type()));
+std::string KotlinTypeName(const FieldDescriptor* field,
+                           ClassNameResolver* name_resolver) {
+  if (GetJavaType(field) == JAVATYPE_MESSAGE) {
+    return name_resolver->GetImmutableClassName(field->message_type());
+  } else if (GetJavaType(field) == JAVATYPE_ENUM) {
+    return name_resolver->GetImmutableClassName(field->enum_type());
+  } else {
+    return KotlinTypeName(GetJavaType(field));
+  }
 }
 
-void SetMessageVariables(const FieldDescriptor* descriptor,
-                         int messageBitIndex,
-                         int builderBitIndex,
-                         const FieldGeneratorInfo* info,
+std::string WireType(const FieldDescriptor* field) {
+  return "com.google.protobuf.WireFormat.FieldType." +
+         std::string(FieldTypeName(field->type()));
+}
+
+void SetMessageVariables(const FieldDescriptor* descriptor, int messageBitIndex,
+                         int builderBitIndex, const FieldGeneratorInfo* info,
                          Context* context,
-                         std::map<string, string>* variables) {
+                         std::map<std::string, std::string>* variables) {
   SetCommonFieldVariables(descriptor, info, variables);
   ClassNameResolver* name_resolver = context->GetNameResolver();
 
@@ -91,18 +99,28 @@ void SetMessageVariables(const FieldDescriptor* descriptor,
   const JavaType keyJavaType = GetJavaType(key);
   const JavaType valueJavaType = GetJavaType(value);
 
+  std::string pass_through_nullness = "/* nullable */\n";
+
   (*variables)["key_type"] = TypeName(key, name_resolver, false);
-  string boxed_key_type = TypeName(key, name_resolver, true);
+  std::string boxed_key_type = TypeName(key, name_resolver, true);
   (*variables)["boxed_key_type"] = boxed_key_type;
+  (*variables)["kt_key_type"] = KotlinTypeName(key, name_resolver);
+  (*variables)["kt_value_type"] = KotlinTypeName(value, name_resolver);
   // Used for calling the serialization function.
   (*variables)["short_key_type"] =
       boxed_key_type.substr(boxed_key_type.rfind('.') + 1);
   (*variables)["key_wire_type"] = WireType(key);
   (*variables)["key_default_value"] = DefaultValue(key, true, name_resolver);
-  (*variables)["key_null_check"] = IsReferenceType(keyJavaType) ?
-      "if (key == null) { throw new java.lang.NullPointerException(); }" : "";
-  (*variables)["value_null_check"] = IsReferenceType(valueJavaType) ?
-      "if (value == null) { throw new java.lang.NullPointerException(); }" : "";
+  (*variables)["key_null_check"] =
+      IsReferenceType(keyJavaType)
+          ? "if (key == null) { throw new NullPointerException(\"map key\"); }"
+          : "";
+  (*variables)["value_null_check"] =
+      valueJavaType != JAVATYPE_ENUM && IsReferenceType(valueJavaType)
+          ? "if (value == null) {\n"
+            "  throw new NullPointerException(\"map value\");\n"
+            "}\n"
+          : "";
   if (valueJavaType == JAVATYPE_ENUM) {
     // We store enums as Integers internally.
     (*variables)["value_type"] = "int";
@@ -112,6 +130,9 @@ void SetMessageVariables(const FieldDescriptor* descriptor,
         DefaultValue(value, true, name_resolver) + ".getNumber()";
 
     (*variables)["value_enum_type"] = TypeName(value, name_resolver, false);
+
+    (*variables)["value_enum_type_pass_through_nullness"] =
+        pass_through_nullness + (*variables)["value_enum_type"];
 
     if (SupportUnknownEnumValue(descriptor->file())) {
       // Map unknown values to a special UNRECOGNIZED value if supported.
@@ -124,6 +145,11 @@ void SetMessageVariables(const FieldDescriptor* descriptor,
     }
   } else {
     (*variables)["value_type"] = TypeName(value, name_resolver, false);
+
+    (*variables)["value_type_pass_through_nullness"] =
+        (IsReferenceType(valueJavaType) ? pass_through_nullness : "") +
+        (*variables)["value_type"];
+
     (*variables)["boxed_value_type"] = TypeName(value, name_resolver, true);
     (*variables)["value_wire_type"] = WireType(value);
     (*variables)["value_default_value"] =
@@ -133,8 +159,13 @@ void SetMessageVariables(const FieldDescriptor* descriptor,
       (*variables)["boxed_key_type"] + ", " + (*variables)["boxed_value_type"];
   // TODO(birdo): Add @deprecated javadoc when generating javadoc is supported
   // by the proto compiler
-  (*variables)["deprecation"] = descriptor->options().deprecated()
-      ? "@java.lang.Deprecated " : "";
+  (*variables)["deprecation"] =
+      descriptor->options().deprecated() ? "@java.lang.Deprecated " : "";
+  (*variables)["kt_deprecation"] =
+      descriptor->options().deprecated()
+          ? "@kotlin.Deprecated(message = \"Field " + (*variables)["name"] +
+                " is deprecated\") "
+          : "";
   (*variables)["on_changed"] = "onChanged();";
 
   // For repeated fields, one bit is used for whether the array is immutable
@@ -144,62 +175,51 @@ void SetMessageVariables(const FieldDescriptor* descriptor,
   (*variables)["set_mutable_bit_parser"] =
       GenerateSetBitMutableLocal(builderBitIndex);
 
-  (*variables)["default_entry"] = (*variables)["capitalized_name"] +
-      "DefaultEntryHolder.defaultEntry";
+  (*variables)["default_entry"] =
+      (*variables)["capitalized_name"] + "DefaultEntryHolder.defaultEntry";
   (*variables)["map_field_parameter"] = (*variables)["default_entry"];
   (*variables)["descriptor"] =
-      name_resolver->GetImmutableClassName(descriptor->file()) +
-      ".internal_" + UniqueFileScopeIdentifier(descriptor->message_type()) +
-      "_descriptor, ";
+      name_resolver->GetImmutableClassName(descriptor->file()) + ".internal_" +
+      UniqueFileScopeIdentifier(descriptor->message_type()) + "_descriptor, ";
   (*variables)["ver"] = GeneratedCodeVersionSuffix();
 }
 
 }  // namespace
 
-ImmutableMapFieldGenerator::
-ImmutableMapFieldGenerator(const FieldDescriptor* descriptor,
-                                       int messageBitIndex,
-                                       int builderBitIndex,
-                                       Context* context)
-  : descriptor_(descriptor), name_resolver_(context->GetNameResolver())  {
+ImmutableMapFieldGenerator::ImmutableMapFieldGenerator(
+    const FieldDescriptor* descriptor, int messageBitIndex, int builderBitIndex,
+    Context* context)
+    : descriptor_(descriptor), name_resolver_(context->GetNameResolver()) {
   SetMessageVariables(descriptor, messageBitIndex, builderBitIndex,
-                      context->GetFieldGeneratorInfo(descriptor),
-                      context, &variables_);
+                      context->GetFieldGeneratorInfo(descriptor), context,
+                      &variables_);
 }
 
-ImmutableMapFieldGenerator::
-~ImmutableMapFieldGenerator() {}
+ImmutableMapFieldGenerator::~ImmutableMapFieldGenerator() {}
 
-int ImmutableMapFieldGenerator::GetNumBitsForMessage() const {
-  return 0;
-}
+int ImmutableMapFieldGenerator::GetNumBitsForMessage() const { return 0; }
 
-int ImmutableMapFieldGenerator::GetNumBitsForBuilder() const {
-  return 1;
-}
+int ImmutableMapFieldGenerator::GetNumBitsForBuilder() const { return 1; }
 
-void ImmutableMapFieldGenerator::
-GenerateInterfaceMembers(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateInterfaceMembers(
+    io::Printer* printer) const {
   WriteFieldDocComment(printer, descriptor_);
-  printer->Print(
-      variables_,
-      "$deprecation$int ${$get$capitalized_name$Count$}$();\n");
+  printer->Print(variables_,
+                 "$deprecation$int ${$get$capitalized_name$Count$}$();\n");
   printer->Annotate("{", "}", descriptor_);
   WriteFieldDocComment(printer, descriptor_);
-  printer->Print(
-      variables_,
-      "$deprecation$boolean ${$contains$capitalized_name$$}$(\n"
-      "    $key_type$ key);\n");
+  printer->Print(variables_,
+                 "$deprecation$boolean ${$contains$capitalized_name$$}$(\n"
+                 "    $key_type$ key);\n");
   printer->Annotate("{", "}", descriptor_);
   if (GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
-    printer->Print(
-        variables_,
-        "/**\n"
-        " * Use {@link #get$capitalized_name$Map()} instead.\n"
-        " */\n"
-        "@java.lang.Deprecated\n"
-        "java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
-        "${$get$capitalized_name$$}$();\n");
+    printer->Print(variables_,
+                   "/**\n"
+                   " * Use {@link #get$capitalized_name$Map()} instead.\n"
+                   " */\n"
+                   "@java.lang.Deprecated\n"
+                   "java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
+                   "${$get$capitalized_name$$}$();\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
     printer->Print(
@@ -208,11 +228,12 @@ GenerateInterfaceMembers(io::Printer* printer) const {
         "${$get$capitalized_name$Map$}$();\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$$value_enum_type$ ${$get$capitalized_name$OrDefault$}$(\n"
-        "    $key_type$ key,\n"
-        "    $value_enum_type$ defaultValue);\n");
+    printer->Print(variables_,
+                   "$deprecation$$value_enum_type_pass_through_nullness$ "
+                   "${$get$capitalized_name$OrDefault$}$(\n"
+                   "    $key_type$ key,\n"
+                   "    $value_enum_type_pass_through_nullness$ "
+                   "        defaultValue);\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
     printer->Print(
@@ -231,63 +252,56 @@ GenerateInterfaceMembers(io::Printer* printer) const {
           "${$get$capitalized_name$Value$}$();\n");
       printer->Annotate("{", "}", descriptor_);
       WriteFieldDocComment(printer, descriptor_);
-      printer->Print(
-          variables_,
-          "$deprecation$java.util.Map<$type_parameters$>\n"
-          "${$get$capitalized_name$ValueMap$}$();\n");
+      printer->Print(variables_,
+                     "$deprecation$java.util.Map<$type_parameters$>\n"
+                     "${$get$capitalized_name$ValueMap$}$();\n");
       printer->Annotate("{", "}", descriptor_);
       WriteFieldDocComment(printer, descriptor_);
-      printer->Print(
-          variables_,
-          "$deprecation$\n"
-          "$value_type$ ${$get$capitalized_name$ValueOrDefault$}$(\n"
-          "    $key_type$ key,\n"
-          "    $value_type$ defaultValue);\n");
+      printer->Print(variables_,
+                     "$deprecation$\n"
+                     "$value_type$ ${$get$capitalized_name$ValueOrDefault$}$(\n"
+                     "    $key_type$ key,\n"
+                     "    $value_type$ defaultValue);\n");
       printer->Annotate("{", "}", descriptor_);
       WriteFieldDocComment(printer, descriptor_);
-      printer->Print(
-          variables_,
-          "$deprecation$\n"
-          "$value_type$ ${$get$capitalized_name$ValueOrThrow$}$(\n"
-          "    $key_type$ key);\n");
+      printer->Print(variables_,
+                     "$deprecation$\n"
+                     "$value_type$ ${$get$capitalized_name$ValueOrThrow$}$(\n"
+                     "    $key_type$ key);\n");
       printer->Annotate("{", "}", descriptor_);
     }
   } else {
-    printer->Print(
-        variables_,
-        "/**\n"
-        " * Use {@link #get$capitalized_name$Map()} instead.\n"
-        " */\n"
-        "@java.lang.Deprecated\n"
-        "java.util.Map<$type_parameters$>\n"
-        "${$get$capitalized_name$$}$();\n");
+    printer->Print(variables_,
+                   "/**\n"
+                   " * Use {@link #get$capitalized_name$Map()} instead.\n"
+                   " */\n"
+                   "@java.lang.Deprecated\n"
+                   "java.util.Map<$type_parameters$>\n"
+                   "${$get$capitalized_name$$}$();\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$java.util.Map<$type_parameters$>\n"
-        "${$get$capitalized_name$Map$}$();\n");
+    printer->Print(variables_,
+                   "$deprecation$java.util.Map<$type_parameters$>\n"
+                   "${$get$capitalized_name$Map$}$();\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$\n"
-        "$value_type$ ${$get$capitalized_name$OrDefault$}$(\n"
-        "    $key_type$ key,\n"
-        "    $value_type$ defaultValue);\n");
+    printer->Print(variables_,
+                   "$deprecation$\n"
+                   "$value_type_pass_through_nullness$ "
+                   "${$get$capitalized_name$OrDefault$}$(\n"
+                   "    $key_type$ key,\n"
+                   "    $value_type_pass_through_nullness$ defaultValue);\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$\n"
-        "$value_type$ ${$get$capitalized_name$OrThrow$}$(\n"
-        "    $key_type$ key);\n");
+    printer->Print(variables_,
+                   "$deprecation$\n"
+                   "$value_type$ ${$get$capitalized_name$OrThrow$}$(\n"
+                   "    $key_type$ key);\n");
     printer->Annotate("{", "}", descriptor_);
   }
 }
 
-void ImmutableMapFieldGenerator::
-GenerateMembers(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateMembers(io::Printer* printer) const {
   printer->Print(
       variables_,
       "private static final class $capitalized_name$DefaultEntryHolder {\n"
@@ -301,18 +315,17 @@ GenerateMembers(io::Printer* printer) const {
       "              $value_wire_type$,\n"
       "              $value_default_value$);\n"
       "}\n");
-  printer->Print(
-      variables_,
-      "private com.google.protobuf.MapField<\n"
-      "    $type_parameters$> $name$_;\n"
-      "private com.google.protobuf.MapField<$type_parameters$>\n"
-      "internalGet$capitalized_name$() {\n"
-      "  if ($name$_ == null) {\n"
-      "    return com.google.protobuf.MapField.emptyMapField(\n"
-      "        $map_field_parameter$);\n"
-      "  }\n"
-      "  return $name$_;\n"
-      "}\n");
+  printer->Print(variables_,
+                 "private com.google.protobuf.MapField<\n"
+                 "    $type_parameters$> $name$_;\n"
+                 "private com.google.protobuf.MapField<$type_parameters$>\n"
+                 "internalGet$capitalized_name$() {\n"
+                 "  if ($name$_ == null) {\n"
+                 "    return com.google.protobuf.MapField.emptyMapField(\n"
+                 "        $map_field_parameter$);\n"
+                 "  }\n"
+                 "  return $name$_;\n"
+                 "}\n");
   if (GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
     printer->Print(
         variables_,
@@ -336,53 +349,50 @@ GenerateMembers(io::Printer* printer) const {
   GenerateMapGetters(printer);
 }
 
-void ImmutableMapFieldGenerator::
-GenerateBuilderMembers(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "private com.google.protobuf.MapField<\n"
-      "    $type_parameters$> $name$_;\n"
-      "private com.google.protobuf.MapField<$type_parameters$>\n"
-      "internalGet$capitalized_name$() {\n"
-      "  if ($name$_ == null) {\n"
-      "    return com.google.protobuf.MapField.emptyMapField(\n"
-      "        $map_field_parameter$);\n"
-      "  }\n"
-      "  return $name$_;\n"
-      "}\n"
-      "private com.google.protobuf.MapField<$type_parameters$>\n"
-      "internalGetMutable$capitalized_name$() {\n"
-      "  $on_changed$;\n"
-      "  if ($name$_ == null) {\n"
-      "    $name$_ = com.google.protobuf.MapField.newMapField(\n"
-      "        $map_field_parameter$);\n"
-      "  }\n"
-      "  if (!$name$_.isMutable()) {\n"
-      "    $name$_ = $name$_.copy();\n"
-      "  }\n"
-      "  return $name$_;\n"
-      "}\n");
+void ImmutableMapFieldGenerator::GenerateBuilderMembers(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "private com.google.protobuf.MapField<\n"
+                 "    $type_parameters$> $name$_;\n"
+                 "private com.google.protobuf.MapField<$type_parameters$>\n"
+                 "internalGet$capitalized_name$() {\n"
+                 "  if ($name$_ == null) {\n"
+                 "    return com.google.protobuf.MapField.emptyMapField(\n"
+                 "        $map_field_parameter$);\n"
+                 "  }\n"
+                 "  return $name$_;\n"
+                 "}\n"
+                 "private com.google.protobuf.MapField<$type_parameters$>\n"
+                 "internalGetMutable$capitalized_name$() {\n"
+                 "  $on_changed$;\n"
+                 "  if ($name$_ == null) {\n"
+                 "    $name$_ = com.google.protobuf.MapField.newMapField(\n"
+                 "        $map_field_parameter$);\n"
+                 "  }\n"
+                 "  if (!$name$_.isMutable()) {\n"
+                 "    $name$_ = $name$_.copy();\n"
+                 "  }\n"
+                 "  return $name$_;\n"
+                 "}\n");
   GenerateMapGetters(printer);
-  printer->Print(
-      variables_,
-      "$deprecation$\n"
-      "public Builder ${$clear$capitalized_name$$}$() {\n"
-      "  internalGetMutable$capitalized_name$().getMutableMap()\n"
-      "      .clear();\n"
-      "  return this;\n"
-      "}\n");
+  printer->Print(variables_,
+                 "$deprecation$\n"
+                 "public Builder ${$clear$capitalized_name$$}$() {\n"
+                 "  internalGetMutable$capitalized_name$().getMutableMap()\n"
+                 "      .clear();\n"
+                 "  return this;\n"
+                 "}\n");
   printer->Annotate("{", "}", descriptor_);
   WriteFieldDocComment(printer, descriptor_);
-  printer->Print(
-      variables_,
-      "$deprecation$\n"
-      "public Builder ${$remove$capitalized_name$$}$(\n"
-      "    $key_type$ key) {\n"
-      "  $key_null_check$\n"
-      "  internalGetMutable$capitalized_name$().getMutableMap()\n"
-      "      .remove(key);\n"
-      "  return this;\n"
-      "}\n");
+  printer->Print(variables_,
+                 "$deprecation$\n"
+                 "public Builder ${$remove$capitalized_name$$}$(\n"
+                 "    $key_type$ key) {\n"
+                 "  $key_null_check$\n"
+                 "  internalGetMutable$capitalized_name$().getMutableMap()\n"
+                 "      .remove(key);\n"
+                 "  return this;\n"
+                 "}\n");
   printer->Annotate("{", "}", descriptor_);
   if (GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
     printer->Print(
@@ -439,6 +449,7 @@ GenerateBuilderMembers(io::Printer* printer) const {
           "    $key_type$ key,\n"
           "    $value_type$ value) {\n"
           "  $key_null_check$\n"
+          "  $value_null_check$\n"
           "  internalGetMutable$capitalized_name$().getMutableMap()\n"
           "      .put(key, value);\n"
           "  return this;\n"
@@ -468,46 +479,44 @@ GenerateBuilderMembers(io::Printer* printer) const {
         "}\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$"
-        "public Builder ${$put$capitalized_name$$}$(\n"
-        "    $key_type$ key,\n"
-        "    $value_type$ value) {\n"
-        "  $key_null_check$\n"
-        "  $value_null_check$\n"
-        "  internalGetMutable$capitalized_name$().getMutableMap()\n"
-        "      .put(key, value);\n"
-        "  return this;\n"
-        "}\n");
+    printer->Print(variables_,
+                   "$deprecation$"
+                   "public Builder ${$put$capitalized_name$$}$(\n"
+                   "    $key_type$ key,\n"
+                   "    $value_type$ value) {\n"
+                   "  $key_null_check$\n"
+                   "  $value_null_check$\n"
+                   "  internalGetMutable$capitalized_name$().getMutableMap()\n"
+                   "      .put(key, value);\n"
+                   "  return this;\n"
+                   "}\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$\n"
-        "public Builder ${$putAll$capitalized_name$$}$(\n"
-        "    java.util.Map<$type_parameters$> values) {\n"
-        "  internalGetMutable$capitalized_name$().getMutableMap()\n"
-        "      .putAll(values);\n"
-        "  return this;\n"
-        "}\n");
+    printer->Print(variables_,
+                   "$deprecation$\n"
+                   "public Builder ${$putAll$capitalized_name$$}$(\n"
+                   "    java.util.Map<$type_parameters$> values) {\n"
+                   "  internalGetMutable$capitalized_name$().getMutableMap()\n"
+                   "      .putAll(values);\n"
+                   "  return this;\n"
+                   "}\n");
     printer->Annotate("{", "}", descriptor_);
   }
 }
 
-void ImmutableMapFieldGenerator::
-GenerateMapGetters(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "$deprecation$\n"
-      "public int ${$get$capitalized_name$Count$}$() {\n"
-      "  return internalGet$capitalized_name$().getMap().size();\n"
-      "}\n");
+void ImmutableMapFieldGenerator::GenerateMapGetters(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "$deprecation$\n"
+                 "public int ${$get$capitalized_name$Count$}$() {\n"
+                 "  return internalGet$capitalized_name$().getMap().size();\n"
+                 "}\n");
   printer->Annotate("{", "}", descriptor_);
   WriteFieldDocComment(printer, descriptor_);
   printer->Print(
       variables_,
       "$deprecation$\n"
+      "@java.lang.Override\n"
       "public boolean ${$contains$capitalized_name$$}$(\n"
       "    $key_type$ key) {\n"
       "  $key_null_check$\n"
@@ -515,34 +524,36 @@ GenerateMapGetters(io::Printer* printer) const {
       "}\n");
   printer->Annotate("{", "}", descriptor_);
   if (GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
-    printer->Print(
-        variables_,
-        "/**\n"
-        " * Use {@link #get$capitalized_name$Map()} instead.\n"
-        " */\n"
-        "@java.lang.Deprecated\n"
-        "public java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
-        "${$get$capitalized_name$$}$() {\n"
-        "  return get$capitalized_name$Map();\n"
-        "}\n");
+    printer->Print(variables_,
+                   "/**\n"
+                   " * Use {@link #get$capitalized_name$Map()} instead.\n"
+                   " */\n"
+                   "@java.lang.Override\n"
+                   "@java.lang.Deprecated\n"
+                   "public java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
+                   "${$get$capitalized_name$$}$() {\n"
+                   "  return get$capitalized_name$Map();\n"
+                   "}\n");
+    printer->Annotate("{", "}", descriptor_);
+    WriteFieldDocComment(printer, descriptor_);
+    printer->Print(variables_,
+                   "@java.lang.Override\n"
+                   "$deprecation$\n"
+                   "public java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
+                   "${$get$capitalized_name$Map$}$() {\n"
+                   "  return internalGetAdapted$capitalized_name$Map(\n"
+                   "      internalGet$capitalized_name$().getMap());"
+                   "}\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
     printer->Print(
         variables_,
+        "@java.lang.Override\n"
         "$deprecation$\n"
-        "public java.util.Map<$boxed_key_type$, $value_enum_type$>\n"
-        "${$get$capitalized_name$Map$}$() {\n"
-        "  return internalGetAdapted$capitalized_name$Map(\n"
-        "      internalGet$capitalized_name$().getMap());"
-        "}\n");
-    printer->Annotate("{", "}", descriptor_);
-    WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$\n"
-        "public $value_enum_type$ ${$get$capitalized_name$OrDefault$}$(\n"
+        "public $value_enum_type_pass_through_nullness$ "
+        "${$get$capitalized_name$OrDefault$}$(\n"
         "    $key_type$ key,\n"
-        "    $value_enum_type$ defaultValue) {\n"
+        "    $value_enum_type_pass_through_nullness$ defaultValue) {\n"
         "  $key_null_check$\n"
         "  java.util.Map<$boxed_key_type$, $boxed_value_type$> map =\n"
         "      internalGet$capitalized_name$().getMap();\n"
@@ -554,6 +565,7 @@ GenerateMapGetters(io::Printer* printer) const {
     WriteFieldDocComment(printer, descriptor_);
     printer->Print(
         variables_,
+        "@java.lang.Override\n"
         "$deprecation$\n"
         "public $value_enum_type$ ${$get$capitalized_name$OrThrow$}$(\n"
         "    $key_type$ key) {\n"
@@ -572,6 +584,7 @@ GenerateMapGetters(io::Printer* printer) const {
           "/**\n"
           " * Use {@link #get$capitalized_name$ValueMap()} instead.\n"
           " */\n"
+          "@java.lang.Override\n"
           "@java.lang.Deprecated\n"
           "public java.util.Map<$boxed_key_type$, $boxed_value_type$>\n"
           "${$get$capitalized_name$Value$}$() {\n"
@@ -581,6 +594,7 @@ GenerateMapGetters(io::Printer* printer) const {
       WriteFieldDocComment(printer, descriptor_);
       printer->Print(
           variables_,
+          "@java.lang.Override\n"
           "$deprecation$\n"
           "public java.util.Map<$boxed_key_type$, $boxed_value_type$>\n"
           "${$get$capitalized_name$ValueMap$}$() {\n"
@@ -590,6 +604,7 @@ GenerateMapGetters(io::Printer* printer) const {
       WriteFieldDocComment(printer, descriptor_);
       printer->Print(
           variables_,
+          "@java.lang.Override\n"
           "$deprecation$\n"
           "public $value_type$ ${$get$capitalized_name$ValueOrDefault$}$(\n"
           "    $key_type$ key,\n"
@@ -603,6 +618,7 @@ GenerateMapGetters(io::Printer* printer) const {
       WriteFieldDocComment(printer, descriptor_);
       printer->Print(
           variables_,
+          "@java.lang.Override\n"
           "$deprecation$\n"
           "public $value_type$ ${$get$capitalized_name$ValueOrThrow$}$(\n"
           "    $key_type$ key) {\n"
@@ -617,29 +633,30 @@ GenerateMapGetters(io::Printer* printer) const {
       printer->Annotate("{", "}", descriptor_);
     }
   } else {
-    printer->Print(
-        variables_,
-        "/**\n"
-        " * Use {@link #get$capitalized_name$Map()} instead.\n"
-        " */\n"
-        "@java.lang.Deprecated\n"
-        "public java.util.Map<$type_parameters$> "
-        "${$get$capitalized_name$$}$() {\n"
-        "  return get$capitalized_name$Map();\n"
-        "}\n");
+    printer->Print(variables_,
+                   "/**\n"
+                   " * Use {@link #get$capitalized_name$Map()} instead.\n"
+                   " */\n"
+                   "@java.lang.Override\n"
+                   "@java.lang.Deprecated\n"
+                   "public java.util.Map<$type_parameters$> "
+                   "${$get$capitalized_name$$}$() {\n"
+                   "  return get$capitalized_name$Map();\n"
+                   "}\n");
+    printer->Annotate("{", "}", descriptor_);
+    WriteFieldDocComment(printer, descriptor_);
+    printer->Print(variables_,
+                   "@java.lang.Override\n"
+                   "$deprecation$\n"
+                   "public java.util.Map<$type_parameters$> "
+                   "${$get$capitalized_name$Map$}$() {\n"
+                   "  return internalGet$capitalized_name$().getMap();\n"
+                   "}\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
     printer->Print(
         variables_,
-        "$deprecation$\n"
-        "public java.util.Map<$type_parameters$> "
-        "${$get$capitalized_name$Map$}$() {\n"
-        "  return internalGet$capitalized_name$().getMap();\n"
-        "}\n");
-    printer->Annotate("{", "}", descriptor_);
-    WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
+        "@java.lang.Override\n"
         "$deprecation$\n"
         "public $value_type$ ${$get$capitalized_name$OrDefault$}$(\n"
         "    $key_type$ key,\n"
@@ -651,65 +668,143 @@ GenerateMapGetters(io::Printer* printer) const {
         "}\n");
     printer->Annotate("{", "}", descriptor_);
     WriteFieldDocComment(printer, descriptor_);
-    printer->Print(
-        variables_,
-        "$deprecation$\n"
-        "public $value_type$ ${$get$capitalized_name$OrThrow$}$(\n"
-        "    $key_type$ key) {\n"
-        "  $key_null_check$\n"
-        "  java.util.Map<$type_parameters$> map =\n"
-        "      internalGet$capitalized_name$().getMap();\n"
-        "  if (!map.containsKey(key)) {\n"
-        "    throw new java.lang.IllegalArgumentException();\n"
-        "  }\n"
-        "  return map.get(key);\n"
-        "}\n");
+    printer->Print(variables_,
+                   "@java.lang.Override\n"
+                   "$deprecation$\n"
+                   "public $value_type$ ${$get$capitalized_name$OrThrow$}$(\n"
+                   "    $key_type$ key) {\n"
+                   "  $key_null_check$\n"
+                   "  java.util.Map<$type_parameters$> map =\n"
+                   "      internalGet$capitalized_name$().getMap();\n"
+                   "  if (!map.containsKey(key)) {\n"
+                   "    throw new java.lang.IllegalArgumentException();\n"
+                   "  }\n"
+                   "  return map.get(key);\n"
+                   "}\n");
     printer->Annotate("{", "}", descriptor_);
   }
 }
 
-void ImmutableMapFieldGenerator::
-GenerateFieldBuilderInitializationCode(io::Printer* printer)  const {
+void ImmutableMapFieldGenerator::GenerateKotlinDslMembers(
+    io::Printer* printer) const {
+  printer->Print(
+      variables_,
+      "/**\n"
+      " * An uninstantiable, behaviorless type to represent the field in\n"
+      " * generics.\n"
+      " */\n"
+      "@kotlin.OptIn"
+      "(com.google.protobuf.kotlin.OnlyForUseByGeneratedProtoCode::class)\n"
+      "public class ${$$kt_capitalized_name$Proxy$}$ private constructor()"
+      " : com.google.protobuf.kotlin.DslProxy()\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "$kt_deprecation$ public val $kt_name$: "
+      "com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  @kotlin.jvm.JvmSynthetic\n"
+      "  @JvmName(\"get$kt_capitalized_name$Map\")\n"
+      "  get() = com.google.protobuf.kotlin.DslMap(\n"
+      "    $kt_dsl_builder$.${$get$capitalized_name$Map$}$()\n"
+      "  )\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "@JvmName(\"put$kt_capitalized_name$\")\n"
+      "public fun com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  .put(key: $kt_key_type$, value: $kt_value_type$) {\n"
+      "     $kt_dsl_builder$.${$put$capitalized_name$$}$(key, value)\n"
+      "   }\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "@kotlin.jvm.JvmSynthetic\n"
+      "@JvmName(\"set$kt_capitalized_name$\")\n"
+      "@Suppress(\"NOTHING_TO_INLINE\")\n"
+      "public inline operator fun com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  .set(key: $kt_key_type$, value: $kt_value_type$) {\n"
+      "     put(key, value)\n"
+      "   }\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "@kotlin.jvm.JvmSynthetic\n"
+      "@JvmName(\"remove$kt_capitalized_name$\")\n"
+      "public fun com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  .remove(key: $kt_key_type$) {\n"
+      "     $kt_dsl_builder$.${$remove$capitalized_name$$}$(key)\n"
+      "   }\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "@kotlin.jvm.JvmSynthetic\n"
+      "@JvmName(\"putAll$kt_capitalized_name$\")\n"
+      "public fun com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  .putAll(map: kotlin.collections.Map<$kt_key_type$, $kt_value_type$>) "
+      "{\n"
+      "     $kt_dsl_builder$.${$putAll$capitalized_name$$}$(map)\n"
+      "   }\n");
+
+  WriteFieldDocComment(printer, descriptor_);
+  printer->Print(
+      variables_,
+      "@kotlin.jvm.JvmSynthetic\n"
+      "@JvmName(\"clear$kt_capitalized_name$\")\n"
+      "public fun com.google.protobuf.kotlin.DslMap"
+      "<$kt_key_type$, $kt_value_type$, ${$$kt_capitalized_name$Proxy$}$>\n"
+      "  .clear() {\n"
+      "     $kt_dsl_builder$.${$clear$capitalized_name$$}$()\n"
+      "   }\n");
+}
+
+void ImmutableMapFieldGenerator::GenerateFieldBuilderInitializationCode(
+    io::Printer* printer) const {
   // Nothing to initialize.
 }
 
-void ImmutableMapFieldGenerator::
-GenerateInitializationCode(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateInitializationCode(
+    io::Printer* printer) const {
   // Nothing to initialize.
 }
 
-void ImmutableMapFieldGenerator::
-GenerateBuilderClearCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "internalGetMutable$capitalized_name$().clear();\n");
+void ImmutableMapFieldGenerator::GenerateBuilderClearCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "internalGetMutable$capitalized_name$().clear();\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateMergingCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "internalGetMutable$capitalized_name$().mergeFrom(\n"
-      "    other.internalGet$capitalized_name$());\n");
+void ImmutableMapFieldGenerator::GenerateMergingCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "internalGetMutable$capitalized_name$().mergeFrom(\n"
+                 "    other.internalGet$capitalized_name$());\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateBuildingCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "result.$name$_ = internalGet$capitalized_name$();\n"
-      "result.$name$_.makeImmutable();\n");
+void ImmutableMapFieldGenerator::GenerateBuildingCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "result.$name$_ = internalGet$capitalized_name$();\n"
+                 "result.$name$_.makeImmutable();\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateParsingCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "if (!$get_mutable_bit_parser$) {\n"
-      "  $name$_ = com.google.protobuf.MapField.newMapField(\n"
-      "      $map_field_parameter$);\n"
-      "  $set_mutable_bit_parser$;\n"
-      "}\n");
+void ImmutableMapFieldGenerator::GenerateParsingCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "if (!$get_mutable_bit_parser$) {\n"
+                 "  $name$_ = com.google.protobuf.MapField.newMapField(\n"
+                 "      $map_field_parameter$);\n"
+                 "  $set_mutable_bit_parser$;\n"
+                 "}\n");
   if (!SupportUnknownEnumValue(descriptor_->file()) &&
       GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
     printer->Print(
@@ -736,25 +831,24 @@ GenerateParsingCode(io::Printer* printer) const {
   }
 }
 
-void ImmutableMapFieldGenerator::
-GenerateParsingDoneCode(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateParsingDoneCode(
+    io::Printer* printer) const {
   // Nothing to do here.
 }
 
-void ImmutableMapFieldGenerator::
-GenerateSerializationCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "com.google.protobuf.GeneratedMessage$ver$\n"
-      "  .serialize$short_key_type$MapTo(\n"
-      "    output,\n"
-      "    internalGet$capitalized_name$(),\n"
-      "    $default_entry$,\n"
-      "    $number$);\n");
+void ImmutableMapFieldGenerator::GenerateSerializationCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "com.google.protobuf.GeneratedMessage$ver$\n"
+                 "  .serialize$short_key_type$MapTo(\n"
+                 "    output,\n"
+                 "    internalGet$capitalized_name$(),\n"
+                 "    $default_entry$,\n"
+                 "    $number$);\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateSerializedSizeCode(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateSerializedSizeCode(
+    io::Printer* printer) const {
   printer->Print(
       variables_,
       "for (java.util.Map.Entry<$type_parameters$> entry\n"
@@ -769,16 +863,14 @@ GenerateSerializedSizeCode(io::Printer* printer) const {
       "}\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateEqualsCode(io::Printer* printer) const {
-  printer->Print(
-      variables_,
-      "result = result && internalGet$capitalized_name$().equals(\n"
-      "    other.internalGet$capitalized_name$());\n");
+void ImmutableMapFieldGenerator::GenerateEqualsCode(
+    io::Printer* printer) const {
+  printer->Print(variables_,
+                 "if (!internalGet$capitalized_name$().equals(\n"
+                 "    other.internalGet$capitalized_name$())) return false;\n");
 }
 
-void ImmutableMapFieldGenerator::
-GenerateHashCode(io::Printer* printer) const {
+void ImmutableMapFieldGenerator::GenerateHashCode(io::Printer* printer) const {
   printer->Print(
       variables_,
       "if (!internalGet$capitalized_name$().getMap().isEmpty()) {\n"
@@ -787,7 +879,7 @@ GenerateHashCode(io::Printer* printer) const {
       "}\n");
 }
 
-string ImmutableMapFieldGenerator::GetBoxedType() const {
+std::string ImmutableMapFieldGenerator::GetBoxedType() const {
   return name_resolver_->GetImmutableClassName(descriptor_->message_type());
 }
 

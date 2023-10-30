@@ -5,16 +5,16 @@
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
+option java_package = "org.chromium.components.metrics";
 
 option java_outer_classname = "OmniboxEventProtos";
-option java_package = "org.chromium.components.metrics";
 
 package metrics;
 
 import "omnibox_input_type.proto";
 
 // Stores information about an omnibox interaction.
-// Next tag: 21
+// Next tag: 23
 message OmniboxEventProto {
   // The timestamp for the event, in seconds.
   // This value comes from Chromium's TimeTicks::Now(), which is an abstract
@@ -93,18 +93,19 @@ message OmniboxEventProto {
   // the field |typing_duration_ms|.
   optional int64 duration_since_last_default_match_update_ms = 13;
 
-  // The type of page currently displayed when the user used the omnibox.
+  // The type of page the user was on when they used the omnibox. Or the type of
+  // page for which suggestions were prefetched from the server.
   enum PageClassification {
     // An invalid URL; shouldn't happen.
     INVALID_SPEC = 0;
 
-    // chrome://newtab/.  This can be either the built-in version or a
-    // replacement new tab page from an extension.  Note that when Instant
-    // Extended is enabled, the new tab page will be reported as either
-    // INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS or
-    // INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS below,
-    // unless an extension is replacing the new tab page, in which case
-    // it will still be reported as NTP.
+    // chrome://newtab/.  For modern versions of Chrome, this is only reported
+    // when an extension is replacing the new tab page. Otherwise, new tab
+    // page interactions will be reported as NTP_REALBOX,
+    // INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS or
+    // INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS.
+    // For old versions of Chrome, this was reported for the default New Tab
+    // Page.
     NTP = 1;
 
     // about:blank.
@@ -119,8 +120,8 @@ message OmniboxEventProto {
     // on this list.
     OTHER = 4;
 
-    // The instant new tab page enum value was deprecated on August 2, 2013.
-    OBSOLETE_INSTANT_NTP = 5;
+    // The instant new tab page.
+    OBSOLETE_INSTANT_NTP = 5;  // DEPRECATED on August 2, 2013.
 
     // The user is on a search result page that does search term replacement.
     // This means the search terms are shown in the omnibox instead of the URL.
@@ -131,8 +132,9 @@ message OmniboxEventProto {
     // with the user having focus in the omnibox.
     INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS = 7;
 
-    // The new tab page in which this omnibox interaction first started
-    // with the user having focus in the fakebox.
+    // The new tab page in which this omnibox interaction first started with the
+    // user having focus in the fakebox. This is replaced by NTP_REALBOX.
+    // DEPRECATED on Aug 17, 2020.
     INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS = 8;
 
     // The user is on a search result page that does not do search term
@@ -155,6 +157,43 @@ message OmniboxEventProto {
     // This interaction started with the user focusing or typing in the search
     // box of the ChromeOS app list (a.k.a., launcher).
     CHROMEOS_APP_LIST = 14;
+
+    // The new tab page in which this omnibox interaction started with the user
+    // having focus in the realbox.
+    NTP_REALBOX = 15;
+
+    // Android's Search Widget started directly from Launcher.
+    ANDROID_SEARCH_WIDGET = 16;
+
+    // Android's Start surface homepage.
+    START_SURFACE_HOMEPAGE = 17;  // DEPRECATED on Jun 17, 2022.
+    // New Tab with Omnibox focused with Android's start surface finale enabled.
+    START_SURFACE_NEW_TAB = 18;  // DEPRECATED on Jun 17, 2022.
+
+    // Android's improved Search Widget with new suggestions.
+    ANDROID_SHORTCUTS_WIDGET = 19;
+
+    // The New Tab Page zero-prefix suggestion prefetch.
+    // Used for prefetching suggestions and should never appear in an
+    // OmniboxEventProto or any of its derived histograms. (PageClassification
+    // enum is used in other places too, and not only OmniboxEventProto.)
+    NTP_ZPS_PREFETCH = 20;
+
+    // Android's auxiliary search backend.
+    ANDROID_AUXILIARY_SEARCH = 21;
+
+    // The Search Results Page zero-prefix suggestion prefetch.
+    // Used for prefetching suggestions and should never appear in an
+    // OmniboxEventProto or any of its derived histograms. (PageClassification
+    // enum is used in other places too, and not only OmniboxEventProto.)
+    SRP_ZPS_PREFETCH = 22;
+
+    // The catch-all zero-prefix suggestion prefetch for everything other than
+    // NTP and SRP.
+    // Used for prefetching suggestions and should never appear in an
+    // OmniboxEventProto or any of its derived histograms. (PageClassification
+    // enum is used in other places too, and not only OmniboxEventProto.)
+    OTHER_ZPS_PREFETCH = 23;
 
     // When adding new classifications, please consider adding them in
     // chromium's chrome/browser/resources/omnibox/omnibox.html
@@ -202,6 +241,17 @@ message OmniboxEventProto {
     // Non personalized query suggestions generated from a lightweight on device
     // head model.
     ON_DEVICE_HEAD = 17;
+    // Zero-prefix query suggestions based on device local history.
+    ZERO_SUGGEST_LOCAL_HISTORY = 18;
+    // Only used by Android Chrome. Represents a suggestion showing query tiles
+    // that users can tap on for bulding queries.
+    QUERY_TILE = 19;
+    // Clusters generated on-device from the user's Chrome history.
+    HISTORY_CLUSTER = 20;
+    // Suggestions from history derived from input with automatic corrections.
+    HISTORY_FUZZY = 21;
+    // URLs amongst the user's currently open tabs.
+    OPEN_TAB = 22;
   }
 
   // The result set displayed on the completion popup
@@ -276,6 +326,15 @@ message OmniboxEventProto {
                                    // suggestion.
       CLIPBOARD_TEXT = 28;         // Text based on the clipboard.
       CLIPBOARD_IMAGE = 29;        // An image based on the clipboard.
+      TILE_SUGGESTION = 30;        // A search query from Chrome Query Tiles
+                                   // feature. Only used by Android.
+      HISTORY_CLUSTER = 31;        // A past page that is a member of a cluster
+                                   // (an aggregation of related searches and
+                                   // URLs from the user's history) that
+                                   // contains the input (the input might or
+                                   // might not also match the title or URL of
+                                   // this page).
+      OPEN_TAB = 32;  // A currently open tab whose URL contains the input.
     }
     optional ResultType result_type = 2;
 
@@ -378,4 +437,15 @@ message OmniboxEventProto {
                             // or tabbing to it.
   }
   optional KeywordModeEntryMethod keyword_mode_entry_method = 20;
+
+  // Whether the omnibox input is a search query that is started
+  // by clicking on a image tile.
+  optional bool is_query_started_from_tile = 21;
+
+  // The set of features that triggered within the current omnibox session.
+  // Each element is a value of |OmniboxTriggeredFeatureService::Features| enum
+  // in components/omnibox/browser/omnibox_triggered_feature_service.h .
+  // See AutocompleteController::ResetSession() for more details on the
+  // definition of a session.
+  repeated int32 feature_triggered_in_session = 22;
 }

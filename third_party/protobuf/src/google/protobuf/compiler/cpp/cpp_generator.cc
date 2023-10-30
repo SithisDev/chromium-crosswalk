@@ -34,17 +34,17 @@
 
 #include <google/protobuf/compiler/cpp/cpp_generator.h>
 
-#include <vector>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <google/protobuf/stubs/strutil.h>
+#include <google/protobuf/io/printer.h>
+#include <google/protobuf/io/zero_copy_stream.h>
 #include <google/protobuf/compiler/cpp/cpp_file.h>
 #include <google/protobuf/compiler/cpp/cpp_helpers.h>
 #include <google/protobuf/descriptor.pb.h>
-#include <google/protobuf/io/printer.h>
-#include <google/protobuf/io/zero_copy_stream.h>
-
 
 namespace google {
 namespace protobuf {
@@ -54,11 +54,17 @@ namespace cpp {
 CppGenerator::CppGenerator() {}
 CppGenerator::~CppGenerator() {}
 
+namespace {
+std::string NumberedCcFileName(const std::string& basename, int number) {
+  return StrCat(basename, ".out/", number, ".cc");
+}
+}  // namespace
+
 bool CppGenerator::Generate(const FileDescriptor* file,
-                            const string& parameter,
+                            const std::string& parameter,
                             GeneratorContext* generator_context,
-                            string* error) const {
-  std::vector<std::pair<string, string> > options;
+                            std::string* error) const {
+  std::vector<std::pair<std::string, std::string> > options;
   ParseGeneratorParameter(parameter, &options);
 
   // -----------------------------------------------------------------
@@ -76,7 +82,17 @@ bool CppGenerator::Generate(const FileDescriptor* file,
   // FOO_EXPORT is a macro which should expand to __declspec(dllexport) or
   // __declspec(dllimport) depending on what is being compiled.
   //
+  // If the proto_h option is passed to the compiler, we will generate all
+  // classes and enums so that they can be forward-declared from files that
+  // need them from imports.
+  //
+  // If the lite option is passed to the compiler, we will generate the
+  // current files and all transitive dependencies using the LITE runtime.
   Options file_options;
+
+  file_options.opensource_runtime = opensource_runtime_;
+  file_options.runtime_include_base = runtime_include_base_;
+
   for (int i = 0; i < options.size(); i++) {
     if (options[i].first == "dllexport_decl") {
       file_options.dllexport_decl = options[i].second;
@@ -88,18 +104,57 @@ bool CppGenerator::Generate(const FileDescriptor* file,
       file_options.annotation_pragma_name = options[i].second;
     } else if (options[i].first == "annotation_guard_name") {
       file_options.annotation_guard_name = options[i].second;
+    } else if (options[i].first == "speed") {
+      file_options.enforce_mode = EnforceOptimizeMode::kSpeed;
+    } else if (options[i].first == "code_size") {
+      file_options.enforce_mode = EnforceOptimizeMode::kCodeSize;
     } else if (options[i].first == "lite") {
-      file_options.enforce_lite = true;
+      file_options.enforce_mode = EnforceOptimizeMode::kLiteRuntime;
     } else if (options[i].first == "lite_implicit_weak_fields") {
+      file_options.enforce_mode = EnforceOptimizeMode::kLiteRuntime;
       file_options.lite_implicit_weak_fields = true;
       if (!options[i].second.empty()) {
-        file_options.num_cc_files = strto32(options[i].second.c_str(),
-                                            NULL, 10);
+        file_options.num_cc_files =
+            strto32(options[i].second.c_str(), nullptr, 10);
       }
-    } else if (options[i].first == "table_driven_parsing") {
-      file_options.table_driven_parsing = true;
-    } else if (options[i].first == "table_driven_serialization") {
-      file_options.table_driven_serialization = true;
+    } else if (options[i].first == "proto_h") {
+      file_options.proto_h = true;
+    } else if (options[i].first == "annotate_accessor") {
+      file_options.annotate_accessor = true;
+    } else if (options[i].first == "inject_field_listener_events") {
+      file_options.field_listener_options.inject_field_listener_events = true;
+    } else if (options[i].first == "forbidden_field_listener_events") {
+      std::size_t pos = 0;
+      do {
+        std::size_t next_pos = options[i].second.find_first_of("+", pos);
+        if (next_pos == std::string::npos) {
+          next_pos = options[i].second.size();
+        }
+        if (next_pos > pos)
+          file_options.field_listener_options.forbidden_field_listener_events
+              .insert(options[i].second.substr(pos, next_pos - pos));
+        pos = next_pos + 1;
+      } while (pos < options[i].second.size());
+    } else if (options[i].first == "verified_lazy_message_sets") {
+      file_options.unverified_lazy_message_sets = false;
+    } else if (options[i].first == "unverified_lazy_message_sets") {
+      file_options.unverified_lazy_message_sets = true;
+    } else if (options[i].first == "eagerly_verified_lazy") {
+      file_options.eagerly_verified_lazy = true;
+    } else if (options[i].first == "force_eagerly_verified_lazy") {
+      file_options.force_eagerly_verified_lazy = true;
+    } else if (options[i].first == "experimental_tail_call_table_mode") {
+      if (options[i].second == "never") {
+        file_options.tctable_mode = Options::kTCTableNever;
+      } else if (options[i].second == "guarded") {
+        file_options.tctable_mode = Options::kTCTableGuarded;
+      } else if (options[i].second == "always") {
+        file_options.tctable_mode = Options::kTCTableAlways;
+      } else {
+        *error = "Unknown value for experimental_tail_call_table_mode: " +
+                 options[i].second;
+        return false;
+      }
     } else {
       *error = "Unknown generator option: " + options[i].first;
       return false;
@@ -108,7 +163,7 @@ bool CppGenerator::Generate(const FileDescriptor* file,
 
   // The safe_boundary_check option controls behavior for Google-internal
   // protobuf APIs.
-  if (file_options.safe_boundary_check) {
+  if (file_options.safe_boundary_check && file_options.opensource_runtime) {
     *error =
         "The safe_boundary_check option is not supported outside of Google.";
     return false;
@@ -117,8 +172,12 @@ bool CppGenerator::Generate(const FileDescriptor* file,
   // -----------------------------------------------------------------
 
 
-  string basename = StripProto(file->name());
+  std::string basename = StripProto(file->name());
 
+  if (MaybeBootstrap(file_options, generator_context, file_options.bootstrap,
+                     &basename)) {
+    return true;
+  }
 
   FileGenerator file_generator(file, file_options);
 
@@ -129,10 +188,10 @@ bool CppGenerator::Generate(const FileDescriptor* file,
     GeneratedCodeInfo annotations;
     io::AnnotationProtoCollector<GeneratedCodeInfo> annotation_collector(
         &annotations);
-    string info_path = basename + ".proto.h.meta";
-    io::Printer printer(output.get(), '$', file_options.annotate_headers
-                                               ? &annotation_collector
-                                               : NULL);
+    std::string info_path = basename + ".proto.h.meta";
+    io::Printer printer(
+        output.get(), '$',
+        file_options.annotate_headers ? &annotation_collector : nullptr);
     file_generator.GenerateProtoHeader(
         &printer, file_options.annotate_headers ? info_path : "");
     if (file_options.annotate_headers) {
@@ -148,10 +207,10 @@ bool CppGenerator::Generate(const FileDescriptor* file,
     GeneratedCodeInfo annotations;
     io::AnnotationProtoCollector<GeneratedCodeInfo> annotation_collector(
         &annotations);
-    string info_path = basename + ".pb.h.meta";
-    io::Printer printer(output.get(), '$', file_options.annotate_headers
-                                               ? &annotation_collector
-                                               : NULL);
+    std::string info_path = basename + ".pb.h.meta";
+    io::Printer printer(
+        output.get(), '$',
+        file_options.annotate_headers ? &annotation_collector : nullptr);
     file_generator.GeneratePBHeader(
         &printer, file_options.annotate_headers ? info_path : "");
     if (file_options.annotate_headers) {
@@ -164,32 +223,45 @@ bool CppGenerator::Generate(const FileDescriptor* file,
   // Generate cc file(s).
   if (UsingImplicitWeakFields(file, file_options)) {
     {
-      // This is the global .cc file, containing enum/services/tables/reflection
+      // This is the global .cc file, containing
+      // enum/services/tables/reflection
       std::unique_ptr<io::ZeroCopyOutputStream> output(
           generator_context->Open(basename + ".pb.cc"));
       io::Printer printer(output.get(), '$');
       file_generator.GenerateGlobalSource(&printer);
     }
 
-    int num_cc_files = file_generator.NumMessages();
+    int num_cc_files =
+        file_generator.NumMessages() + file_generator.NumExtensions();
 
-    // If we're using implicit weak fields then we allow the user to optionally
-    // specify how many files to generate, not counting the global pb.cc file.
-    // If we have more files than messages, then some files will be generated as
-    // empty placeholders.
+    // If we're using implicit weak fields then we allow the user to
+    // optionally specify how many files to generate, not counting the global
+    // pb.cc file. If we have more files than messages, then some files will
+    // be generated as empty placeholders.
     if (file_options.num_cc_files > 0) {
-      GOOGLE_CHECK_LE(file_generator.NumMessages(), file_options.num_cc_files)
-          << "There must be at least as many numbered .cc files as messages.";
+      GOOGLE_CHECK_LE(num_cc_files, file_options.num_cc_files)
+          << "There must be at least as many numbered .cc files as messages "
+             "and extensions.";
       num_cc_files = file_options.num_cc_files;
     }
-    for (int i = 0; i < num_cc_files; i++) {
-      // TODO(gerbens) Agree on naming scheme.
-      std::unique_ptr<io::ZeroCopyOutputStream> output(
-          generator_context->Open(basename + "." + SimpleItoa(i) + ".cc"));
+    int cc_file_number = 0;
+    for (int i = 0; i < file_generator.NumMessages(); i++) {
+      std::unique_ptr<io::ZeroCopyOutputStream> output(generator_context->Open(
+          NumberedCcFileName(basename, cc_file_number++)));
       io::Printer printer(output.get(), '$');
-      if (i < file_generator.NumMessages()) {
-        file_generator.GenerateSourceForMessage(i, &printer);
-      }
+      file_generator.GenerateSourceForMessage(i, &printer);
+    }
+    for (int i = 0; i < file_generator.NumExtensions(); i++) {
+      std::unique_ptr<io::ZeroCopyOutputStream> output(generator_context->Open(
+          NumberedCcFileName(basename, cc_file_number++)));
+      io::Printer printer(output.get(), '$');
+      file_generator.GenerateSourceForExtension(i, &printer);
+    }
+    // Create empty placeholder files if necessary to match the expected number
+    // of files.
+    for (; cc_file_number < num_cc_files; ++cc_file_number) {
+      std::unique_ptr<io::ZeroCopyOutputStream> output(generator_context->Open(
+          NumberedCcFileName(basename, cc_file_number)));
     }
   } else {
     std::unique_ptr<io::ZeroCopyOutputStream> output(

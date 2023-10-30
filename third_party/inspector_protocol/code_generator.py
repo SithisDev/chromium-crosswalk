@@ -1,8 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import os
 import os.path
 import sys
 import argparse
@@ -43,6 +44,9 @@ def read_config():
       items = [(k, os.path.join(output_base, v) if k == "output" else v)
                for (k, v) in items]
       keys, values = list(zip(*items))
+      # 'async' is a keyword since Python 3.7.
+      # Avoid namedtuple(rename=True) for compatibility with Python 2.X.
+      keys = tuple('async_' if k == 'async' else k for k in keys)
       return collections.namedtuple('X', keys)(*values)
     return json.loads(data, object_hook=json_object_hook)
 
@@ -93,6 +97,7 @@ def read_config():
     defaults = {
       ".use_snake_file_names": False,
       ".use_title_case_methods": False,
+      ".use_embedder_types": False,
       ".imported": False,
       ".imported.export_macro": "",
       ".imported.export_header": False,
@@ -109,16 +114,9 @@ def read_config():
       ".lib": False,
       ".lib.export_macro": "",
       ".lib.export_header": False,
-      # The encoding lib consists of encoding/encoding.h and
-      # encoding/encoding.cc in its subdirectory, which binaries
-      # must link / depend on.
-      ".encoding_lib.header": os.path.join(inspector_protocol_dir,
-                                           "encoding/encoding.h"),
-      ".encoding_lib.namespace": "",
-      # Ditto for bindings, see bindings/bindings.h.
-      ".bindings_lib.header": os.path.join(inspector_protocol_dir,
-                                           "bindings/bindings.h"),
-      ".bindings_lib.namespace": ""
+      ".crdtp": False,
+      ".crdtp.dir": os.path.join(inspector_protocol_dir, "crdtp"),
+      ".crdtp.namespace": "crdtp",
     }
     for key_value in config_values:
       parts = key_value.split("=")
@@ -148,6 +146,7 @@ def dash_to_camelcase(word):
 
 
 def to_snake_case(name):
+  name = re.sub(r"([A-Z]{2,})([A-Z][a-z])", r"\1_\2", name)
   return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name, sys.maxsize).lower()
 
 
@@ -375,7 +374,6 @@ class Protocol(object):
                                  for rule in config.imported.options]
 
     self.patch_full_qualified_refs()
-    self.create_notification_types()
     self.create_type_definitions()
     self.generate_used_types()
 
@@ -438,8 +436,6 @@ class Protocol(object):
         for event in domain["events"]:
           if self.generate_event(domain_name, event["name"]):
             all_refs |= self.all_references(event)
-            all_refs.add('%s.%sNotification' % (domain_name,
-                                                to_title_case(event["name"])))
 
     dependencies = self.generate_type_dependencies()
     queue = set(all_refs)
@@ -460,20 +456,6 @@ class Protocol(object):
         if len(related_types):
           dependencies[domain_name + "." + type["id"]] = related_types
     return dependencies
-
-  def create_notification_types(self):
-    for domain in self.json_api["domains"]:
-      if "events" in domain:
-        for event in domain["events"]:
-          event_type = dict()
-          event_type["description"] = "Wrapper for notification params"
-          event_type["type"] = "object"
-          event_type["id"] = to_title_case(event["name"]) + "Notification"
-          if "parameters" in event:
-            event_type["properties"] = copy.deepcopy(event["parameters"])
-          if "types" not in domain:
-            domain["types"] = list()
-          domain["types"].append(event_type)
 
   def create_type_definitions(self):
     imported_namespace = ""
@@ -555,7 +537,7 @@ class Protocol(object):
     if not self.config.protocol.options:
       return False
     return self.check_options(self.config.protocol.options, domain, command,
-                              "async", None, False)
+                              "async_", None, False)
 
   def is_exported(self, domain, name):
     if not self.config.protocol.options:
@@ -657,37 +639,32 @@ def main():
 
     lib_templates_dir = os.path.join(module_path, "lib")
     # Note these should be sorted in the right order.
-    # TODO(dgozman): sort them programmatically based on commented includes.
-    protocol_h_templates = [
-      "ErrorSupport_h.template",
-      "Values_h.template",
-      "Object_h.template",
-      "ValueConversions_h.template",
-      "DispatcherBase_h.template",
-      "Parser_h.template",
-    ]
 
-    protocol_cpp_templates = [
-      "Protocol_cpp.template",
-      "ErrorSupport_cpp.template",
-      "Values_cpp.template",
-      "Object_cpp.template",
-      "DispatcherBase_cpp.template",
-      "Parser_cpp.template",
-    ]
+    # TODO(dgozman): sort them programmatically based on commented includes.
 
     forward_h_templates = [
       "Forward_h.template",
-      "FrontendChannel_h.template",
     ]
 
-    base_string_adapter_h_templates = [
-      "base_string_adapter_h.template",
-    ]
+    protocol_h_templates = []
+    protocol_cpp_templates = []
 
-    base_string_adapter_cc_templates = [
-      "base_string_adapter_cc.template",
-    ]
+    if not config.use_embedder_types:
+      protocol_h_templates += [
+        "Values_h.template",
+        "Object_h.template",
+        "ValueConversions_h.template",
+      ]
+      protocol_cpp_templates += [
+        "Protocol_cpp.template",
+        "Values_cpp.template",
+        "Object_cpp.template",
+        "ValueConversions_cpp.template",
+      ]
+    else:
+      protocol_h_templates += [
+        "Forward_h.template",
+      ]
 
     def generate_lib_file(file_name, template_files):
       parts = []
@@ -701,12 +678,10 @@ def main():
         config, "Forward.h")), forward_h_templates)
     generate_lib_file(os.path.join(config.lib.output, to_file_name(
         config, "Protocol.h")), protocol_h_templates)
-    generate_lib_file(os.path.join(config.lib.output, to_file_name(
-        config, "Protocol.cpp")), protocol_cpp_templates)
-    generate_lib_file(os.path.join(config.lib.output, to_file_name(
-        config, "base_string_adapter.h")), base_string_adapter_h_templates)
-    generate_lib_file(os.path.join(config.lib.output, to_file_name(
-        config, "base_string_adapter.cc")), base_string_adapter_cc_templates)
+
+    if not config.use_embedder_types:
+      generate_lib_file(os.path.join(config.lib.output, to_file_name(
+          config, "Protocol.cpp")), protocol_cpp_templates)
 
   # Make gyp / make generatos happy, otherwise make rebuilds world.
   inputs_ts = max(map(os.path.getmtime, inputs))
@@ -720,6 +695,11 @@ def main():
     sys.exit()
 
   for file_name, content in outputs.items():
+    # Remove output file first to account for potential case changes.
+    try:
+      os.remove(file_name)
+    except OSError:
+      pass
     out_file = open(file_name, "w")
     out_file.write(content)
     out_file.close()

@@ -37,6 +37,7 @@
 #include <map>
 #include <vector>
 #include <google/protobuf/stubs/common.h>
+#include <google/protobuf/stubs/logging.h>
 #include <gmock/gmock.h>
 // Disable death tests if we use exceptions in CHECK().
 #if !PROTOBUF_USE_EXCEPTIONS && defined(GTEST_HAS_DEATH_TEST) && \
@@ -48,19 +49,19 @@ namespace google {
 namespace protobuf {
 
 // When running unittests, get the directory containing the source code.
-string TestSourceDir();
+std::string TestSourceDir();
 
 // When running unittests, get a directory where temporary files may be
 // placed.
-string TestTempDir();
+std::string TestTempDir();
 
 // Capture all text written to stdout or stderr.
 void CaptureTestStdout();
 void CaptureTestStderr();
 
 // Stop capturing stdout or stderr and return the text captured.
-string GetCapturedTestStdout();
-string GetCapturedTestStderr();
+std::string GetCapturedTestStdout();
+std::string GetCapturedTestStderr();
 
 // For use with ScopedMemoryLog::GetMessages().  Inside Google the LogLevel
 // constants don't have the LOGLEVEL_ prefix, so the code that used
@@ -83,14 +84,14 @@ class ScopedMemoryLog {
   virtual ~ScopedMemoryLog();
 
   // Fetches all messages with the given severity level.
-  const std::vector<string>& GetMessages(LogLevel error);
+  const std::vector<std::string>& GetMessages(LogLevel error);
 
  private:
-  std::map<LogLevel, std::vector<string> > messages_;
+  std::map<LogLevel, std::vector<std::string> > messages_;
   LogHandler* old_handler_;
 
   static void HandleLog(LogLevel level, const char* filename, int line,
-                        const string& message);
+                        const std::string& message);
 
   static ScopedMemoryLog* active_log_;
 

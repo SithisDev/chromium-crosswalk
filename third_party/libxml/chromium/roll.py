@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -31,8 +31,8 @@ import tempfile
 # 2. On Linux:
 #    a. sudo apt-get install libicu-dev
 #    b. git clone https://github.com/GNOME/libxml2.git somewhere
-# 3. On Mac, install these MacPorts:
-#    autoconf automake libtool pkgconfig icu
+# 3. On Mac, install these packages with brew:
+#      autoconf automake libtool pkgconfig icu4c
 #
 # Procedure:
 #
@@ -60,17 +60,16 @@ import tempfile
 #
 # 3. On Mac, in the Chromium src directory:
 #    a. git cl patch <Gerrit Issue ID>
-#    b. third_party/libxml/chromium/roll.py --mac
+#    b. third_party/libxml/chromium/roll.py --mac --icu4c_path=~/homebrew/opt/icu4c
 #    c. Make and commit any final changes to README.chromium, BUILD.gn, etc.
 #    d. git cl upload
 #    e. Complete the review as usual
 
 PATCHES = [
-    'chromium-issue-599427.patch',
     'chromium-issue-628581.patch',
-    'libxml2-2.9.4-security-CVE-2017-7376-nanohttp-out-of-bounds-write.patch',
     'libxml2-2.9.4-security-xpath-nodetab-uaf.patch',
     'chromium-issue-708434.patch',
+    'undo-sax-deprecation.patch',
 ]
 
 
@@ -91,6 +90,7 @@ SHARED_XML_CONFIGURE_OPTIONS = [
     ('--with-python', 'python=yes'),
     ('--with-reader', 'reader=yes'),
     ('--with-sax1', 'sax1=yes'),
+    ('--with-threads', 'threads=yes'),
     ('--with-tree', 'tree=yes'),
     ('--with-writer', 'writer=yes'),
     ('--with-xpath', 'xpath=yes'),
@@ -98,7 +98,6 @@ SHARED_XML_CONFIGURE_OPTIONS = [
     ('--without-c14n', 'c14n=no'),
     ('--without-catalog', 'catalog=no'),
     ('--without-debug', 'xml_debug=no'),
-    ('--without-docbook', 'docb=no'),
     ('--without-ftp', 'ftp=no'),
     ('--without-http', 'http=no'),
     ('--without-iconv', 'iconv=no'),
@@ -112,10 +111,10 @@ SHARED_XML_CONFIGURE_OPTIONS = [
     ('--without-run-debug', 'run_debug=no'),
     ('--without-schemas', 'schemas=no'),
     ('--without-schematron', 'schematron=no'),
-    ('--without-threads', 'threads=no'),
     ('--without-valid', 'valid=no'),
     ('--without-xinclude', 'xinclude=no'),
     ('--without-xptr', 'xptr=no'),
+    ('--without-xptr-locs', 'xptr_locs=no'),
     ('--without-zlib', 'zlib=no'),
 ]
 
@@ -295,10 +294,11 @@ def check_copying(full_path_to_third_party_libxml_src):
             raise Exception('check COPYING')
 
 
-def prepare_libxml_distribution(libxml2_repo_path, temp_dir):
+def prepare_libxml_distribution(src_path, libxml2_repo_path, temp_dir):
     """Makes a libxml2 distribution.
 
     Args:
+        src_path: The path to the Chromium checkout.
         libxml2_repo_path: The path to the local clone of the libxml2 repo.
         temp_dir: A temporary directory to stage the distribution to.
 
@@ -320,12 +320,20 @@ def prepare_libxml_distribution(libxml2_repo_path, temp_dir):
 
     with WorkingDir(libxml2_repo_path):
         commit = subprocess.check_output(
-            ['git', 'log', '-n', '1', '--pretty=format:%H', 'HEAD'])
+            ['git', 'log', '-n', '1', '--pretty=format:%H',
+             'HEAD']).decode('ascii')
         subprocess.check_call(
             'git archive HEAD | tar -x -C "%s"' % temp_src_path,
             shell=True)
     with WorkingDir(temp_src_path):
         os.remove('.gitignore')
+        for patch in PATCHES:
+            print('applying %s' % patch)
+            subprocess.check_call(
+                'patch -p1 --fuzz=0 < %s' % os.path.join(
+                    src_path, THIRD_PARTY_LIBXML_SRC, '..', 'chromium', patch),
+                shell=True)
+
     with WorkingDir(temp_config_path):
         print('../src/autogen.sh %s' % XML_CONFIGURE_OPTIONS)
         subprocess.check_call(['../src/autogen.sh'] + XML_CONFIGURE_OPTIONS)
@@ -334,8 +342,8 @@ def prepare_libxml_distribution(libxml2_repo_path, temp_dir):
         # Work out what it is called
         tar_file = subprocess.check_output(
             '''awk '/PACKAGE =/ {p=$3} /VERSION =/ {v=$3} '''
-            '''END {printf("%s-%s.tar.gz", p, v)}' Makefile''',
-            shell=True)
+            '''END {printf("%s-%s.tar.xz", p, v)}' Makefile''',
+            shell=True).decode('ascii')
         return commit, os.path.abspath(tar_file)
 
 
@@ -346,8 +354,8 @@ def roll_libxml_linux(src_path, libxml2_repo_path):
             temp_dir = tempfile.mkdtemp()
             print('temporary directory: %s' % temp_dir)
 
-            commit, tar_file = prepare_libxml_distribution(libxml2_repo_path,
-                                                           temp_dir)
+            commit, tar_file = prepare_libxml_distribution(
+                src_path, libxml2_repo_path, temp_dir)
 
             # Remove all of the old libxml to ensure only desired cruft
             # accumulates
@@ -356,7 +364,7 @@ def roll_libxml_linux(src_path, libxml2_repo_path):
             # Update the libxml repo and export it to the Chromium tree
             with WorkingDir(THIRD_PARTY_LIBXML_SRC):
                 subprocess.check_call(
-                    'tar xzf %s --strip-components=1' % tar_file,
+                    'tar xJf %s --strip-components=1' % tar_file,
                     shell=True)
         finally:
             shutil.rmtree(temp_dir)
@@ -365,12 +373,6 @@ def roll_libxml_linux(src_path, libxml2_repo_path):
             # Put the version number is the README file
             sed_in_place('../README.chromium',
                          's/Version: .*$/Version: %s/' % commit)
-
-            for patch in PATCHES:
-                print(patch)
-                subprocess.check_call(
-                    'cat ../chromium/%s | patch -p1 --fuzz=0' % patch,
-                    shell=True)
 
             with WorkingDir('../linux'):
                 subprocess.check_call(
@@ -394,17 +396,22 @@ def roll_libxml_win32(src_path):
                 XML_WIN32_CONFIGURE_OPTIONS)
 
             # Add and commit the result.
-            shutil.move('VC10/config.h', '../../win32/config.h')
+            shutil.move('../config.h', '../../win32/config.h')
             git('add', '../../win32/config.h')
             shutil.move('../include/libxml/xmlversion.h',
                         '../../win32/include/libxml/xmlversion.h')
             git('add', '../../win32/include/libxml/xmlversion.h')
-            git('commit', '-m', 'Windows')
+            git('commit', '--allow-empty', '-m', 'Windows')
             git('clean', '-f')
     print('Now push to Mac and run steps there.')
 
 
-def roll_libxml_mac(src_path):
+def roll_libxml_mac(src_path, icu4c_path):
+    icu4c_path = os.path.abspath(os.path.expanduser(icu4c_path))
+    os.environ["LDFLAGS"] = "-L" + os.path.join(icu4c_path, 'lib')
+    os.environ["CPPFLAGS"] = "-I" + os.path.join(icu4c_path, 'include')
+    os.environ["PKG_CONFIG_PATH"] = os.path.join(icu4c_path, 'lib/pkgconfig')
+
     full_path_to_third_party_libxml = os.path.join(
         src_path, THIRD_PARTY_LIBXML_SRC, '..')
 
@@ -416,8 +423,9 @@ def roll_libxml_mac(src_path):
         sed_in_place('config.h', 's/#define HAVE_RAND_R 1//')
 
     with WorkingDir(full_path_to_third_party_libxml):
-        commit = subprocess.check_output(['awk', '/Version:/ {print $2}',
-                                          'README.chromium'])
+        commit = subprocess.check_output(
+            ['awk', '/Version:/ {print $2}',
+             'README.chromium']).decode('ascii')
         remove_tracked_files(FILES_TO_REMOVE)
         commit_message = 'Roll libxml to %s' % commit
         git('commit', '-am', commit_message)
@@ -426,7 +434,8 @@ def roll_libxml_mac(src_path):
 
 def check_clean(path):
     with WorkingDir(path):
-        status = subprocess.check_output(['git', 'status', '-s'])
+        status = subprocess.check_output(['git', 'status',
+                                          '-s']).decode('ascii')
         if len(status) > 0:
             raise Exception('repository at %s is not clean' % path)
 
@@ -448,6 +457,9 @@ def main():
         type=str,
         nargs='?',
         help='The path to the local clone of the libxml2 git repo.')
+    parser.add_argument(
+        '--icu4c_path',
+        help='The path to the homebrew installation of icu4c.')
     args = parser.parse_args()
 
     if args.linux:
@@ -460,7 +472,12 @@ def main():
     elif args.win32:
         roll_libxml_win32(src_dir)
     elif args.mac:
-        roll_libxml_mac(src_dir)
+        icu4c_path = args.icu4c_path
+        if not icu4c_path:
+            print('Specify the path to the homebrew installation of icu4c with --icu4c_path.')
+            print('  ex: roll.py --mac --icu4c_path=~/homebrew/opt/icu4c')
+            sys.exit(1)
+        roll_libxml_mac(src_dir, icu4c_path)
 
 
 if __name__ == '__main__':

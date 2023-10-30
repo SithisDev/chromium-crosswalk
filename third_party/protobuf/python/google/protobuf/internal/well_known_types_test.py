@@ -1,5 +1,3 @@
-#! /usr/bin/env python
-#
 # Protocol Buffers - Google's data interchange format
 # Copyright 2008 Google Inc.  All rights reserved.
 # https://developers.google.com/protocol-buffers/
@@ -34,28 +32,35 @@
 
 __author__ = 'jieluo@google.com (Jie Luo)'
 
-import collections
-from datetime import datetime
-
-try:
-  import unittest2 as unittest  #PY26
-except ImportError:
-  import unittest
+import collections.abc as collections_abc
+import datetime
+import unittest
 
 from google.protobuf import any_pb2
 from google.protobuf import duration_pb2
 from google.protobuf import field_mask_pb2
 from google.protobuf import struct_pb2
 from google.protobuf import timestamp_pb2
+from google.protobuf import map_unittest_pb2
 from google.protobuf import unittest_pb2
 from google.protobuf.internal import any_test_pb2
 from google.protobuf.internal import test_util
 from google.protobuf.internal import well_known_types
 from google.protobuf import descriptor
 from google.protobuf import text_format
+from google.protobuf.internal import _parameterized
+
+try:
+  # New module in Python 3.9:
+  import zoneinfo  # pylint:disable=g-import-not-at-top
+  _TZ_JAPAN = zoneinfo.ZoneInfo('Japan')
+  _TZ_PACIFIC = zoneinfo.ZoneInfo('US/Pacific')
+except ImportError:
+  _TZ_JAPAN = datetime.timezone(datetime.timedelta(hours=9), 'Japan')
+  _TZ_PACIFIC = datetime.timezone(datetime.timedelta(hours=-8), 'US/Pacific')
 
 
-class TimeUtilTestBase(unittest.TestCase):
+class TimeUtilTestBase(_parameterized.TestCase):
 
   def CheckTimestampConversion(self, message, text):
     self.assertEqual(text, message.ToJsonString())
@@ -238,15 +243,68 @@ class TimeUtilTest(TimeUtilTestBase):
     message.FromNanoseconds(-1999)
     self.assertEqual(-1, message.ToMicroseconds())
 
-  def testDatetimeConverison(self):
+  def testTimezoneNaiveDatetimeConversion(self):
     message = timestamp_pb2.Timestamp()
-    dt = datetime(1970, 1, 1)
-    message.FromDatetime(dt)
-    self.assertEqual(dt, message.ToDatetime())
+    naive_utc_epoch = datetime.datetime(1970, 1, 1)
+    message.FromDatetime(naive_utc_epoch)
+    self.assertEqual(0, message.seconds)
+    self.assertEqual(0, message.nanos)
+
+    self.assertEqual(naive_utc_epoch, message.ToDatetime())
+
+    naive_epoch_morning = datetime.datetime(1970, 1, 1, 8, 0, 0, 1)
+    message.FromDatetime(naive_epoch_morning)
+    self.assertEqual(8 * 3600, message.seconds)
+    self.assertEqual(1000, message.nanos)
+
+    self.assertEqual(naive_epoch_morning, message.ToDatetime())
 
     message.FromMilliseconds(1999)
-    self.assertEqual(datetime(1970, 1, 1, 0, 0, 1, 999000),
+    self.assertEqual(1, message.seconds)
+    self.assertEqual(999_000_000, message.nanos)
+
+    self.assertEqual(datetime.datetime(1970, 1, 1, 0, 0, 1, 999000),
                      message.ToDatetime())
+
+    naive_future = datetime.datetime(2555, 2, 22, 1, 2, 3, 456789)
+    message.FromDatetime(naive_future)
+    self.assertEqual(naive_future, message.ToDatetime())
+
+    naive_end_of_time = datetime.datetime.max
+    message.FromDatetime(naive_end_of_time)
+    self.assertEqual(naive_end_of_time, message.ToDatetime())
+
+  # Two hours after the Unix Epoch, around the world.
+  @_parameterized.named_parameters(
+      ('London', [1970, 1, 1, 2], datetime.timezone.utc),
+      ('Tokyo', [1970, 1, 1, 11], _TZ_JAPAN),
+      ('LA', [1969, 12, 31, 18], _TZ_PACIFIC),
+  )
+  def testTimezoneAwareDatetimeConversion(self, date_parts, tzinfo):
+    original_datetime = datetime.datetime(*date_parts, tzinfo=tzinfo)  # pylint:disable=g-tzinfo-datetime
+
+    message = timestamp_pb2.Timestamp()
+    message.FromDatetime(original_datetime)
+    self.assertEqual(7200, message.seconds)
+    self.assertEqual(0, message.nanos)
+
+    # ToDatetime() with no parameters produces a naive UTC datetime, i.e. it not
+    # only loses the original timezone information (e.g. US/Pacific) as it's
+    # "normalised" to UTC, but also drops the information that the datetime
+    # represents a UTC one.
+    naive_datetime = message.ToDatetime()
+    self.assertEqual(datetime.datetime(1970, 1, 1, 2), naive_datetime)
+    self.assertIsNone(naive_datetime.tzinfo)
+    self.assertNotEqual(original_datetime, naive_datetime)  # not even for UTC!
+
+    # In contrast, ToDatetime(tzinfo=) produces an aware datetime in the given
+    # timezone.
+    aware_datetime = message.ToDatetime(tzinfo=tzinfo)
+    self.assertEqual(original_datetime, aware_datetime)
+    self.assertEqual(
+        datetime.datetime(1970, 1, 1, 2, tzinfo=datetime.timezone.utc),
+        aware_datetime)
+    self.assertEqual(tzinfo, aware_datetime.tzinfo)
 
   def testTimedeltaConversion(self):
     message = duration_pb2.Duration()
@@ -272,85 +330,64 @@ class TimeUtilTest(TimeUtilTestBase):
 
   def testInvalidTimestamp(self):
     message = timestamp_pb2.Timestamp()
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
-        'Failed to parse timestamp: missing valid timezone offset.',
-        message.FromJsonString,
-        '')
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
-        'Failed to parse timestamp: invalid trailing data '
-        '1970-01-01T00:00:01Ztrail.',
-        message.FromJsonString,
+    self.assertRaisesRegex(
+        ValueError, 'Failed to parse timestamp: missing valid timezone offset.',
+        message.FromJsonString, '')
+    self.assertRaisesRegex(
+        ValueError, 'Failed to parse timestamp: invalid trailing data '
+        '1970-01-01T00:00:01Ztrail.', message.FromJsonString,
         '1970-01-01T00:00:01Ztrail')
-    self.assertRaisesRegexp(
+    self.assertRaisesRegex(
+        ValueError, 'time data \'10000-01-01T00:00:00\' does not match'
+        ' format \'%Y-%m-%dT%H:%M:%S\'', message.FromJsonString,
+        '10000-01-01T00:00:00.00Z')
+    self.assertRaisesRegex(
+        ValueError, 'nanos 0123456789012 more than 9 fractional digits.',
+        message.FromJsonString, '1970-01-01T00:00:00.0123456789012Z')
+    self.assertRaisesRegex(
         ValueError,
-        'time data \'10000-01-01T00:00:00\' does not match'
-        ' format \'%Y-%m-%dT%H:%M:%S\'',
-        message.FromJsonString, '10000-01-01T00:00:00.00Z')
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
-        'nanos 0123456789012 more than 9 fractional digits.',
-        message.FromJsonString,
-        '1970-01-01T00:00:00.0123456789012Z')
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
         (r'Invalid timezone offset value: \+08.'),
         message.FromJsonString,
-        '1972-01-01T01:00:00.01+08',)
-    self.assertRaisesRegexp(
-        ValueError,
-        'year (0 )?is out of range',
-        message.FromJsonString,
-        '0000-01-01T00:00:00Z')
+        '1972-01-01T01:00:00.01+08',
+    )
+    self.assertRaisesRegex(ValueError, 'year (0 )?is out of range',
+                           message.FromJsonString, '0000-01-01T00:00:00Z')
     message.seconds = 253402300800
-    self.assertRaisesRegexp(
-        OverflowError,
-        'date value out of range',
-        message.ToJsonString)
+    self.assertRaisesRegex(OverflowError, 'date value out of range',
+                           message.ToJsonString)
 
   def testInvalidDuration(self):
     message = duration_pb2.Duration()
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
-        'Duration must end with letter "s": 1.',
-        message.FromJsonString, '1')
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
-        'Couldn\'t parse duration: 1...2s.',
-        message.FromJsonString, '1...2s')
+    self.assertRaisesRegex(ValueError, 'Duration must end with letter "s": 1.',
+                           message.FromJsonString, '1')
+    self.assertRaisesRegex(ValueError, 'Couldn\'t parse duration: 1...2s.',
+                           message.FromJsonString, '1...2s')
     text = '-315576000001.000000000s'
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+    self.assertRaisesRegex(
+        ValueError,
         r'Duration is not valid\: Seconds -315576000001 must be in range'
-        r' \[-315576000000\, 315576000000\].',
-        message.FromJsonString, text)
+        r' \[-315576000000\, 315576000000\].', message.FromJsonString, text)
     text = '315576000001.000000000s'
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+    self.assertRaisesRegex(
+        ValueError,
         r'Duration is not valid\: Seconds 315576000001 must be in range'
-        r' \[-315576000000\, 315576000000\].',
-        message.FromJsonString, text)
+        r' \[-315576000000\, 315576000000\].', message.FromJsonString, text)
     message.seconds = -315576000001
     message.nanos = 0
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+    self.assertRaisesRegex(
+        ValueError,
         r'Duration is not valid\: Seconds -315576000001 must be in range'
-        r' \[-315576000000\, 315576000000\].',
-        message.ToJsonString)
+        r' \[-315576000000\, 315576000000\].', message.ToJsonString)
     message.seconds = 0
     message.nanos = 999999999 + 1
-    self.assertRaisesRegexp(
-        well_known_types.Error,
-        r'Duration is not valid\: Nanos 1000000000 must be in range'
-        r' \[-999999999\, 999999999\].',
-        message.ToJsonString)
+    self.assertRaisesRegex(
+        ValueError, r'Duration is not valid\: Nanos 1000000000 must be in range'
+        r' \[-999999999\, 999999999\].', message.ToJsonString)
     message.seconds = -1
     message.nanos = 1
-    self.assertRaisesRegexp(
-        well_known_types.Error,
-        r'Duration is not valid\: Sign mismatch.',
-        message.ToJsonString)
+    self.assertRaisesRegex(ValueError,
+                           r'Duration is not valid\: Sign mismatch.',
+                           message.ToJsonString)
 
 
 class FieldMaskTest(unittest.TestCase):
@@ -379,6 +416,7 @@ class FieldMaskTest(unittest.TestCase):
 
     mask.FromJsonString('')
     self.assertEqual('', mask.ToJsonString())
+    self.assertEqual([], mask.paths)
     mask.FromJsonString('fooBar')
     self.assertEqual(['foo_bar'], mask.paths)
     mask.FromJsonString('fooBar,barQuz')
@@ -491,6 +529,8 @@ class FieldMaskTest(unittest.TestCase):
     mask2.FromJsonString('bar,quz')
     out_mask.Intersect(mask1, mask2)
     self.assertEqual('', out_mask.ToJsonString())
+    self.assertEqual(len(out_mask.paths), 0)
+    self.assertEqual(out_mask.paths, [])
     # Overlap with duplicated paths.
     mask1.FromJsonString('foo,baz.bb')
     mask2.FromJsonString('baz.bb,quz')
@@ -505,8 +545,17 @@ class FieldMaskTest(unittest.TestCase):
     mask2.FromJsonString('foo.bar.baz,quz')
     out_mask.Intersect(mask1, mask2)
     self.assertEqual('foo.bar.baz', out_mask.ToJsonString())
+    # Intersect '' with ''
+    mask1.Clear()
+    mask2.Clear()
+    mask1.paths.append('')
+    mask2.paths.append('')
+    self.assertEqual(mask1.paths, [''])
+    self.assertEqual('', mask1.ToJsonString())
+    out_mask.Intersect(mask1, mask2)
+    self.assertEqual(out_mask.paths, [])
 
-  def testMergeMessage(self):
+  def testMergeMessageWithoutMapFields(self):
     # Test merge one field.
     src = unittest_pb2.TestAllTypes()
     test_util.SetAllFields(src)
@@ -615,6 +664,29 @@ class FieldMaskTest(unittest.TestCase):
     self.assertTrue(dst.HasField('foo_message'))
     self.assertFalse(dst.HasField('foo_lazy_message'))
 
+  def testMergeMessageWithMapField(self):
+    empty_map = map_unittest_pb2.TestRecursiveMapMessage()
+    src_level_2 = map_unittest_pb2.TestRecursiveMapMessage()
+    src_level_2.a['src level 2'].CopyFrom(empty_map)
+    src = map_unittest_pb2.TestRecursiveMapMessage()
+    src.a['common key'].CopyFrom(src_level_2)
+    src.a['src level 1'].CopyFrom(src_level_2)
+
+    dst_level_2 = map_unittest_pb2.TestRecursiveMapMessage()
+    dst_level_2.a['dst level 2'].CopyFrom(empty_map)
+    dst = map_unittest_pb2.TestRecursiveMapMessage()
+    dst.a['common key'].CopyFrom(dst_level_2)
+    dst.a['dst level 1'].CopyFrom(empty_map)
+
+    mask = field_mask_pb2.FieldMask()
+    mask.FromJsonString('a')
+    mask.MergeMessage(src, dst)
+
+    # map from dst is replaced with map from src.
+    self.assertEqual(dst.a['common key'], src_level_2)
+    self.assertEqual(dst.a['src level 1'], src_level_2)
+    self.assertEqual(dst.a['dst level 1'], empty_map)
+
   def testMergeErrors(self):
     src = unittest_pb2.TestAllTypes()
     dst = unittest_pb2.TestAllTypes()
@@ -637,34 +709,29 @@ class FieldMaskTest(unittest.TestCase):
                      well_known_types._SnakeCaseToCamelCase('foo3_bar'))
 
     # No uppercase letter is allowed.
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+    self.assertRaisesRegex(
+        ValueError,
         'Fail to print FieldMask to Json string: Path name Foo must '
         'not contain uppercase letters.',
-        well_known_types._SnakeCaseToCamelCase,
-        'Foo')
+        well_known_types._SnakeCaseToCamelCase, 'Foo')
     # Any character after a "_" must be a lowercase letter.
     #   1. "_" cannot be followed by another "_".
     #   2. "_" cannot be followed by a digit.
     #   3. "_" cannot appear as the last character.
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+    self.assertRaisesRegex(
+        ValueError,
         'Fail to print FieldMask to Json string: The character after a '
         '"_" must be a lowercase letter in path name foo__bar.',
-        well_known_types._SnakeCaseToCamelCase,
-        'foo__bar')
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+        well_known_types._SnakeCaseToCamelCase, 'foo__bar')
+    self.assertRaisesRegex(
+        ValueError,
         'Fail to print FieldMask to Json string: The character after a '
         '"_" must be a lowercase letter in path name foo_3bar.',
-        well_known_types._SnakeCaseToCamelCase,
-        'foo_3bar')
-    self.assertRaisesRegexp(
-        well_known_types.Error,
+        well_known_types._SnakeCaseToCamelCase, 'foo_3bar')
+    self.assertRaisesRegex(
+        ValueError,
         'Fail to print FieldMask to Json string: Trailing "_" in path '
-        'name foo_bar_.',
-        well_known_types._SnakeCaseToCamelCase,
-        'foo_bar_')
+        'name foo_bar_.', well_known_types._SnakeCaseToCamelCase, 'foo_bar_')
 
   def testCamelCaseToSnakeCase(self):
     self.assertEqual('foo_bar',
@@ -673,18 +740,17 @@ class FieldMaskTest(unittest.TestCase):
                      well_known_types._CamelCaseToSnakeCase('FooBar'))
     self.assertEqual('foo3_bar',
                      well_known_types._CamelCaseToSnakeCase('foo3Bar'))
-    self.assertRaisesRegexp(
-        well_known_types.ParseError,
+    self.assertRaisesRegex(
+        ValueError,
         'Fail to parse FieldMask: Path name foo_bar must not contain "_"s.',
-        well_known_types._CamelCaseToSnakeCase,
-        'foo_bar')
+        well_known_types._CamelCaseToSnakeCase, 'foo_bar')
 
 
 class StructTest(unittest.TestCase):
 
   def testStruct(self):
     struct = struct_pb2.Struct()
-    self.assertIsInstance(struct, collections.Mapping)
+    self.assertIsInstance(struct, collections_abc.Mapping)
     self.assertEqual(0, len(struct))
     struct_class = struct.__class__
 
@@ -693,7 +759,7 @@ class StructTest(unittest.TestCase):
     struct['key3'] = True
     struct.get_or_create_struct('key4')['subkey'] = 11.0
     struct_list = struct.get_or_create_list('key5')
-    self.assertIsInstance(struct_list, collections.Sequence)
+    self.assertIsInstance(struct_list, collections_abc.Sequence)
     struct_list.extend([6, 'seven', True, False, None])
     struct_list.add_struct()['subkey2'] = 9
     struct['key6'] = {'subkey': {}}
@@ -801,6 +867,15 @@ class StructTest(unittest.TestCase):
     self.assertEqual([6, True, False, None, inner_struct],
                      list(struct['key5'].items()))
 
+  def testStructAssignment(self):
+    # Tests struct assignment from another struct
+    s1 = struct_pb2.Struct()
+    s2 = struct_pb2.Struct()
+    for value in [1, 'a', [1], ['a'], {'a': 'b'}]:
+      s1['x'] = value
+      s2['x'] = s1['x']
+      self.assertEqual(s1['x'], s2['x'])
+
   def testMergeFrom(self):
     struct = struct_pb2.Struct()
     struct_class = struct.__class__
@@ -878,6 +953,17 @@ class AnyTest(unittest.TestCase):
     else:
       raise AttributeError('%s should not have Pack method.' %
                            msg_descriptor.full_name)
+
+  def testUnpackWithNoSlashInTypeUrl(self):
+    msg = any_test_pb2.TestAny()
+    all_types = unittest_pb2.TestAllTypes()
+    all_descriptor = all_types.DESCRIPTOR
+    msg.value.Pack(all_types)
+    # Reset type_url to part of type_url after '/'
+    msg.value.type_url = msg.value.TypeName()
+    self.assertFalse(msg.value.Is(all_descriptor))
+    unpacked_message = unittest_pb2.TestAllTypes()
+    self.assertFalse(msg.value.Unpack(unpacked_message))
 
   def testMessageName(self):
     # Creates and sets message.

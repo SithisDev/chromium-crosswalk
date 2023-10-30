@@ -1,38 +1,27 @@
-
 package com.google.protobuf;
 
 import com.google.caliper.BeforeExperiment;
-import com.google.caliper.AfterExperiment;
 import com.google.caliper.Benchmark;
 import com.google.caliper.Param;
-import com.google.caliper.api.VmOptions;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.ExtensionRegistry;
-import com.google.protobuf.Message;
 import com.google.protobuf.benchmarks.Benchmarks.BenchmarkDataset;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 
-// Caliper set CICompilerCount to 1 for making sure compilation doesn't run in parallel with itself,
-// This makes TieredCompilation not working. We just disable TieredCompilation by default. In master 
-// branch this has been disabled by default in caliper: 
-// https://github.com/google/caliper/blob/master/caliper-runner/src/main/java/com/google/caliper/runner/target/Jvm.java#L38:14
-// But this haven't been added into most recent release.
-@VmOptions("-XX:-TieredCompilation")
+/**
+ * Basic benchmarks for Java protobuf parsing.
+ */
 public class ProtoCaliperBenchmark {
   public enum BenchmarkMessageType {
     GOOGLE_MESSAGE1_PROTO3 {
-      @Override ExtensionRegistry getExtensionRegistry() { return ExtensionRegistry.newInstance(); }
+      @Override
+      ExtensionRegistry getExtensionRegistry() {
+        return ExtensionRegistry.newInstance();
+      }
       @Override
       Message getDefaultInstance() {
         return com.google.protobuf.benchmarks.BenchmarkMessage1Proto3.GoogleMessage1
@@ -40,7 +29,9 @@ public class ProtoCaliperBenchmark {
       }
     },
     GOOGLE_MESSAGE1_PROTO2 {
-      @Override ExtensionRegistry getExtensionRegistry() { return ExtensionRegistry.newInstance(); }
+      @Override ExtensionRegistry getExtensionRegistry() {
+        return ExtensionRegistry.newInstance();
+      }
       @Override
       Message getDefaultInstance() {
         return com.google.protobuf.benchmarks.BenchmarkMessage1Proto2.GoogleMessage1
@@ -48,7 +39,10 @@ public class ProtoCaliperBenchmark {
       }
     },
     GOOGLE_MESSAGE2 {
-      @Override ExtensionRegistry getExtensionRegistry() { return ExtensionRegistry.newInstance(); }
+      @Override
+      ExtensionRegistry getExtensionRegistry() {
+        return ExtensionRegistry.newInstance();
+      }
       @Override
       Message getDefaultInstance() {
         return com.google.protobuf.benchmarks.BenchmarkMessage2.GoogleMessage2.getDefaultInstance();
@@ -89,7 +83,7 @@ public class ProtoCaliperBenchmark {
         return com.google.protobuf.benchmarks.BenchmarkMessage4.GoogleMessage4.getDefaultInstance();
       }
     };
-    
+
     abstract ExtensionRegistry getExtensionRegistry();
     abstract Message getDefaultInstance();
   }
@@ -97,7 +91,7 @@ public class ProtoCaliperBenchmark {
   private BenchmarkMessageType benchmarkMessageType;
   @Param("")
   private String dataFile;
-  
+
   private byte[] inputData;
   private BenchmarkDataset benchmarkDataset;
   private Message defaultMessage;
@@ -125,7 +119,7 @@ public class ProtoCaliperBenchmark {
           + benchmarkDataset.getMessageName());
     }
   }
-  
+
   @BeforeExperiment
   void setUp() throws IOException {
     if (!dataFile.equals("")) {
@@ -145,7 +139,7 @@ public class ProtoCaliperBenchmark {
     inputStreamList = new ArrayList<ByteArrayInputStream>();
     inputStringList = new ArrayList<ByteString>();
     sampleMessageList = new ArrayList<Message>();
-    
+
     for (int i = 0; i < benchmarkDataset.getPayloadCount(); i++) {
       byte[] singleInputData = benchmarkDataset.getPayload(i).toByteArray();
       inputDataList.add(benchmarkDataset.getPayload(i).toByteArray());
@@ -156,8 +150,8 @@ public class ProtoCaliperBenchmark {
           defaultMessage.newBuilderForType().mergeFrom(singleInputData, extensions).build());
     }
   }
-  
-  
+
+
   @Benchmark
   void serializeToByteArray(int reps) throws IOException {
     if (sampleMessageList.size() == 0) {
@@ -165,11 +159,11 @@ public class ProtoCaliperBenchmark {
     }
     for (int i = 0; i < reps; i++) {
       for (int j = 0; j < sampleMessageList.size(); j++) {
-        sampleMessageList.get(j).toByteArray();  
+        sampleMessageList.get(j).toByteArray();
       }
     }
   }
-  
+
   @Benchmark
   void serializeToMemoryStream(int reps) throws IOException {
     if (sampleMessageList.size() == 0) {
@@ -178,11 +172,11 @@ public class ProtoCaliperBenchmark {
     for (int i = 0; i < reps; i++) {
       for (int j = 0; j < sampleMessageList.size(); j++) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        sampleMessageList.get(j).writeTo(output); 
+        sampleMessageList.get(j).writeTo(output);
       }
     }
   }
-  
+
   @Benchmark
   void deserializeFromByteArray(int reps) throws IOException {
     if (inputDataList.size() == 0) {
@@ -195,7 +189,7 @@ public class ProtoCaliperBenchmark {
       }
     }
   }
-  
+
   @Benchmark
   void deserializeFromMemoryStream(int reps) throws IOException {
     if (inputStreamList.size() == 0) {

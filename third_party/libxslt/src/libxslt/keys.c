@@ -241,6 +241,8 @@ skipString(const xmlChar *cur, int end) {
  */
 static int
 skipPredicate(const xmlChar *cur, int end) {
+    int level = 0;
+
     if ((cur == NULL) || (end < 0)) return(-1);
     if (cur[end] != '[') return(end);
     end++;
@@ -251,12 +253,12 @@ skipPredicate(const xmlChar *cur, int end) {
 	        return(-1);
 	    continue;
 	} else if (cur[end] == '[') {
-	    end = skipPredicate(cur, end);
-	    if (end <= 0)
-	        return(-1);
-	    continue;
-	} else if (cur[end] == ']')
-	    return(end + 1);
+            level += 1;
+	} else if (cur[end] == ']') {
+            if (level == 0)
+	        return(end + 1);
+            level -= 1;
+        }
 	end++;
     }
     return(-1);
@@ -308,7 +310,7 @@ xsltAddKey(xsltStylesheetPtr style, const xmlChar *name,
     current = end = 0;
     while (match[current] != 0) {
 	start = current;
-	while (IS_BLANK_CH(match[current]))
+	while (xmlIsBlank_ch(match[current]))
 	    current++;
 	end = current;
 	while ((match[end] != 0) && (match[end] != '|')) {
@@ -629,6 +631,7 @@ xsltInitCtxtKey(xsltTransformContextPtr ctxt, xsltDocumentPtr idoc,
     xmlNodePtr oldContextNode;
     xsltDocumentPtr oldDocInfo;
     int	oldXPPos, oldXPSize;
+    xmlNodePtr oldXPNode;
     xmlDocPtr oldXPDoc;
     int oldXPNsNr;
     xmlNsPtr *oldXPNamespaces;
@@ -667,6 +670,7 @@ fprintf(stderr, "xsltInitCtxtKey %s : %d\n", keyDef->name, ctxt->keyInitLevel);
     oldDocInfo = ctxt->document;
     oldContextNode = ctxt->node;
 
+    oldXPNode = xpctxt->node;
     oldXPDoc = xpctxt->doc;
     oldXPPos = xpctxt->proximityPosition;
     oldXPSize = xpctxt->contextSize;
@@ -830,24 +834,7 @@ fprintf(stderr, "xsltInitCtxtKey %s : %d\n", keyDef->name, ctxt->keyInitLevel);
 		*/
 		xmlXPathNodeSetAdd(keylist, cur);
 	    }
-	    switch (cur->type) {
-		case XML_ELEMENT_NODE:
-		case XML_TEXT_NODE:
-		case XML_CDATA_SECTION_NODE:
-		case XML_PI_NODE:
-		case XML_COMMENT_NODE:
-		    cur->psvi = keyDef;
-		    break;
-		case XML_ATTRIBUTE_NODE:
-		    ((xmlAttrPtr) cur)->psvi = keyDef;
-		    break;
-		case XML_DOCUMENT_NODE:
-		case XML_HTML_DOCUMENT_NODE:
-		    ((xmlDocPtr) cur)->psvi = keyDef;
-		    break;
-		default:
-		    break;
-	    }
+            xsltSetSourceNodeFlags(ctxt, cur, XSLT_SOURCE_NODE_HAS_KEY);
 	    xmlFree(str);
 	    str = NULL;
 
@@ -865,6 +852,7 @@ error:
     /*
     * Restore context state.
     */
+    xpctxt->node = oldXPNode;
     xpctxt->doc = oldXPDoc;
     xpctxt->nsNr = oldXPNsNr;
     xpctxt->namespaces = oldXPNamespaces;

@@ -42,7 +42,8 @@ void silk_find_pred_coefs_FIX(
 {
     opus_int         i;
     opus_int32       invGains_Q16[ MAX_NB_SUBFR ], local_gains[ MAX_NB_SUBFR ];
-    opus_int16       NLSF_Q15[ MAX_LPC_ORDER ];
+    /* Set to NLSF_Q15 to zero so we don't copy junk to the state. */
+    opus_int16       NLSF_Q15[ MAX_LPC_ORDER ]={0};
     const opus_int16 *x_ptr;
     opus_int16       *x_pre_ptr;
     VARDECL( opus_int16, LPC_in_pre );
@@ -80,7 +81,7 @@ void silk_find_pred_coefs_FIX(
         /**********/
         /* VOICED */
         /**********/
-        silk_assert( psEnc->sCmn.ltp_mem_length - psEnc->sCmn.predictLPCOrder >= psEncCtrl->pitchL[ 0 ] + LTP_ORDER / 2 );
+        celt_assert( psEnc->sCmn.ltp_mem_length - psEnc->sCmn.predictLPCOrder >= psEncCtrl->pitchL[ 0 ] + LTP_ORDER / 2 );
 
         ALLOC( xXLTP_Q17, psEnc->sCmn.nb_subfr * LTP_ORDER, opus_int32 );
         ALLOC( XXLTP_Q17, psEnc->sCmn.nb_subfr * LTP_ORDER * LTP_ORDER, opus_int32 );

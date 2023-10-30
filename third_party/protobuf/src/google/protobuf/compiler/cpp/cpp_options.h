@@ -33,9 +33,9 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_CPP_OPTIONS_H__
 #define GOOGLE_PROTOBUF_COMPILER_CPP_OPTIONS_H__
 
+#include <set>
 #include <string>
 
-#include <google/protobuf/stubs/common.h>
 namespace google {
 namespace protobuf {
 namespace compiler {
@@ -43,41 +43,58 @@ class AccessInfoMap;
 
 namespace cpp {
 
+enum class EnforceOptimizeMode {
+  kNoEnforcement,  // Use the runtime specified by the file specific options.
+  kSpeed,          // Full runtime with a generated code implementation.
+  kCodeSize,       // Full runtime with a reflective implementation.
+  kLiteRuntime,
+};
+
+struct FieldListenerOptions {
+  bool inject_field_listener_events = false;
+  std::set<std::string> forbidden_field_listener_events;
+};
+
 // Generator options (see generator.cc for a description of each):
 struct Options {
-  Options()
-      : safe_boundary_check(false),
-        proto_h(false),
-        transitive_pb_h(true),
-        annotate_headers(false),
-        enforce_lite(false),
-        table_driven_parsing(false),
-        table_driven_serialization(false),
-        lite_implicit_weak_fields(false),
-        bootstrap(false),
-        num_cc_files(0),
-        access_info_map(NULL) {}
-
-  string dllexport_decl;
-  bool safe_boundary_check;
-  bool proto_h;
-  bool transitive_pb_h;
-  bool annotate_headers;
-  bool enforce_lite;
-  bool table_driven_parsing;
-  bool table_driven_serialization;
-  bool lite_implicit_weak_fields;
-  bool bootstrap;
-  int num_cc_files;
-  string annotation_pragma_name;
-  string annotation_guard_name;
-  const AccessInfoMap* access_info_map;
+  const AccessInfoMap* access_info_map = nullptr;
+  std::string dllexport_decl;
+  std::string runtime_include_base;
+  std::string annotation_pragma_name;
+  std::string annotation_guard_name;
+  FieldListenerOptions field_listener_options;
+  EnforceOptimizeMode enforce_mode = EnforceOptimizeMode::kNoEnforcement;
+  enum {
+    kTCTableNever,
+    kTCTableGuarded,
+    kTCTableAlways
+  } tctable_mode = kTCTableNever;
+  int num_cc_files = 0;
+  bool safe_boundary_check = false;
+  bool proto_h = false;
+  bool transitive_pb_h = true;
+  bool annotate_headers = false;
+  bool lite_implicit_weak_fields = false;
+  bool bootstrap = false;
+  bool opensource_runtime = false;
+  bool annotate_accessor = false;
+  bool unused_field_stripping = false;
+  bool unverified_lazy_message_sets = true;
+  bool eagerly_verified_lazy = true;
+  bool profile_driven_inline_string = true;
+  bool force_split = false;
+#ifdef PROTOBUF_STABLE_EXPERIMENTS
+  bool force_eagerly_verified_lazy = true;
+  bool force_inline_string = true;
+#else   // PROTOBUF_STABLE_EXPERIMENTS
+  bool force_eagerly_verified_lazy = false;
+  bool force_inline_string = false;
+#endif  // !PROTOBUF_STABLE_EXPERIMENTS
 };
 
 }  // namespace cpp
 }  // namespace compiler
 }  // namespace protobuf
-
-
 }  // namespace google
+
 #endif  // GOOGLE_PROTOBUF_COMPILER_CPP_OPTIONS_H__

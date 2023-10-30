@@ -8603,225 +8603,6 @@ var animationManager = (function(){
         }
         initTime = nowTime;
         if(playingAnimationsNum && !_isFrozen) {
-            window.requestAnimationFrame(resume);
-        } else {
-            _stopped = true;
-        }
-    }
-
-    function first(nowTime){
-        initTime = nowTime;
-        window.requestAnimationFrame(resume);
-    }
-
-    function pause(animation) {
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.pause(animation);
-        }
-    }
-
-    function goToAndStop(value,isFrame,animation) {
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.goToAndStop(value,isFrame,animation);
-        }
-    }
-
-    function stop(animation) {
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.stop(animation);
-        }
-    }
-
-    function togglePause(animation) {
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.togglePause(animation);
-        }
-    }
-
-    function destroy(animation) {
-        var i;
-        for(i=(len-1);i>=0;i-=1){
-            registeredAnimations[i].animation.destroy(animation);
-        }
-    }
-
-    function searchAnimations(animationData, standalone, renderer){
-        var animElements = [].concat([].slice.call(document.getElementsByClassName('lottie')),
-                  [].slice.call(document.getElementsByClassName('bodymovin')));
-        var i, len = animElements.length;
-        for(i=0;i<len;i+=1){
-            if(renderer){
-                animElements[i].setAttribute('data-bm-type',renderer);
-            }
-            registerAnimation(animElements[i], animationData);
-        }
-        if(standalone && len === 0){
-            if(!renderer){
-                renderer = 'svg';
-            }
-            var body = document.getElementsByTagName('body')[0];
-            body.innerHTML = '';
-            var div = createTag('div');
-            div.style.width = '100%';
-            div.style.height = '100%';
-            div.setAttribute('data-bm-type',renderer);
-            body.appendChild(div);
-            registerAnimation(div, animationData);
-        }
-    }
-
-    function resize(){
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.resize();
-        }
-    }
-
-    function activate(){
-        if(!_isFrozen && playingAnimationsNum){
-            if(_stopped) {
-                window.requestAnimationFrame(first);
-                _stopped = false;
-            }
-        }
-    }
-
-    function freeze() {
-        _isFrozen = true;
-    }
-
-    function unfreeze() {
-        _isFrozen = false;
-        activate();
-    }
-
-    moduleOb.registerAnimation = registerAnimation;
-    moduleOb.loadAnimation = loadAnimation;
-    moduleOb.setSpeed = setSpeed;
-    moduleOb.setDirection = setDirection;
-    moduleOb.play = play;
-    moduleOb.pause = pause;
-    moduleOb.stop = stop;
-    moduleOb.togglePause = togglePause;
-    moduleOb.searchAnimations = searchAnimations;
-    moduleOb.resize = resize;
-    //moduleOb.start = start;
-    moduleOb.goToAndStop = goToAndStop;
-    moduleOb.destroy = destroy;
-    moduleOb.freeze = freeze;
-    moduleOb.unfreeze = unfreeze;
-    moduleOb.getRegisteredAnimations = getRegisteredAnimations;
-    return moduleOb;
-}());
-
-animationManager = (function(){
-    var moduleOb = {};
-    var registeredAnimations = [];
-    var initTime = 0;
-    var len = 0;
-    var playingAnimationsNum = 0;
-    var _stopped = true;
-    var _isFrozen = false;
-
-    function removeElement(ev){
-        var i = 0;
-        var animItem = ev.target;
-        while(i<len) {
-            if (registeredAnimations[i].animation === animItem) {
-                registeredAnimations.splice(i, 1);
-                i -= 1;
-                len -= 1;
-                if(!animItem.isPaused){
-                    subtractPlayingCount();
-                }
-            }
-            i += 1;
-        }
-    }
-
-    function registerAnimation(element, animationData){
-        if(!element){
-            return null;
-        }
-        var i=0;
-        while(i<len){
-            if(registeredAnimations[i].elem == element && registeredAnimations[i].elem !== null ){
-                return registeredAnimations[i].animation;
-            }
-            i+=1;
-        }
-        var animItem = new AnimationItem();
-        setupAnimation(animItem, element);
-        animItem.setData(element, animationData);
-        return animItem;
-    }
-
-    function getRegisteredAnimations() {
-        var i, len = registeredAnimations.length;
-        var animations = [];
-        for(i = 0; i < len; i += 1) {
-            animations.push(registeredAnimations[i].animation);
-        }
-        return animations;
-    }
-
-    function addPlayingCount(){
-        playingAnimationsNum += 1;
-        activate();
-    }
-
-    function subtractPlayingCount(){
-        playingAnimationsNum -= 1;
-    }
-
-    function setupAnimation(animItem, element){
-        animItem.addEventListener('destroy',removeElement);
-        animItem.addEventListener('_active',addPlayingCount);
-        animItem.addEventListener('_idle',subtractPlayingCount);
-        registeredAnimations.push({elem: element,animation:animItem});
-        len += 1;
-    }
-
-    function loadAnimation(params){
-        var animItem = new AnimationItem();
-        setupAnimation(animItem, null);
-        animItem.setParams(params);
-        return animItem;
-    }
-
-
-    function setSpeed(val,animation){
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.setSpeed(val, animation);
-        }
-    }
-
-    function setDirection(val, animation){
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.setDirection(val, animation);
-        }
-    }
-
-    function play(animation){
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.play(animation);
-        }
-    }
-    function resume(nowTime) {
-        var elapsedTime = nowTime - initTime;
-        var i;
-        for(i=0;i<len;i+=1){
-            registeredAnimations[i].animation.advanceTime(elapsedTime);
-        }
-        initTime = nowTime;
-        if(playingAnimationsNum && !_isFrozen) {
             requestAnimationFrame(resume);
         } else {
             _stopped = true;
@@ -12150,47 +11931,191 @@ GroupEffect.prototype.init = function(data,element){
  * a wrapper that manages animation control for each animation.
  */
 
+/**
+ * An instance of the currently running lottie animation.
+ * @type {?AnimationItem}
+ */
 var currentAnimation = null;
 
+/**
+ * Events sent back to the parent thread.
+ */
+var events = {
+  INITIALIZED: 'initialized',  // Send when the animation was successfully
+                               // initialized.
+  RESIZED: 'resized',  // Sent when the animation has been resized.
+  PLAYING: 'playing',  // Send when the animation started playing.
+  PAUSED: 'paused',  // Sent when the animation has paused.
+  STOPPED: 'stopped',  // Sent when the animation has stopped.
+};
+
+/**
+ * Returns the size of the canvas on which the current animation is running on.
+ * @return {Object<string, number>} Returns the current size of canvas
+ */
+function getCurrentCanvasSize() {
+  var canvas = currentAnimation.renderer.canvasContext.canvas;
+  return {
+    height: canvas.height,
+    width: canvas.width
+  };
+}
+
+/**
+ * Informs the parent thread that the canvas has been resized and also sends the
+ * new size.
+ */
+function sendResizeEvent() {
+  var canvas = currentAnimation.renderer.canvasContext.canvas;
+  postMessage({
+    name: events.RESIZED,
+    size: getCurrentCanvasSize()
+  });
+};
+
+/**
+ * Informs the parent thread that the animation is playing.
+ */
+function sendPlayEvent() {
+  postMessage({name: events.PLAYING});
+}
+
+/**
+ * Informs the parent thread that the animation is paused.
+ */
+function sendPauseEvent() {
+  postMessage({name: events.PAUSED});
+}
+
+/**
+ * Informs the parent thread that the animation is stopped.
+ */
+function sendStopEvent() {
+  postMessage({name: events.STOPPED});
+}
+
+/**
+ * Informs the parent thread that the animation has finished initializing.
+ */
+function sendInitializedEvent() {
+  var canvas = currentAnimation.renderer.canvasContext.canvas;
+  postMessage({
+    name: events.INITIALIZED,
+    success: currentAnimation.isLoaded
+  })
+}
+
+/**
+ * Initializes the animation using the animation data sent from the parent
+ * thread along with the init parameters. If an animation is already initialized
+ * this is a no-op.
+ * @param {JSON} animationData JSON data for the animation.
+ * @param {Object} initParams Parameters to initialize the animation with.
+ * @param {OffscreenCanvas} canvas The offsccreen canvas that will display the
+ *     animation.
+ */
+function initAnimation(animationData, initParams, canvas) {
+  if (!animationData || !initParams) {
+    return;
+  }
+
+  var ctx = canvas.getContext("2d");
+
+  currentAnimation = lottiejs.loadAnimation({
+    renderer: 'canvas',
+    loop: initParams.loop,
+    autoplay: initParams.autoplay,
+    animationData: animationData,
+    rendererSettings: {
+      context: ctx,
+      scaleMode: 'noScale',
+      clearCanvas: true
+    }
+  });
+
+  sendInitializedEvent();
+
+  // Play the animation if its not already playing.
+  if (initParams.autoplay) {
+    currentAnimation.play();
+  }
+
+  if (currentAnimation.isLoaded && !currentAnimation.isPaused) {
+    sendPlayEvent();
+  }
+}
+
+/**
+ * Updates the canvas draw size. If an animation is already initialized or
+ * playing, this would update the canvas for that as well.
+ * @param {OffscreenCanvas} canvas Draw size for this canvas is updated.
+ * @param {Object<string, number>} size Draw size to update the canvas to.
+ */
+function updateCanvasSize(canvas, size) {
+  if (!size || !canvas) {
+    return;
+  }
+
+  if (size.height > 0 && size.width > 0) {
+    canvas.height = size.height;
+    canvas.width = size.width;
+  }
+
+  // If an animation is already initialized then update its canvas size.
+  if (currentAnimation) {
+    currentAnimation.resize();
+    sendResizeEvent();
+  }
+}
+
+/**
+ * Updates the animation state to play or pause. Informs the parent thread if
+ * the state has changed.
+ * @param {Object<string, bool>} control Has information about playing or
+ *     pausing the animation.
+ * @param {HTMLCanvasElement} canvas the canvas on which the animation is drawn.
+ */
+function updateAnimationState(control, canvas) {
+  if (!control || !currentAnimation) {
+    return;
+  }
+
+  if (control.stop) {
+    currentAnimation.stop();
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    sendStopEvent();
+    return;
+  }
+
+  if (control.play && currentAnimation.isPaused) {
+    currentAnimation.play();
+    sendPlayEvent();
+  } else if (!control.play && !currentAnimation.isPaused) {
+    currentAnimation.pause();
+    sendPauseEvent();
+  }
+}
+
 onmessage = function(evt) {
-    if (!evt || !evt.data) return;
+  if (!evt || !evt.data) return;
 
-    var canvas = null;
-    if (currentAnimation) {
-        canvas = currentAnimation.renderer.canvasContext.canvas;
-    } else if (evt.data.canvas) {
-        canvas = evt.data.canvas;
-    } else {
-        return;
-    }
+  var canvas = null;
+  if (currentAnimation) {
+    canvas = currentAnimation.renderer.canvasContext.canvas;
+  } else if (evt.data.canvas) {
+    canvas = evt.data.canvas;
+  } else {
+    return;
+  }
 
-    // Set the draw size of the canvas. This is the pixel size at which the
-    // lottie renderer will render the frames.
-    if (evt.data.drawSize) {
-        canvas.height = evt.data.drawSize.height;
-        canvas.width = evt.data.drawSize.width;
+  // Stop and clear the current animation to initialize a new one with the
+  // provided animation data.
+  if (currentAnimation && evt.data.animationData) {
+    currentAnimation.stop();
+    currentAnimation = null;
+  }
 
-        // Update lottie player to use the new canvas size.
-        if (currentAnimation)
-            currentAnimation.resize();
-    }
-
-    if (!currentAnimation) {
-        if (!evt.data.animationData || !evt.data.params)
-            return;
-        var params = evt.data.params;
-        var ctx = canvas.getContext("2d");
-        currentAnimation = lottiejs.loadAnimation({
-            renderer: 'canvas',
-            loop: params.loop,
-            autoplay: params.autoplay,
-            animationData: evt.data.animationData,
-            rendererSettings: {
-                context: ctx,
-                scaleMode: 'noScale',
-                clearCanvas: true
-            }
-        });
-        currentAnimation.play();
-    }
+  updateCanvasSize(canvas, evt.data.drawSize);
+  initAnimation(evt.data.animationData, evt.data.params, canvas);
+  updateAnimationState(evt.data.control, canvas);
 };

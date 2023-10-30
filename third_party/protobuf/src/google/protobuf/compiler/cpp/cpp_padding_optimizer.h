@@ -53,12 +53,13 @@ class PaddingOptimizer : public MessageLayoutHelper {
   ~PaddingOptimizer() override {}
 
   void OptimizeLayout(std::vector<const FieldDescriptor*>* fields,
-                      const Options& options) override;
+                      const Options& options,
+                      MessageSCCAnalyzer* scc_analyzer) override;
 };
 
 }  // namespace cpp
 }  // namespace compiler
 }  // namespace protobuf
-
 }  // namespace google
+
 #endif  // GOOGLE_PROTOBUF_COMPILER_CPP_PADDING_OPTIMIZER_H__

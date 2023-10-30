@@ -7,12 +7,11 @@
 #include <cmath>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "third_party/libaddressinput/chromium/addressinput_util.h"
-#include "third_party/libaddressinput/chromium/input_suggester.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_normalizer.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/source.h"
@@ -45,13 +44,11 @@ AddressValidator::AddressValidator(std::unique_ptr<Source> source,
                                    std::unique_ptr<Storage> storage,
                                    LoadRulesListener* load_rules_listener)
     : supplier_(new PreloadSupplier(source.release(), storage.release())),
-      input_suggester_(new InputSuggester(supplier_.get())),
       normalizer_(new AddressNormalizer(supplier_.get())),
       validator_(new ::i18n::addressinput::AddressValidator(supplier_.get())),
       validated_(BuildCallback(this, &AddressValidator::Validated)),
       rules_loaded_(BuildCallback(this, &AddressValidator::RulesLoaded)),
-      load_rules_listener_(load_rules_listener),
-      weak_factory_(this) {}
+      load_rules_listener_(load_rules_listener) {}
 
 AddressValidator::~AddressValidator() {}
 
@@ -124,31 +121,6 @@ AddressValidator::Status AddressValidator::ValidateAddress(
   return SUCCESS;
 }
 
-AddressValidator::Status AddressValidator::GetSuggestions(
-    const AddressData& user_input,
-    AddressField focused_field,
-    size_t suggestion_limit,
-    std::vector<AddressData>* suggestions) const {
-  if (supplier_->IsPending(user_input.region_code))
-    return RULES_NOT_READY;
-
-  if (!supplier_->IsLoaded(user_input.region_code))
-    return RULES_UNAVAILABLE;
-
-  if (!suggestions)
-    return SUCCESS;
-
-  suggestions->clear();
-
-  if (focused_field == POSTAL_CODE ||
-      (focused_field >= ADMIN_AREA && focused_field <= DEPENDENT_LOCALITY)) {
-    input_suggester_->GetSuggestions(
-        user_input, focused_field, suggestion_limit, suggestions);
-  }
-
-  return SUCCESS;
-}
-
 bool AddressValidator::NormalizeAddress(AddressData* address) const {
   if (!supplier_->IsLoaded(address->region_code))
     return false;
@@ -161,11 +133,10 @@ bool AddressValidator::AreRulesLoadedForRegion(const std::string& region_code) {
   return supplier_->IsLoaded(region_code);
 }
 
-AddressValidator::AddressValidator()
-    : load_rules_listener_(NULL), weak_factory_(this) {}
+AddressValidator::AddressValidator() : load_rules_listener_(nullptr) {}
 
 base::TimeDelta AddressValidator::GetBaseRetryPeriod() const {
-  return base::TimeDelta::FromSeconds(8);
+  return base::Seconds(8);
 }
 
 void AddressValidator::Validated(bool success,
@@ -185,8 +156,9 @@ void AddressValidator::RulesLoaded(bool success,
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&AddressValidator::RetryLoadRules,
-                            weak_factory_.GetWeakPtr(), region_code),
+      FROM_HERE,
+      base::BindOnce(&AddressValidator::RetryLoadRules,
+                     weak_factory_.GetWeakPtr(), region_code),
       GetBaseRetryPeriod() * pow(2, attempts_number_[region_code]++));
 }
 

@@ -47,7 +47,7 @@ class FieldGroup {
   FieldGroup() : preferred_location_(0) {}
 
   // A group with a single field.
-  FieldGroup(float preferred_location, const FieldDescriptor* field)
+  FieldGroup(double preferred_location, const FieldDescriptor* field)
       : preferred_location_(preferred_location), fields_(1, field) {}
 
   // Append the fields in 'other' to this group.
@@ -63,7 +63,7 @@ class FieldGroup {
     fields_.insert(fields_.end(), other.fields_.begin(), other.fields_.end());
   }
 
-  void SetPreferredLocation(float location) { preferred_location_ = location; }
+  void SetPreferredLocation(double location) { preferred_location_ = location; }
   const std::vector<const FieldDescriptor*>& fields() const { return fields_; }
 
   // FieldGroup objects sort by their preferred location.
@@ -77,7 +77,7 @@ class FieldGroup {
   // field in this group in the original ordering of fields.  This is very
   // approximate, but should put this group close to where its member fields
   // originally went.
-  float preferred_location_;
+  double preferred_location_;
   std::vector<const FieldDescriptor*> fields_;
   // We rely on the default copy constructor and operator= so this type can be
   // used in a vector.
@@ -106,6 +106,8 @@ class FieldGroup {
 // STRING is grouped next, as our Clear/SharedCtor/SharedDtor walks it and
 // calls ArenaStringPtr::Destroy on each.
 //
+// LAZY_MESSAGE is grouped next, as it interferes with the ability to memset
+// non-repeated fields otherwise.
 //
 // MESSAGE is grouped next, as our Clear/SharedDtor code walks it and calls
 // delete on each.  We initialize these fields with a NULL pointer (see
@@ -116,12 +118,16 @@ class FieldGroup {
 //
 // OTHER these fields are initialized one-by-one.
 void PaddingOptimizer::OptimizeLayout(
-    std::vector<const FieldDescriptor*>* fields, const Options& options) {
+    std::vector<const FieldDescriptor*>* fields, const Options& options,
+    MessageSCCAnalyzer* scc_analyzer) {
   // The sorted numeric order of Family determines the declaration order in the
   // memory layout.
   enum Family {
     REPEATED = 0,
     STRING = 1,
+    // Laying out LAZY_MESSAGE before MESSAGE allows a single memset to zero
+    // MESSAGE and ZERO_INITIALIZABLE fields together.
+    LAZY_MESSAGE = 2,
     MESSAGE = 3,
     ZERO_INITIALIZABLE = 4,
     OTHER = 5,
@@ -142,7 +148,9 @@ void PaddingOptimizer::OptimizeLayout(
       f = STRING;
     } else if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
       f = MESSAGE;
-
+      if (IsLazy(field, options, scc_analyzer)) {
+        f = LAZY_MESSAGE;
+      }
     } else if (CanInitializeByZeroing(field)) {
       f = ZERO_INITIALIZABLE;
     }
@@ -195,7 +203,7 @@ void PaddingOptimizer::OptimizeLayout(
           field_group.SetPreferredLocation(-1);
         } else {
           // Move incomplete 4-byte block to the end.
-          field_group.SetPreferredLocation(fields->size() + 1);
+          field_group.SetPreferredLocation(double{FieldDescriptor::kMaxNumber});
         }
       }
       aligned_to_8[f].push_back(field_group);

@@ -425,6 +425,7 @@ struct Attribute {
   virtual ~Attribute() {}
   virtual void Write(u1 *&p) = 0;
   virtual void ExtractClassNames() {}
+  virtual bool KeepForCompile() const { return false; }
 
   void WriteProlog(u1 *&p, u2 length) {
     put_u2be(p, attribute_name_->slot());
@@ -432,6 +433,25 @@ struct Attribute {
   }
 
   Constant *attribute_name_;
+};
+
+struct HasAttrs {
+  std::vector<Attribute*> attributes;
+
+  void WriteAttrs(u1 *&p);
+  void ReadAttrs(const u1 *&p);
+
+  virtual ~HasAttrs() {
+    for (const auto *attribute : attributes) {
+      delete attribute;
+    }
+  }
+
+  void ExtractClassNames() {
+    for (auto *attribute : attributes) {
+      attribute->ExtractClassNames();
+    }
+  }
 };
 
 // See sec.4.7.5 of JVM spec.
@@ -497,7 +517,6 @@ struct InnerClassesAttribute : Attribute {
     // kept. Then we mark its outer class and its class name as kept, too, then
     // iterate until a fixed point is reached.
     int entry_count;
-    int iteration = 0;
 
     do {
       entry_count = kept_entries.size();
@@ -523,10 +542,9 @@ struct InnerClassesAttribute : Attribute {
           entry->inner_name->slot();
         }
       }
-      iteration += 1;
     } while (entry_count != static_cast<int>(kept_entries.size()));
 
-    if (kept_entries.size() == 0) {
+    if (kept_entries.empty()) {
       return;
     }
 
@@ -815,10 +833,8 @@ struct TypeAnnotation {
   };
 
   struct EmptyInfo : TargetInfo {
-    void Write(u1 *&p) {}
-    static EmptyInfo *Read(const u1 *&p) {
-      return new EmptyInfo;
-    }
+    void Write(u1 *& /*p*/) {}
+    static EmptyInfo *Read(const u1 *& /*p*/) { return new EmptyInfo; }
   };
 
   struct MethodFormalParameterInfo : TargetInfo {
@@ -1021,8 +1037,8 @@ struct SignatureAttribute : Attribute {
 // We preserve Deprecated attributes because they are required by the
 // compiler to generate warning messages.
 struct DeprecatedAttribute : Attribute {
-
-  static DeprecatedAttribute* Read(const u1 *&p, Constant *attribute_name) {
+  static DeprecatedAttribute *Read(const u1 *& /*p*/,
+                                   Constant *attribute_name) {
     DeprecatedAttribute *attr = new DeprecatedAttribute;
     attr->attribute_name_ = attribute_name;
     return attr;
@@ -1059,6 +1075,15 @@ struct AnnotationsAttribute : Attribute {
     for (auto *annotation : annotations_) {
       annotation->ExtractClassNames();
     }
+  }
+
+  virtual bool KeepForCompile() const {
+    for (auto *annotation : annotations_) {
+      if (annotation->type_->Display() == "Lkotlin/Metadata;") {
+        return true;
+      }
+    }
+    return false;
   }
 
   void Write(u1 *&p) {
@@ -1126,8 +1151,8 @@ struct ParameterAnnotationsAttribute : Attribute {
 // See sec.4.7.20 of Java 8 JVM spec. Includes RuntimeVisibleTypeAnnotations
 // and RuntimeInvisibleTypeAnnotations.
 struct TypeAnnotationsAttribute : Attribute {
-  static TypeAnnotationsAttribute* Read(const u1 *&p, Constant *attribute_name,
-                                        u4 attribute_length) {
+  static TypeAnnotationsAttribute *Read(const u1 *&p, Constant *attribute_name,
+                                        u4 /*attribute_length*/) {
     auto attr = new TypeAnnotationsAttribute;
     attr->attribute_name_ = attribute_name;
     u2 num_annotations = get_u2be(p);
@@ -1160,7 +1185,7 @@ struct TypeAnnotationsAttribute : Attribute {
 // See JVMS §4.7.24
 struct MethodParametersAttribute : Attribute {
   static MethodParametersAttribute *Read(const u1 *&p, Constant *attribute_name,
-                                         u4 attribute_length) {
+                                         u4 /*attribute_length*/) {
     auto attr = new MethodParametersAttribute;
     attr->attribute_name_ = attribute_name;
     u1 parameters_count = get_u1(p);
@@ -1192,6 +1217,121 @@ struct MethodParametersAttribute : Attribute {
   std::vector<MethodParameter*> parameters_;
 };
 
+// See JVMS §4.7.28
+struct NestHostAttribute : Attribute {
+  static NestHostAttribute *Read(const u1 *&p, Constant *attribute_name,
+                                 u4 /*attribute_length*/) {
+    auto attr = new NestHostAttribute;
+    attr->attribute_name_ = attribute_name;
+    attr->host_class_index_ = constant(get_u2be(p));
+    return attr;
+  }
+
+  void Write(u1 *&p) {
+    WriteProlog(p, 2);
+    put_u2be(p, host_class_index_->slot());
+  }
+
+  Constant *host_class_index_;
+};
+
+// See JVMS §4.7.29
+struct NestMembersAttribute : Attribute {
+  static NestMembersAttribute *Read(const u1 *&p, Constant *attribute_name,
+                                    u4 /*attribute_length*/) {
+    auto attr = new NestMembersAttribute;
+    attr->attribute_name_ = attribute_name;
+    u2 number_of_classes = get_u2be(p);
+    for (int ii = 0; ii < number_of_classes; ++ii) {
+      attr->classes_.push_back(constant(get_u2be(p)));
+    }
+    return attr;
+  }
+
+  void Write(u1 *&p) {
+    WriteProlog(p, classes_.size() * 2 + 2);
+    put_u2be(p, classes_.size());
+    for (size_t ii = 0; ii < classes_.size(); ++ii) {
+      put_u2be(p, classes_[ii]->slot());
+    }
+  }
+
+  std::vector<Constant *> classes_;
+};
+
+// See JVMS §4.7.30
+struct RecordAttribute : Attribute {
+  static RecordAttribute *Read(const u1 *&p, Constant *attribute_name,
+                                    u4 attribute_length) {
+    auto attr = new RecordAttribute;
+    attr->attribute_name_ = attribute_name;
+    attr->attribute_length_ = attribute_length;
+    u2 components_length = get_u2be(p);
+    for (int i = 0; i < components_length; ++i) {
+      attr->components_.push_back(RecordComponentInfo::Read(p));
+    }
+    return attr;
+  }
+
+  void Write(u1 *&p) {
+    u1 *tmp = new u1[attribute_length_];
+    u1 *start = tmp;
+    put_u2be(tmp, components_.size());
+    for (size_t i = 0; i < components_.size(); ++i) {
+      components_[i]->Write(tmp);
+    }
+    u2 length = tmp - start;
+    WriteProlog(p, length);
+    memcpy(p, start, length);
+    p += length;
+  }
+
+  struct RecordComponentInfo : HasAttrs {
+    void Write(u1 *&p) {
+      put_u2be(p, name_->slot());
+      put_u2be(p, descriptor_->slot());
+      WriteAttrs(p);
+    }
+    static RecordComponentInfo *Read(const u1 *&p) {
+      RecordComponentInfo *value = new RecordComponentInfo;
+      value->name_ = constant(get_u2be(p));
+      value->descriptor_ = constant(get_u2be(p));
+      value->ReadAttrs(p);
+      return value;
+    }
+
+    Constant *name_;
+    Constant *descriptor_;
+  };
+
+  u4 attribute_length_;
+  std::vector<RecordComponentInfo *> components_;
+};
+
+// See JVMS §4.7.31
+struct PermittedSubclassesAttribute : Attribute {
+  static PermittedSubclassesAttribute *Read(const u1 *&p,
+                                            Constant *attribute_name) {
+    PermittedSubclassesAttribute *attr = new PermittedSubclassesAttribute;
+    attr->attribute_name_ = attribute_name;
+    u2 number_of_exceptions = get_u2be(p);
+    for (int ii = 0; ii < number_of_exceptions; ++ii) {
+      attr->permitted_subclasses_.push_back(constant(get_u2be(p)));
+    }
+    return attr;
+  }
+
+  void Write(u1 *&p) {
+    WriteProlog(p, permitted_subclasses_.size() * 2 + 2);
+    put_u2be(p, permitted_subclasses_.size());
+    for (size_t ii = 0; ii < permitted_subclasses_.size(); ++ii) {
+      put_u2be(p, permitted_subclasses_[ii]->slot());
+    }
+  }
+
+  std::vector<Constant *> permitted_subclasses_;
+};
+
 struct GeneralAttribute : Attribute {
   static GeneralAttribute* Read(const u1 *&p, Constant *attribute_name,
                                 u4 attribute_length) {
@@ -1217,25 +1357,6 @@ struct GeneralAttribute : Attribute {
  *                             ClassFile                              *
  *                                                                    *
  **********************************************************************/
-
-struct HasAttrs {
-  std::vector<Attribute*> attributes;
-
-  void WriteAttrs(u1 *&p);
-  void ReadAttrs(const u1 *&p);
-
-  virtual ~HasAttrs() {
-    for (const auto *attribute : attributes) {
-      delete attribute;
-    }
-  }
-
-  void ExtractClassNames() {
-    for (auto *attribute : attributes) {
-      attribute->ExtractClassNames();
-    }
-  }
-};
 
 // A field or method.
 // See sec.4.5 and 4.6 of JVM spec.
@@ -1294,6 +1415,8 @@ struct ClassFile : HasAttrs {
   void WriteClass(u1 *&p);
 
   bool ReadConstantPool(const u1 *&p);
+
+  bool KeepForCompile();
 
   bool IsLocalOrAnonymous();
 
@@ -1389,7 +1512,8 @@ void HasAttrs::ReadAttrs(const u1 *&p) {
           ParameterAnnotationsAttribute::Read(p, attribute_name));
     } else if (attr_name == "Scala" ||
                attr_name == "ScalaSig" ||
-               attr_name == "ScalaInlineInfo") {
+               attr_name == "ScalaInlineInfo" ||
+               attr_name == "TurbineTransitiveJar") {
       // These are opaque blobs, so can be handled with a general
       // attribute handler
       attributes.push_back(GeneralAttribute::Read(p, attribute_name,
@@ -1401,11 +1525,28 @@ void HasAttrs::ReadAttrs(const u1 *&p) {
     } else if (attr_name == "MethodParameters") {
       attributes.push_back(
           MethodParametersAttribute::Read(p, attribute_name, attribute_length));
+    } else if (attr_name == "NestHost") {
+      attributes.push_back(
+          NestHostAttribute::Read(p, attribute_name, attribute_length));
+    } else if (attr_name == "NestMembers") {
+      attributes.push_back(
+          NestMembersAttribute::Read(p, attribute_name, attribute_length));
+    } else if (attr_name == "Record") {
+      attributes.push_back(
+          RecordAttribute::Read(p, attribute_name, attribute_length));
+    } else if (attr_name == "PermittedSubclasses") {
+      attributes.push_back(
+          PermittedSubclassesAttribute::Read(p, attribute_name));
     } else {
       // Skip over unknown attributes with a warning.  The JVM spec
       // says this is ok, so long as we handle the mandatory attributes.
-      fprintf(stderr, "ijar: skipping unknown attribute: \"%s\".\n",
-              attr_name.c_str());
+      // Don't even warn for the D8 desugar SynthesizedClass attribute. It is
+      // not relevant for ijar.
+      if (attr_name != "com.android.tools.r8.SynthesizedClass" &&
+          attr_name != "com.android.tools.r8.SynthesizedClassV2") {
+        fprintf(stderr, "ijar: skipping unknown attribute: \"%s\".\n",
+                attr_name.c_str());
+      }
       p += attribute_length;
     }
   }
@@ -1538,6 +1679,22 @@ bool ClassFile::IsLocalOrAnonymous() {
   return false;
 }
 
+static bool HasKeepForCompile(const std::vector<Attribute *> attributes) {
+  for (const Attribute *attribute : attributes) {
+    if (attribute->KeepForCompile()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClassFile::KeepForCompile() {
+  if (HasKeepForCompile(attributes)) {
+    return true;
+  }
+  return false;
+}
+
 static ClassFile *ReadClass(const void *classdata, size_t length) {
   const u1 *p = (u1*) classdata;
 
@@ -1592,9 +1749,9 @@ static ClassFile *ReadClass(const void *classdata, size_t length) {
       // drop private methods
       continue;
     }
-    if ((method->access_flags & (ACC_SYNTHETIC | ACC_BRIDGE)) ==
-        ACC_SYNTHETIC) {
-      // drop non-bridge synthetic methods, e.g. package-private synthetic
+    if ((method->access_flags & (ACC_SYNTHETIC | ACC_BRIDGE | ACC_PUBLIC |
+                                 ACC_PROTECTED)) == ACC_SYNTHETIC) {
+      // drop package-private non-bridge synthetic methods, e.g. synthetic
       // constructors used to instantiate private nested classes within their
       // declaring compilation unit
       continue;
@@ -1785,13 +1942,12 @@ void ClassFile::WriteClass(u1 *&p) {
 bool StripClass(u1 *&classdata_out, const u1 *classdata_in, size_t in_length) {
   ClassFile *clazz = ReadClass(classdata_in, in_length);
   bool keep = true;
-  if (clazz == NULL) {
-    // Class is invalid. Simply copy it to the output and call it a day.
+  if (clazz == NULL || clazz->KeepForCompile()) {
+    // Class is invalid or kept. Simply copy it to the output and call it a day.
     put_n(classdata_out, classdata_in, in_length);
   } else if (clazz->IsLocalOrAnonymous()) {
     keep = false;
   } else {
-
     // Constant pool item zero is a dummy entry.  Setting it marks the
     // beginning of the output phase; calls to Constant::slot() will
     // fail if called prior to this.

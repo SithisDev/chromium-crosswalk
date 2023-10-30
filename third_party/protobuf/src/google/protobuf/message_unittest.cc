@@ -41,11 +41,8 @@
 #define UNITTEST_IMPORT ::protobuf_unittest_import
 
 // Must include after the above macros.
+// clang-format off
 #include <google/protobuf/test_util.inc>
 #include <google/protobuf/message_unittest.inc>
-
-// Make extract script happy.
-namespace google {
-namespace protobuf {
-}  // namespace protobuf
-}  // namespace google
+#include <google/protobuf/arena.h>
+// clang-format on

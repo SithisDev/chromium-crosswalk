@@ -28,8 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_TEST_HELPER_H__
-#define GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_TEST_HELPER_H__
+#ifndef GOOGLE_PROTOBUF_UTIL_INTERNAL_TYPE_INFO_TEST_HELPER_H__
+#define GOOGLE_PROTOBUF_UTIL_INTERNAL_TYPE_INFO_TEST_HELPER_H__
 
 #include <memory>
 #include <vector>
@@ -37,9 +37,9 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/util/internal/default_value_objectwriter.h>
-#include <google/protobuf/util/internal/type_info.h>
 #include <google/protobuf/util/internal/protostream_objectsource.h>
 #include <google/protobuf/util/internal/protostream_objectwriter.h>
+#include <google/protobuf/util/internal/type_info.h>
 #include <google/protobuf/util/type_resolver.h>
 
 namespace google {
@@ -63,7 +63,7 @@ class TypeInfoTestHelper {
   // Creates a TypeInfo object for the given set of descriptors.
   void ResetTypeInfo(const std::vector<const Descriptor*>& descriptors);
 
-  // Convinent overloads.
+  // Convenient overloads.
   void ResetTypeInfo(const Descriptor* descriptor);
   void ResetTypeInfo(const Descriptor* descriptor1,
                      const Descriptor* descriptor2);
@@ -71,14 +71,15 @@ class TypeInfoTestHelper {
   // Returns the TypeInfo created after ResetTypeInfo.
   TypeInfo* GetTypeInfo();
 
-  ProtoStreamObjectSource* NewProtoSource(io::CodedInputStream* coded_input,
-                                          const string& type_url);
+  ProtoStreamObjectSource* NewProtoSource(
+      io::CodedInputStream* coded_input, const std::string& type_url,
+      ProtoStreamObjectSource::RenderOptions render_options = {});
 
   ProtoStreamObjectWriter* NewProtoWriter(
-      const string& type_url, strings::ByteSink* output,
+      const std::string& type_url, strings::ByteSink* output,
       ErrorListener* listener, const ProtoStreamObjectWriter::Options& options);
 
-  DefaultValueObjectWriter* NewDefaultValueWriter(const string& type_url,
+  DefaultValueObjectWriter* NewDefaultValueWriter(const std::string& type_url,
                                                   ObjectWriter* writer);
 
  private:
@@ -90,6 +91,6 @@ class TypeInfoTestHelper {
 }  // namespace converter
 }  // namespace util
 }  // namespace protobuf
-
 }  // namespace google
-#endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_TEST_HELPER_H__
+
+#endif  // GOOGLE_PROTOBUF_UTIL_INTERNAL_TYPE_INFO_TEST_HELPER_H__

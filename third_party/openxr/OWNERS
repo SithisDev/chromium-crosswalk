@@ -1,5 +1,2 @@
-ddorwin@chromium.org
-billorr@chromium.org
-
-# TEAM: xr-dev@chromium.org
-# COMPONENT: Internals>XR
+file://components/webxr/OWNERS
+rafael.cintron@microsoft.com

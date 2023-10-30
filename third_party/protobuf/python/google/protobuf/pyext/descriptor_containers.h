@@ -34,6 +34,7 @@
 // Mappings and Sequences of descriptors.
 // They implement containers like fields_by_name, EnumDescriptor.values...
 // See descriptor_containers.cc for more description.
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 namespace google {
@@ -104,6 +105,6 @@ PyObject* NewServiceMethodsByName(const ServiceDescriptor* descriptor);
 
 }  // namespace python
 }  // namespace protobuf
-
 }  // namespace google
+
 #endif  // GOOGLE_PROTOBUF_PYTHON_CPP_DESCRIPTOR_CONTAINERS_H__

@@ -37,6 +37,7 @@
 
 #include <map>
 #include <string>
+
 #include <google/protobuf/compiler/cpp/cpp_field.h>
 
 namespace google {
@@ -48,25 +49,21 @@ class PrimitiveFieldGenerator : public FieldGenerator {
  public:
   PrimitiveFieldGenerator(const FieldDescriptor* descriptor,
                           const Options& options);
-  ~PrimitiveFieldGenerator();
+  ~PrimitiveFieldGenerator() override;
 
   // implements FieldGenerator ---------------------------------------
-  void GeneratePrivateMembers(io::Printer* printer) const;
-  void GenerateAccessorDeclarations(io::Printer* printer) const;
-  void GenerateInlineAccessorDefinitions(io::Printer* printer) const;
-  void GenerateClearingCode(io::Printer* printer) const;
-  void GenerateMergingCode(io::Printer* printer) const;
-  void GenerateSwappingCode(io::Printer* printer) const;
-  void GenerateConstructorCode(io::Printer* printer) const;
-  void GenerateCopyConstructorCode(io::Printer* printer) const;
-  void GenerateMergeFromCodedStream(io::Printer* printer) const;
-  void GenerateSerializeWithCachedSizes(io::Printer* printer) const;
-  void GenerateSerializeWithCachedSizesToArray(io::Printer* printer) const;
-  void GenerateByteSize(io::Printer* printer) const;
-
- protected:
-  const FieldDescriptor* descriptor_;
-  std::map<string, string> variables_;
+  void GeneratePrivateMembers(io::Printer* printer) const override;
+  void GenerateAccessorDeclarations(io::Printer* printer) const override;
+  void GenerateInlineAccessorDefinitions(io::Printer* printer) const override;
+  void GenerateClearingCode(io::Printer* printer) const override;
+  void GenerateMergingCode(io::Printer* printer) const override;
+  void GenerateSwappingCode(io::Printer* printer) const override;
+  void GenerateConstructorCode(io::Printer* printer) const override;
+  void GenerateCopyConstructorCode(io::Printer* printer) const override;
+  void GenerateSerializeWithCachedSizesToArray(
+      io::Printer* printer) const override;
+  void GenerateByteSize(io::Printer* printer) const override;
+  void GenerateConstinitInitializer(io::Printer* printer) const override;
 
  private:
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(PrimitiveFieldGenerator);
@@ -76,14 +73,13 @@ class PrimitiveOneofFieldGenerator : public PrimitiveFieldGenerator {
  public:
   PrimitiveOneofFieldGenerator(const FieldDescriptor* descriptor,
                                const Options& options);
-  ~PrimitiveOneofFieldGenerator();
+  ~PrimitiveOneofFieldGenerator() override;
 
   // implements FieldGenerator ---------------------------------------
-  void GenerateInlineAccessorDefinitions(io::Printer* printer) const;
-  void GenerateClearingCode(io::Printer* printer) const;
-  void GenerateSwappingCode(io::Printer* printer) const;
-  void GenerateConstructorCode(io::Printer* printer) const;
-  void GenerateMergeFromCodedStream(io::Printer* printer) const;
+  void GenerateInlineAccessorDefinitions(io::Printer* printer) const override;
+  void GenerateClearingCode(io::Printer* printer) const override;
+  void GenerateSwappingCode(io::Printer* printer) const override;
+  void GenerateConstructorCode(io::Printer* printer) const override;
 
  private:
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(PrimitiveOneofFieldGenerator);
@@ -93,33 +89,29 @@ class RepeatedPrimitiveFieldGenerator : public FieldGenerator {
  public:
   RepeatedPrimitiveFieldGenerator(const FieldDescriptor* descriptor,
                                   const Options& options);
-  ~RepeatedPrimitiveFieldGenerator();
+  ~RepeatedPrimitiveFieldGenerator() override;
 
   // implements FieldGenerator ---------------------------------------
-  void GeneratePrivateMembers(io::Printer* printer) const;
-  void GenerateAccessorDeclarations(io::Printer* printer) const;
-  void GenerateInlineAccessorDefinitions(io::Printer* printer) const;
-  void GenerateClearingCode(io::Printer* printer) const;
-  void GenerateMergingCode(io::Printer* printer) const;
-  void GenerateSwappingCode(io::Printer* printer) const;
-  void GenerateConstructorCode(io::Printer* printer) const;
-  void GenerateCopyConstructorCode(io::Printer* printer) const;
-  void GenerateMergeFromCodedStream(io::Printer* printer) const;
-  void GenerateMergeFromCodedStreamWithPacking(io::Printer* printer) const;
-  void GenerateSerializeWithCachedSizes(io::Printer* printer) const;
-  void GenerateSerializeWithCachedSizesToArray(io::Printer* printer) const;
-  void GenerateByteSize(io::Printer* printer) const;
+  void GeneratePrivateMembers(io::Printer* printer) const override;
+  void GenerateAccessorDeclarations(io::Printer* printer) const override;
+  void GenerateInlineAccessorDefinitions(io::Printer* printer) const override;
+  void GenerateClearingCode(io::Printer* printer) const override;
+  void GenerateMergingCode(io::Printer* printer) const override;
+  void GenerateSwappingCode(io::Printer* printer) const override;
+  void GenerateConstructorCode(io::Printer* printer) const override {}
+  void GenerateCopyConstructorCode(io::Printer* printer) const override {}
+  void GenerateSerializeWithCachedSizesToArray(
+      io::Printer* printer) const override;
+  void GenerateByteSize(io::Printer* printer) const override;
+  void GenerateConstinitInitializer(io::Printer* printer) const override;
 
  private:
-  const FieldDescriptor* descriptor_;
-  std::map<string, string> variables_;
-
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(RepeatedPrimitiveFieldGenerator);
 };
 
 }  // namespace cpp
 }  // namespace compiler
 }  // namespace protobuf
-
 }  // namespace google
+
 #endif  // GOOGLE_PROTOBUF_COMPILER_CPP_PRIMITIVE_FIELD_H__

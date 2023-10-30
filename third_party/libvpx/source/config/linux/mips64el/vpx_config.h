@@ -10,11 +10,18 @@
 #define VPX_CONFIG_H
 #define RESTRICT    
 #define INLINE      inline
+#define VPX_ARCH_ARM 0
 #define ARCH_ARM 0
+#define VPX_ARCH_MIPS 1
 #define ARCH_MIPS 1
+#define VPX_ARCH_X86 0
 #define ARCH_X86 0
+#define VPX_ARCH_X86_64 0
 #define ARCH_X86_64 0
+#define VPX_ARCH_PPC 0
 #define ARCH_PPC 0
+#define VPX_ARCH_LOONGARCH 0
+#define ARCH_LOONGARCH 0
 #define HAVE_NEON 0
 #define HAVE_NEON_ASM 0
 #define HAVE_MIPS32 0
@@ -32,6 +39,8 @@
 #define HAVE_AVX512 0
 #define HAVE_VSX 0
 #define HAVE_MMI 0
+#define HAVE_LSX 0
+#define HAVE_LASX 0
 #define HAVE_VPX_PORTS 1
 #define HAVE_PTHREAD_H 1
 #define HAVE_UNISTD_H 0
@@ -78,7 +87,7 @@
 #define CONFIG_OS_SUPPORT 1
 #define CONFIG_UNIT_TESTS 1
 #define CONFIG_WEBM_IO 1
-#define CONFIG_LIBYUV 1
+#define CONFIG_LIBYUV 0
 #define CONFIG_DECODE_PERF_TESTS 0
 #define CONFIG_ENCODE_PERF_TESTS 0
 #define CONFIG_MULTI_RES_ENCODING 1
@@ -96,6 +105,7 @@
 #define CONFIG_FP_MB_STATS 0
 #define CONFIG_EMULATE_HARDWARE 0
 #define CONFIG_NON_GREEDY_MV 0
+#define CONFIG_RATE_CTRL 0
 #define DECODE_WIDTH_LIMIT 16384
 #define DECODE_HEIGHT_LIMIT 16384
 #endif /* VPX_CONFIG_H */

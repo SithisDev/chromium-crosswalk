@@ -36,6 +36,7 @@
 #ifndef GOOGLE_PROTOBUF_PYTHON_PYTHON_PROTOBUF_H__
 #define GOOGLE_PROTOBUF_PYTHON_PYTHON_PROTOBUF_H__
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 namespace google {
@@ -52,6 +53,6 @@ Message* MutableCProtoInsidePyProto(PyObject* msg);
 
 }  // namespace python
 }  // namespace protobuf
-
 }  // namespace google
+
 #endif  // GOOGLE_PROTOBUF_PYTHON_PYTHON_PROTOBUF_H__

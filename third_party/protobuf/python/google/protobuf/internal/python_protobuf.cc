@@ -37,10 +37,10 @@ namespace protobuf {
 namespace python {
 
 static const Message* GetCProtoInsidePyProtoStub(PyObject* msg) {
-  return NULL;
+  return nullptr;
 }
 static Message* MutableCProtoInsidePyProtoStub(PyObject* msg) {
-  return NULL;
+  return nullptr;
 }
 
 // This is initialized with a default, stub implementation.

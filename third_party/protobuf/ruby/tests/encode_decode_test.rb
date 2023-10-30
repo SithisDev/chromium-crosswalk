@@ -4,6 +4,7 @@
 $LOAD_PATH.unshift(File.expand_path(File.dirname(__FILE__)))
 
 require 'generated_code_pb'
+require 'google/protobuf/well_known_types'
 require 'test/unit'
 
 def hex2bin(s)
@@ -22,8 +23,8 @@ class EncodeDecodeTest < Test::Unit::TestCase
 
     # Test discard unknown for singular message field.
     unknown_msg = A::B::C::TestUnknown.new(
-	    :optional_unknown =>
-	    A::B::C::TestUnknown.new(:unknown_field => 1))
+            :optional_unknown =>
+            A::B::C::TestUnknown.new(:unknown_field => 1))
     from = A::B::C::TestUnknown.encode(unknown_msg)
     m = A::B::C::TestMessage.decode(from)
     Google::Protobuf.discard_unknown(m)
@@ -32,8 +33,8 @@ class EncodeDecodeTest < Test::Unit::TestCase
 
     # Test discard unknown for repeated message field.
     unknown_msg = A::B::C::TestUnknown.new(
-	    :repeated_unknown =>
-	    [A::B::C::TestUnknown.new(:unknown_field => 1)])
+            :repeated_unknown =>
+            [A::B::C::TestUnknown.new(:unknown_field => 1)])
     from = A::B::C::TestUnknown.encode(unknown_msg)
     m = A::B::C::TestMessage.decode(from)
     Google::Protobuf.discard_unknown(m)
@@ -42,8 +43,8 @@ class EncodeDecodeTest < Test::Unit::TestCase
 
     # Test discard unknown for map value message field.
     unknown_msg = A::B::C::TestUnknown.new(
-	    :map_unknown =>
-	    {"" => A::B::C::TestUnknown.new(:unknown_field => 1)})
+            :map_unknown =>
+            {"" => A::B::C::TestUnknown.new(:unknown_field => 1)})
     from = A::B::C::TestUnknown.encode(unknown_msg)
     m = A::B::C::TestMessage.decode(from)
     Google::Protobuf.discard_unknown(m)
@@ -52,8 +53,8 @@ class EncodeDecodeTest < Test::Unit::TestCase
 
     # Test discard unknown for oneof message field.
     unknown_msg = A::B::C::TestUnknown.new(
-	    :oneof_unknown =>
-	    A::B::C::TestUnknown.new(:unknown_field => 1))
+            :oneof_unknown =>
+            A::B::C::TestUnknown.new(:unknown_field => 1))
     from = A::B::C::TestUnknown.encode(unknown_msg)
     m = A::B::C::TestMessage.decode(from)
     Google::Protobuf.discard_unknown(m)
@@ -84,4 +85,71 @@ class EncodeDecodeTest < Test::Unit::TestCase
 
     assert_match 'optional_int32', json
   end
+
+  def test_encode_wrong_msg
+    assert_raise ::ArgumentError do
+      m = A::B::C::TestMessage.new(
+          :optional_int32 => 1,
+      )
+      Google::Protobuf::Any.encode(m)
+    end
+  end
+
+  def test_json_name
+    msg = A::B::C::TestJsonName.new(:value => 42)
+    json = msg.to_json
+    assert_match json, "{\"CustomJsonName\":42}"
+  end
+
+  def test_decode_depth_limit
+    msg = A::B::C::TestMessage.new(
+      optional_msg: A::B::C::TestMessage.new(
+        optional_msg: A::B::C::TestMessage.new(
+          optional_msg: A::B::C::TestMessage.new(
+            optional_msg: A::B::C::TestMessage.new(
+              optional_msg: A::B::C::TestMessage.new(
+              )
+            )
+          )
+        )
+      )
+    )
+    msg_encoded = A::B::C::TestMessage.encode(msg)
+    msg_out = A::B::C::TestMessage.decode(msg_encoded)
+    assert_match msg.to_json, msg_out.to_json
+
+    assert_raise Google::Protobuf::ParseError do
+      A::B::C::TestMessage.decode(msg_encoded, { recursion_limit: 4 })
+    end
+
+    msg_out = A::B::C::TestMessage.decode(msg_encoded, { recursion_limit: 5 })
+    assert_match msg.to_json, msg_out.to_json
+  end
+
+  def test_encode_depth_limit
+    msg = A::B::C::TestMessage.new(
+      optional_msg: A::B::C::TestMessage.new(
+        optional_msg: A::B::C::TestMessage.new(
+          optional_msg: A::B::C::TestMessage.new(
+            optional_msg: A::B::C::TestMessage.new(
+              optional_msg: A::B::C::TestMessage.new(
+              )
+            )
+          )
+        )
+      )
+    )
+    msg_encoded = A::B::C::TestMessage.encode(msg)
+    msg_out = A::B::C::TestMessage.decode(msg_encoded)
+    assert_match msg.to_json, msg_out.to_json
+
+    assert_raise RuntimeError do
+      A::B::C::TestMessage.encode(msg, { recursion_limit: 5 })
+    end
+
+    msg_encoded = A::B::C::TestMessage.encode(msg, { recursion_limit: 6 })
+    msg_out = A::B::C::TestMessage.decode(msg_encoded)
+    assert_match msg.to_json, msg_out.to_json
+  end
+
 end
