@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,15 @@
 
 #include <stddef.h>
 
-#include <string>
-
-#include "base/callback.h"
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory_handle.h"
 #include "base/process/process_handle.h"
-#include "base/task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/core/embedder/configuration.h"
 
 namespace mojo {
 namespace core {
-
-using ProcessErrorCallback = base::Callback<void(const std::string& error)>;
 
 // Basic configuration/initialization ------------------------------------------
 
@@ -35,16 +29,35 @@ void Init(const Configuration& configuration);
 // Like above but uses a default Configuration.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void Init();
 
-// Sets a default callback to invoke when an internal error is reported but
-// cannot be associated with a specific child process. Calling this is optional.
-COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
-void SetDefaultProcessErrorCallback(const ProcessErrorCallback& callback);
+// Explicitly shuts down Mojo stopping any IO thread work and destroying any
+// global state initialized by Init().
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void ShutDown();
 
 // Initialialization/shutdown for interprocess communication (IPC) -------------
 
-// Retrieves the TaskRunner used for IPC I/O, as set by ScopedIPCSupport.
+// Retrieves the SequencedTaskRunner used for IPC I/O, as set by
+// ScopedIPCSupport.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
-scoped_refptr<base::TaskRunner> GetIOTaskRunner();
+scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner();
+
+// InitFeatures will be called as soon as the base::FeatureList is initialized.
+// NOTE: This is temporarily necessary because of how Mojo is started with
+// respect to base::FeatureList.
+//
+// TODO(rockot): Remove once a long term solution is in place for using
+// base::Features inside of Mojo.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void InitFeatures();
+
+// Indicates whether the ipcz-based Mojo implementation is enabled. This can be
+// done by enabling the MojoIpcz feature.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) bool IsMojoIpczEnabled();
+
+// Installs base shared shared memory allocation hooks appropriate for use in
+// a sandboxed environment when MojoIpcz is enabled on platforms where such
+// processes cannot allocate shared memory directly through the OS. Must be
+// called before any shared memory allocation is attempted in the process.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
+void InstallMojoIpczBaseSharedMemoryHooks();
 
 }  // namespace core
 }  // namespace mojo

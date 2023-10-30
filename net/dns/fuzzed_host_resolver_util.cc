@@ -1,10 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/dns/fuzzed_host_resolver_util.h"
 
 #include <stdint.h>
+
+#include <fuzzer/FuzzedDataProvider.h>
+
 #include <algorithm>
 #include <limits>
 #include <memory>
@@ -13,11 +16,11 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/notreached.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_once_callback.h"
@@ -34,11 +37,11 @@
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/mdns_client.h"
 #include "net/dns/public/util.h"
+#include "net/dns/resolve_context.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/datagram_server_socket.h"
 #include "net/socket/fuzzed_socket_factory.h"
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 namespace net {
 
@@ -85,6 +88,61 @@ IPAddress FuzzIPAddress(FuzzedDataProvider* data_provider) {
   return FuzzIPv6Address(data_provider);
 }
 
+DnsConfig GetFuzzedDnsConfig(FuzzedDataProvider* data_provider) {
+  // Fuzz DNS configuration.
+  DnsConfig config;
+
+  // Fuzz name servers.
+  uint32_t num_nameservers = data_provider->ConsumeIntegralInRange(0, 4);
+  for (uint32_t i = 0; i < num_nameservers; ++i) {
+    config.nameservers.push_back(
+        IPEndPoint(FuzzIPAddress(data_provider), FuzzPort(data_provider)));
+  }
+
+  // Fuzz suffix search list.
+  switch (data_provider->ConsumeIntegralInRange(0, 3)) {
+    case 3:
+      config.search.push_back("foo.com");
+      [[fallthrough]];
+    case 2:
+      config.search.push_back("bar");
+      [[fallthrough]];
+    case 1:
+      config.search.push_back("com");
+      [[fallthrough]];
+    default:
+      break;
+  }
+
+  net::DnsHosts hosts;
+  // Fuzz hosts file.
+  uint8_t num_hosts_entries = data_provider->ConsumeIntegral<uint8_t>();
+  for (uint8_t i = 0; i < num_hosts_entries; ++i) {
+    const char* kHostnames[] = {"foo", "foo.com",   "a.foo.com",
+                                "bar", "localhost", "localhost6"};
+    const char* hostname = data_provider->PickValueInArray(kHostnames);
+    net::IPAddress address = FuzzIPAddress(data_provider);
+    config.hosts[net::DnsHostsKey(hostname, net::GetAddressFamily(address))] =
+        address;
+  }
+
+  config.unhandled_options = data_provider->ConsumeBool();
+  config.append_to_multi_label_name = data_provider->ConsumeBool();
+  config.ndots = data_provider->ConsumeIntegralInRange(0, 3);
+  config.attempts = data_provider->ConsumeIntegralInRange(1, 3);
+
+  // Fallback periods don't really work for fuzzing. Even a period of 0
+  // milliseconds will be increased after the first expiration, resulting in
+  // inconsistent behavior.
+  config.fallback_period = base::Days(10);
+
+  config.rotate = data_provider->ConsumeBool();
+
+  config.use_local_ipv6 = data_provider->ConsumeBool();
+
+  return config;
+}
+
 // HostResolverProc that returns a random set of results, and can succeed or
 // fail. Must only be run on the thread it's created on.
 class FuzzedHostResolverProc : public HostResolverProc {
@@ -97,6 +155,9 @@ class FuzzedHostResolverProc : public HostResolverProc {
       : HostResolverProc(nullptr),
         data_provider_(data_provider),
         network_task_runner_(base::ThreadTaskRunnerHandle::Get()) {}
+
+  FuzzedHostResolverProc(const FuzzedHostResolverProc&) = delete;
+  FuzzedHostResolverProc& operator=(const FuzzedHostResolverProc&) = delete;
 
   int Resolve(const std::string& host,
               AddressFamily address_family,
@@ -141,7 +202,8 @@ class FuzzedHostResolverProc : public HostResolverProc {
 
     if (host_resolver_flags & HOST_RESOLVER_CANONNAME) {
       // Don't bother to fuzz this - almost nothing cares.
-      result.set_canonical_name("foo.com");
+      std::vector<std::string> aliases({"foo.com"});
+      result.SetDnsAliases(std::move(aliases));
     }
 
     *addrlist = result;
@@ -155,8 +217,6 @@ class FuzzedHostResolverProc : public HostResolverProc {
 
   // Just used for thread-safety checks.
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(FuzzedHostResolverProc);
 };
 
 const Error kMdnsErrors[] = {ERR_FAILED,
@@ -302,20 +362,22 @@ class FuzzedMdnsSocketFactory : public MDnsSocketFactory {
 class FuzzedHostResolverManager : public HostResolverManager {
  public:
   // |data_provider| and |net_log| must outlive the FuzzedHostResolver.
+  // TODO(crbug.com/971411): Fuzz system DNS config changes through a non-null
+  // SystemDnsConfigChangeNotifier.
   FuzzedHostResolverManager(const HostResolver::ManagerOptions& options,
                             NetLog* net_log,
                             FuzzedDataProvider* data_provider)
-      : HostResolverManager(options, net_log),
+      : HostResolverManager(options,
+                            nullptr /* system_dns_config_notifier */,
+                            net_log),
         data_provider_(data_provider),
         is_ipv6_reachable_(data_provider->ConsumeBool()),
         socket_factory_(data_provider_),
         net_log_(net_log),
         data_provider_weak_factory_(data_provider) {
-    // Use SetDnsClientEnabled() to ensure fuzzed client is used.
-    DCHECK(!options.dns_client_enabled);
-
     ProcTaskParams proc_task_params(
-        new FuzzedHostResolverProc(data_provider_weak_factory_.GetWeakPtr()),
+        base::MakeRefCounted<FuzzedHostResolverProc>(
+            data_provider_weak_factory_.GetWeakPtr()),
         // Retries are only used when the original request hangs, which this
         // class currently can't simulate.
         0 /* max_retry_attempts */);
@@ -323,16 +385,24 @@ class FuzzedHostResolverManager : public HostResolverManager {
     SetTaskRunnerForTesting(base::SequencedTaskRunnerHandle::Get());
     SetMdnsSocketFactoryForTesting(
         std::make_unique<FuzzedMdnsSocketFactory>(data_provider_));
+    std::unique_ptr<DnsClient> dns_client = DnsClient::CreateClientForTesting(
+        net_log_, base::BindRepeating(
+                      &FuzzedDataProvider::ConsumeIntegralInRange<int32_t>,
+                      base::Unretained(data_provider_)));
+    dns_client->SetSystemConfig(GetFuzzedDnsConfig(data_provider_));
+    HostResolverManager::SetDnsClientForTesting(std::move(dns_client));
   }
+
+  FuzzedHostResolverManager(const FuzzedHostResolverManager&) = delete;
+  FuzzedHostResolverManager& operator=(const FuzzedHostResolverManager&) =
+      delete;
 
   ~FuzzedHostResolverManager() override = default;
 
-  // Enable / disable the async resolver. When enabled, installs a
-  // DnsClient with fuzzed UDP and TCP sockets.
-  void SetDnsClientEnabled(bool enabled) override;
-
   void SetDnsClientForTesting(std::unique_ptr<DnsClient> dns_client) {
-    // Should only call SetDnsClientEnabled() to ensure a fuzzed client is used.
+    // The only DnsClient that is supported is the one created by the
+    // FuzzedHostResolverManager since that DnsClient contains the necessary
+    // fuzzing logic.
     NOTREACHED();
   }
 
@@ -358,76 +428,7 @@ class FuzzedHostResolverManager : public HostResolverManager {
   NetLog* const net_log_;
 
   base::WeakPtrFactory<FuzzedDataProvider> data_provider_weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FuzzedHostResolverManager);
 };
-
-void FuzzedHostResolverManager::SetDnsClientEnabled(bool enabled) {
-  if (!enabled) {
-    HostResolverManager::SetDnsClientEnabled(false);
-    return;
-  }
-
-  // Fuzz DNS configuration.
-
-  DnsConfig config;
-
-  // Fuzz name servers.
-  uint32_t num_nameservers = data_provider_->ConsumeIntegralInRange(0, 4);
-  for (uint32_t i = 0; i < num_nameservers; ++i) {
-    config.nameservers.push_back(
-        IPEndPoint(FuzzIPAddress(data_provider_), FuzzPort(data_provider_)));
-  }
-
-  // Fuzz suffix search list.
-  switch (data_provider_->ConsumeIntegralInRange(0, 3)) {
-    case 3:
-      config.search.push_back("foo.com");
-      FALLTHROUGH;
-    case 2:
-      config.search.push_back("bar");
-      FALLTHROUGH;
-    case 1:
-      config.search.push_back("com");
-      FALLTHROUGH;
-    default:
-      break;
-  }
-
-  net::DnsHosts hosts;
-  // Fuzz hosts file.
-  uint8_t num_hosts_entries = data_provider_->ConsumeIntegral<uint8_t>();
-  for (uint8_t i = 0; i < num_hosts_entries; ++i) {
-    const char* kHostnames[] = {"foo", "foo.com",   "a.foo.com",
-                                "bar", "localhost", "localhost6"};
-    const char* hostname = data_provider_->PickValueInArray(kHostnames);
-    net::IPAddress address = FuzzIPAddress(data_provider_);
-    config.hosts[net::DnsHostsKey(hostname, net::GetAddressFamily(address))] =
-        address;
-  }
-
-  config.unhandled_options = data_provider_->ConsumeBool();
-  config.append_to_multi_label_name = data_provider_->ConsumeBool();
-  config.randomize_ports = data_provider_->ConsumeBool();
-  config.ndots = data_provider_->ConsumeIntegralInRange(0, 3);
-  config.attempts = data_provider_->ConsumeIntegralInRange(1, 3);
-
-  // Timeouts don't really work for fuzzing. Even a timeout of 0 milliseconds
-  // will be increased after the first timeout, resulting in inconsistent
-  // behavior.
-  config.timeout = base::TimeDelta::FromDays(10);
-
-  config.rotate = data_provider_->ConsumeBool();
-
-  config.use_local_ipv6 = data_provider_->ConsumeBool();
-
-  std::unique_ptr<DnsClient> dns_client = DnsClient::CreateClientForTesting(
-      net_log_, &socket_factory_,
-      base::Bind(&FuzzedDataProvider::ConsumeIntegralInRange<int32_t>,
-                 base::Unretained(data_provider_)));
-  dns_client->SetConfig(config);
-  HostResolverManager::SetDnsClientForTesting(std::move(dns_client));
-}
 
 }  // namespace
 
@@ -436,19 +437,12 @@ std::unique_ptr<ContextHostResolver> CreateFuzzedContextHostResolver(
     NetLog* net_log,
     FuzzedDataProvider* data_provider,
     bool enable_caching) {
-  // FuzzedHostResolverManager only handles fuzzing DnsClient when enabled
-  // through SetDnsClientEnabled().
-  bool enable_dns_client = options.dns_client_enabled;
-  HostResolver::ManagerOptions filtered_options(options);
-  filtered_options.dns_client_enabled = false;
-
-  auto manager = std::make_unique<FuzzedHostResolverManager>(
-      filtered_options, net_log, data_provider);
-  manager->SetDnsClientEnabled(enable_dns_client);
-
-  return std::make_unique<ContextHostResolver>(
-      std::move(manager),
-      enable_caching ? HostCache::CreateDefaultCache() : nullptr);
+  auto manager = std::make_unique<FuzzedHostResolverManager>(options, net_log,
+                                                             data_provider);
+  auto resolve_context = std::make_unique<ResolveContext>(
+      nullptr /* url_request_context */, enable_caching);
+  return std::make_unique<ContextHostResolver>(std::move(manager),
+                                               std::move(resolve_context));
 }
 
 }  // namespace net

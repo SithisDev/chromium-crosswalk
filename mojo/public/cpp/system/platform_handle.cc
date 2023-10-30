@@ -1,35 +1,34 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "mojo/public/cpp/system/platform_handle.h"
 
+#include "base/check_op.h"
 #include "base/memory/platform_shared_memory_region.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-#include <mach/mach.h>
-#include "base/mac/mach_logging.h"
-#endif
+#include "mojo/public/cpp/platform/platform_handle_internal.h"
 
 namespace mojo {
 
 namespace {
 
-uint64_t PlatformHandleValueFromPlatformFile(base::PlatformFile file) {
-#if defined(OS_WIN)
-  return reinterpret_cast<uint64_t>(file);
+uint64_t ReleasePlatformHandleValueFromPlatformFile(
+    base::ScopedPlatformFile file) {
+#if BUILDFLAG(IS_WIN)
+  return reinterpret_cast<uint64_t>(file.Take());
 #else
-  return static_cast<uint64_t>(file);
+  return static_cast<uint64_t>(file.release());
 #endif
 }
 
-base::PlatformFile PlatformFileFromPlatformHandleValue(uint64_t value) {
-#if defined(OS_WIN)
-  return reinterpret_cast<base::PlatformFile>(value);
+base::ScopedPlatformFile PlatformFileFromPlatformHandleValue(uint64_t value) {
+#if BUILDFLAG(IS_WIN)
+  return base::ScopedPlatformFile(reinterpret_cast<base::PlatformFile>(value));
 #else
-  return static_cast<base::PlatformFile>(value);
+  return base::ScopedPlatformFile(static_cast<base::PlatformFile>(value));
 #endif
 }
 
@@ -56,21 +55,21 @@ ScopedSharedBufferHandle WrapPlatformSharedMemoryRegion(
       return ScopedSharedBufferHandle();
   }
 
-  base::subtle::PlatformSharedMemoryRegion::ScopedPlatformHandle handle =
+  base::subtle::ScopedPlatformSharedMemoryHandle handle =
       region.PassPlatformHandle();
   MojoPlatformHandle platform_handles[2];
   uint32_t num_platform_handles = 1;
   platform_handles[0].struct_size = sizeof(platform_handles[0]);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE;
   platform_handles[0].value = reinterpret_cast<uint64_t>(handle.Take());
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif BUILDFLAG(IS_APPLE)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
 #else
@@ -86,9 +85,9 @@ ScopedSharedBufferHandle WrapPlatformSharedMemoryRegion(
         static_cast<uint64_t>(handle.readonly_fd.release());
   }
 #endif
-  const auto& guid = region.GetGUID();
-  MojoSharedBufferGuid mojo_guid = {guid.GetHighForSerialization(),
-                                    guid.GetLowForSerialization()};
+  MojoSharedBufferGuid mojo_guid =
+      mojo::internal::PlatformHandleInternal::MarshalUnguessableToken(
+          region.GetGUID());
   MojoHandle mojo_handle;
   MojoResult result = MojoWrapPlatformSharedMemoryRegion(
       platform_handles, num_platform_handles, region.GetSize(), &mojo_guid,
@@ -116,26 +115,26 @@ base::subtle::PlatformSharedMemoryRegion UnwrapPlatformSharedMemoryRegion(
   if (result != MOJO_RESULT_OK)
     return base::subtle::PlatformSharedMemoryRegion();
 
-  base::subtle::PlatformSharedMemoryRegion::ScopedPlatformHandle region_handle;
-#if defined(OS_WIN)
+  base::subtle::ScopedPlatformSharedMemoryHandle region_handle;
+#if BUILDFLAG(IS_WIN)
   if (num_platform_handles != 1)
     return base::subtle::PlatformSharedMemoryRegion();
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE)
     return base::subtle::PlatformSharedMemoryRegion();
   region_handle.Set(reinterpret_cast<HANDLE>(platform_handles[0].value));
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
   if (num_platform_handles != 1)
     return base::subtle::PlatformSharedMemoryRegion();
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE)
     return base::subtle::PlatformSharedMemoryRegion();
   region_handle.reset(static_cast<zx_handle_t>(platform_handles[0].value));
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif BUILDFLAG(IS_APPLE)
   if (num_platform_handles != 1)
     return base::subtle::PlatformSharedMemoryRegion();
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT)
     return base::subtle::PlatformSharedMemoryRegion();
   region_handle.reset(static_cast<mach_port_t>(platform_handles[0].value));
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   if (num_platform_handles != 1)
     return base::subtle::PlatformSharedMemoryRegion();
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR)
@@ -176,7 +175,7 @@ base::subtle::PlatformSharedMemoryRegion UnwrapPlatformSharedMemoryRegion(
 
   return base::subtle::PlatformSharedMemoryRegion::Take(
       std::move(region_handle), mode, size,
-      base::UnguessableToken::Deserialize(mojo_guid.high, mojo_guid.low));
+      internal::PlatformHandleInternal::UnmarshalUnguessableToken(&mojo_guid));
 }
 
 ScopedHandle WrapPlatformHandle(PlatformHandle handle) {
@@ -201,12 +200,12 @@ PlatformHandle UnwrapPlatformHandle(ScopedHandle handle) {
   return PlatformHandle::FromMojoPlatformHandle(&platform_handle);
 }
 
-// Wraps a PlatformFile as a Mojo handle. Takes ownership of the file object.
-ScopedHandle WrapPlatformFile(base::PlatformFile platform_file) {
+ScopedHandle WrapPlatformFile(base::ScopedPlatformFile platform_file) {
   MojoPlatformHandle platform_handle;
   platform_handle.struct_size = sizeof(MojoPlatformHandle);
   platform_handle.type = kPlatformFileHandleType;
-  platform_handle.value = PlatformHandleValueFromPlatformFile(platform_file);
+  platform_handle.value =
+      ReleasePlatformHandleValueFromPlatformFile(std::move(platform_file));
 
   MojoHandle mojo_handle;
   MojoResult result =
@@ -216,7 +215,8 @@ ScopedHandle WrapPlatformFile(base::PlatformFile platform_file) {
   return ScopedHandle(Handle(mojo_handle));
 }
 
-MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
+MojoResult UnwrapPlatformFile(ScopedHandle handle,
+                              base::ScopedPlatformFile* file) {
   MojoPlatformHandle platform_handle;
   platform_handle.struct_size = sizeof(MojoPlatformHandle);
   MojoResult result = MojoUnwrapPlatformHandle(handle.release().value(),
@@ -225,133 +225,11 @@ MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
     return result;
 
   if (platform_handle.type == MOJO_PLATFORM_HANDLE_TYPE_INVALID) {
-    *file = base::kInvalidPlatformFile;
+    *file = base::ScopedPlatformFile();
   } else {
     CHECK_EQ(platform_handle.type, kPlatformFileHandleType);
     *file = PlatformFileFromPlatformHandleValue(platform_handle.value);
   }
-
-  return MOJO_RESULT_OK;
-}
-
-ScopedSharedBufferHandle WrapSharedMemoryHandle(
-    const base::SharedMemoryHandle& memory_handle,
-    size_t size,
-    UnwrappedSharedMemoryHandleProtection protection) {
-  if (!memory_handle.IsValid())
-    return ScopedSharedBufferHandle();
-  MojoPlatformHandle platform_handle;
-  platform_handle.struct_size = sizeof(MojoPlatformHandle);
-  platform_handle.type = kPlatformSharedBufferHandleType;
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  platform_handle.value =
-      static_cast<uint64_t>(memory_handle.GetMemoryObject());
-#else
-  platform_handle.value =
-      PlatformHandleValueFromPlatformFile(memory_handle.GetHandle());
-#endif
-
-  MojoPlatformSharedMemoryRegionAccessMode access_mode =
-      MOJO_PLATFORM_SHARED_MEMORY_REGION_ACCESS_MODE_UNSAFE;
-  if (protection == UnwrappedSharedMemoryHandleProtection::kReadOnly) {
-    access_mode = MOJO_PLATFORM_SHARED_MEMORY_REGION_ACCESS_MODE_READ_ONLY;
-
-#if defined(OS_ANDROID)
-    // Many callers assume that base::SharedMemory::GetReadOnlyHandle() gives
-    // them a handle which is actually read-only. This assumption is invalid on
-    // Android. As a precursor to migrating all base::SharedMemory usage --
-    // including Mojo internals -- to the new base shared memory API, we ensure
-    // that regions are set to read-only if any of their handles are wrapped
-    // read-only. This relies on existing usages not attempting to map the
-    // region writable any time after this call.
-    if (!memory_handle.IsRegionReadOnly())
-      memory_handle.SetRegionReadOnly();
-#endif
-  }
-
-  MojoSharedBufferGuid guid;
-  guid.high = memory_handle.GetGUID().GetHighForSerialization();
-  guid.low = memory_handle.GetGUID().GetLowForSerialization();
-  MojoHandle mojo_handle;
-  MojoResult result = MojoWrapPlatformSharedMemoryRegion(
-      &platform_handle, 1, size, &guid, access_mode, nullptr, &mojo_handle);
-  CHECK_EQ(result, MOJO_RESULT_OK);
-
-  return ScopedSharedBufferHandle(SharedBufferHandle(mojo_handle));
-}
-
-MojoResult UnwrapSharedMemoryHandle(
-    ScopedSharedBufferHandle handle,
-    base::SharedMemoryHandle* memory_handle,
-    size_t* size,
-    UnwrappedSharedMemoryHandleProtection* protection) {
-  if (!handle.is_valid())
-    return MOJO_RESULT_INVALID_ARGUMENT;
-  MojoPlatformHandle platform_handles[2];
-  platform_handles[0].struct_size = sizeof(platform_handles[0]);
-  platform_handles[1].struct_size = sizeof(platform_handles[1]);
-
-  uint32_t num_platform_handles = 2;
-  uint64_t num_bytes;
-  MojoSharedBufferGuid mojo_guid;
-  MojoPlatformSharedMemoryRegionAccessMode access_mode;
-  MojoResult result = MojoUnwrapPlatformSharedMemoryRegion(
-      handle.release().value(), nullptr, platform_handles,
-      &num_platform_handles, &num_bytes, &mojo_guid, &access_mode);
-  if (result != MOJO_RESULT_OK)
-    return result;
-
-  if (size) {
-    DCHECK(base::IsValueInRangeForNumericType<size_t>(num_bytes));
-    *size = static_cast<size_t>(num_bytes);
-  }
-
-  if (protection) {
-    *protection =
-        access_mode == MOJO_PLATFORM_SHARED_MEMORY_REGION_ACCESS_MODE_READ_ONLY
-            ? UnwrappedSharedMemoryHandleProtection::kReadOnly
-            : UnwrappedSharedMemoryHandleProtection::kReadWrite;
-  }
-
-  base::UnguessableToken guid =
-      base::UnguessableToken::Deserialize(mojo_guid.high, mojo_guid.low);
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  DCHECK_EQ(platform_handles[0].type, MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT);
-  DCHECK_EQ(num_platform_handles, 1u);
-  *memory_handle = base::SharedMemoryHandle(
-      static_cast<mach_port_t>(platform_handles[0].value), num_bytes, guid);
-#elif defined(OS_FUCHSIA)
-  DCHECK_EQ(platform_handles[0].type, MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE);
-  DCHECK_EQ(num_platform_handles, 1u);
-  *memory_handle = base::SharedMemoryHandle(
-      static_cast<zx_handle_t>(platform_handles[0].value), num_bytes, guid);
-#elif defined(OS_POSIX)
-  DCHECK_EQ(platform_handles[0].type,
-            MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR);
-  *memory_handle = base::SharedMemoryHandle(
-      base::FileDescriptor(static_cast<int>(platform_handles[0].value), false),
-      num_bytes, guid);
-#if !defined(OS_ANDROID)
-  if (access_mode == MOJO_PLATFORM_SHARED_MEMORY_REGION_ACCESS_MODE_WRITABLE) {
-    DCHECK_EQ(num_platform_handles, 2u);
-    // When unwrapping as a base::SharedMemoryHandle, make sure to discard the
-    // extra file descriptor if the region is writable. base::SharedMemoryHandle
-    // effectively only supports read-only and unsafe usage modes when wrapping
-    // or unwrapping to and from Mojo handles.
-    base::ScopedFD discarded_readonly_fd(
-        static_cast<int>(platform_handles[1].value));
-  } else {
-    DCHECK_EQ(num_platform_handles, 1u);
-  }
-#else   // !defined(OS_ANDROID)
-  DCHECK_EQ(num_platform_handles, 1u);
-#endif  // !defined(OS_ANDROID)
-#elif defined(OS_WIN)
-  DCHECK_EQ(platform_handles[0].type, MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE);
-  DCHECK_EQ(num_platform_handles, 1u);
-  *memory_handle = base::SharedMemoryHandle(
-      reinterpret_cast<HANDLE>(platform_handles[0].value), num_bytes, guid);
-#endif
 
   return MOJO_RESULT_OK;
 }
@@ -394,42 +272,5 @@ base::WritableSharedMemoryRegion UnwrapWritableSharedMemoryRegion(
   return base::WritableSharedMemoryRegion::Deserialize(
       UnwrapPlatformSharedMemoryRegion(std::move(handle)));
 }
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-ScopedHandle WrapMachPort(mach_port_t port) {
-  kern_return_t kr =
-      mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, 1);
-  MACH_LOG_IF(ERROR, kr != KERN_SUCCESS, kr)
-      << "MachPortAttachmentMac mach_port_mod_refs";
-  if (kr != KERN_SUCCESS)
-    return ScopedHandle();
-
-  MojoPlatformHandle platform_handle;
-  platform_handle.struct_size = sizeof(MojoPlatformHandle);
-  platform_handle.type = MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT;
-  platform_handle.value = static_cast<uint64_t>(port);
-
-  MojoHandle mojo_handle;
-  MojoResult result =
-      MojoWrapPlatformHandle(&platform_handle, nullptr, &mojo_handle);
-  CHECK_EQ(result, MOJO_RESULT_OK);
-
-  return ScopedHandle(Handle(mojo_handle));
-}
-
-MojoResult UnwrapMachPort(ScopedHandle handle, mach_port_t* port) {
-  MojoPlatformHandle platform_handle;
-  platform_handle.struct_size = sizeof(MojoPlatformHandle);
-  MojoResult result = MojoUnwrapPlatformHandle(handle.release().value(),
-                                               nullptr, &platform_handle);
-  if (result != MOJO_RESULT_OK)
-    return result;
-
-  CHECK(platform_handle.type == MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT ||
-        platform_handle.type == MOJO_PLATFORM_HANDLE_TYPE_INVALID);
-  *port = static_cast<mach_port_t>(platform_handle.value);
-  return MOJO_RESULT_OK;
-}
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 }  // namespace mojo

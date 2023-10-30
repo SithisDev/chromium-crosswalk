@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/third_party/uri_template/uri_template.h"
 
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
+#include <fuzzer/FuzzedDataProvider.h>
 
 // Entry point for LibFuzzer.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {

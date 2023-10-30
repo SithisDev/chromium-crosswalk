@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "base/format_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,29 +33,29 @@ TEST(IPAddressBytesTest, ConstructEmpty) {
 
 TEST(IPAddressBytesTest, ConstructIPv4) {
   uint8_t data[] = {192, 168, 1, 1};
-  IPAddressBytes bytes(data, base::size(data));
-  ASSERT_EQ(base::size(data), bytes.size());
+  IPAddressBytes bytes(data, std::size(data));
+  ASSERT_EQ(std::size(data), bytes.size());
   size_t i = 0;
   for (uint8_t byte : bytes)
     EXPECT_EQ(data[i++], byte);
-  ASSERT_EQ(base::size(data), i);
+  ASSERT_EQ(std::size(data), i);
 }
 
 TEST(IPAddressBytesTest, ConstructIPv6) {
   uint8_t data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
-  IPAddressBytes bytes(data, base::size(data));
-  ASSERT_EQ(base::size(data), bytes.size());
+  IPAddressBytes bytes(data, std::size(data));
+  ASSERT_EQ(std::size(data), bytes.size());
   size_t i = 0;
   for (uint8_t byte : bytes)
     EXPECT_EQ(data[i++], byte);
-  ASSERT_EQ(base::size(data), i);
+  ASSERT_EQ(std::size(data), i);
 }
 
 TEST(IPAddressBytesTest, Assign) {
   uint8_t data[] = {192, 168, 1, 1};
   IPAddressBytes copy;
-  copy.Assign(data, base::size(data));
-  EXPECT_EQ(IPAddressBytes(data, base::size(data)), copy);
+  copy.Assign(data, std::size(data));
+  EXPECT_EQ(IPAddressBytes(data, std::size(data)), copy);
 }
 
 TEST(IPAddressTest, ConstructIPv4) {
@@ -150,8 +149,8 @@ TEST(IPAddressTest, IsPubliclyRoutableIPv4) {
                {"172.32.0.0", NOT_RESERVED},
                {"191.255.255.255", NOT_RESERVED},
                // 192.0.0.0/24 (including sub ranges)
-               {"192.0.0.0", NOT_RESERVED},
-               {"192.0.0.255", NOT_RESERVED},
+               {"192.0.0.0", RESERVED},
+               {"192.0.0.255", RESERVED},
                // Unreserved block(s)
                {"192.0.1.0", NOT_RESERVED},
                {"192.0.1.255", NOT_RESERVED},
@@ -213,9 +212,8 @@ TEST(IPAddressTest, IsPubliclyRoutableIPv4) {
                {"224.0.0.0", RESERVED},
                {"255.255.255.255", RESERVED}};
 
-  IPAddress address;
-  IPAddress mapped_address;
   for (const auto& test : tests) {
+    IPAddress address;
     EXPECT_TRUE(address.AssignFromIPLiteral(test.address));
     ASSERT_TRUE(address.IsValid());
     EXPECT_EQ(!test.is_reserved, address.IsPubliclyRoutable());
@@ -648,6 +646,35 @@ TEST(IPAddressTest, IPAddressStartsWith) {
   uint8_t ipv6_prefix5[] = {42, 0, 20, 80, 64, 12, 12, 9, 0,
                             0,  0, 0,  0,  0,  0,  0,  10};
   EXPECT_FALSE(IPAddressStartsWith(ipv6_address, ipv6_prefix5));
+}
+
+TEST(IPAddressTest, IsLinkLocal) {
+  const char* kPositive[] = {
+      "169.254.0.0",
+      "169.254.100.1",
+      "169.254.100.1",
+      "::ffff:169.254.0.0",
+      "::ffff:169.254.100.1",
+      "fe80::1",
+      "fe81::1",
+  };
+
+  for (const char* literal : kPositive) {
+    IPAddress ip_address;
+    ASSERT_TRUE(ip_address.AssignFromIPLiteral(literal));
+    EXPECT_TRUE(ip_address.IsLinkLocal()) << literal;
+  }
+
+  const char* kNegative[] = {
+      "170.254.0.0",        "169.255.0.0",        "::169.254.0.0",
+      "::fffe:169.254.0.0", "::ffff:169.255.0.0", "fec0::1",
+  };
+
+  for (const char* literal : kNegative) {
+    IPAddress ip_address;
+    ASSERT_TRUE(ip_address.AssignFromIPLiteral(literal));
+    EXPECT_FALSE(ip_address.IsLinkLocal()) << literal;
+  }
 }
 
 }  // anonymous namespace

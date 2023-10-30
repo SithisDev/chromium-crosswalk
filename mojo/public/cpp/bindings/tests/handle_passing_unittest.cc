@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "mojo/public/cpp/system/wait.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "mojo/public/interfaces/bindings/tests/sample_factory.mojom.h"
+#include "mojo/public/interfaces/bindings/tests/sample_import.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace mojo {
@@ -24,16 +25,16 @@ const char kText1[] = "hello";
 const char kText2[] = "world";
 
 void RecordString(std::string* storage,
-                  const base::Closure& closure,
+                  base::OnceClosure closure,
                   const std::string& str) {
   *storage = str;
-  closure.Run();
+  std::move(closure).Run();
 }
 
-base::Callback<void(const std::string&)> MakeStringRecorder(
+base::OnceCallback<void(const std::string&)> MakeStringRecorder(
     std::string* storage,
-    const base::Closure& closure) {
-  return base::Bind(&RecordString, storage, closure);
+    base::OnceClosure closure) {
+  return base::BindOnce(&RecordString, storage, std::move(closure));
 }
 
 class ImportedInterfaceImpl : public imported::ImportedInterface {
@@ -162,7 +163,7 @@ class HandlePassingTest : public BindingsTestBase {
 
 void DoStuff(bool* got_response,
              std::string* got_text_reply,
-             const base::Closure& closure,
+             base::OnceClosure closure,
              sample::ResponsePtr response,
              const std::string& text_reply) {
   *got_text_reply = text_reply;
@@ -183,16 +184,16 @@ void DoStuff(bool* got_response,
   }
 
   *got_response = true;
-  closure.Run();
+  std::move(closure).Run();
 }
 
 void DoStuff2(bool* got_response,
               std::string* got_text_reply,
-              const base::Closure& closure,
+              base::OnceClosure closure,
               const std::string& text_reply) {
   *got_response = true;
   *got_text_reply = text_reply;
-  closure.Run();
+  std::move(closure).Run();
 }
 
 TEST_P(HandlePassingTest, Basic) {
@@ -211,13 +212,13 @@ TEST_P(HandlePassingTest, Basic) {
                                       run_loop.QuitClosure());
 
   sample::RequestPtr request(sample::Request::New(
-      1, std::move(pipe1.handle0), base::nullopt, std::move(imported)));
+      1, std::move(pipe1.handle0), absl::nullopt, std::move(imported)));
   bool got_response = false;
   std::string got_text_reply;
   base::RunLoop run_loop2;
   factory->DoStuff(std::move(request), std::move(pipe0.handle0),
-                   base::Bind(&DoStuff, &got_response, &got_text_reply,
-                              run_loop2.QuitClosure()));
+                   base::BindOnce(&DoStuff, &got_response, &got_text_reply,
+                                  run_loop2.QuitClosure()));
 
   EXPECT_FALSE(got_response);
   int count_before = ImportedInterfaceImpl::do_something_count();
@@ -235,14 +236,14 @@ TEST_P(HandlePassingTest, PassInvalid) {
   SampleFactoryImpl factory_impl(factory.BindNewPipeAndPassReceiver());
 
   sample::RequestPtr request(sample::Request::New(1, ScopedMessagePipeHandle(),
-                                                  base::nullopt, NullRemote()));
+                                                  absl::nullopt, NullRemote()));
 
   bool got_response = false;
   std::string got_text_reply;
   base::RunLoop run_loop;
   factory->DoStuff(std::move(request), ScopedMessagePipeHandle(),
-                   base::Bind(&DoStuff, &got_response, &got_text_reply,
-                              run_loop.QuitClosure()));
+                   base::BindOnce(&DoStuff, &got_response, &got_text_reply,
+                                  run_loop.QuitClosure()));
 
   EXPECT_FALSE(got_response);
 
@@ -264,7 +265,7 @@ TEST_P(HandlePassingTest, DataPipe) {
                                        MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1,
                                        1024};
   ASSERT_EQ(MOJO_RESULT_OK,
-            CreateDataPipe(&options, &producer_handle, &consumer_handle));
+            CreateDataPipe(&options, producer_handle, consumer_handle));
   std::string expected_text_reply = "got it";
   // +1 for \0.
   uint32_t data_size = static_cast<uint32_t>(expected_text_reply.size() + 1);
@@ -276,8 +277,8 @@ TEST_P(HandlePassingTest, DataPipe) {
   std::string got_text_reply;
   base::RunLoop run_loop;
   factory->DoStuff2(std::move(consumer_handle),
-                    base::Bind(&DoStuff2, &got_response, &got_text_reply,
-                               run_loop.QuitClosure()));
+                    base::BindOnce(&DoStuff2, &got_response, &got_text_reply,
+                                   run_loop.QuitClosure()));
 
   EXPECT_FALSE(got_response);
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,32 +13,40 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
+#include "base/callback.h"
+#include "base/check.h"
 #include "base/component_export.h"
-#include "base/location.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
+#include "base/dcheck_is_on.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
-#include "mojo/public/cpp/bindings/associated_group.h"
+#include "mojo/public/cpp/bindings/async_flusher.h"
 #include "mojo/public/cpp/bindings/connection_error_callback.h"
-#include "mojo/public/cpp/bindings/filter_chain.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_client.h"
-#include "mojo/public/cpp/bindings/interface_id.h"
-#include "mojo/public/cpp/bindings/interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/lib/multiplex_router.h"
 #include "mojo/public/cpp/bindings/lib/pending_remote_state.h"
-#include "mojo/public/cpp/bindings/message_header_validator.h"
-#include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
+#include "mojo/public/cpp/bindings/pending_flush.h"
+#include "mojo/public/cpp/bindings/thread_safe_proxy.h"
+#include "mojo/public/cpp/system/message_pipe.h"
+
+namespace base {
+class Location;
+}
 
 namespace mojo {
+
+class AssociatedGroup;
+class MessageReceiver;
+
 namespace internal {
 
 class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfacePtrStateBase {
  public:
   InterfacePtrStateBase();
+
+  InterfacePtrStateBase(const InterfacePtrStateBase&) = delete;
+  InterfacePtrStateBase& operator=(const InterfacePtrStateBase&) = delete;
+
   ~InterfacePtrStateBase();
 
   MessagePipeHandle handle() const {
@@ -62,6 +70,11 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfacePtrStateBase {
     return endpoint_client_ && endpoint_client_->has_pending_responders();
   }
 
+  scoped_refptr<ThreadSafeProxy> CreateThreadSafeProxy(
+      scoped_refptr<ThreadSafeProxy::Target> target) {
+    return endpoint_client_->CreateThreadSafeProxy(std::move(target));
+  }
+
 #if DCHECK_IS_ON()
   void SetNextCallLocation(const base::Location& location) {
     endpoint_client_->SetNextCallLocation(location);
@@ -76,9 +89,12 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfacePtrStateBase {
 
   void QueryVersion(base::OnceCallback<void(uint32_t)> callback);
   void RequireVersion(uint32_t version);
+  void PauseReceiverUntilFlushCompletes(PendingFlush flush);
+  void FlushAsync(AsyncFlusher flusher);
   void Swap(InterfacePtrStateBase* other);
   void Bind(PendingRemoteState* remote_state,
             scoped_refptr<base::SequencedTaskRunner> task_runner);
+  PendingRemoteState Unbind();
 
   ScopedMessagePipeHandle PassMessagePipe() {
     endpoint_client_.reset();
@@ -88,8 +104,11 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfacePtrStateBase {
   bool InitializeEndpointClient(
       bool passes_associated_kinds,
       bool has_sync_methods,
+      bool has_uninterruptable_methods,
       std::unique_ptr<MessageReceiver> payload_validator,
-      const char* interface_name);
+      const char* interface_name,
+      MessageToMethodInfoCallback method_info_callback,
+      MessageToMethodNameCallback method_name_callback);
 
  private:
   void OnQueryVersion(base::OnceCallback<void(uint32_t)> callback,
@@ -106,8 +125,6 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) InterfacePtrStateBase {
   scoped_refptr<base::SequencedTaskRunner> runner_;
 
   uint32_t version_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(InterfacePtrStateBase);
 };
 
 template <typename Interface>
@@ -116,6 +133,10 @@ class InterfacePtrState : public InterfacePtrStateBase {
   using Proxy = typename Interface::Proxy_;
 
   InterfacePtrState() = default;
+
+  InterfacePtrState(const InterfacePtrState&) = delete;
+  InterfacePtrState& operator=(const InterfacePtrState&) = delete;
+
   ~InterfacePtrState() = default;
 
   Proxy* instance() {
@@ -132,10 +153,6 @@ class InterfacePtrState : public InterfacePtrStateBase {
 #endif
   }
 
-  void QueryVersionDeprecated(const base::Callback<void(uint32_t)>& callback) {
-    QueryVersion(base::BindOnce(callback));
-  }
-
   void QueryVersion(base::OnceCallback<void(uint32_t)> callback) {
     ConfigureProxyIfNecessary();
     InterfacePtrStateBase::QueryVersion(std::move(callback));
@@ -144,6 +161,16 @@ class InterfacePtrState : public InterfacePtrStateBase {
   void RequireVersion(uint32_t version) {
     ConfigureProxyIfNecessary();
     InterfacePtrStateBase::RequireVersion(version);
+  }
+
+  void PauseReceiverUntilFlushCompletes(PendingFlush flush) {
+    ConfigureProxyIfNecessary();
+    InterfacePtrStateBase::PauseReceiverUntilFlushCompletes(std::move(flush));
+  }
+
+  void FlushAsync(AsyncFlusher flusher) {
+    ConfigureProxyIfNecessary();
+    InterfacePtrStateBase::FlushAsync(std::move(flusher));
   }
 
   void FlushForTesting() {
@@ -175,9 +202,9 @@ class InterfacePtrState : public InterfacePtrStateBase {
 
   // After this method is called, the object is in an invalid state and
   // shouldn't be reused.
-  InterfacePtrInfo<Interface> PassInterface() {
+  PendingRemoteState Unbind() {
     proxy_.reset();
-    return InterfacePtrInfo<Interface>(PassMessagePipe(), version());
+    return InterfacePtrStateBase::Unbind();
   }
 
   void set_connection_error_handler(base::OnceClosure error_handler) {
@@ -217,17 +244,6 @@ class InterfacePtrState : public InterfacePtrStateBase {
     router()->EnableTestingMode();
   }
 
-  void ForwardMessage(Message message) {
-    ConfigureProxyIfNecessary();
-    endpoint_client()->Accept(&message);
-  }
-
-  void ForwardMessageWithResponder(Message message,
-                                   std::unique_ptr<MessageReceiver> responder) {
-    ConfigureProxyIfNecessary();
-    endpoint_client()->AcceptWithResponder(&message, std::move(responder));
-  }
-
   void RaiseError() {
     ConfigureProxyIfNecessary();
     endpoint_client()->RaiseError();
@@ -244,16 +260,15 @@ class InterfacePtrState : public InterfacePtrStateBase {
 
     if (InitializeEndpointClient(
             Interface::PassesAssociatedKinds_, Interface::HasSyncMethods_,
+            Interface::HasUninterruptableMethods_,
             std::make_unique<typename Interface::ResponseValidator_>(),
-            Interface::Name_)) {
-      router()->SetMasterInterfaceName(Interface::Name_);
+            Interface::Name_, Interface::MessageToMethodInfo_,
+            Interface::MessageToMethodName_)) {
       proxy_ = std::make_unique<Proxy>(endpoint_client());
     }
   }
 
   std::unique_ptr<Proxy> proxy_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterfacePtrState);
 };
 
 }  // namespace internal

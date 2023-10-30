@@ -1,10 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.net.test.util;
 
 import android.util.Base64;
+
+import androidx.annotation.GuardedBy;
 
 import org.chromium.base.Log;
 
@@ -25,7 +27,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import javax.annotation.concurrent.GuardedBy;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -181,8 +182,18 @@ public class WebServer {
             return matchingHeaders;
         }
 
+        private static boolean hasChunkedTransferEncoding(HTTPRequest req) {
+            List<String> transferEncodings = req.headerValues("Transfer-Encoding");
+            for (String encoding : transferEncodings) {
+                if (encoding.equals("chunked")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /** Parses an HTTP request from an input stream. */
-        static public HTTPRequest parse(InputStream stream) throws InvalidRequest, IOException {
+        public static HTTPRequest parse(InputStream stream) throws InvalidRequest, IOException {
             boolean firstLine = true;
             HTTPRequest req = new HTTPRequest();
             ArrayList<HTTPHeader> mHeaders = new ArrayList<HTTPHeader>();
@@ -250,7 +261,7 @@ public class WebServer {
                     offset += bytesRead;
                 }
                 req.mBody = content;
-            } else {
+            } else if (hasChunkedTransferEncoding(req)) {
                 ByteArrayOutputStream mBody = new ByteArrayOutputStream();
                 byte[] buffer = new byte[1000];
                 int bytesRead;

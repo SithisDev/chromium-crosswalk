@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,9 @@
 #include <string>
 #include <utility>
 
+#include "base/ranges/algorithm.h"
+#include "base/strings/abseil_string_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_usage_estimator.h"
@@ -25,19 +28,19 @@ void NetLogInvalidHeader(const NetLogWithSource& net_log,
                          const char* error_message) {
   net_log.AddEvent(NetLogEventType::HTTP2_SESSION_RECV_INVALID_HEADER,
                    [&](NetLogCaptureMode capture_mode) {
-                     base::DictionaryValue dict;
-                     dict.SetKey("header_name", NetLogStringValue(header_name));
-                     dict.SetKey("header_value",
-                                 NetLogStringValue(ElideHeaderValueForNetLog(
-                                     capture_mode, header_name.as_string(),
-                                     header_value.as_string())));
-                     dict.SetString("error", error_message);
-                     return dict;
+                     base::Value::Dict dict;
+                     dict.Set("header_name", NetLogStringValue(header_name));
+                     dict.Set("header_value",
+                              NetLogStringValue(ElideHeaderValueForNetLog(
+                                  capture_mode, std::string(header_name),
+                                  std::string(header_value))));
+                     dict.Set("error", error_message);
+                     return base::Value(std::move(dict));
                    });
 }
 
 bool ContainsUppercaseAscii(base::StringPiece str) {
-  return std::any_of(str.begin(), str.end(), base::IsAsciiUpper<char>);
+  return base::ranges::any_of(str, base::IsAsciiUpper<char>);
 }
 
 }  // namespace
@@ -46,21 +49,18 @@ HeaderCoalescer::HeaderCoalescer(uint32_t max_header_list_size,
                                  const NetLogWithSource& net_log)
     : max_header_list_size_(max_header_list_size), net_log_(net_log) {}
 
-void HeaderCoalescer::OnHeader(base::StringPiece key, base::StringPiece value) {
+void HeaderCoalescer::OnHeader(absl::string_view key, absl::string_view value) {
   if (error_seen_)
     return;
-  if (!AddHeader(key, value))
+  if (!AddHeader(base::StringViewToStringPiece(key),
+                 base::StringViewToStringPiece(value)))
     error_seen_ = true;
 }
 
-spdy::SpdyHeaderBlock HeaderCoalescer::release_headers() {
+spdy::Http2HeaderBlock HeaderCoalescer::release_headers() {
   DCHECK(headers_valid_);
   headers_valid_ = false;
   return std::move(headers_);
-}
-
-size_t HeaderCoalescer::EstimateMemoryUsage() const {
-  return base::trace_event::EstimateMemoryUsage(headers_);
 }
 
 bool HeaderCoalescer::AddHeader(base::StringPiece key,
@@ -122,7 +122,8 @@ bool HeaderCoalescer::AddHeader(base::StringPiece key,
     }
   }
 
-  headers_.AppendValueOrAddHeader(key, value);
+  headers_.AppendValueOrAddHeader(base::StringPieceToStringView(key),
+                                  base::StringPieceToStringView(value));
   return true;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/values.h"
+#include "net/base/proxy_delegate.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_response_headers.h"
@@ -25,17 +25,18 @@ namespace net {
 QuicProxyClientSocket::QuicProxyClientSocket(
     std::unique_ptr<QuicChromiumClientStream::Handle> stream,
     std::unique_ptr<QuicChromiumClientSession::Handle> session,
+    const ProxyServer& proxy_server,
     const std::string& user_agent,
     const HostPortPair& endpoint,
     const NetLogWithSource& net_log,
-    HttpAuthController* auth_controller)
-    : next_state_(STATE_DISCONNECTED),
-      stream_(std::move(stream)),
+    scoped_refptr<HttpAuthController> auth_controller,
+    ProxyDelegate* proxy_delegate)
+    : stream_(std::move(stream)),
       session_(std::move(session)),
-      read_buf_(nullptr),
-      write_buf_len_(0),
       endpoint_(endpoint),
-      auth_(auth_controller),
+      auth_(std::move(auth_controller)),
+      proxy_server_(proxy_server),
+      proxy_delegate_(proxy_delegate),
       user_agent_(user_agent),
       net_log_(net_log) {
   DCHECK(stream_->IsOpen());
@@ -69,14 +70,6 @@ int QuicProxyClientSocket::RestartWithAuth(CompletionOnceCallback callback) {
   // created (possibly on top of the same QUIC Session).
   next_state_ = STATE_DISCONNECTED;
   return ERR_UNABLE_TO_REUSE_CONNECTION_FOR_PROXY_AUTH;
-}
-
-bool QuicProxyClientSocket::IsUsingSpdy() const {
-  return false;
-}
-
-NextProto QuicProxyClientSocket::GetProxyNegotiatedProtocol() const {
-  return kProtoQUIC;
 }
 
 // Ignore priority changes, just use priority of initial request. Since multiple
@@ -136,20 +129,21 @@ bool QuicProxyClientSocket::WasEverUsed() const {
 }
 
 bool QuicProxyClientSocket::WasAlpnNegotiated() const {
+  // Do not delegate to `session_`. While `session_` negotiates ALPN with the
+  // proxy, this object represents the tunneled TCP connection to the origin.
   return false;
 }
 
 NextProto QuicProxyClientSocket::GetNegotiatedProtocol() const {
+  // Do not delegate to `session_`. While `session_` negotiates ALPN with the
+  // proxy, this object represents the tunneled TCP connection to the origin.
   return kProtoUnknown;
 }
 
 bool QuicProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
-  return session_->GetSSLInfo(ssl_info);
-}
-
-void QuicProxyClientSocket::GetConnectionAttempts(
-    ConnectionAttempts* out) const {
-  out->clear();
+  // Do not delegate to `session_`. While `session_` has a secure channel to the
+  // proxy, this object represents the tunneled TCP connection to the origin.
+  return false;
 }
 
 int64_t QuicProxyClientSocket::GetTotalReceivedBytes() const {
@@ -181,9 +175,10 @@ int QuicProxyClientSocket::Read(IOBuffer* buf,
     return 0;
   }
 
-  int rv = stream_->ReadBody(buf, buf_len,
-                             base::Bind(&QuicProxyClientSocket::OnReadComplete,
-                                        weak_factory_.GetWeakPtr()));
+  int rv =
+      stream_->ReadBody(buf, buf_len,
+                        base::BindOnce(&QuicProxyClientSocket::OnReadComplete,
+                                       weak_factory_.GetWeakPtr()));
 
   if (rv == ERR_IO_PENDING) {
     read_callback_ = std::move(callback);
@@ -228,9 +223,9 @@ int QuicProxyClientSocket::Write(
                                 buf->data());
 
   int rv = stream_->WriteStreamData(
-      quic::QuicStringPiece(buf->data(), buf_len), false,
-      base::Bind(&QuicProxyClientSocket::OnWriteComplete,
-                 weak_factory_.GetWeakPtr()));
+      base::StringPiece(buf->data(), buf_len), false,
+      base::BindOnce(&QuicProxyClientSocket::OnWriteComplete,
+                     weak_factory_.GetWeakPtr()));
   if (rv == OK)
     return buf_len;
 
@@ -326,8 +321,8 @@ int QuicProxyClientSocket::DoGenerateAuthToken() {
   next_state_ = STATE_GENERATE_AUTH_TOKEN_COMPLETE;
   return auth_->MaybeGenerateAuthToken(
       &request_,
-      base::Bind(&QuicProxyClientSocket::OnIOComplete,
-                 weak_factory_.GetWeakPtr()),
+      base::BindOnce(&QuicProxyClientSocket::OnIOComplete,
+                     weak_factory_.GetWeakPtr()),
       net_log_);
 }
 
@@ -347,6 +342,13 @@ int QuicProxyClientSocket::DoSendRequest() {
     auth_->AddAuthorizationHeader(&authorization_headers);
   }
 
+  if (proxy_delegate_) {
+    HttpRequestHeaders proxy_delegate_headers;
+    proxy_delegate_->OnBeforeTunnelRequest(proxy_server_,
+                                           &proxy_delegate_headers);
+    request_.extra_headers.MergeFrom(proxy_delegate_headers);
+  }
+
   std::string request_line;
   BuildTunnelRequest(endpoint_, authorization_headers, user_agent_,
                      &request_line, &request_.extra_headers);
@@ -355,7 +357,7 @@ int QuicProxyClientSocket::DoSendRequest() {
                        NetLogEventType::HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
                        request_line, &request_.extra_headers);
 
-  spdy::SpdyHeaderBlock headers;
+  spdy::Http2HeaderBlock headers;
   CreateSpdyHeadersFromHttpRequest(request_, request_.extra_headers, &headers);
 
   return stream_->WriteHeaders(std::move(headers), false, nullptr);
@@ -381,8 +383,8 @@ int QuicProxyClientSocket::DoReadReply() {
 
   int rv = stream_->ReadInitialHeaders(
       &response_header_block_,
-      base::Bind(&QuicProxyClientSocket::OnReadResponseHeadersComplete,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&QuicProxyClientSocket::OnReadResponseHeadersComplete,
+                     weak_factory_.GetWeakPtr()));
   if (rv == ERR_IO_PENDING)
     return ERR_IO_PENDING;
   if (rv < 0)
@@ -403,6 +405,15 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
       net_log_, NetLogEventType::HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       response_.headers.get());
 
+  if (proxy_delegate_) {
+    int rv = proxy_delegate_->OnTunnelHeadersReceived(proxy_server_,
+                                                      *response_.headers);
+    if (rv != OK) {
+      DCHECK_NE(ERR_IO_PENDING, rv);
+      return rv;
+    }
+  }
+
   switch (response_.headers->response_code()) {
     case 200:  // OK
       next_state_ = STATE_CONNECT_COMPLETE;
@@ -410,8 +421,7 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
 
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_CONNECT_COMPLETE;
-      if (!SanitizeProxyAuth(&response_))
-        return ERR_TUNNEL_CONNECTION_FAILED;
+      SanitizeProxyAuth(response_);
       return HandleProxyAuthChallenge(auth_.get(), &response_, net_log_);
 
     default:
@@ -422,7 +432,7 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
 }
 
 void QuicProxyClientSocket::OnReadResponseHeadersComplete(int result) {
-  // Convert the now-populated spdy::SpdyHeaderBlock to HttpResponseInfo
+  // Convert the now-populated spdy::Http2HeaderBlock to HttpResponseInfo
   if (result > 0)
     result = ProcessResponseHeaders(response_header_block_);
 
@@ -431,30 +441,12 @@ void QuicProxyClientSocket::OnReadResponseHeadersComplete(int result) {
 }
 
 int QuicProxyClientSocket::ProcessResponseHeaders(
-    const spdy::SpdyHeaderBlock& headers) {
-  if (!SpdyHeadersToHttpResponse(headers, &response_)) {
+    const spdy::Http2HeaderBlock& headers) {
+  if (SpdyHeadersToHttpResponse(headers, &response_) != OK) {
     DLOG(WARNING) << "Invalid headers";
     return ERR_QUIC_PROTOCOL_ERROR;
   }
-  // Populate |connect_timing_| when response headers are received. This
-  // should take care of 0-RTT where request is sent before handshake is
-  // confirmed.
-  connect_timing_ = session_->GetConnectTiming();
   return OK;
-}
-
-bool QuicProxyClientSocket::GetLoadTimingInfo(
-    LoadTimingInfo* load_timing_info) const {
-  bool is_first_stream = stream_->IsFirstStream();
-  if (stream_)
-    is_first_stream = stream_->IsFirstStream();
-  if (is_first_stream) {
-    load_timing_info->socket_reused = false;
-    load_timing_info->connect_timing = connect_timing_;
-  } else {
-    load_timing_info->socket_reused = true;
-  }
-  return true;
 }
 
 }  // namespace net

@@ -1,33 +1,36 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "mojo/public/cpp/system/invitation.h"
+
 #include <utility>
 
-#include "mojo/public/cpp/system/invitation.h"
 #include "base/base_paths.h"
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/feature_list.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/multiprocess_test.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
+#include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "mojo/public/cpp/system/wait.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
 #include "mojo/public/cpp/platform/named_platform_channel.h"
 #endif
 
@@ -41,7 +44,8 @@ enum class InvitationType {
 
 enum class TransportType {
   kChannel,
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
+  // Fuchsia has no named pipe support.
   kChannelServer,
 #endif
 };
@@ -50,7 +54,7 @@ enum class TransportType {
 // should be testing against.
 const char kTransportTypeSwitch[] = "test-transport-type";
 const char kTransportTypeChannel[] = "channel";
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
 const char kTransportTypeChannelServer[] = "channel-server";
 #endif
 
@@ -58,6 +62,10 @@ class InvitationCppTest : public testing::Test,
                           public testing::WithParamInterface<TransportType> {
  public:
   InvitationCppTest() = default;
+
+  InvitationCppTest(const InvitationCppTest&) = delete;
+  InvitationCppTest& operator=(const InvitationCppTest&) = delete;
+
   ~InvitationCppTest() override = default;
 
  protected:
@@ -71,7 +79,7 @@ class InvitationCppTest : public testing::Test,
         base::GetMultiProcessTestChildBaseCommandLine());
 
     base::LaunchOptions launch_options;
-    base::Optional<PlatformChannel> channel;
+    absl::optional<PlatformChannel> channel;
     PlatformChannelEndpoint channel_endpoint;
     PlatformChannelServerEndpoint server_endpoint;
     switch (transport_type) {
@@ -80,18 +88,18 @@ class InvitationCppTest : public testing::Test,
                                        kTransportTypeChannel);
         channel.emplace();
         channel->PrepareToPassRemoteEndpoint(&launch_options, &command_line);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
         launch_options.start_hidden = true;
 #endif
         channel_endpoint = channel->TakeLocalEndpoint();
         break;
       }
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
       case TransportType::kChannelServer: {
         command_line.AppendSwitchASCII(kTransportTypeSwitch,
                                        kTransportTypeChannelServer);
         NamedPlatformChannel::Options named_channel_options;
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
         CHECK(base::PathService::Get(base::DIR_TEMP,
                                      &named_channel_options.socket_dir));
 #endif
@@ -100,8 +108,16 @@ class InvitationCppTest : public testing::Test,
         server_endpoint = named_channel.TakeServerEndpoint();
         break;
       }
-#endif  //  !defined(OS_FUCHSIA)
+#endif  //  !BUILDFLAG(IS_FUCHSIA)
     }
+
+    std::string enable_features;
+    std::string disable_features;
+    base::FeatureList::GetInstance()->GetCommandLineFeatureOverrides(
+        &enable_features, &disable_features);
+    command_line.AppendSwitchASCII(switches::kEnableFeatures, enable_features);
+    command_line.AppendSwitchASCII(switches::kDisableFeatures,
+                                   disable_features);
 
     child_process_ = base::SpawnMultiProcessTestChild(
         test_client_name, command_line, launch_options);
@@ -128,7 +144,7 @@ class InvitationCppTest : public testing::Test,
               OutgoingInvitation::SendIsolated(std::move(channel_endpoint));
         }
         break;
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
       case TransportType::kChannelServer:
         DCHECK(server_endpoint.is_valid());
         if (invitation_type == InvitationType::kNormal) {
@@ -142,7 +158,7 @@ class InvitationCppTest : public testing::Test,
               OutgoingInvitation::SendIsolated(std::move(server_endpoint));
         }
         break;
-#endif  // !defined(OS_FUCHSIA)
+#endif  // !BUILDFLAG(IS_FUCHSIA)
     }
   }
 
@@ -172,17 +188,18 @@ class InvitationCppTest : public testing::Test,
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::Process child_process_;
-
-  DISALLOW_COPY_AND_ASSIGN(InvitationCppTest);
 };
 
 class TestClientBase : public InvitationCppTest {
  public:
+  TestClientBase(const TestClientBase&) = delete;
+  TestClientBase& operator=(const TestClientBase&) = delete;
+
   static PlatformChannelEndpoint RecoverEndpointFromCommandLine() {
     const auto& command_line = *base::CommandLine::ForCurrentProcess();
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
     std::string transport_type_string =
         command_line.GetSwitchValueASCII(kTransportTypeSwitch);
     CHECK(!transport_type_string.empty());
@@ -200,9 +217,6 @@ class TestClientBase : public InvitationCppTest {
   static ScopedMessagePipeHandle AcceptIsolatedInvitation() {
     return IncomingInvitation::AcceptIsolated(RecoverEndpointFromCommandLine());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestClientBase);
 };
 
 #define DEFINE_TEST_CLIENT(name)             \
@@ -234,6 +248,12 @@ DEFINE_TEST_CLIENT(CppSendClient) {
 }
 
 TEST_P(InvitationCppTest, SendIsolated) {
+  if (mojo::core::IsMojoIpczEnabled()) {
+    // TODO(http://crbug.com/1299283): Enable this test with MojoIpcz once
+    // support for isolated connections is implemented.
+    GTEST_SKIP() << "MojoIpcz does not yet support isolated invitations.";
+  }
+
   ScopedMessagePipeHandle pipe;
   LaunchChildTestClient("CppSendIsolatedClient", &pipe, 1,
                         InvitationType::kIsolated, GetParam());
@@ -264,7 +284,13 @@ DEFINE_TEST_CLIENT(CppSendWithMultiplePipesClient) {
 }
 
 TEST(InvitationCppTest_NoParam, SendIsolatedInvitationWithDuplicateName) {
-  base::test::ScopedTaskEnvironment task_environment;
+  if (mojo::core::IsMojoIpczEnabled()) {
+    // TODO(http://crbug.com/1299283): Enable this test with MojoIpcz once
+    // support for isolated connections is implemented.
+    GTEST_SKIP() << "MojoIpcz does not yet support isolated invitations.";
+  }
+
+  base::test::TaskEnvironment task_environment;
   PlatformChannel channel1;
   PlatformChannel channel2;
   const char kConnectionName[] = "foo";
@@ -278,7 +304,15 @@ TEST(InvitationCppTest_NoParam, SendIsolatedInvitationWithDuplicateName) {
 const char kErrorMessage[] = "ur bad :{{";
 const char kDisconnectMessage[] = "go away plz";
 
-TEST_P(InvitationCppTest, ProcessErrors) {
+// Flakily times out on Android under ASAN.
+// crbug.com/1011494
+#if BUILDFLAG(IS_ANDROID) && defined(ADDRESS_SANITIZER)
+#define MAYBE_ProcessErrors DISABLED_ProcessErrors
+#else
+#define MAYBE_ProcessErrors ProcessErrors
+#endif
+
+TEST_P(InvitationCppTest, MAYBE_ProcessErrors) {
   ProcessErrorCallback actual_error_callback;
 
   ScopedMessagePipeHandle pipe;
@@ -322,10 +356,10 @@ DEFINE_TEST_CLIENT(CppProcessErrorsClient) {
   EXPECT_EQ(kDisconnectMessage, ReadMessage(pipe));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          InvitationCppTest,
                          testing::Values(TransportType::kChannel
-#if !defined(OS_FUCHSIA)
+#if !BUILDFLAG(IS_FUCHSIA)
                                          ,
                                          TransportType::kChannelServer
 #endif

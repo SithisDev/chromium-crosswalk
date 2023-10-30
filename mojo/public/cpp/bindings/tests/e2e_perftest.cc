@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/current_thread.h"
 #include "base/test/perf_time_logger.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/core/embedder/embedder.h"
 #include "mojo/core/test/mojo_test_base.h"
@@ -81,8 +81,7 @@ void PingPongTest::RunTest(int iterations, int batch_size, int message_size) {
   current_iterations_ = 0;
   calls_outstanding_ = 0;
 
-  base::MessageLoopCurrent::Get()->SetNestableTasksAllowed(true);
-  base::RunLoop run_loop;
+  base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
   quit_closure_ = run_loop.QuitClosure();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&PingPongTest::DoPing, base::Unretained(this)));
@@ -122,15 +121,15 @@ class MojoE2EPerftest : public core::test::MojoTestBase {
       base::RunLoop run_loop;
       runner->PostTaskAndReply(
           FROM_HERE,
-          base::Bind(&MojoE2EPerftest::RunTests, base::Unretained(this),
-                     client_mp, test_name),
+          base::BindOnce(&MojoE2EPerftest::RunTests, base::Unretained(this),
+                         client_mp, test_name),
           run_loop.QuitClosure());
       run_loop.Run();
     }
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
  private:
   void RunTests(MojoHandle client_mp, const std::string& test_name) {
@@ -175,8 +174,8 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(PingService, MojoE2EPerftest, mp) {
       base::BindOnce(
           &CreateAndRunService, std::move(receiver),
           base::BindOnce(base::IgnoreResult(&base::TaskRunner::PostTask),
-                         scoped_task_environment_.GetMainThreadTaskRunner(),
-                         FROM_HERE, run_loop.QuitClosure())));
+                         task_environment_.GetMainThreadTaskRunner(), FROM_HERE,
+                         run_loop.QuitClosure())));
   run_loop.Run();
 }
 
@@ -185,9 +184,8 @@ TEST_F(MojoE2EPerftest, MultiProcessEchoMainThread) {
     MojoHandle client_mp, service_mp;
     CreateMessagePipe(&client_mp, &service_mp);
     WriteMessageWithHandles(mp, "hello", &service_mp, 1);
-    RunTestOnTaskRunner(
-        scoped_task_environment_.GetMainThreadTaskRunner().get(), client_mp,
-        "MultiProcessEchoMainThread");
+    RunTestOnTaskRunner(task_environment_.GetMainThreadTaskRunner().get(),
+                        client_mp, "MultiProcessEchoMainThread");
   });
 }
 

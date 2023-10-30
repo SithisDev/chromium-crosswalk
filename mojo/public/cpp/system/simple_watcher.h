@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -89,7 +88,12 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
   SimpleWatcher(const base::Location& from_here,
                 ArmingPolicy arming_policy,
                 scoped_refptr<base::SequencedTaskRunner> runner =
-                    base::SequencedTaskRunnerHandle::Get());
+                    base::SequencedTaskRunnerHandle::Get(),
+                const char* handler_tag = nullptr);
+
+  SimpleWatcher(const SimpleWatcher&) = delete;
+  SimpleWatcher& operator=(const SimpleWatcher&) = delete;
+
   ~SimpleWatcher();
 
   // Indicates if the SimpleWatcher is currently watching a handle.
@@ -120,7 +124,7 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
   MojoResult Watch(Handle handle,
                    MojoHandleSignals signals,
                    MojoTriggerCondition condition,
-                   const ReadyCallbackWithState& callback);
+                   ReadyCallbackWithState callback);
 
   // DEPRECATED: Please use the above signature instead.
   //
@@ -129,9 +133,9 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
   // a notification.
   MojoResult Watch(Handle handle,
                    MojoHandleSignals signals,
-                   const ReadyCallback& callback) {
+                   ReadyCallback callback) {
     return Watch(handle, signals, MOJO_WATCH_CONDITION_SATISFIED,
-                 base::Bind(&DiscardReadyState, callback));
+                 base::BindRepeating(&DiscardReadyState, std::move(callback)));
   }
 
   // Cancels the current watch. Once this returns, the ReadyCallback previously
@@ -179,12 +183,6 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
   Handle handle() const { return handle_; }
   ReadyCallbackWithState ready_callback() const { return callback_; }
 
-  // Sets the tag used by the heap profiler.
-  // |tag| must be a const string literal.
-  void set_heap_profiler_tag(const char* heap_profiler_tag) {
-    heap_profiler_tag_ = heap_profiler_tag;
-  }
-
  private:
   class Context;
 
@@ -231,11 +229,9 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
 
   // Tag used to ID memory allocations that originated from notifications in
   // this watcher.
-  const char* heap_profiler_tag_ = nullptr;
+  const char* handler_tag_ = nullptr;
 
   base::WeakPtrFactory<SimpleWatcher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleWatcher);
 };
 
 }  // namespace mojo

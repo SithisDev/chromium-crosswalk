@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "crypto/scoped_capi_types.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_private_key.h"
 #include "net/ssl/ssl_private_key_test_util.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/bn.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
@@ -86,8 +86,8 @@ bool PKCS8ToBLOBForCAPI(const std::string& pkcs8, std::vector<uint8_t>* blob) {
 
   RSAPUBKEY rsapubkey = {0};
   rsapubkey.magic = 0x32415352;
-  rsapubkey.bitlen = BN_num_bits(rsa->n);
-  rsapubkey.pubexp = BN_get_word(rsa->e);
+  rsapubkey.bitlen = RSA_bits(rsa);
+  rsapubkey.pubexp = BN_get_word(RSA_get0_e(rsa));
 
   uint8_t* blob_data;
   size_t blob_len;
@@ -97,13 +97,20 @@ bool PKCS8ToBLOBForCAPI(const std::string& pkcs8, std::vector<uint8_t>* blob) {
                      sizeof(header)) ||
       !CBB_add_bytes(cbb.get(), reinterpret_cast<const uint8_t*>(&rsapubkey),
                      sizeof(rsapubkey)) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->n, rsapubkey.bitlen / 8) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->p, rsapubkey.bitlen / 16) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->q, rsapubkey.bitlen / 16) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->dmp1, rsapubkey.bitlen / 16) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->dmq1, rsapubkey.bitlen / 16) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->iqmp, rsapubkey.bitlen / 16) ||
-      !AddBIGNUMLittleEndian(cbb.get(), rsa->d, rsapubkey.bitlen / 8) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_n(rsa),
+                             rsapubkey.bitlen / 8) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_p(rsa),
+                             rsapubkey.bitlen / 16) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_q(rsa),
+                             rsapubkey.bitlen / 16) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_dmp1(rsa),
+                             rsapubkey.bitlen / 16) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_dmq1(rsa),
+                             rsapubkey.bitlen / 16) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_iqmp(rsa),
+                             rsapubkey.bitlen / 16) ||
+      !AddBIGNUMLittleEndian(cbb.get(), RSA_get0_d(rsa),
+                             rsapubkey.bitlen / 8) ||
       !CBB_finish(cbb.get(), &blob_data, &blob_len)) {
     return false;
   }
@@ -139,11 +146,11 @@ bool PKCS8ToBLOBForCNG(const std::string& pkcs8,
     const RSA* rsa = EVP_PKEY_get0_RSA(key.get());
     BCRYPT_RSAKEY_BLOB header = {0};
     header.Magic = BCRYPT_RSAFULLPRIVATE_MAGIC;
-    header.BitLength = BN_num_bits(rsa->n);
-    header.cbPublicExp = BN_num_bytes(rsa->e);
-    header.cbModulus = BN_num_bytes(rsa->n);
-    header.cbPrime1 = BN_num_bytes(rsa->p);
-    header.cbPrime2 = BN_num_bytes(rsa->q);
+    header.BitLength = RSA_bits(rsa);
+    header.cbPublicExp = BN_num_bytes(RSA_get0_e(rsa));
+    header.cbModulus = BN_num_bytes(RSA_get0_n(rsa));
+    header.cbPrime1 = BN_num_bytes(RSA_get0_p(rsa));
+    header.cbPrime2 = BN_num_bytes(RSA_get0_q(rsa));
 
     uint8_t* blob_data;
     size_t blob_len;
@@ -151,14 +158,14 @@ bool PKCS8ToBLOBForCNG(const std::string& pkcs8,
     if (!CBB_init(cbb.get(), sizeof(header) + pkcs8.size()) ||
         !CBB_add_bytes(cbb.get(), reinterpret_cast<const uint8_t*>(&header),
                        sizeof(header)) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->e, header.cbPublicExp) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->n, header.cbModulus) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->p, header.cbPrime1) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->q, header.cbPrime2) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->dmp1, header.cbPrime1) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->dmq1, header.cbPrime2) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->iqmp, header.cbPrime1) ||
-        !AddBIGNUMBigEndian(cbb.get(), rsa->d, header.cbModulus) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_e(rsa), header.cbPublicExp) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_n(rsa), header.cbModulus) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_p(rsa), header.cbPrime1) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_q(rsa), header.cbPrime2) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_dmp1(rsa), header.cbPrime1) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_dmq1(rsa), header.cbPrime2) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_iqmp(rsa), header.cbPrime1) ||
+        !AddBIGNUMBigEndian(cbb.get(), RSA_get0_d(rsa), header.cbModulus) ||
         !CBB_finish(cbb.get(), &blob_data, &blob_len)) {
       return false;
     }
@@ -223,7 +230,7 @@ bool PKCS8ToBLOBForCNG(const std::string& pkcs8,
 }  // namespace
 
 class SSLPlatformKeyCNGTest : public testing::TestWithParam<TestKey>,
-                              public WithScopedTaskEnvironment {};
+                              public WithTaskEnvironment {};
 
 TEST_P(SSLPlatformKeyCNGTest, KeyMatches) {
   const TestKey& test_key = GetParam();
@@ -268,13 +275,13 @@ TEST_P(SSLPlatformKeyCNGTest, KeyMatches) {
   TestSSLPrivateKeyMatches(key.get(), pkcs8);
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          SSLPlatformKeyCNGTest,
                          testing::ValuesIn(kTestKeys),
                          TestKeyToString);
 
 TEST(SSLPlatformKeyCAPITest, KeyMatches) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   // Load test data.
   scoped_refptr<X509Certificate> cert =
@@ -289,7 +296,8 @@ TEST(SSLPlatformKeyCAPITest, KeyMatches) {
   // Import the key into CAPI. Use CRYPT_VERIFYCONTEXT for an ephemeral key.
   crypto::ScopedHCRYPTPROV prov;
   ASSERT_NE(FALSE,
-            CryptAcquireContext(prov.receive(), nullptr, nullptr, PROV_RSA_AES,
+            CryptAcquireContext(crypto::ScopedHCRYPTPROV::Receiver(prov).get(),
+                                nullptr, nullptr, PROV_RSA_AES,
                                 CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
       << GetLastError();
 
@@ -297,15 +305,16 @@ TEST(SSLPlatformKeyCAPITest, KeyMatches) {
   ASSERT_TRUE(PKCS8ToBLOBForCAPI(pkcs8, &blob));
 
   crypto::ScopedHCRYPTKEY hcryptkey;
-  ASSERT_NE(FALSE, CryptImportKey(prov.get(), blob.data(), blob.size(),
-                                  0 /* hPubKey */, 0 /* dwFlags */,
-                                  hcryptkey.receive()))
+  ASSERT_NE(FALSE,
+            CryptImportKey(prov.get(), blob.data(), blob.size(),
+                           0 /* hPubKey */, 0 /* dwFlags */,
+                           crypto::ScopedHCRYPTKEY::Receiver(hcryptkey).get()))
       << GetLastError();
   // Release |hcryptkey| so it does not outlive |prov|.
   hcryptkey.reset();
 
   scoped_refptr<SSLPrivateKey> key =
-      WrapCAPIPrivateKey(cert.get(), prov.release(), AT_SIGNATURE);
+      WrapCAPIPrivateKey(cert.get(), std::move(prov), AT_SIGNATURE);
   ASSERT_TRUE(key);
 
   std::vector<uint16_t> expected = {

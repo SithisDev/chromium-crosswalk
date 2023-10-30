@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,31 +7,33 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_log_util.h"
+#include "net/http/http_raw_request_headers.h"
 #include "net/http/http_response_headers.h"
-#include "net/http/http_util.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
+#include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_job.h"
 
 namespace net {
 
-URLRequestRedirectJob::URLRequestRedirectJob(URLRequest* request,
-                                             NetworkDelegate* network_delegate,
-                                             const GURL& redirect_destination,
-                                             ResponseCode response_code,
-                                             const std::string& redirect_reason)
-    : URLRequestJob(request, network_delegate),
+URLRequestRedirectJob::URLRequestRedirectJob(
+    URLRequest* request,
+    const GURL& redirect_destination,
+    RedirectUtil::ResponseCode response_code,
+    const std::string& redirect_reason)
+    : URLRequestJob(request),
       redirect_destination_(redirect_destination),
       response_code_(response_code),
       redirect_reason_(redirect_reason) {
@@ -82,48 +84,43 @@ bool URLRequestRedirectJob::CopyFragmentOnRedirect(const GURL& location) const {
 
 void URLRequestRedirectJob::StartAsync() {
   DCHECK(request_);
-  DCHECK(request_->status().is_success());
 
   receive_headers_end_ = base::TimeTicks::Now();
   response_time_ = base::Time::Now();
 
-  std::string header_string =
-      base::StringPrintf("HTTP/1.1 %i Internal Redirect\n"
-                             "Location: %s\n"
-                             "Non-Authoritative-Reason: %s",
-                         response_code_,
-                         redirect_destination_.spec().c_str(),
-                         redirect_reason_.c_str());
-
-  std::string http_origin;
   const HttpRequestHeaders& request_headers = request_->extra_request_headers();
-  if (request_headers.GetHeader("Origin", &http_origin)) {
-    // If this redirect is used in a cross-origin request, add CORS headers to
-    // make sure that the redirect gets through. Note that the destination URL
-    // is still subject to the usual CORS policy, i.e. the resource will only
-    // be available to web pages if the server serves the response with the
-    // required CORS response headers.
-    header_string += base::StringPrintf(
-        "\n"
-        "Access-Control-Allow-Origin: %s\n"
-        "Access-Control-Allow-Credentials: true",
-        http_origin.c_str());
-  }
-
-  fake_headers_ = base::MakeRefCounted<HttpResponseHeaders>(
-      HttpUtil::AssembleRawHeaders(header_string));
-  DCHECK(fake_headers_->IsRedirect(nullptr));
+  fake_headers_ = RedirectUtil::SynthesizeRedirectHeaders(
+      redirect_destination_, response_code_, redirect_reason_, request_headers);
 
   NetLogResponseHeaders(
       request()->net_log(),
       NetLogEventType::URL_REQUEST_FAKE_RESPONSE_HEADERS_CREATED,
       fake_headers_.get());
 
+  // Send request headers along if there's a callback
+  if (request_headers_callback_) {
+    HttpRawRequestHeaders raw_request_headers;
+    for (const auto& header : request_headers.GetHeaderVector()) {
+      raw_request_headers.Add(header.key, header.value);
+    }
+
+    // Just to make extra sure everyone knows this is an internal header
+    raw_request_headers.set_request_line(
+        base::StringPrintf("%s %s HTTP/1.1\r\n", request_->method().c_str(),
+                           request_->url().PathForRequest().c_str()));
+    request_headers_callback_.Run(std::move(raw_request_headers));
+  }
+
   // TODO(mmenke):  Consider calling the NetworkDelegate with the headers here.
   // There's some weirdness about how to handle the case in which the delegate
   // tries to modify the redirect location, in terms of how IsSafeRedirect
   // should behave, and whether the fragment should be copied.
   URLRequestJob::NotifyHeadersComplete();
+}
+
+void URLRequestRedirectJob::SetRequestHeadersCallback(
+    RequestHeadersCallback callback) {
+  request_headers_callback_ = std::move(callback);
 }
 
 }  // namespace net

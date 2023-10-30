@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,7 @@
 #include "net/der/parse_values.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace net {
-namespace der {
-namespace test {
+namespace net::der::test {
 
 namespace {
 
@@ -24,8 +22,7 @@ base::StringPiece ToStringPiece(const uint8_t (&data)[N]) {
 
 TEST(EncodeValuesTest, EncodeTimeAsGeneralizedTime) {
   // Fri, 24 Jun 2016 17:04:54 GMT
-  base::Time time =
-      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1466787894);
+  base::Time time = base::Time::UnixEpoch() + base::Seconds(1466787894);
   GeneralizedTime generalized_time;
   ASSERT_TRUE(EncodeTimeAsGeneralizedTime(time, &generalized_time));
   EXPECT_EQ(2016, generalized_time.year);
@@ -41,33 +38,20 @@ TEST(EncodeValuesTest, EncodeTimeAsGeneralizedTime) {
 // after the 32-bit time_t maximum, the conversion between base::Time and
 // der::GeneralizedTime goes through the time representation of the underlying
 // platform, which might not be able to handle the full GeneralizedTime date
-// range. Out-of-range times should not be converted to der::GeneralizedTime. In
-// tests, possibly-out-of-range test times are specified as a
-// base::Time::Exploded, and then converted to a base::Time. If the conversion
-// fails, this signals the underlying platform cannot handle the time, and the
-// test aborts early. If the underlying platform can represent the time, then
-// the conversion is successful, and the encoded GeneralizedTime can should
-// match the test time.
+// range. Out-of-range times should not be converted to der::GeneralizedTime.
 //
-// Thu, 1 Jan 1570 00:00:00 GMT. This time is unrepresentable by the Windows
-// native time libraries.
+// Thus, this test focuses on an input date 31 years before the Windows epoch,
+// and confirms that EncodeTimeAsGeneralizedTime() produces the correct result
+// on platforms where it returns true. As of this writing, it will return false
+// on Windows.
 TEST(EncodeValuesTest, EncodeTimeFromBeforeWindowsEpoch) {
-  base::Time::Exploded exploded;
-  exploded.year = 1570;
-  exploded.month = 1;
-  exploded.day_of_week = 5;
-  exploded.day_of_month = 1;
-  exploded.hour = 0;
-  exploded.minute = 0;
-  exploded.second = 0;
-  exploded.millisecond = 0;
-
-  base::Time time;
-  if (!base::Time::FromUTCExploded(exploded, &time))
+  // Thu, 01 Jan 1570 00:00:00 GMT
+  constexpr base::Time kStartOfYear1570 =
+      base::Time::UnixEpoch() - base::Seconds(12622780800);
+  GeneralizedTime generalized_time;
+  if (!EncodeTimeAsGeneralizedTime(kStartOfYear1570, &generalized_time))
     return;
 
-  GeneralizedTime generalized_time;
-  ASSERT_TRUE(EncodeTimeAsGeneralizedTime(time, &generalized_time));
   EXPECT_EQ(1570, generalized_time.year);
   EXPECT_EQ(1, generalized_time.month);
   EXPECT_EQ(1, generalized_time.day);
@@ -113,8 +97,7 @@ TEST(EncodeValuesTest, GeneralizedTimeToTime) {
   generalized_time.seconds = 54;
   base::Time time;
   ASSERT_TRUE(GeneralizedTimeToTime(generalized_time, &time));
-  EXPECT_EQ(base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1466787894),
-            time);
+  EXPECT_EQ(base::Time::UnixEpoch() + base::Seconds(1466787894), time);
 }
 
 TEST(EncodeValuesTest, GeneralizedTimeToTimeBeforeWindowsEpoch) {
@@ -288,8 +271,4 @@ TEST(EncodeValuesTest, EncodeUTCTime) {
   EXPECT_FALSE(EncodeUTCTime(time, out));
 }
 
-}  // namespace test
-
-}  // namespace der
-
-}  // namespace net
+}  // namespace net::der::test

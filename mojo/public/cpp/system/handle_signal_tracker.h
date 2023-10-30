@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define MOJO_PUBLIC_CPP_SYSTEM_HANDLE_SIGNAL_TRACKER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "mojo/public/c/system/types.h"
 #include "mojo/public/cpp/system/handle.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
@@ -29,7 +28,7 @@ namespace mojo {
 class MOJO_CPP_SYSTEM_EXPORT HandleSignalTracker {
  public:
   using NotificationCallback =
-      base::Callback<void(const HandleSignalsState& signals_state)>;
+      base::RepeatingCallback<void(const HandleSignalsState& signals_state)>;
 
   // Constructs a tracker which tracks |signals| on |handle|. |signals| may
   // be any single signal flag or any combination of signal flags.
@@ -37,6 +36,10 @@ class MOJO_CPP_SYSTEM_EXPORT HandleSignalTracker {
                       MojoHandleSignals signals,
                       scoped_refptr<base::SequencedTaskRunner> task_runner =
                           base::SequencedTaskRunnerHandle::Get());
+
+  HandleSignalTracker(const HandleSignalTracker&) = delete;
+  HandleSignalTracker& operator=(const HandleSignalTracker&) = delete;
+
   ~HandleSignalTracker();
 
   const HandleSignalsState& last_known_state() const {
@@ -45,8 +48,8 @@ class MOJO_CPP_SYSTEM_EXPORT HandleSignalTracker {
 
   // Sets an optional callback to be invoked any time the tracker is notified of
   // a relevant state change.
-  void set_notification_callback(const NotificationCallback& callback) {
-    notification_callback_ = callback;
+  void set_notification_callback(NotificationCallback callback) {
+    notification_callback_ = std::move(callback);
   }
 
  private:
@@ -67,8 +70,6 @@ class MOJO_CPP_SYSTEM_EXPORT HandleSignalTracker {
   // Watches for the signal(s) to be cleared. May only be armed when
   // |high_watcher_| is not.
   SimpleWatcher low_watcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(HandleSignalTracker);
 };
 
 }  // namespace mojo

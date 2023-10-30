@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_piece.h"
+#include "mojo/public/c/system/invitation.h"
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
 #include "mojo/public/cpp/platform/platform_channel_server_endpoint.h"
 #include "mojo/public/cpp/system/handle.h"
@@ -55,9 +55,15 @@ class MOJO_CPP_SYSTEM_EXPORT OutgoingInvitation {
  public:
   OutgoingInvitation();
   OutgoingInvitation(OutgoingInvitation&& other);
+
+  OutgoingInvitation(const OutgoingInvitation&) = delete;
+  OutgoingInvitation& operator=(const OutgoingInvitation&) = delete;
+
   ~OutgoingInvitation();
 
   OutgoingInvitation& operator=(OutgoingInvitation&& other);
+
+  void set_extra_flags(MojoSendInvitationFlags flags) { extra_flags_ = flags; }
 
   // Creates a new message pipe, attaching one end to this invitation and
   // returning the other end to the caller. The invitee can extract the
@@ -99,6 +105,13 @@ class MOJO_CPP_SYSTEM_EXPORT OutgoingInvitation {
                    PlatformChannelServerEndpoint server_endpoint,
                    const ProcessErrorCallback& error_callback = {});
 
+  // Similar to |Send()|, but targets a process which will accept the invitation
+  // with |IncomingInvitation::AcceptAsync()| instead of |Accept()|.
+  static void SendAsync(OutgoingInvitation invitation,
+                        base::ProcessHandle target_process,
+                        PlatformChannelEndpoint channel_endpoint,
+                        const ProcessErrorCallback& error_callback = {});
+
   // Sends an isolated invitation over |endpoint|. The process at the other
   // endpoint must use |IncomingInvitation::AcceptIsolated()| to accept the
   // invitation.
@@ -138,9 +151,8 @@ class MOJO_CPP_SYSTEM_EXPORT OutgoingInvitation {
       base::StringPiece connection_name = {});
 
  private:
+  MojoSendInvitationFlags extra_flags_ = MOJO_SEND_INVITATION_FLAG_NONE;
   ScopedInvitationHandle handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(OutgoingInvitation);
 };
 
 // An IncomingInvitation can be accepted by an invited process by calling
@@ -151,16 +163,32 @@ class MOJO_CPP_SYSTEM_EXPORT IncomingInvitation {
   IncomingInvitation();
   IncomingInvitation(IncomingInvitation&& other);
   explicit IncomingInvitation(ScopedInvitationHandle handle);
+
+  IncomingInvitation(const IncomingInvitation&) = delete;
+  IncomingInvitation& operator=(const IncomingInvitation&) = delete;
+
   ~IncomingInvitation();
 
   IncomingInvitation& operator=(IncomingInvitation&& other);
+
+  bool is_valid() const { return handle_.is_valid(); }
 
   // Accepts an incoming invitation from |channel_endpoint|. If the invitation
   // was sent using one end of a |PlatformChannel|, |channel_endpoint| should be
   // the other end of that channel. If the invitation was sent using a
   // |PlatformChannelServerEndpoint|, then |channel_endpoint| should be created
   // by |NamedPlatformChannel::ConnectToServer|.
-  static IncomingInvitation Accept(PlatformChannelEndpoint channel_endpoint);
+  //
+  // Note that this performs blocking I/O on the calling thread.
+  static IncomingInvitation Accept(
+      PlatformChannelEndpoint channel_endpoint,
+      MojoAcceptInvitationFlags flags = MOJO_ACCEPT_INVITATION_FLAG_NONE);
+
+  // Like above, but does not perform any blocking I/O. Not all platforms and
+  // sandbox configurations are compatible with this API. In such cases, the
+  // synchronous |Accept()| above should be used.
+  static IncomingInvitation AcceptAsync(
+      PlatformChannelEndpoint channel_endpoint);
 
   // Accepts an incoming isolated invitation from |channel_endpoint|. See
   // notes on |OutgoingInvitation::SendIsolated()|.
@@ -177,8 +205,6 @@ class MOJO_CPP_SYSTEM_EXPORT IncomingInvitation {
 
  private:
   ScopedInvitationHandle handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(IncomingInvitation);
 };
 
 }  // namespace mojo

@@ -1,33 +1,46 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "build/build_config.h"
-#include "pdf/pdf.h"
-#include "ppapi/c/pp_input_event.h"
-#include "ppapi/c/private/ppb_pdf.h"
-#include "ppapi/c/private/ppp_pdf.h"
+#include "pdf/accessibility_structs.h"
+#include "pdf/content_restriction.h"
+#include "pdf/document_metadata.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/pdfium/public/fpdf_edit.h"
+#include "third_party/pdfium/public/fpdf_formfill.h"
 #include "third_party/pdfium/public/fpdf_fwlevent.h"
 #include "third_party/pdfium/public/fpdf_sysfontinfo.h"
+#include "third_party/pdfium/public/fpdfview.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "pdf/pdf.h"
+#endif
+
+namespace chrome_pdf {
 
 #define STATIC_ASSERT_ENUM(a, b)                            \
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
                 "mismatching enums: " #a)
 
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_SHIFTKEY, FWL_EVENTFLAG_ShiftKey);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_CONTROLKEY, FWL_EVENTFLAG_ControlKey);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_ALTKEY, FWL_EVENTFLAG_AltKey);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_METAKEY, FWL_EVENTFLAG_MetaKey);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_ISKEYPAD, FWL_EVENTFLAG_KeyPad);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_ISAUTOREPEAT,
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kShiftKey,
+                   FWL_EVENTFLAG_ShiftKey);
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kControlKey,
+                   FWL_EVENTFLAG_ControlKey);
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kAltKey,
+                   FWL_EVENTFLAG_AltKey);
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kMetaKey,
+                   FWL_EVENTFLAG_MetaKey);
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kIsKeyPad,
+                   FWL_EVENTFLAG_KeyPad);
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kIsAutoRepeat,
                    FWL_EVENTFLAG_AutoRepeat);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_LEFTBUTTONDOWN,
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kLeftButtonDown,
                    FWL_EVENTFLAG_LeftButtonDown);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_MIDDLEBUTTONDOWN,
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kMiddleButtonDown,
                    FWL_EVENTFLAG_MiddleButtonDown);
-STATIC_ASSERT_ENUM(PP_INPUTEVENT_MODIFIER_RIGHTBUTTONDOWN,
+STATIC_ASSERT_ENUM(blink::WebInputEvent::Modifiers::kRightButtonDown,
                    FWL_EVENTFLAG_RightButtonDown);
 
 STATIC_ASSERT_ENUM(ui::VKEY_BACK, FWL_VKEY_Back);
@@ -200,23 +213,21 @@ STATIC_ASSERT_ENUM(ui::VKEY_PA1, FWL_VKEY_PA1);
 STATIC_ASSERT_ENUM(ui::VKEY_OEM_CLEAR, FWL_VKEY_OEM_Clear);
 STATIC_ASSERT_ENUM(ui::VKEY_UNKNOWN, FWL_VKEY_Unknown);
 
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_ANSI, FXFONT_ANSI_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_DEFAULT, FXFONT_DEFAULT_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_SYMBOL, FXFONT_SYMBOL_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_SHIFTJIS, FXFONT_SHIFTJIS_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_HANGUL, FXFONT_HANGEUL_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_GB2312, FXFONT_GB2312_CHARSET);
-STATIC_ASSERT_ENUM(PP_PRIVATEFONTCHARSET_CHINESEBIG5,
-                   FXFONT_CHINESEBIG5_CHARSET);
+STATIC_ASSERT_ENUM(FormType::kNone, FORMTYPE_NONE);
+STATIC_ASSERT_ENUM(FormType::kAcroForm, FORMTYPE_ACRO_FORM);
+STATIC_ASSERT_ENUM(FormType::kXFAFull, FORMTYPE_XFA_FULL);
+STATIC_ASSERT_ENUM(FormType::kXFAForeground, FORMTYPE_XFA_FOREGROUND);
+STATIC_ASSERT_ENUM(FormType::kMaxValue, FORMTYPE_COUNT - 1);
 
-STATIC_ASSERT_ENUM(PP_PRIVATEDUPLEXMODE_NONE, DuplexUndefined);
-STATIC_ASSERT_ENUM(PP_PRIVATEDUPLEXMODE_SIMPLEX, Simplex);
-STATIC_ASSERT_ENUM(PP_PRIVATEDUPLEXMODE_SHORT_EDGE, DuplexFlipShortEdge);
-STATIC_ASSERT_ENUM(PP_PRIVATEDUPLEXMODE_LONG_EDGE, DuplexFlipLongEdge);
-
-#if defined(OS_WIN)
-STATIC_ASSERT_ENUM(chrome_pdf::kEmf, FPDF_PRINTMODE_EMF);
-STATIC_ASSERT_ENUM(chrome_pdf::kTextOnly, FPDF_PRINTMODE_TEXTONLY);
-STATIC_ASSERT_ENUM(chrome_pdf::kPostScript2, FPDF_PRINTMODE_POSTSCRIPT2);
-STATIC_ASSERT_ENUM(chrome_pdf::kPostScript3, FPDF_PRINTMODE_POSTSCRIPT3);
+#if BUILDFLAG(IS_WIN)
+STATIC_ASSERT_ENUM(kEmf, FPDF_PRINTMODE_EMF);
+STATIC_ASSERT_ENUM(kTextOnly, FPDF_PRINTMODE_TEXTONLY);
+STATIC_ASSERT_ENUM(kPostScript2, FPDF_PRINTMODE_POSTSCRIPT2);
+STATIC_ASSERT_ENUM(kPostScript3, FPDF_PRINTMODE_POSTSCRIPT3);
+STATIC_ASSERT_ENUM(kEmfWithReducedRasterization,
+                   FPDF_PRINTMODE_EMF_IMAGE_MASKS);
+STATIC_ASSERT_ENUM(kPostScript3WithType42Fonts,
+                   FPDF_PRINTMODE_POSTSCRIPT3_TYPE42);
 #endif
+
+}  // namespace chrome_pdf

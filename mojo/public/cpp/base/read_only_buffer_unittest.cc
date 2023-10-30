@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ TEST(ReadOnlyBufferTest, ReadOnlyBufferEmptySpan) {
   base::span<const uint8_t> out;
 
   ASSERT_TRUE(
-      mojo::test::SerializeAndDeserialize<mojom::ReadOnlyBuffer>(&in, &out));
+      mojo::test::SerializeAndDeserialize<mojom::ReadOnlyBuffer>(in, out));
   EXPECT_TRUE(std::equal(in.begin(), in.end(), out.begin(), out.end()));
 }
 

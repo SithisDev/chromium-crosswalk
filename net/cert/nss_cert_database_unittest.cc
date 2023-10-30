@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,29 +10,31 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/run_loop.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "crypto/scoped_nss_types.h"
 #include "crypto/scoped_test_nss_db.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_errors.h"
+#include "net/cert/cert_net_fetcher.h"
 #include "net/cert/cert_status_flags.h"
-#include "net/cert/cert_verify_proc_nss.h"
+#include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
+#include "net/log/net_log_with_source.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertificateDB.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -60,15 +62,15 @@ std::string GetSubjectCN(CERTCertificate* cert) {
 
 }  // namespace
 
-class CertDatabaseNSSTest : public TestWithScopedTaskEnvironment {
+class CertDatabaseNSSTest : public TestWithTaskEnvironment {
  public:
   void SetUp() override {
     ASSERT_TRUE(test_nssdb_.is_open());
-    cert_db_.reset(new NSSCertDatabase(
+    cert_db_ = std::make_unique<NSSCertDatabase>(
         crypto::ScopedPK11Slot(
             PK11_ReferenceSlot(test_nssdb_.slot())) /* public slot */,
         crypto::ScopedPK11Slot(
-            PK11_ReferenceSlot(test_nssdb_.slot())) /* private slot */));
+            PK11_ReferenceSlot(test_nssdb_.slot())) /* private slot */);
     public_slot_ = cert_db_->GetPublicSlot();
     crl_set_ = CRLSet::BuiltinCRLSet();
 
@@ -107,6 +109,8 @@ class CertDatabaseNSSTest : public TestWithScopedTaskEnvironment {
   ScopedCERTCertificateList ListCerts() {
     ScopedCERTCertificateList result;
     CERTCertList* cert_list = PK11_ListCertsInSlot(test_nssdb_.slot());
+    if (!cert_list)
+      return result;
     for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
          !CERT_LIST_END(node, cert_list);
          node = CERT_LIST_NEXT(node)) {
@@ -134,15 +138,6 @@ class CertDatabaseNSSTest : public TestWithScopedTaskEnvironment {
   scoped_refptr<CRLSet> crl_set_;
 };
 
-TEST_F(CertDatabaseNSSTest, ListCertsSync) {
-  // This test isn't terribly useful, though it might help with memory
-  // leak tests.
-  ScopedCERTCertificateList certs = cert_db_->ListCertsSync();
-  // The test DB is empty, but let's assume there will always be something in
-  // the other slots.
-  EXPECT_LT(0U, certs.size());
-}
-
 TEST_F(CertDatabaseNSSTest, ListCerts) {
   // This test isn't terribly useful, though it might help with memory
   // leak tests.
@@ -162,7 +157,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12WrongPassword) {
 
   EXPECT_EQ(
       ERR_PKCS12_IMPORT_BAD_PASSWORD,
-      cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, base::string16(),
+      cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, std::u16string(),
                                  true,  // is_extractable
                                  nullptr));
 
@@ -173,10 +168,10 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12WrongPassword) {
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsExtractableAndExportAgain) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       true,  // is_extractable
+                                       nullptr));
 
   ScopedCERTCertificateList cert_list = ListCerts();
   ASSERT_EQ(1U, cert_list.size());
@@ -184,8 +179,8 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsExtractableAndExportAgain) {
 
   // TODO(mattm): move export test to separate test case?
   std::string exported_data;
-  EXPECT_EQ(1, cert_db_->ExportToPKCS12(cert_list, ASCIIToUTF16("exportpw"),
-                                        &exported_data));
+  EXPECT_EQ(1,
+            cert_db_->ExportToPKCS12(cert_list, u"exportpw", &exported_data));
   ASSERT_LT(0U, exported_data.size());
   // TODO(mattm): further verification of exported data?
 }
@@ -193,64 +188,64 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsExtractableAndExportAgain) {
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12Twice) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       true,  // is_extractable
+                                       nullptr));
   EXPECT_EQ(1U, ListCerts().size());
 
   // NSS has a SEC_ERROR_PKCS12_DUPLICATE_DATA error, but it doesn't look like
   // it's ever used.  This test verifies that.
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       true,  // is_extractable
+                                       nullptr));
   EXPECT_EQ(1U, ListCerts().size());
 }
 
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12AsUnextractableAndExportAgain) {
   std::string pkcs12_data = ReadTestFile("client.p12");
 
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           false,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       false,  // is_extractable
+                                       nullptr));
 
   ScopedCERTCertificateList cert_list = ListCerts();
   ASSERT_EQ(1U, cert_list.size());
   EXPECT_EQ("testusercert", GetSubjectCN(cert_list[0].get()));
 
   std::string exported_data;
-  EXPECT_EQ(0, cert_db_->ExportToPKCS12(cert_list, ASCIIToUTF16("exportpw"),
-                                        &exported_data));
+  EXPECT_EQ(0,
+            cert_db_->ExportToPKCS12(cert_list, u"exportpw", &exported_data));
 }
 
 // Importing a PKCS#12 file with a certificate but no corresponding
 // private key should not mark an existing private key as unextractable.
 TEST_F(CertDatabaseNSSTest, ImportFromPKCS12OnlyMarkIncludedKey) {
   std::string pkcs12_data = ReadTestFile("client.p12");
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           true,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       true,  // is_extractable
+                                       nullptr));
 
   ScopedCERTCertificateList cert_list = ListCerts();
   ASSERT_EQ(1U, cert_list.size());
 
   // Now import a PKCS#12 file with just a certificate but no private key.
   pkcs12_data = ReadTestFile("client-nokey.p12");
-  EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           ASCIIToUTF16("12345"),
-                                           false,  // is_extractable
-                                           nullptr));
+  EXPECT_EQ(OK,
+            cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, u"12345",
+                                       false,  // is_extractable
+                                       nullptr));
 
   cert_list = ListCerts();
   ASSERT_EQ(1U, cert_list.size());
 
   // Make sure the imported private key is still extractable.
   std::string exported_data;
-  EXPECT_EQ(1, cert_db_->ExportToPKCS12(cert_list, ASCIIToUTF16("exportpw"),
-                                        &exported_data));
+  EXPECT_EQ(1,
+            cert_db_->ExportToPKCS12(cert_list, u"exportpw", &exported_data));
   ASSERT_LT(0U, exported_data.size());
 }
 
@@ -259,7 +254,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12InvalidFile) {
 
   EXPECT_EQ(
       ERR_PKCS12_IMPORT_INVALID_FILE,
-      cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, base::string16(),
+      cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data, std::u16string(),
                                  true,  // is_extractable
                                  nullptr));
 
@@ -271,7 +266,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12EmptyPassword) {
   std::string pkcs12_data = ReadTestFile("client-empty-password.p12");
 
   EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           base::string16(),
+                                           std::u16string(),
                                            true,  // is_extractable
                                            nullptr));
   EXPECT_EQ(1U, ListCerts().size());
@@ -281,7 +276,7 @@ TEST_F(CertDatabaseNSSTest, ImportFromPKCS12NullPassword) {
   std::string pkcs12_data = ReadTestFile("client-null-password.p12");
 
   EXPECT_EQ(OK, cert_db_->ImportFromPKCS12(GetPublicSlot(), pkcs12_data,
-                                           base::string16(),
+                                           std::u16string(),
                                            true,  // is_extractable
                                            nullptr));
   EXPECT_EQ(1U, ListCerts().size());
@@ -548,12 +543,20 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert) {
   // All the certs in the imported list should now be found in the NSS DB.
   ScopedCERTCertificateList cert_list = ListCerts();
   ASSERT_EQ(3U, cert_list.size());
-  CERTCertificate* found_server_cert = cert_list[1].get();
-  CERTCertificate* found_intermediate_cert = cert_list[2].get();
-  CERTCertificate* found_root_cert = cert_list[0].get();
-  EXPECT_EQ("127.0.0.1", GetSubjectCN(found_server_cert));
-  EXPECT_EQ("Test Intermediate CA", GetSubjectCN(found_intermediate_cert));
-  EXPECT_EQ("Test Root CA", GetSubjectCN(found_root_cert));
+  CERTCertificate* found_server_cert = nullptr;
+  CERTCertificate* found_intermediate_cert = nullptr;
+  CERTCertificate* found_root_cert = nullptr;
+  for (const auto& cert : cert_list) {
+    if (GetSubjectCN(cert.get()) == "127.0.0.1")
+      found_server_cert = cert.get();
+    else if (GetSubjectCN(cert.get()) == "Test Intermediate CA")
+      found_intermediate_cert = cert.get();
+    else if (GetSubjectCN(cert.get()) == "Test Root CA")
+      found_root_cert = cert.get();
+  }
+  ASSERT_TRUE(found_server_cert);
+  ASSERT_TRUE(found_intermediate_cert);
+  ASSERT_TRUE(found_root_cert);
 
   EXPECT_EQ(NSSCertDatabase::TRUST_DEFAULT,
             cert_db_->GetCertTrust(found_server_cert, SERVER_CERT));
@@ -570,13 +573,14 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert) {
   scoped_refptr<X509Certificate> x509_found_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(found_server_cert);
   ASSERT_TRUE(x509_found_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_found_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result.cert_status);
 }
@@ -602,13 +606,14 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned) {
   scoped_refptr<X509Certificate> x509_puny_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(puny_cert);
   ASSERT_TRUE(x509_puny_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_puny_cert.get(), "xn--wgv71a119e.com",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result.cert_status);
 }
@@ -635,15 +640,17 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned_Trusted) {
   scoped_refptr<X509Certificate> x509_puny_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(puny_cert);
   ASSERT_TRUE(x509_puny_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_puny_cert.get(), "xn--wgv71a119e.com",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
-  EXPECT_THAT(error, IsOk());
-  EXPECT_EQ(0U, verify_result.cert_status);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
+  // New verifier does not support server cert trust records.
+  EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
+  EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result.cert_status);
 }
 
 TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert) {
@@ -671,13 +678,14 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsOk());
   EXPECT_EQ(0U, verify_result.cert_status);
 }
@@ -712,15 +720,19 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert_DistrustServer) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
-  EXPECT_THAT(error, IsError(ERR_CERT_REVOKED));
-  EXPECT_EQ(CERT_STATUS_REVOKED, verify_result.cert_status);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
+  // This hits the "Cannot verify a chain of length 1" error in the new
+  // verifier, since path building stops at the leaf which has a distrust
+  // record.
+  EXPECT_THAT(error, IsError(ERR_CERT_INVALID));
+  EXPECT_EQ(CERT_STATUS_INVALID, verify_result.cert_status);
 }
 
 TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
@@ -762,13 +774,14 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsOk());
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -794,9 +807,10 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
   error = verify_proc->Verify(x509_server_cert.get(), "127.0.0.1",
                               /*ocsp_response=*/std::string(),
                               /*sct_list=*/std::string(), flags, crl_set_.get(),
-                              empty_cert_list_, &verify_result2);
-  EXPECT_THAT(error, IsError(ERR_CERT_REVOKED));
-  EXPECT_EQ(CERT_STATUS_REVOKED, verify_result2.cert_status);
+                              empty_cert_list_, &verify_result2,
+                              NetLogWithSource());
+  EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
+  EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result2.cert_status);
 }
 
 TEST_F(CertDatabaseNSSTest, TrustIntermediateCa2) {
@@ -829,13 +843,14 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa2) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsOk());
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -848,7 +863,8 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa2) {
   error = verify_proc->Verify(x509_server_cert.get(), "127.0.0.1",
                               /*ocsp_response=*/std::string(),
                               /*sct_list=*/std::string(), flags, crl_set_.get(),
-                              empty_cert_list_, &verify_result2);
+                              empty_cert_list_, &verify_result2,
+                              NetLogWithSource());
   EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result2.cert_status);
 }
@@ -893,13 +909,14 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa3) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
   EXPECT_THAT(error, IsOk());
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -912,7 +929,8 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa3) {
   error = verify_proc->Verify(x509_server_cert.get(), "127.0.0.1",
                               /*ocsp_response=*/std::string(),
                               /*sct_list=*/std::string(), flags, crl_set_.get(),
-                              empty_cert_list_, &verify_result2);
+                              empty_cert_list_, &verify_result2,
+                              NetLogWithSource());
   EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
   EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result2.cert_status);
 }
@@ -957,15 +975,16 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa4) {
   scoped_refptr<X509Certificate> x509_server_cert =
       x509_util::CreateX509CertificateFromCERTCertificate(certs[0].get());
   ASSERT_TRUE(x509_server_cert);
-  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
+  scoped_refptr<CertVerifyProc> verify_proc(
+      CertVerifyProc::CreateBuiltinVerifyProc(/*cert_net_fetcher=*/nullptr));
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(
       x509_server_cert.get(), "127.0.0.1",
       /*ocsp_response=*/std::string(), /*sct_list=*/std::string(), flags,
-      crl_set_.get(), empty_cert_list_, &verify_result);
-  EXPECT_THAT(error, IsError(ERR_CERT_REVOKED));
-  EXPECT_EQ(CERT_STATUS_REVOKED, verify_result.cert_status);
+      crl_set_.get(), empty_cert_list_, &verify_result, NetLogWithSource());
+  EXPECT_THAT(error, IsError(ERR_CERT_AUTHORITY_INVALID));
+  EXPECT_EQ(CERT_STATUS_AUTHORITY_INVALID, verify_result.cert_status);
 
   // Without explicit distrust of the intermediate, verification should succeed.
   EXPECT_TRUE(cert_db_->SetCertTrust(
@@ -976,7 +995,8 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa4) {
   error = verify_proc->Verify(x509_server_cert.get(), "127.0.0.1",
                               /*ocsp_response=*/std::string(),
                               /*sct_list=*/std::string(), flags, crl_set_.get(),
-                              empty_cert_list_, &verify_result2);
+                              empty_cert_list_, &verify_result2,
+                              NetLogWithSource());
   EXPECT_THAT(error, IsOk());
   EXPECT_EQ(0U, verify_result2.cert_status);
 }

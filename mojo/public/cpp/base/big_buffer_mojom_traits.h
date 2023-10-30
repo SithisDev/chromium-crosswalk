@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,9 @@
 #define MOJO_PUBLIC_CPP_BASE_BIG_BUFFER_MOJOM_TRAITS_H_
 
 #include <cstdint>
-#include <vector>
 
 #include "base/component_export.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/union_traits.h"
 #include "mojo/public/cpp/system/buffer.h"
@@ -37,7 +35,7 @@ struct COMPONENT_EXPORT(MOJO_BASE_SHARED_TRAITS)
   static mojo_base::mojom::BigBufferDataView::Tag GetTag(
       const mojo_base::BigBuffer& buffer);
 
-  static const std::vector<uint8_t>& bytes(const mojo_base::BigBuffer& buffer);
+  static base::span<const uint8_t> bytes(const mojo_base::BigBuffer& buffer);
   static mojo_base::internal::BigBufferSharedMemoryRegion& shared_memory(
       mojo_base::BigBuffer& buffer);
   static bool invalid_buffer(mojo_base::BigBuffer& buffer);

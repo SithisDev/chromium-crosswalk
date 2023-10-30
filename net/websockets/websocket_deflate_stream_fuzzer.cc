@@ -1,19 +1,22 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <fuzzer/FuzzedDataProvider.h>
+
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/log/net_log_with_source.h"
 #include "net/websockets/websocket_deflate_parameters.h"
 #include "net/websockets/websocket_deflate_predictor.h"
 #include "net/websockets/websocket_deflate_predictor_impl.h"
@@ -21,7 +24,6 @@
 #include "net/websockets/websocket_extension.h"
 #include "net/websockets/websocket_frame.h"
 #include "net/websockets/websocket_stream.h"
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 namespace net {
 
@@ -63,6 +65,9 @@ class WebSocketFuzzedStream final : public WebSocketStream {
   void Close() override {}
   std::string GetSubProtocol() const override { return std::string(); }
   std::string GetExtensions() const override { return std::string(); }
+  const NetLogWithSource& GetNetLogWithSource() const override {
+    return net_log_;
+  }
 
  private:
   std::unique_ptr<WebSocketFrame> CreateFrame() {
@@ -84,13 +89,19 @@ class WebSocketFuzzedStream final : public WebSocketStream {
         fuzzed_data_provider_->ConsumeIntegralInRange(0, 64);
     std::vector<char> payload =
         fuzzed_data_provider_->ConsumeBytes<char>(payload_length);
-    frame->data = base::MakeRefCounted<IOBufferWithSize>(payload.size());
-    memcpy(frame->data->data(), payload.data(), payload.size());
+    auto buffer = base::MakeRefCounted<IOBufferWithSize>(payload.size());
+    memcpy(buffer->data(), payload.data(), payload.size());
+    buffers_.push_back(buffer);
+    frame->payload = buffer->data();
     frame->header.payload_length = payload.size();
     return frame;
   }
 
+  std::vector<scoped_refptr<IOBufferWithSize>> buffers_;
+
   FuzzedDataProvider* fuzzed_data_provider_;
+
+  NetLogWithSource net_log_;
 };
 
 void WebSocketDeflateStreamFuzz(const uint8_t* data, size_t size) {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "mojo/core/channel.h"
 #include "mojo/core/dispatcher.h"
 #include "mojo/core/ports/event.h"
@@ -46,10 +45,14 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
     kAbort,
   };
 
+  UserMessageImpl(const UserMessageImpl&) = delete;
+  UserMessageImpl& operator=(const UserMessageImpl&) = delete;
+
   ~UserMessageImpl() override;
 
   // Creates a new ports::UserMessageEvent with an attached UserMessageImpl.
-  static std::unique_ptr<ports::UserMessageEvent> CreateEventForNewMessage();
+  static std::unique_ptr<ports::UserMessageEvent> CreateEventForNewMessage(
+      MojoCreateMessageFlags flags);
 
   // Creates a new ports::UserMessageEvent with an attached serialized
   // UserMessageImpl. May fail iff one or more |dispatchers| fails to serialize
@@ -154,7 +157,8 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
   // |thunks|. If the message is ever going to be routed to another node (see
   // |WillBeRoutedExternally()| below), it will be serialized at that time using
   // operations provided by |thunks|.
-  UserMessageImpl(ports::UserMessageEvent* message_event);
+  UserMessageImpl(ports::UserMessageEvent* message_event,
+                  MojoCreateMessageFlags flags);
 
   // Creates a serialized UserMessageImpl backed by an existing Channel::Message
   // object. |header| and |user_payload| must be pointers into
@@ -172,7 +176,10 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
   size_t GetSizeIfSerialized() const override;
 
   // The event which owns this serialized message. Not owned.
-  ports::UserMessageEvent* const message_event_;
+  //
+  // `message_event_` is not a raw_ptr<...> for performance reasons (based on
+  // analysis of sampling profiler data and tab_search:top100:2020).
+  RAW_PTR_EXCLUSION ports::UserMessageEvent* const message_event_;
 
   // Unserialized message state.
   uintptr_t context_ = 0;
@@ -182,6 +189,10 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
   // Serialized message contents. May be null if this is not a serialized
   // message.
   Channel::MessagePtr channel_message_;
+
+  // Whether or not this message should enforce size constraints at
+  // serialization time.
+  const bool unlimited_size_ = false;
 
   // Indicates whether any handles serialized within |channel_message_| have
   // yet to be extracted.
@@ -196,9 +207,13 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
   // serialized message buffer. |user_payload_| is the address of the first byte
   // after any serialized dispatchers, with the payload comprising the remaining
   // |user_payload_size_| bytes of the message.
-  void* header_ = nullptr;
+  //
+  // `header_` and `user_payload_` are not a raw_ptr<...> for performance
+  // reasons (based on analysis of sampling profiler data and
+  // tab_search:top100:2020).
+  RAW_PTR_EXCLUSION void* header_ = nullptr;
   size_t header_size_ = 0;
-  void* user_payload_ = nullptr;
+  RAW_PTR_EXCLUSION void* user_payload_ = nullptr;
   size_t user_payload_size_ = 0;
 
   // Handles which have been attached to the serialized message but which have
@@ -208,8 +223,6 @@ class MOJO_SYSTEM_IMPL_EXPORT UserMessageImpl : public ports::UserMessage {
   // The node name from which this message was received, iff it came from
   // out-of-process and the source is known.
   ports::NodeName source_node_ = ports::kInvalidNodeName;
-
-  DISALLOW_COPY_AND_ASSIGN(UserMessageImpl);
 };
 
 }  // namespace core

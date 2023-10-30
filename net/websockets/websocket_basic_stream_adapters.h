@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
@@ -61,7 +62,7 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
     virtual ~Delegate() = default;
     virtual void OnHeadersSent() = 0;
     virtual void OnHeadersReceived(
-        const spdy::SpdyHeaderBlock& response_headers) = 0;
+        const spdy::Http2HeaderBlock& response_headers) = 0;
     // Might destroy |this|.
     virtual void OnClose(int status) = 0;
   };
@@ -94,13 +95,15 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
   // SpdyStream::Delegate methods.
 
   void OnHeadersSent() override;
+  void OnEarlyHintsReceived(const spdy::Http2HeaderBlock& headers) override;
   void OnHeadersReceived(
-      const spdy::SpdyHeaderBlock& response_headers,
-      const spdy::SpdyHeaderBlock* pushed_request_headers) override;
+      const spdy::Http2HeaderBlock& response_headers,
+      const spdy::Http2HeaderBlock* pushed_request_headers) override;
   void OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) override;
   void OnDataSent() override;
-  void OnTrailers(const spdy::SpdyHeaderBlock& trailers) override;
+  void OnTrailers(const spdy::Http2HeaderBlock& trailers) override;
   void OnClose(int status) override;
+  bool CanGreaseFrameType() const override;
   NetLogSource source_dependency() const override;
 
  private:
@@ -112,22 +115,22 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
 
   // True if SpdyStream::Delegate::OnHeadersSent() has been called.
   // SpdyStream::SendData() must not be called before that.
-  bool headers_sent_;
+  bool headers_sent_ = false;
 
   // The underlying SpdyStream.
   base::WeakPtr<SpdyStream> stream_;
 
   // The error code with which SpdyStream was closed.
-  int stream_error_;
+  int stream_error_ = ERR_CONNECTION_CLOSED;
 
-  Delegate* delegate_;
+  raw_ptr<Delegate> delegate_;
 
   // Buffer data pushed by SpdyStream until read through Read().
   SpdyReadQueue read_data_;
 
   // Read buffer and length used for both synchronous and asynchronous
   // read operations.
-  IOBuffer* read_buffer_;
+  raw_ptr<IOBuffer> read_buffer_;
   size_t read_length_;
 
   // Read callback saved for asynchronous reads.
@@ -137,7 +140,7 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
   // Write length saved to be passed to |write_callback_|.  This is necessary
   // because SpdyStream::Delegate::OnDataSent() does not pass number of bytes
   // written.
-  int write_length_;
+  int write_length_ = 0;
 
   // Write callback saved for asynchronous writes (all writes are asynchronous).
   CompletionOnceCallback write_callback_;

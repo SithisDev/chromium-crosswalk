@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,27 @@
 
 #include <string.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/log/net_log_source.h"
 #include "net/quic/address_utils.h"
 #include "net/socket/udp_server_socket.h"
-#include "net/third_party/quiche/src/quic/core/crypto/crypto_handshake.h"
-#include "net/third_party/quiche/src/quic/core/crypto/quic_random.h"
-#include "net/third_party/quiche/src/quic/core/quic_crypto_stream.h"
-#include "net/third_party/quiche/src/quic/core/quic_data_reader.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
-#include "net/third_party/quiche/src/quic/tools/quic_simple_dispatcher.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_handshake.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_random.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_crypto_stream.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_data_reader.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/tools/quic_simple_dispatcher.h"
 #include "net/tools/quic/quic_simple_server_packet_writer.h"
 #include "net/tools/quic/quic_simple_server_session_helper.h"
+#include "net/tools/quic/quic_simple_server_socket.h"
 
 namespace net {
 
@@ -33,7 +37,7 @@ const size_t kNumSessionsToCreatePerSocketEvent = 16;
 
 // Allocate some extra space so we can send an error if the client goes over
 // the limit.
-const int kReadBufferSize = 2 * quic::kMaxOutgoingPacketSize;
+const int kReadBufferSize = 2 * quic::kMaxIncomingPacketSize;
 
 }  // namespace
 
@@ -56,10 +60,9 @@ QuicSimpleServer::QuicSimpleServer(
                      quic::QuicRandom::GetInstance(),
                      std::move(proof_source),
                      quic::KeyExchangeSource::Default()),
-      read_pending_(false),
-      synchronous_read_count_(0),
       read_buffer_(base::MakeRefCounted<IOBufferWithSize>(kReadBufferSize)),
-      quic_simple_server_backend_(quic_simple_server_backend) {
+      quic_simple_server_backend_(quic_simple_server_backend),
+      connection_id_generator_(quic::kQuicDefaultConnectionIdLength) {
   DCHECK(quic_simple_server_backend);
   Initialize();
 }
@@ -92,61 +95,39 @@ void QuicSimpleServer::Initialize() {
 
 QuicSimpleServer::~QuicSimpleServer() = default;
 
-int QuicSimpleServer::Listen(const IPEndPoint& address) {
-  std::unique_ptr<UDPServerSocket> socket(
-      new UDPServerSocket(nullptr, NetLogSource()));
+bool QuicSimpleServer::CreateUDPSocketAndListen(
+    const quic::QuicSocketAddress& address) {
+  return Listen(ToIPEndPoint(address));
+}
 
-  socket->AllowAddressReuse();
+void QuicSimpleServer::HandleEventsForever() {
+  base::RunLoop().Run();
+}
 
-  int rc = socket->Listen(address);
-  if (rc < 0) {
-    LOG(ERROR) << "Listen() failed: " << ErrorToString(rc);
-    return rc;
-  }
+bool QuicSimpleServer::Listen(const IPEndPoint& address) {
+  socket_ = CreateQuicSimpleServerSocket(address, &server_address_);
+  if (socket_ == nullptr)
+    return false;
 
-  // These send and receive buffer sizes are sized for a single connection,
-  // because the default usage of QuicSimpleServer is as a test server with
-  // one or two clients.  Adjust higher for use with many clients.
-  rc = socket->SetReceiveBufferSize(
-      static_cast<int32_t>(quic::kDefaultSocketReceiveBuffer));
-  if (rc < 0) {
-    LOG(ERROR) << "SetReceiveBufferSize() failed: " << ErrorToString(rc);
-    return rc;
-  }
-
-  rc = socket->SetSendBufferSize(20 * quic::kMaxOutgoingPacketSize);
-  if (rc < 0) {
-    LOG(ERROR) << "SetSendBufferSize() failed: " << ErrorToString(rc);
-    return rc;
-  }
-
-  rc = socket->GetLocalAddress(&server_address_);
-  if (rc < 0) {
-    LOG(ERROR) << "GetLocalAddress() failed: " << ErrorToString(rc);
-    return rc;
-  }
-
-  DVLOG(1) << "Listening on " << server_address_.ToString();
-
-  socket_.swap(socket);
-
-  dispatcher_.reset(new quic::QuicSimpleDispatcher(
+  dispatcher_ = std::make_unique<quic::QuicSimpleDispatcher>(
       &config_, &crypto_config_, &version_manager_,
       std::unique_ptr<quic::QuicConnectionHelperInterface>(helper_),
-      std::unique_ptr<quic::QuicCryptoServerStream::Helper>(
-          new QuicSimpleServerSessionHelper(quic::QuicRandom::GetInstance())),
+      std::make_unique<QuicSimpleServerSessionHelper>(
+          quic::QuicRandom::GetInstance()),
       std::unique_ptr<quic::QuicAlarmFactory>(alarm_factory_),
-      quic_simple_server_backend_, quic::kQuicDefaultConnectionIdLength));
+      quic_simple_server_backend_, quic::kQuicDefaultConnectionIdLength,
+      connection_id_generator_);
   QuicSimpleServerPacketWriter* writer =
       new QuicSimpleServerPacketWriter(socket_.get(), dispatcher_.get());
   dispatcher_->InitializeWithWriter(writer);
 
   StartReading();
 
-  return OK;
+  return true;
 }
 
 void QuicSimpleServer::Shutdown() {
+  DVLOG(1) << "QuicSimpleServer is shutting down";
   // Before we shut down the epoll server, give all active sessions a chance to
   // notify clients that they're closing.
   dispatcher_->Shutdown();
@@ -171,7 +152,8 @@ void QuicSimpleServer::StartReading() {
 
   int result = socket_->RecvFrom(
       read_buffer_.get(), read_buffer_->size(), &client_address_,
-      base::Bind(&QuicSimpleServer::OnReadComplete, base::Unretained(this)));
+      base::BindOnce(&QuicSimpleServer::OnReadComplete,
+                     base::Unretained(this)));
 
   if (result == ERR_IO_PENDING) {
     synchronous_read_count_ = 0;
@@ -198,19 +180,26 @@ void QuicSimpleServer::StartReading() {
 
 void QuicSimpleServer::OnReadComplete(int result) {
   read_pending_ = false;
-  if (result == 0)
-    result = ERR_CONNECTION_CLOSED;
 
-  if (result < 0) {
+  if (result > 0) {
+    quic::QuicReceivedPacket packet(read_buffer_->data(), result,
+                                    helper_->GetClock()->Now(), false);
+    dispatcher_->ProcessPacket(ToQuicSocketAddress(server_address_),
+                               ToQuicSocketAddress(client_address_), packet);
+  } else {
     LOG(ERROR) << "QuicSimpleServer read failed: " << ErrorToString(result);
-    Shutdown();
-    return;
+    // Do not act on ERR_MSG_TOO_BIG as that indicates that we received a UDP
+    // packet whose payload is larger than our receive buffer. Do not act on 0
+    // as that indicates that we received a UDP packet with an empty payload.
+    // In both cases, the socket should still be usable.
+    // Also do not act on ERR_CONNECTION_RESET as this is happening when the
+    // network service restarts on Windows.
+    if (result != ERR_MSG_TOO_BIG && result != ERR_CONNECTION_RESET &&
+        result != 0) {
+      Shutdown();
+      return;
+    }
   }
-
-  quic::QuicReceivedPacket packet(read_buffer_->data(), result,
-                                  helper_->GetClock()->Now(), false);
-  dispatcher_->ProcessPacket(ToQuicSocketAddress(server_address_),
-                             ToQuicSocketAddress(client_address_), packet);
 
   StartReading();
 }

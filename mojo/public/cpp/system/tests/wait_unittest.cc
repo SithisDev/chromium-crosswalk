@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,16 +42,18 @@ std::string ReadMessage(const ScopedMessagePipeHandle& handle) {
 
 class ThreadedRunner : public base::SimpleThread {
  public:
-  explicit ThreadedRunner(const base::Closure& callback)
-      : SimpleThread("ThreadedRunner"), callback_(callback) {}
+  explicit ThreadedRunner(base::OnceClosure callback)
+      : SimpleThread("ThreadedRunner"), callback_(std::move(callback)) {}
+
+  ThreadedRunner(const ThreadedRunner&) = delete;
+  ThreadedRunner& operator=(const ThreadedRunner&) = delete;
+
   ~ThreadedRunner() override { Join(); }
 
-  void Run() override { callback_.Run(); }
+  void Run() override { std::move(callback_).Run(); }
 
  private:
-  const base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadedRunner);
+  base::OnceClosure callback_;
 };
 
 TEST_F(WaitTest, InvalidArguments) {
@@ -125,10 +127,10 @@ TEST_F(WaitTest, Basic) {
 TEST_F(WaitTest, DelayedWrite) {
   MessagePipe p;
 
-  ThreadedRunner write_after_delay(base::Bind(
+  ThreadedRunner write_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then write a message.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         WriteMessage(*handle, "wakey wakey");
       },
       &p.handle0));
@@ -145,10 +147,10 @@ TEST_F(WaitTest, DelayedWrite) {
 TEST_F(WaitTest, DelayedPeerClosure) {
   MessagePipe p;
 
-  ThreadedRunner close_after_delay(base::Bind(
+  ThreadedRunner close_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then close the handle.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         handle->reset();
       },
       &p.handle0));
@@ -164,9 +166,9 @@ TEST_F(WaitTest, DelayedPeerClosure) {
 
 TEST_F(WaitTest, CloseWhileWaiting) {
   MessagePipe p;
-  ThreadedRunner close_after_delay(base::Bind(
+  ThreadedRunner close_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         handle->reset();
       },
       &p.handle0));
@@ -214,9 +216,6 @@ TEST_F(WaitManyTest, Basic) {
   EXPECT_EQ(kTestMessage1, ReadMessage(p.handle1));
   p.handle0.reset();
 
-  // handles[0] is invalid.
-  EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT,
-            WaitMany(handles, signals, 2, &result_index, hss));
   handles[0] = handles[1];
   EXPECT_EQ(MOJO_RESULT_FAILED_PRECONDITION,
             WaitMany(handles, signals, 1, &result_index, hss));
@@ -234,9 +233,9 @@ TEST_F(WaitManyTest, CloseWhileWaiting) {
                                   MOJO_HANDLE_SIGNAL_READABLE,
                                   MOJO_HANDLE_SIGNAL_READABLE};
 
-  ThreadedRunner close_after_delay(base::Bind(
+  ThreadedRunner close_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         handle->reset();
       },
       &p.handle1));
@@ -251,10 +250,10 @@ TEST_F(WaitManyTest, CloseWhileWaiting) {
 TEST_F(WaitManyTest, DelayedWrite) {
   MessagePipe p;
 
-  ThreadedRunner write_after_delay(base::Bind(
+  ThreadedRunner write_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then write a message.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         WriteMessage(*handle, "wakey wakey");
       },
       &p.handle0));
@@ -278,10 +277,10 @@ TEST_F(WaitManyTest, DelayedWrite) {
 TEST_F(WaitManyTest, DelayedPeerClosure) {
   MessagePipe p, q;
 
-  ThreadedRunner close_after_delay(base::Bind(
+  ThreadedRunner close_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then close the handle.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         handle->reset();
       },
       &p.handle0));

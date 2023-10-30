@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/stl_util.h"
-#include "base/util/type_safety/id_type.h"
+#include "base/containers/contains.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/types/id_type.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -25,7 +26,7 @@ namespace internal {
 struct RemoteSetElementIdTypeTag {};
 }  // namespace internal
 
-using RemoteSetElementId = util::IdTypeU32<internal::RemoteSetElementIdTypeTag>;
+using RemoteSetElementId = base::IdTypeU32<internal::RemoteSetElementIdTypeTag>;
 
 // Shared implementation of a set of remotes, used by both RemoteSet and
 // AssociatedRemoteSet aliases (see below).
@@ -74,23 +75,28 @@ class RemoteSetImpl {
       return result;
     }
 
-    RemoteSetElementId id() const { return it_.first; }
+    RemoteSetElementId id() const { return it_->first; }
 
     reference operator*() const { return it_->second; }
     pointer operator->() const { return &it_->second; }
-    bool operator==(const self_type& rhs) { return it_ == rhs.it_; }
-    bool operator!=(const self_type& rhs) { return it_ != rhs.it_; }
+    bool operator==(const self_type& rhs) const { return it_ == rhs.it_; }
+    bool operator!=(const self_type& rhs) const { return it_ != rhs.it_; }
 
    private:
     typename Storage::const_iterator it_;
   };
 
   RemoteSetImpl() = default;
+
+  RemoteSetImpl(const RemoteSetImpl&) = delete;
+  RemoteSetImpl& operator=(const RemoteSetImpl&) = delete;
+
   ~RemoteSetImpl() = default;
 
   // Adds a new remote to this set and returns a unique ID that can be used to
   // identify the remote later.
   RemoteSetElementId Add(RemoteType<Interface> remote) {
+    DCHECK(remote.is_bound());
     auto id = GenerateNextElementId();
     remote.set_disconnect_handler(base::BindOnce(&RemoteSetImpl::OnDisconnect,
                                                  base::Unretained(this), id));
@@ -99,9 +105,15 @@ class RemoteSetImpl {
     return id;
   }
 
-  // Same as above but for the equivalent pending remote type, for convenience.
-  RemoteSetElementId Add(PendingRemoteType<Interface> remote) {
-    return Add(RemoteType<Interface>(std::move(remote)));
+  // Same as above but for the equivalent pending remote type. If |task_runner|
+  // is null, the value of |base::SequencedTaskRunnerHandle::Get()| at the time
+  // of the |Add()| call will be used to run scheduled tasks for the remote.
+  RemoteSetElementId Add(
+      PendingRemoteType<Interface> remote,
+      scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
+    DCHECK(remote.is_valid());
+    return Add(
+        RemoteType<Interface>(std::move(remote), std::move(task_runner)));
   }
 
   // Removes a remote from the set given |id|, if present.
@@ -109,6 +121,15 @@ class RemoteSetImpl {
 
   // Indicates whether a remote with the given ID is present in the set.
   bool Contains(RemoteSetElementId id) { return base::Contains(storage_, id); }
+
+  // Returns an `Interface*` for the given ID, that can be used to issue
+  // interface calls.
+  Interface* Get(RemoteSetElementId id) {
+    auto it = storage_.find(id);
+    if (it == storage_.end())
+      return nullptr;
+    return it->second.get();
+  }
 
   // Sets a callback to invoke any time a remote in the set is disconnected.
   // Note that the remote in question is already removed from the set by the
@@ -121,6 +142,8 @@ class RemoteSetImpl {
   void Clear() { storage_.clear(); }
 
   bool empty() const { return storage_.empty(); }
+  size_t size() const { return storage_.size(); }
+
   Iterator begin() { return Iterator(storage_.begin()); }
   Iterator begin() const { return Iterator(storage_.begin()); }
   Iterator end() { return Iterator(storage_.end()); }
@@ -128,13 +151,13 @@ class RemoteSetImpl {
 
   void FlushForTesting() {
     for (auto& it : storage_) {
-        it.second.FlushForTesting();
+      it.second.FlushForTesting();
     }
   }
 
  private:
   RemoteSetElementId GenerateNextElementId() {
-    return RemoteSetElementId::FromUnsafeValue(next_element_id_++);
+    return remote_set_element_id_generator_.GenerateNextId();
   }
 
   void OnDisconnect(RemoteSetElementId id) {
@@ -143,11 +166,9 @@ class RemoteSetImpl {
       disconnect_handler_.Run(id);
   }
 
-  uint32_t next_element_id_ = 1;
+  RemoteSetElementId::Generator remote_set_element_id_generator_;
   Storage storage_;
   DisconnectHandler disconnect_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(RemoteSetImpl);
 };
 
 template <typename Interface>

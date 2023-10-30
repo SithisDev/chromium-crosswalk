@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "net/base/host_port_pair.h"
@@ -19,6 +19,7 @@
 #include "net/base/proxy_server.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_network_session.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_handle.h"
@@ -36,26 +37,25 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/websockets/websocket_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
+#include "url/url_constants.h"
 
 using testing::Test;
 using testing::StrictMock;
 using testing::_;
 
-namespace net {
+namespace net::test {
 
-namespace test {
-
-class WebSocketClientSocketHandleAdapterTest
-    : public TestWithScopedTaskEnvironment {
+class WebSocketClientSocketHandleAdapterTest : public TestWithTaskEnvironment {
  protected:
   WebSocketClientSocketHandleAdapterTest()
-      : host_port_pair_("www.example.org", 443),
-        network_session_(
+      : network_session_(
             SpdySessionDependencies::SpdyCreateSession(&session_deps_)),
         websocket_endpoint_lock_manager_(
             network_session_->websocket_endpoint_lock_manager()) {}
@@ -63,15 +63,18 @@ class WebSocketClientSocketHandleAdapterTest
   ~WebSocketClientSocketHandleAdapterTest() override = default;
 
   bool InitClientSocketHandle(ClientSocketHandle* connection) {
+    auto ssl_config_for_origin = std::make_unique<SSLConfig>();
+    ssl_config_for_origin->alpn_protos = {kProtoHTTP11};
     scoped_refptr<ClientSocketPool::SocketParams> socks_params =
         base::MakeRefCounted<ClientSocketPool::SocketParams>(
-            std::make_unique<SSLConfig>() /* ssl_config_for_origin */,
-            nullptr /* ssl_config_for_proxy */);
+            std::move(ssl_config_for_origin),
+            /*ssl_config_for_proxy=*/nullptr);
     TestCompletionCallback callback;
     int rv = connection->Init(
-        ClientSocketPool::GroupId(host_port_pair_,
-                                  ClientSocketPool::SocketType::kSsl,
-                                  PrivacyMode::PRIVACY_MODE_DISABLED),
+        ClientSocketPool::GroupId(
+            url::SchemeHostPort(url::kHttpsScheme, "www.example.org", 443),
+            PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
+            SecureDnsPolicy::kAllow),
         socks_params, TRAFFIC_ANNOTATION_FOR_TESTS /* proxy_annotation_tag */,
         MEDIUM, SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
         callback.callback(), ClientSocketPool::ProxyAuthCallback(),
@@ -82,10 +85,9 @@ class WebSocketClientSocketHandleAdapterTest
     return rv == OK;
   }
 
-  const HostPortPair host_port_pair_;
   SpdySessionDependencies session_deps_;
   std::unique_ptr<HttpNetworkSession> network_session_;
-  WebSocketEndpointLockManager* websocket_endpoint_lock_manager_;
+  raw_ptr<WebSocketEndpointLockManager> websocket_endpoint_lock_manager_;
 };
 
 TEST_F(WebSocketClientSocketHandleAdapterTest, Uninitialized) {
@@ -274,11 +276,11 @@ class MockDelegate : public WebSocketSpdyStreamAdapter::Delegate {
  public:
   ~MockDelegate() override = default;
   MOCK_METHOD0(OnHeadersSent, void());
-  MOCK_METHOD1(OnHeadersReceived, void(const spdy::SpdyHeaderBlock&));
+  MOCK_METHOD1(OnHeadersReceived, void(const spdy::Http2HeaderBlock&));
   MOCK_METHOD1(OnClose, void(int));
 };
 
-class WebSocketSpdyStreamAdapterTest : public TestWithScopedTaskEnvironment {
+class WebSocketSpdyStreamAdapterTest : public TestWithTaskEnvironment {
  protected:
   WebSocketSpdyStreamAdapterTest()
       : url_("wss://www.example.org/"),
@@ -286,18 +288,20 @@ class WebSocketSpdyStreamAdapterTest : public TestWithScopedTaskEnvironment {
              ProxyServer::Direct(),
              PRIVACY_MODE_DISABLED,
              SpdySessionKey::IsProxySession::kFalse,
-             SocketTag()),
+             SocketTag(),
+             NetworkAnonymizationKey(),
+             SecureDnsPolicy::kAllow),
         session_(SpdySessionDependencies::SpdyCreateSession(&session_deps_)),
         ssl_(SYNCHRONOUS, OK) {}
 
   ~WebSocketSpdyStreamAdapterTest() override = default;
 
-  static spdy::SpdyHeaderBlock RequestHeaders() {
+  static spdy::Http2HeaderBlock RequestHeaders() {
     return WebSocketHttp2Request("/", "www.example.org:443",
                                  "http://www.example.org", {});
   }
 
-  static spdy::SpdyHeaderBlock ResponseHeaders() {
+  static spdy::Http2HeaderBlock ResponseHeaders() {
     return WebSocketHttp2Response({});
   }
 
@@ -570,6 +574,60 @@ TEST_F(WebSocketSpdyStreamAdapterTest,
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(session);
   EXPECT_FALSE(stream);
+
+  EXPECT_TRUE(data.AllReadDataConsumed());
+  EXPECT_TRUE(data.AllWriteDataConsumed());
+}
+
+// Previously we failed to detect a half-close by the server that indicated the
+// stream should be closed. This test ensures a half-close is correctly
+// detected. See https://crbug.com/1151393.
+TEST_F(WebSocketSpdyStreamAdapterTest, OnHeadersReceivedThenStreamEnd) {
+  spdy::SpdySerializedFrame response_headers(
+      spdy_util_.ConstructSpdyResponseHeaders(1, ResponseHeaders(), false));
+  spdy::SpdySerializedFrame stream_end(
+      spdy_util_.ConstructSpdyDataFrame(1, "", true));
+  MockRead reads[] = {CreateMockRead(response_headers, 1),
+                      CreateMockRead(stream_end, 2),
+                      MockRead(ASYNC, ERR_IO_PENDING, 3),  // pause here
+                      MockRead(ASYNC, 0, 4)};
+  spdy::SpdySerializedFrame request_headers(spdy_util_.ConstructSpdyHeaders(
+      1, RequestHeaders(), DEFAULT_PRIORITY, /* fin = */ false));
+  MockWrite writes[] = {CreateMockWrite(request_headers, 0)};
+  SequencedSocketData data(reads, writes);
+  AddSocketData(&data);
+  AddSSLSocketData();
+
+  EXPECT_CALL(mock_delegate_, OnHeadersSent());
+  EXPECT_CALL(mock_delegate_, OnHeadersReceived(_));
+  EXPECT_CALL(mock_delegate_, OnClose(ERR_CONNECTION_CLOSED));
+
+  base::WeakPtr<SpdySession> session = CreateSpdySession();
+  base::WeakPtr<SpdyStream> stream = CreateSpdyStream(session);
+  WebSocketSpdyStreamAdapter adapter(stream, &mock_delegate_,
+                                     NetLogWithSource());
+  EXPECT_TRUE(adapter.is_initialized());
+
+  int rv = stream->SendRequestHeaders(RequestHeaders(), MORE_DATA_TO_SEND);
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  constexpr int kReadBufSize = 1024;
+  auto read_buf = base::MakeRefCounted<IOBuffer>(kReadBufSize);
+  TestCompletionCallback read_callback;
+  rv = adapter.Read(read_buf.get(), kReadBufSize, read_callback.callback());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_TRUE(session);
+  EXPECT_TRUE(stream);
+  rv = read_callback.WaitForResult();
+  EXPECT_EQ(ERR_CONNECTION_CLOSED, rv);
+  EXPECT_TRUE(session);
+  EXPECT_FALSE(stream);
+
+  // Close the session.
+  data.Resume();
+
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(data.AllReadDataConsumed());
   EXPECT_TRUE(data.AllWriteDataConsumed());
@@ -961,6 +1019,42 @@ TEST_F(WebSocketSpdyStreamAdapterTest, WriteCallbackDestroysAdapter) {
   EXPECT_TRUE(data.AllWriteDataConsumed());
 }
 
-}  // namespace test
+TEST_F(WebSocketSpdyStreamAdapterTest,
+       OnCloseOkShouldBeTranslatedToConnectionClose) {
+  spdy::SpdySerializedFrame response_headers(
+      spdy_util_.ConstructSpdyResponseHeaders(1, ResponseHeaders(), false));
+  spdy::SpdySerializedFrame close(
+      spdy_util_.ConstructSpdyRstStream(1, spdy::ERROR_CODE_NO_ERROR));
+  MockRead reads[] = {CreateMockRead(response_headers, 1),
+                      CreateMockRead(close, 2), MockRead(ASYNC, 0, 3)};
+  spdy::SpdySerializedFrame request_headers(spdy_util_.ConstructSpdyHeaders(
+      1, RequestHeaders(), DEFAULT_PRIORITY, false));
+  MockWrite writes[] = {CreateMockWrite(request_headers, 0)};
+  SequencedSocketData data(reads, writes);
+  AddSocketData(&data);
+  AddSSLSocketData();
 
-}  // namespace net
+  EXPECT_CALL(mock_delegate_, OnHeadersSent());
+  EXPECT_CALL(mock_delegate_, OnHeadersReceived(_));
+
+  base::WeakPtr<SpdySession> session = CreateSpdySession();
+  base::WeakPtr<SpdyStream> stream = CreateSpdyStream(session);
+  WebSocketSpdyStreamAdapter adapter(stream, &mock_delegate_,
+                                     NetLogWithSource());
+  EXPECT_TRUE(adapter.is_initialized());
+
+  EXPECT_CALL(mock_delegate_, OnClose(ERR_CONNECTION_CLOSED));
+
+  int rv = stream->SendRequestHeaders(RequestHeaders(), MORE_DATA_TO_SEND);
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  const int kReadBufSize = 1024;
+  auto read_buf = base::MakeRefCounted<IOBuffer>(kReadBufSize);
+  TestCompletionCallback callback;
+  rv = adapter.Read(read_buf.get(), kReadBufSize, callback.callback());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+  rv = callback.WaitForResult();
+  ASSERT_EQ(ERR_CONNECTION_CLOSED, rv);
+}
+
+}  // namespace net::test

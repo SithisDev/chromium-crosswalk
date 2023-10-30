@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,29 +19,34 @@
 #include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_config_service.h"
-#include "net/proxy_resolution/proxy_resolution_service.h"
+#include "net/proxy_resolution/proxy_config_with_annotation.h"
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "net/base/network_change_notifier_linux.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
 namespace {
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 // Flag to specifies which network interfaces to ignore. Interfaces should
 // follow as a comma seperated list.
 const char kIgnoreNetifFlag[] = "ignore-netif";
@@ -64,6 +69,8 @@ const char* ConnectionTypeToString(
       return "CONNECTION_3G";
     case net::NetworkChangeNotifier::CONNECTION_4G:
       return "CONNECTION_4G";
+    case net::NetworkChangeNotifier::CONNECTION_5G:
+      return "CONNECTION_5G";
     case net::NetworkChangeNotifier::CONNECTION_NONE:
       return "CONNECTION_NONE";
     case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
@@ -104,6 +111,9 @@ class NetWatcher :
  public:
   NetWatcher() = default;
 
+  NetWatcher(const NetWatcher&) = delete;
+  NetWatcher& operator=(const NetWatcher&) = delete;
+
   ~NetWatcher() override = default;
 
   // net::NetworkChangeNotifier::IPAddressObserver implementation.
@@ -118,9 +128,6 @@ class NetWatcher :
 
   // net::NetworkChangeNotifier::DNSObserver implementation.
   void OnDNSChanged() override { LOG(INFO) << "OnDNSChanged()"; }
-  void OnInitialDNSConfigRead() override {
-    LOG(INFO) << "OnInitialDNSConfigRead()";
-  }
 
   // net::NetworkChangeNotifier::NetworkChangeObserver implementation.
   void OnNetworkChanged(
@@ -136,15 +143,12 @@ class NetWatcher :
     LOG(INFO) << "OnProxyConfigChanged(" << ProxyConfigToString(config.value())
               << ", " << ConfigAvailabilityToString(availability) << ")";
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NetWatcher);
 };
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
   base::mac::ScopedNSAutoreleasePool pool;
 #endif
   base::AtExitManager exit_manager;
@@ -155,13 +159,15 @@ int main(int argc, char* argv[]) {
   logging::InitLogging(settings);
 
   // Just make the main task executor the network loop.
-  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
 
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("NetWatcher");
 
   NetWatcher net_watcher;
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   std::string ignored_netifs_str =
       command_line->GetSwitchValueASCII(kIgnoreNetifFlag);
@@ -174,16 +180,16 @@ int main(int argc, char* argv[]) {
       ignored_interfaces.insert(ignored_netif);
     }
   }
-  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier(
-      new net::NetworkChangeNotifierLinux(ignored_interfaces));
+  auto network_change_notifier =
+      std::make_unique<net::NetworkChangeNotifierLinux>(ignored_interfaces);
 #else
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier(
-      net::NetworkChangeNotifier::Create());
+      net::NetworkChangeNotifier::CreateIfNeeded());
 #endif
 
   // Use the network loop as the file loop also.
   std::unique_ptr<net::ProxyConfigService> proxy_config_service(
-      net::ProxyResolutionService::CreateSystemProxyConfigService(
+      net::ProxyConfigService::CreateSystemProxyConfigService(
           io_task_executor.task_runner()));
 
   // Uses |network_change_notifier|.

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,25 +12,24 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/containers/mru_cache.h"
-#include "base/macros.h"
+#include "base/containers/lru_cache.h"
 #include "base/memory/memory_pressure_monitor.h"
-#include "base/time/time.h"
-#include "base/trace_event/memory_dump_provider.h"
+#include "base/memory/raw_ptr.h"
+#include "net/base/host_port_pair.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_export.h"
-#include "net/cert/cert_database.h"
+#include "net/base/network_anonymization_key.h"
+#include "net/base/privacy_mode.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
 
 namespace base {
 class Clock;
-namespace trace_event {
-class ProcessMemoryDump;
-}
 }
 
 namespace net {
 
-class NET_EXPORT SSLClientSessionCache : public CertDatabase::Observer {
+class NET_EXPORT SSLClientSessionCache {
  public:
   struct Config {
     // The maximum number of entries in the cache.
@@ -39,10 +38,30 @@ class NET_EXPORT SSLClientSessionCache : public CertDatabase::Observer {
     size_t expiration_check_count = 256;
   };
 
-  explicit SSLClientSessionCache(const Config& config);
-  ~SSLClientSessionCache() override;
+  struct NET_EXPORT Key {
+    Key();
+    Key(const Key& other);
+    Key(Key&& other);
+    ~Key();
+    Key& operator=(const Key& other);
+    Key& operator=(Key&& other);
 
-  void OnCertDBChanged() override;
+    bool operator==(const Key& other) const;
+    bool operator<(const Key& other) const;
+
+    HostPortPair server;
+    absl::optional<IPAddress> dest_ip_addr;
+    NetworkAnonymizationKey network_anonymization_key;
+    PrivacyMode privacy_mode = PRIVACY_MODE_DISABLED;
+    bool disable_legacy_crypto = false;
+  };
+
+  explicit SSLClientSessionCache(const Config& config);
+
+  SSLClientSessionCache(const SSLClientSessionCache&) = delete;
+  SSLClientSessionCache& operator=(const SSLClientSessionCache&) = delete;
+
+  ~SSLClientSessionCache();
 
   // Returns true if |entry| is expired as of |now|.
   static bool IsExpired(SSL_SESSION* session, time_t now);
@@ -51,23 +70,25 @@ class NET_EXPORT SSLClientSessionCache : public CertDatabase::Observer {
 
   // Returns the session associated with |cache_key| and moves it to the front
   // of the MRU list. Returns nullptr if there is none.
-  bssl::UniquePtr<SSL_SESSION> Lookup(const std::string& cache_key);
+  bssl::UniquePtr<SSL_SESSION> Lookup(const Key& cache_key);
 
   // Inserts |session| into the cache at |cache_key|. If there is an existing
   // one, it is released. Every |expiration_check_count| calls, the cache is
   // checked for stale entries.
-  void Insert(const std::string& cache_key,
-              bssl::UniquePtr<SSL_SESSION> session);
+  void Insert(const Key& cache_key, bssl::UniquePtr<SSL_SESSION> session);
+
+  // Clears early data support for all current sessions associated with
+  // |cache_key|. This may be used after a 0-RTT reject to avoid unnecessarily
+  // offering 0-RTT data on retries. See https://crbug.com/1066623.
+  void ClearEarlyData(const Key& cache_key);
+
+  // Removes all entries associated with |server|.
+  void FlushForServer(const HostPortPair& server);
 
   // Removes all entries from the cache.
   void Flush();
 
   void SetClockForTesting(base::Clock* clock);
-
-  // Dumps memory allocation stats. |pmd| is the ProcessMemoryDump of the
-  // browser process.
-  void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
-                       const std::string& parent_absolute_name) const;
 
  private:
   struct Entry {
@@ -97,13 +118,11 @@ class NET_EXPORT SSLClientSessionCache : public CertDatabase::Observer {
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
-  base::Clock* clock_;
+  raw_ptr<base::Clock> clock_;
   Config config_;
-  base::HashingMRUCache<std::string, Entry> cache_;
-  size_t lookups_since_flush_;
+  base::LRUCache<Key, Entry> cache_;
+  size_t lookups_since_flush_ = 0;
   std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSLClientSessionCache);
 };
 
 }  // namespace net

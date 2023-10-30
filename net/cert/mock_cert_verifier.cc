@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_list.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/pattern.h"
@@ -42,8 +44,13 @@ struct MockCertVerifier::Rule {
 
 class MockCertVerifier::MockRequest : public CertVerifier::Request {
  public:
-  MockRequest(CertVerifyResult* result, CompletionOnceCallback callback)
-      : result_(result), callback_(std::move(callback)) {}
+  MockRequest(MockCertVerifier* parent,
+              CertVerifyResult* result,
+              CompletionOnceCallback callback)
+      : result_(result), callback_(std::move(callback)) {
+    subscription_ = parent->request_list_.Add(
+        base::BindOnce(&MockRequest::Cleanup, weak_factory_.GetWeakPtr()));
+  }
 
   void ReturnResultLater(int rv, const CertVerifyResult& result) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -53,19 +60,34 @@ class MockCertVerifier::MockRequest : public CertVerifier::Request {
 
  private:
   void ReturnResult(int rv, const CertVerifyResult& result) {
+    // If the MockCertVerifier has been deleted, the callback will have been
+    // reset to null.
+    if (!callback_)
+      return;
+
     *result_ = result;
     std::move(callback_).Run(rv);
   }
 
-  CertVerifyResult* result_;
+  void Cleanup() {
+    // Note: May delete |this_|.
+    std::move(callback_).Reset();
+  }
+
+  raw_ptr<CertVerifyResult> result_;
   CompletionOnceCallback callback_;
+  base::CallbackListSubscription subscription_;
+
   base::WeakPtrFactory<MockRequest> weak_factory_{this};
 };
 
-MockCertVerifier::MockCertVerifier()
-    : default_result_(ERR_CERT_INVALID), async_(false) {}
+MockCertVerifier::MockCertVerifier() = default;
 
-MockCertVerifier::~MockCertVerifier() = default;
+MockCertVerifier::~MockCertVerifier() {
+  // Reset the callbacks for any outstanding MockRequests to fulfill the
+  // respective net::CertVerifier contract.
+  request_list_.Notify();
+}
 
 int MockCertVerifier::Verify(const RequestParams& params,
                              CertVerifyResult* verify_result,
@@ -77,7 +99,7 @@ int MockCertVerifier::Verify(const RequestParams& params,
   }
 
   auto request =
-      std::make_unique<MockRequest>(verify_result, std::move(callback));
+      std::make_unique<MockRequest>(this, verify_result, std::move(callback));
   CertVerifyResult result;
   int rv = VerifyImpl(params, &result);
   request->ReturnResultLater(rv, result);
@@ -97,6 +119,10 @@ void MockCertVerifier::AddResultForCertAndHost(
     const CertVerifyResult& verify_result,
     int rv) {
   rules_.push_back(Rule(std::move(cert), host_pattern, verify_result, rv));
+}
+
+void MockCertVerifier::ClearRules() {
+  rules_.clear();
 }
 
 int MockCertVerifier::VerifyImpl(const RequestParams& params,

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "ipc/ipc_param_traits.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -25,6 +24,10 @@ class NativeStructTest : public BindingsTestBase,
                          public test::NativeTypeTester {
  public:
   NativeStructTest() : receiver_(this, remote_.BindNewPipeAndPassReceiver()) {}
+
+  NativeStructTest(const NativeStructTest&) = delete;
+  NativeStructTest& operator=(const NativeStructTest&) = delete;
+
   ~NativeStructTest() override = default;
 
   test::NativeTypeTester* remote() { return remote_.get(); }
@@ -44,15 +47,13 @@ class NativeStructTest : public BindingsTestBase,
 
   Remote<test::NativeTypeTester> remote_;
   Receiver<test::NativeTypeTester> receiver_;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeStructTest);
 };
 
 TEST_P(NativeStructTest, NativeStruct) {
   test::TestNativeStruct s("hello world", 5, 42);
   base::RunLoop loop;
   remote()->PassNativeStruct(
-      s, base::Bind(
+      s, base::BindOnce(
              [](test::TestNativeStruct* expected_struct, base::RunLoop* loop,
                 const test::TestNativeStruct& passed) {
                EXPECT_EQ(expected_struct->message(), passed.message());
@@ -72,7 +73,7 @@ TEST_P(NativeStructTest, NativeStructWithAttachments) {
   base::RunLoop loop;
   remote()->PassNativeStructWithAttachments(
       std::move(s),
-      base::Bind(
+      base::BindOnce(
           [](const std::string& expected_message,
              mojo::ScopedMessagePipeHandle peer_pipe, base::RunLoop* loop,
              test::TestNativeStructWithAttachments passed) {
@@ -90,7 +91,7 @@ TEST_P(NativeStructTest, NativeStructWithAttachments) {
             EXPECT_EQ("ping", std::string(bytes.begin(), bytes.end()));
             loop->Quit();
           },
-          kTestMessage, base::Passed(&pipe.handle1), &loop));
+          kTestMessage, std::move(pipe.handle1), &loop));
   loop.Run();
 }
 

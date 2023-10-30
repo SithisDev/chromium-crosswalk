@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "net/base/net_errors.h"
 #include "net/base/trace_constants.h"
@@ -20,12 +21,7 @@
 namespace net {
 
 ClientSocketHandle::ClientSocketHandle()
-    : is_initialized_(false),
-      pool_(nullptr),
-      higher_pool_(nullptr),
-      reuse_type_(ClientSocketHandle::UNUSED),
-      group_generation_(-1),
-      is_ssl_error_(false) {}
+    : resolve_error_info_(ResolveErrorInfo(OK)) {}
 
 ClientSocketHandle::~ClientSocketHandle() {
   Reset();
@@ -34,7 +30,7 @@ ClientSocketHandle::~ClientSocketHandle() {
 int ClientSocketHandle::Init(
     const ClientSocketPool::GroupId& group_id,
     scoped_refptr<ClientSocketPool::SocketParams> socket_params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     RequestPriority priority,
     const SocketTag& socket_tag,
     ClientSocketPool::RespectLimits respect_limits,
@@ -44,7 +40,7 @@ int ClientSocketHandle::Init(
     const NetLogWithSource& net_log) {
   requesting_source_ = net_log.source();
 
-  CHECK(!group_id.destination().IsEmpty());
+  CHECK(group_id.destination().IsValid());
   ResetInternal(true /* cancel */, false /* cancel_connect_job */);
   ResetErrorState();
   pool_ = pool;
@@ -88,7 +84,7 @@ void ClientSocketHandle::ResetAndCloseSocket() {
 
 LoadState ClientSocketHandle::GetLoadState() const {
   CHECK(!is_initialized());
-  CHECK(!group_id_.destination().IsEmpty());
+  CHECK(group_id_.destination().IsValid());
   // Because of http://crbug.com/37810  we may not have a pool, but have
   // just a raw socket.
   if (!pool_)
@@ -124,9 +120,10 @@ void ClientSocketHandle::RemoveHigherLayeredPool(
   }
 }
 
-void ClientSocketHandle::CloseIdleSocketsInGroup() {
+void ClientSocketHandle::CloseIdleSocketsInGroup(
+    const char* net_log_reason_utf8) {
   if (pool_)
-    pool_->CloseIdleSocketsInGroup(group_id_);
+    pool_->CloseIdleSocketsInGroup(group_id_, net_log_reason_utf8);
 }
 
 bool ClientSocketHandle::GetLoadTimingInfo(
@@ -149,13 +146,6 @@ bool ClientSocketHandle::GetLoadTimingInfo(
   return true;
 }
 
-void ClientSocketHandle::DumpMemoryStats(
-    StreamSocket::SocketMemoryStats* stats) const {
-  if (!socket_)
-    return;
-  socket_->DumpMemoryStats(stats);
-}
-
 void ClientSocketHandle::SetSocket(std::unique_ptr<StreamSocket> s) {
   socket_ = std::move(s);
 }
@@ -163,6 +153,7 @@ void ClientSocketHandle::SetSocket(std::unique_ptr<StreamSocket> s) {
 void ClientSocketHandle::SetAdditionalErrorState(ConnectJob* connect_job) {
   connection_attempts_ = connect_job->GetConnectionAttempts();
 
+  resolve_error_info_ = connect_job->GetResolveErrorInfo();
   is_ssl_error_ = connect_job->IsSSLError();
   ssl_cert_request_info_ = connect_job->GetCertRequestInfo();
 }
@@ -207,7 +198,7 @@ void ClientSocketHandle::ResetInternal(bool cancel, bool cancel_connect_job) {
   DCHECK(cancel || !cancel_connect_job);
 
   // Was Init called?
-  if (!group_id_.destination().IsEmpty()) {
+  if (group_id_.destination().IsValid()) {
     // If so, we must have a pool.
     CHECK(pool_);
     if (is_initialized()) {
@@ -241,6 +232,7 @@ void ClientSocketHandle::ResetInternal(bool cancel, bool cancel_connect_job) {
 }
 
 void ClientSocketHandle::ResetErrorState() {
+  resolve_error_info_ = ResolveErrorInfo(OK);
   is_ssl_error_ = false;
   ssl_cert_request_info_ = nullptr;
 }

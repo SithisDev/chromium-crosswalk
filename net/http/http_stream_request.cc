@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/log/net_log_event_type.h"
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
@@ -30,17 +29,13 @@ HttpStreamRequest::HttpStreamRequest(
       websocket_handshake_stream_create_helper_(
           websocket_handshake_stream_create_helper),
       net_log_(net_log),
-      completed_(false),
-      was_alpn_negotiated_(false),
-      negotiated_protocol_(kProtoUnknown),
-      using_spdy_(false),
       stream_type_(stream_type) {
   net_log_.BeginEvent(NetLogEventType::HTTP_STREAM_REQUEST);
 }
 
 HttpStreamRequest::~HttpStreamRequest() {
   net_log_.EndEvent(NetLogEventType::HTTP_STREAM_REQUEST);
-  helper_->OnRequestComplete();
+  helper_.ExtractAsDangling()->OnRequestComplete();  // May delete `*helper_`;
 }
 
 void HttpStreamRequest::Complete(bool was_alpn_negotiated,

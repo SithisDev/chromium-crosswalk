@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,23 +19,22 @@ base::Value NetLogUDPDataTransferParams(int byte_count,
                                         const char* bytes,
                                         const IPEndPoint* address,
                                         NetLogCaptureMode capture_mode) {
-  base::DictionaryValue dict;
-  dict.SetInteger("byte_count", byte_count);
+  base::Value::Dict dict;
+  dict.Set("byte_count", byte_count);
   if (NetLogCaptureIncludesSocketBytes(capture_mode))
-    dict.SetKey("bytes", NetLogBinaryValue(bytes, byte_count));
+    dict.Set("bytes", NetLogBinaryValue(bytes, byte_count));
   if (address)
-    dict.SetString("address", address->ToString());
-  return std::move(dict);
+    dict.Set("address", address->ToString());
+  return base::Value(std::move(dict));
 }
 
-base::Value NetLogUDPConnectParams(
-    const IPEndPoint& address,
-    NetworkChangeNotifier::NetworkHandle network) {
-  base::DictionaryValue dict;
-  dict.SetString("address", address.ToString());
-  if (network != NetworkChangeNotifier::kInvalidNetworkHandle)
-    dict.SetInteger("bound_to_network", network);
-  return std::move(dict);
+base::Value NetLogUDPConnectParams(const IPEndPoint& address,
+                                   handles::NetworkHandle network) {
+  base::Value::Dict dict;
+  dict.Set("address", address.ToString());
+  if (network != handles::kInvalidNetworkHandle)
+    dict.Set("bound_to_network", static_cast<int>(network));
+  return base::Value(std::move(dict));
 }
 
 }  // namespace
@@ -52,9 +51,8 @@ void NetLogUDPDataTransfer(const NetLogWithSource& net_log,
   });
 }
 
-base::Value CreateNetLogUDPConnectParams(
-    const IPEndPoint& address,
-    NetworkChangeNotifier::NetworkHandle network) {
+base::Value CreateNetLogUDPConnectParams(const IPEndPoint& address,
+                                         handles::NetworkHandle network) {
   return NetLogUDPConnectParams(address, network);
 }
 

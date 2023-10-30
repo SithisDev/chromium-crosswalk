@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.mojo.bindings;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -50,7 +50,7 @@ public class ReadAndDispatchMessageTest {
      * @see org.chromium.mojo.MojoTestCase#setUp()
      */
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         Core core = CoreImpl.getInstance();
         mData = BindingsTestUtils.newRandomMessage(DATA_SIZE).getData();
         mMessageReceiver = new RecordingMessageReceiver();
@@ -65,7 +65,7 @@ public class ReadAndDispatchMessageTest {
      * @see org.chromium.mojo.MojoTestCase#tearDown()
      */
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         for (Handle handle : mHandlesToClose) {
             handle.close();
         }

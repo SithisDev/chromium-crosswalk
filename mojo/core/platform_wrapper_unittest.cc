@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,8 @@
 
 #include "base/files/file.h"
 #include "base/files/file_util.h"
-#include "base/memory/shared_memory.h"
+#include "base/files/scoped_file.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/process/process_handle.h"
 #include "build/build_config.h"
 #include "mojo/core/test/mojo_test_base.h"
@@ -19,37 +20,40 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#include "base/win/scoped_handle.h"
+#elif BUILDFLAG(IS_MAC)
+#include "base/mac/scoped_mach_port.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define SIMPLE_PLATFORM_HANDLE_TYPE MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 #define SIMPLE_PLATFORM_HANDLE_TYPE MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR
 #endif
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
 #define SHARED_BUFFER_PLATFORM_HANDLE_TYPE \
   MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif BUILDFLAG(IS_MAC)
 #define SHARED_BUFFER_PLATFORM_HANDLE_TYPE MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT
-#elif defined(OS_WIN) || defined(OS_POSIX)
+#elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_POSIX)
 #define SHARED_BUFFER_PLATFORM_HANDLE_TYPE SIMPLE_PLATFORM_HANDLE_TYPE
 #endif
 
 uint64_t PlatformHandleValueFromPlatformFile(base::PlatformFile file) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return reinterpret_cast<uint64_t>(file);
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   return static_cast<uint64_t>(file);
 #endif
 }
 
 base::PlatformFile PlatformFileFromPlatformHandleValue(uint64_t value) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return reinterpret_cast<base::PlatformFile>(value);
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   return static_cast<base::PlatformFile>(value);
 #endif
 }
@@ -88,7 +92,7 @@ TEST_F(PlatformWrapperTest, WrapPlatformHandle) {
     WriteMessageWithHandles(h, kMessage, &wrapped_handle, 1);
   });
 
-  base::DeleteFile(temp_file_path, false);
+  base::DeleteFile(temp_file_path);
 }
 
 DEFINE_TEST_CLIENT_TEST_WITH_PIPE(ReadPlatformFile, PlatformWrapperTest, h) {
@@ -108,36 +112,41 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(ReadPlatformFile, PlatformWrapperTest, h) {
   EXPECT_EQ(file.ReadAtCurrentPos(data.data(), static_cast<int>(data.size())),
             static_cast<int>(data.size()));
   EXPECT_TRUE(std::equal(message.begin(), message.end(), data.begin()));
+  EXPECT_EQ(MOJO_RESULT_OK, MojoClose(h));
 }
 
 TEST_F(PlatformWrapperTest, WrapPlatformSharedMemoryRegion) {
   // Allocate a new platform shared buffer and write a message into it.
   const std::string kMessage = "Hello, world!";
-  base::SharedMemory buffer;
-  buffer.CreateAndMapAnonymous(kMessage.size());
-  CHECK(buffer.memory());
+  auto region = base::UnsafeSharedMemoryRegion::Create(kMessage.size());
+  base::WritableSharedMemoryMapping buffer = region.Map();
+  CHECK(buffer.IsValid());
   memcpy(buffer.memory(), kMessage.data(), kMessage.size());
 
   RunTestClient("ReadPlatformSharedBuffer", [&](MojoHandle h) {
     // Wrap the shared memory handle and send it to the child along with the
     // expected message.
-    base::SharedMemoryHandle memory_handle =
-        base::SharedMemory::DuplicateHandle(buffer.handle());
+    base::subtle::PlatformSharedMemoryRegion platform_region =
+        base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
+            region.Duplicate());
     MojoPlatformHandle os_buffer;
     os_buffer.struct_size = sizeof(MojoPlatformHandle);
     os_buffer.type = SHARED_BUFFER_PLATFORM_HANDLE_TYPE;
-#if defined(OS_WIN)
-    os_buffer.value = reinterpret_cast<uint64_t>(memory_handle.GetHandle());
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
-    os_buffer.value = static_cast<uint64_t>(memory_handle.GetMemoryObject());
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
-    os_buffer.value = static_cast<uint64_t>(memory_handle.GetHandle());
+#if BUILDFLAG(IS_WIN)
+    os_buffer.value =
+        reinterpret_cast<uint64_t>(platform_region.PassPlatformHandle().Take());
+#elif BUILDFLAG(IS_MAC) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
+    os_buffer.value =
+        static_cast<uint64_t>(platform_region.PassPlatformHandle().release());
+#elif BUILDFLAG(IS_POSIX)
+    os_buffer.value = static_cast<uint64_t>(
+        platform_region.PassPlatformHandle().fd.release());
 #else
 #error Unsupported platform
 #endif
 
     MojoSharedBufferGuid mojo_guid;
-    base::UnguessableToken guid = memory_handle.GetGUID();
+    base::UnguessableToken guid = platform_region.GetGUID();
     mojo_guid.high = guid.GetHighForSerialization();
     mojo_guid.low = guid.GetLowForSerialization();
 
@@ -167,8 +176,8 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(ReadPlatformSharedBuffer,
   // Check the message in the buffer
   ExpectBufferContents(wrapped_handle, 0, message);
 
-  // Now unwrap the buffer and verify that the base::SharedMemoryHandle also
-  // works as expected.
+  // Now unwrap the buffer and verify that the
+  // base::subtle::PlatformSharedMemoryRegion also works as expected.
   MojoPlatformHandle os_buffer;
   os_buffer.struct_size = sizeof(MojoPlatformHandle);
   uint32_t num_handles = 1;
@@ -180,33 +189,35 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(ReadPlatformSharedBuffer,
                                 &num_handles, &size, &mojo_guid, &access_mode));
   EXPECT_EQ(MOJO_PLATFORM_SHARED_MEMORY_REGION_ACCESS_MODE_UNSAFE, access_mode);
 
+  auto mode = base::subtle::PlatformSharedMemoryRegion::Mode::kUnsafe;
   base::UnguessableToken guid =
       base::UnguessableToken::Deserialize(mojo_guid.high, mojo_guid.low);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   ASSERT_EQ(MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE, os_buffer.type);
-  base::SharedMemoryHandle memory_handle(
-      reinterpret_cast<HANDLE>(os_buffer.value), size, guid);
-#elif defined(OS_FUCHSIA)
+  auto platform_handle =
+      base::win::ScopedHandle(reinterpret_cast<HANDLE>(os_buffer.value));
+#elif BUILDFLAG(IS_FUCHSIA)
   ASSERT_EQ(MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE, os_buffer.type);
-  base::SharedMemoryHandle memory_handle(
-      static_cast<zx_handle_t>(os_buffer.value), size, guid);
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+  auto platform_handle = zx::vmo(static_cast<zx_handle_t>(os_buffer.value));
+#elif BUILDFLAG(IS_MAC)
   ASSERT_EQ(MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT, os_buffer.type);
-  base::SharedMemoryHandle memory_handle(
-      static_cast<mach_port_t>(os_buffer.value), size, guid);
-#elif defined(OS_POSIX)
+  auto platform_handle =
+      base::mac::ScopedMachSendRight(static_cast<mach_port_t>(os_buffer.value));
+#elif BUILDFLAG(IS_POSIX)
   ASSERT_EQ(MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR, os_buffer.type);
-  base::SharedMemoryHandle memory_handle(
-      base::FileDescriptor(static_cast<int>(os_buffer.value), false), size,
-      guid);
+  auto platform_handle = base::ScopedFD(static_cast<int>(os_buffer.value));
 #endif
+  base::subtle::PlatformSharedMemoryRegion platform_region =
+      base::subtle::PlatformSharedMemoryRegion::Take(std::move(platform_handle),
+                                                     mode, size, guid);
+  base::UnsafeSharedMemoryRegion region =
+      base::UnsafeSharedMemoryRegion::Deserialize(std::move(platform_region));
+  ASSERT_TRUE(region.IsValid());
 
-  base::SharedMemory memory(memory_handle, false);
-  memory.Map(message.size());
-  ASSERT_TRUE(memory.memory());
-
+  base::WritableSharedMemoryMapping mapping = region.Map();
+  ASSERT_TRUE(mapping.memory());
   EXPECT_TRUE(std::equal(message.begin(), message.end(),
-                         static_cast<const char*>(memory.memory())));
+                         static_cast<const char*>(mapping.memory())));
 
   // Verify that the received buffer's internal GUID was preserved in transit.
   EXPECT_EQ(MOJO_RESULT_OK, WaitForSignals(h, MOJO_HANDLE_SIGNAL_READABLE));
@@ -219,6 +230,7 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(ReadPlatformSharedBuffer,
       reinterpret_cast<MojoSharedBufferGuid*>(guid_bytes.data());
   EXPECT_EQ(expected_guid->high, mojo_guid.high);
   EXPECT_EQ(expected_guid->low, mojo_guid.low);
+  EXPECT_EQ(MOJO_RESULT_OK, MojoClose(h));
 }
 
 TEST_F(PlatformWrapperTest, InvalidHandle) {

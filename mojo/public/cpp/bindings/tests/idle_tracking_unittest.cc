@@ -1,11 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -25,6 +26,9 @@ class TestServiceImpl : public mojom::TestService, public mojom::KeepAlive {
  public:
   explicit TestServiceImpl(PendingReceiver<mojom::TestService> receiver)
       : receiver_(this, std::move(receiver)) {}
+
+  TestServiceImpl(const TestServiceImpl&) = delete;
+  TestServiceImpl& operator=(const TestServiceImpl&) = delete;
 
   ~TestServiceImpl() override = default;
 
@@ -56,8 +60,6 @@ class TestServiceImpl : public mojom::TestService, public mojom::KeepAlive {
 
   bool hold_next_ping_pong_ = false;
   base::OnceClosure last_ping_pong_reply_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestServiceImpl);
 };
 
 TEST_P(IdleTrackingTest, ControlMessagesDontExpectAck) {
@@ -189,7 +191,7 @@ TEST_P(IdleTrackingTest, NonZeroTimeout) {
   Remote<mojom::TestService> remote;
   TestServiceImpl impl(remote.BindNewPipeAndPassReceiver());
 
-  constexpr auto kTimeout = base::TimeDelta::FromMilliseconds(500);
+  constexpr auto kTimeout = base::Milliseconds(500);
   base::ElapsedTimer timer;
   base::RunLoop loop;
   remote.set_idle_handler(kTimeout, base::BindLambdaForTesting([&] {
@@ -197,6 +199,51 @@ TEST_P(IdleTrackingTest, NonZeroTimeout) {
                             loop.Quit();
                           }));
   remote->Ping();
+  loop.Run();
+}
+
+TEST_P(IdleTrackingTest, SubInterfacesCanIdleSeparately) {
+  // Verifies that hierarchical ConnectionGroup references work properly, such
+  // that a main interface with an idle timeout can bind a subinterface with its
+  // own idle timeout, and the subinterface (and all subinterfaces it binds
+  // transitively) will still keep the main interface from timing out.
+
+  Remote<mojom::TestService> remote;
+  TestServiceImpl impl(remote.BindNewPipeAndPassReceiver());
+
+  // First see that we can bind another receiver and that the Remote does not
+  // invoke its idle handler even though its number of unacked messages goes to
+  // zero.
+  remote.set_idle_handler(base::TimeDelta(),
+                          base::BindRepeating([] { NOTREACHED(); }));
+  Remote<mojom::KeepAlive> keepalive;
+  remote->BindKeepAlive(keepalive.BindNewPipeAndPassReceiver());
+  EXPECT_EQ(1u, remote.GetNumUnackedMessagesForTesting());
+  keepalive.FlushForTesting();
+  remote.FlushForTesting();
+
+  // We RunUntilIdle because we want to ensure that no asynchronous side-effects
+  // of the above operations result in the idle handler being invoked.
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(0u, remote.GetNumUnackedMessagesForTesting());
+
+  // Now we set an idle handler on the KeepAlive itself, and we expect the
+  // TestService Remote to NOT invoke its idle handler.
+  keepalive.set_idle_handler(base::TimeDelta(), base::DoNothing());
+
+  // We use RunUntilIdle() again because we want to ensure there are no
+  // asynchronous side-effects of the above operation that lead to idling on the
+  // main interface. If the main interface idles, it will hit an assertion
+  // before this call returns.
+  base::RunLoop().RunUntilIdle();
+
+  // Finally verify that the main interface does still go idle once we reset the
+  // keepalive connection.
+  base::RunLoop loop;
+  remote.set_idle_handler(base::TimeDelta(), loop.QuitClosure());
+  remote.FlushForTesting();
+  keepalive.reset();
   loop.Run();
 }
 

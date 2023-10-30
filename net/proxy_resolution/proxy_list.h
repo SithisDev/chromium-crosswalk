@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,9 @@ class NET_EXPORT_PRIVATE ProxyList {
  public:
   ProxyList();
   ProxyList(const ProxyList& other);
+  ProxyList(ProxyList&& other);
+  ProxyList& operator=(const ProxyList& other);
+  ProxyList& operator=(ProxyList&& other);
   ~ProxyList();
 
   // Initializes the proxy list to a string containing one or more proxy servers

@@ -1,12 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/proxy_resolution/mock_proxy_resolver.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace net {
 
@@ -48,14 +49,15 @@ MockAsyncProxyResolver::~MockAsyncProxyResolver() = default;
 
 int MockAsyncProxyResolver::GetProxyForURL(
     const GURL& url,
+    const NetworkAnonymizationKey& network_anonymization_key,
     ProxyInfo* results,
     CompletionOnceCallback callback,
     std::unique_ptr<Request>* request,
     const NetLogWithSource& /*net_log*/) {
-  std::unique_ptr<Job> job(new Job(this, url, results, std::move(callback)));
+  auto job = std::make_unique<Job>(this, url, results, std::move(callback));
 
   pending_jobs_.push_back(job.get());
-  request->reset(new RequestImpl(std::move(job)));
+  *request = std::make_unique<RequestImpl>(std::move(job));
 
   // Test code completes the request by calling job->CompleteNow().
   return ERR_IO_PENDING;
@@ -142,11 +144,11 @@ int MockAsyncProxyResolverFactory::CreateProxyResolver(
     std::unique_ptr<ProxyResolver>* resolver,
     CompletionOnceCallback callback,
     std::unique_ptr<ProxyResolverFactory::Request>* request_handle) {
-  scoped_refptr<Request> request =
-      new Request(this, pac_script, resolver, std::move(callback));
+  auto request = base::MakeRefCounted<Request>(this, pac_script, resolver,
+                                               std::move(callback));
   pending_requests_.push_back(request);
 
-  request_handle->reset(new Job(request));
+  *request_handle = std::make_unique<Job>(request);
 
   // Test code completes the request by calling request->CompleteNow().
   return ERR_IO_PENDING;
@@ -169,13 +171,15 @@ ForwardingProxyResolver::ForwardingProxyResolver(ProxyResolver* impl)
     : impl_(impl) {
 }
 
-int ForwardingProxyResolver::GetProxyForURL(const GURL& query_url,
-                                            ProxyInfo* results,
-                                            CompletionOnceCallback callback,
-                                            std::unique_ptr<Request>* request,
-                                            const NetLogWithSource& net_log) {
-  return impl_->GetProxyForURL(query_url, results, std::move(callback), request,
-                               net_log);
+int ForwardingProxyResolver::GetProxyForURL(
+    const GURL& query_url,
+    const NetworkAnonymizationKey& network_anonymization_key,
+    ProxyInfo* results,
+    CompletionOnceCallback callback,
+    std::unique_ptr<Request>* request,
+    const NetLogWithSource& net_log) {
+  return impl_->GetProxyForURL(query_url, network_anonymization_key, results,
+                               std::move(callback), request, net_log);
 }
 
 }  // namespace net

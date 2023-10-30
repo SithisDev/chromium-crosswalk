@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -18,7 +18,7 @@ namespace {
 using testing::UnorderedElementsAre;
 using testing::IsEmpty;
 
-class BackendCleanupTrackerTest : public net::TestWithScopedTaskEnvironment {
+class BackendCleanupTrackerTest : public net::TestWithTaskEnvironment {
  protected:
   BackendCleanupTrackerTest() = default;
 

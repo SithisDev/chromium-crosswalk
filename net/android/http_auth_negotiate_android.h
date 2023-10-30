@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,12 @@
 
 #include "base/android/jni_android.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
-#include "net/http/http_negotiate_auth_system.h"
+#include "net/http/http_auth_mechanism.h"
 
 namespace base {
 class TaskRunner;
@@ -41,12 +41,11 @@ namespace android {
 class NET_EXPORT_PRIVATE JavaNegotiateResultWrapper {
  public:
   scoped_refptr<base::TaskRunner> callback_task_runner_;
-  base::Callback<void(int, const std::string&)> thread_safe_callback_;
+  base::OnceCallback<void(int, const std::string&)> thread_safe_callback_;
 
   JavaNegotiateResultWrapper(
       const scoped_refptr<base::TaskRunner>& callback_task_runner,
-      const base::Callback<void(int, const std::string&)>&
-          thread_safe_callback);
+      base::OnceCallback<void(int, const std::string&)> thread_safe_callback);
 
   void SetResult(JNIEnv* env,
                  const base::android::JavaParamRef<jobject>& obj,
@@ -64,16 +63,17 @@ class NET_EXPORT_PRIVATE JavaNegotiateResultWrapper {
 // provides a bridge to the Java code, and hence to the service. See
 // https://drive.google.com/open?id=1G7WAaYEKMzj16PTHT_cIYuKXJG6bBcrQ7QQBQ6ihOcQ&authuser=1
 // for the full details.
-class NET_EXPORT_PRIVATE HttpAuthNegotiateAndroid
-    : public HttpNegotiateAuthSystem {
+class NET_EXPORT_PRIVATE HttpAuthNegotiateAndroid : public HttpAuthMechanism {
  public:
   // Creates an object for one negotiation session. |prefs| are the
   // authentication preferences. In particular they include the Android account
   // type, which is used to connect to the correct Android Authenticator.
   explicit HttpAuthNegotiateAndroid(const HttpAuthPreferences* prefs);
+  HttpAuthNegotiateAndroid(const HttpAuthNegotiateAndroid&) = delete;
+  HttpAuthNegotiateAndroid& operator=(const HttpAuthNegotiateAndroid&) = delete;
   ~HttpAuthNegotiateAndroid() override;
 
-  // HttpNegotiateAuthSystem implementation:
+  // HttpAuthMechanism implementation:
   bool Init(const NetLogWithSource& net_log) override;
   bool NeedsIdentity() const override;
   bool AllowsExplicitCredentials() const override;
@@ -110,17 +110,15 @@ class NET_EXPORT_PRIVATE HttpAuthNegotiateAndroid
  private:
   void SetResultInternal(int result, const std::string& token);
 
-  const HttpAuthPreferences* prefs_ = nullptr;
+  raw_ptr<const HttpAuthPreferences> prefs_ = nullptr;
   bool can_delegate_ = false;
   bool first_challenge_ = true;
   std::string server_auth_token_;
-  std::string* auth_token_ = nullptr;
+  raw_ptr<std::string> auth_token_ = nullptr;
   base::android::ScopedJavaGlobalRef<jobject> java_authenticator_;
   net::CompletionOnceCallback completion_callback_;
 
   base::WeakPtrFactory<HttpAuthNegotiateAndroid> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(HttpAuthNegotiateAndroid);
 };
 
 }  // namespace android

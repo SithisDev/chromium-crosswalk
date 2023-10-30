@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
         mojo.interfaceControl.RunOrClosePipeMessageParams();
     runOrClosePipeMessageParams.input = runOrClosePipeInput;
 
-    var messageName = mojo.interfaceControl.kRunOrClosePipeMessageId;
+    var messageName = mojo.interfaceControl.RUN_OR_CLOSE_PIPE_MESSAGE_ID;
     var payloadSize =
         mojo.interfaceControl.RunOrClosePipeMessageParams.encodedSize;
     var builder = new internal.MessageV0Builder(messageName, payloadSize);
@@ -27,8 +27,8 @@
       throw error;
     }
 
-    if (message.getName() != mojo.interfaceControl.kRunMessageId) {
-      throw new Error("Control message name is not kRunMessageId");
+    if (message.getName() != mojo.interfaceControl.RUN_MESSAGE_ID) {
+      throw new Error("Control message name is not RUN_MESSAGE_ID");
     }
 
     // Validate payload.
@@ -59,7 +59,7 @@
   * @return {Promise} that resolves to a RunResponseMessageParams.
   */
   function sendRunMessage(receiver, runMessageParams) {
-    var messageName = mojo.interfaceControl.kRunMessageId;
+    var messageName = mojo.interfaceControl.RUN_MESSAGE_ID;
     var payloadSize = mojo.interfaceControl.RunMessageParams.encodedSize;
     // |requestID| is set to 0, but is later properly set by Router.
     var builder = new internal.MessageV1Builder(messageName,

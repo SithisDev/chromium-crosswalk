@@ -1,14 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "mojo/public/cpp/platform/platform_handle.h"
+
+#include <tuple>
+
+#include "base/check.h"
 #include "base/files/file.h"
 #include "base/files/platform_file.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/unsafe_shared_memory_region.h"
+#include "base/notreached.h"
 #include "base/rand_util.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
@@ -16,11 +19,11 @@
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if BUILDFLAG(IS_MAC)
 #include <mach/mach_vm.h>
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/scoped_handle.h"
 #else
 #include "base/files/scoped_file.h"
@@ -33,13 +36,13 @@ namespace {
 // We run all PlatformHandle once for each type of handle available on the
 // target platform.
 enum class HandleType {
-#if defined(OS_WIN) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_FUCHSIA)
   kHandle,
 #endif
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   kFileDescriptor,
 #endif
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if BUILDFLAG(IS_MAC)
   kMachPort,
 #endif
 };
@@ -59,21 +62,23 @@ class PlatformHandleTest : public testing::Test,
                            public testing::WithParamInterface<HandleType> {
  public:
   PlatformHandleTest() = default;
+  PlatformHandleTest(const PlatformHandleTest&) = delete;
+  PlatformHandleTest& operator=(const PlatformHandleTest&) = delete;
 
   void SetUp() override {
     test_type_ = TestType::kFile;
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
     if (GetParam() == HandleType::kHandle)
       test_type_ = TestType::kSharedMemory;
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif BUILDFLAG(IS_MAC)
     if (GetParam() == HandleType::kMachPort)
       test_type_ = TestType::kSharedMemory;
 #endif
 
     if (test_type_ == TestType::kFile)
       test_handle_ = SetUpFile();
-#if defined(OS_FUCHSIA) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_MAC)
     else
       test_handle_ = SetUpSharedMemory();
 #endif
@@ -85,12 +90,12 @@ class PlatformHandleTest : public testing::Test,
   std::string GetObjectContents(PlatformHandle& handle) {
     if (test_type_ == TestType::kFile)
       return GetFileContents(handle);
-#if defined(OS_FUCHSIA) || (defined(OS_MACOSX) && !defined(OS_IOS))
-    else
-      return GetSharedMemoryContents(handle);
-#endif
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_MAC)
+    return GetSharedMemoryContents(handle);
+#else
     NOTREACHED();
     return std::string();
+#endif
   }
 
  protected:
@@ -108,7 +113,7 @@ class PlatformHandleTest : public testing::Test,
     test_file.WriteAtCurrentPos(kTestData.data(),
                                 static_cast<int>(kTestData.size()));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     return PlatformHandle(
         base::win::ScopedHandle(test_file.TakePlatformFile()));
 #else
@@ -120,28 +125,29 @@ class PlatformHandleTest : public testing::Test,
   // verify that |handle| is in fact the platform file handle it's expected to
   // be. See |GetObjectContents()|.
   std::string GetFileContents(PlatformHandle& handle) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // We must temporarily release ownership of the handle due to how File
     // interacts with ScopedHandle.
-    base::File file(handle.TakeHandle().Take());
+    base::File file(handle.TakeHandle());
 #else
-    base::File file(handle.GetFD().get());
+    // Do the same as Windows for consistency, even though it is not necessary.
+    base::File file(handle.TakeFD());
 #endif
     std::vector<char> buffer(kTestData.size());
     file.Read(0, buffer.data(), static_cast<int>(buffer.size()));
     std::string contents(buffer.begin(), buffer.end());
 
 // Let |handle| retain ownership.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     handle = PlatformHandle(base::win::ScopedHandle(file.TakePlatformFile()));
 #else
-    ignore_result(file.TakePlatformFile());
+    handle = PlatformHandle(base::ScopedFD(file.TakePlatformFile()));
 #endif
 
     return contents;
   }
 
-#if defined(OS_FUCHSIA) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_MAC)
   // Creates a shared memory region with some test data in it. Leaves the
   // handle open and returns it as a generic PlatformHandle.
   PlatformHandle SetUpSharedMemory() {
@@ -159,14 +165,13 @@ class PlatformHandleTest : public testing::Test,
   // to verify that |handle| does in fact reference a shared memory object when
   // expected. See |GetObjectContents()|.
   std::string GetSharedMemoryContents(const PlatformHandle& handle) {
-    base::subtle::PlatformSharedMemoryRegion::ScopedPlatformHandle
-        region_handle(
-#if defined(OS_FUCHSIA)
-            handle.GetHandle().get()
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
-            handle.GetMachPort().get()
+    base::subtle::ScopedPlatformSharedMemoryHandle region_handle(
+#if BUILDFLAG(IS_FUCHSIA)
+        handle.GetHandle().get()
+#elif BUILDFLAG(IS_MAC)
+        handle.GetMachSendRight().get()
 #endif
-                );
+    );
     auto generic_region = base::subtle::PlatformSharedMemoryRegion::Take(
         std::move(region_handle),
         base::subtle::PlatformSharedMemoryRegion::Mode::kUnsafe,
@@ -181,11 +186,11 @@ class PlatformHandleTest : public testing::Test,
     generic_region = base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
         std::move(region));
     region_handle = generic_region.PassPlatformHandle();
-    ignore_result(region_handle.release());
+    std::ignore = region_handle.release();
 
     return contents;
   }
-#endif  // defined(OS_FUCHSIA) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#endif  // BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_MAC)
 
   base::ScopedTempDir temp_dir_;
   TestType test_type_;
@@ -194,8 +199,6 @@ class PlatformHandleTest : public testing::Test,
   // Needed to reconstitute a base::PlatformSharedMemoryRegion from an unwrapped
   // PlatformHandle.
   base::UnguessableToken shm_guid_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformHandleTest);
 };
 
 TEST_P(PlatformHandleTest, BasicConstruction) {
@@ -244,17 +247,17 @@ TEST_P(PlatformHandleTest, CStructConversion) {
   EXPECT_EQ(kTestData, GetObjectContents(handle));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          PlatformHandleTest,
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
                          testing::Values(HandleType::kHandle)
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
                          testing::Values(HandleType::kHandle,
                                          HandleType::kFileDescriptor)
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif BUILDFLAG(IS_MAC)
                          testing::Values(HandleType::kFileDescriptor,
                                          HandleType::kMachPort)
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
                          testing::Values(HandleType::kFileDescriptor)
 #endif
 );

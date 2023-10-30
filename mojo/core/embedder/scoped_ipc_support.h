@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/memory/ref_counted.h"
 
 namespace base {
-class TaskRunner;
+class SingleThreadTaskRunner;
 }
 
 namespace mojo {
@@ -86,7 +86,7 @@ class COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) ScopedIPCSupport {
   //
   // There are other practical scenarios where fast shutdown is safe even if
   // the process may have live proxies. For example, content's browser process
-  // is treated as a sort of master process in the system, in the sense that if
+  // is treated as a sort of root process in the system, in the sense that if
   // the browser is terminated, no other part of the system is expected to
   // continue normal operation anyway. In this case the side-effects of fast
   // shutdown are irrelevant, so fast shutdown is preferred.
@@ -102,14 +102,17 @@ class COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) ScopedIPCSupport {
     FAST,
   };
 
-  ScopedIPCSupport(scoped_refptr<base::TaskRunner> io_thread_task_runner,
-                   ShutdownPolicy shutdown_policy);
+  ScopedIPCSupport(
+      scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner,
+      ShutdownPolicy shutdown_policy);
+
+  ScopedIPCSupport(const ScopedIPCSupport&) = delete;
+  ScopedIPCSupport& operator=(const ScopedIPCSupport&) = delete;
+
   ~ScopedIPCSupport();
 
  private:
   const ShutdownPolicy shutdown_policy_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedIPCSupport);
 };
 
 }  // namespace core

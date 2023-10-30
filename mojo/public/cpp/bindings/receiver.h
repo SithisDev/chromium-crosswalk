@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,17 @@
 #include <memory>
 #include <utility>
 
-#include "base/compiler_specific.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/strings/string_piece.h"
+#include "base/task/sequenced_task_runner.h"
+#include "mojo/public/cpp/bindings/async_flusher.h"
 #include "mojo/public/cpp/bindings/connection_error_callback.h"
 #include "mojo/public/cpp/bindings/connection_group.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/bindings/lib/binding_state.h"
+#include "mojo/public/cpp/bindings/pending_flush.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/raw_ptr_impl_ref_traits.h"
-#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
@@ -51,7 +50,7 @@ class Receiver {
   using ImplPointerType = typename ImplRefTraits::PointerType;
 
   // Constructs an unbound Receiver linked to |impl| for the duration of the
-  // Receive's lifetime. The Receiver can be bound later by calling |Bind()| or
+  // Receiver's lifetime. The Receiver can be bound later by calling |Bind()| or
   // |BindNewPipeAndPassRemote()|. An unbound Receiver does not schedule any
   // asynchronous tasks.
   explicit Receiver(ImplPointerType impl) : internal_state_(std::move(impl)) {}
@@ -72,6 +71,9 @@ class Receiver {
       : internal_state_(std::move(impl)) {
     Bind(std::move(pending_receiver), std::move(task_runner));
   }
+
+  Receiver(const Receiver&) = delete;
+  Receiver& operator=(const Receiver&) = delete;
 
   ~Receiver() = default;
 
@@ -110,7 +112,7 @@ class Receiver {
 
   // Similar to the method above, but also specifies a disconnect reason.
   void ResetWithReason(uint32_t custom_reason_code,
-                       const std::string& description) {
+                       base::StringPiece description) {
     internal_state_.CloseWithReason(custom_reason_code, description);
   }
 
@@ -122,7 +124,7 @@ class Receiver {
   // notifications on the default SequencedTaskRunner (i.e.
   // base::SequencedTaskRunnerHandle::Get() at the time of this call). Must only
   // be called on an unbound Receiver.
-  PendingRemote<Interface> BindNewPipeAndPassRemote() WARN_UNUSED_RESULT {
+  [[nodiscard]] PendingRemote<Interface> BindNewPipeAndPassRemote() {
     return BindNewPipeAndPassRemote(nullptr);
   }
 
@@ -130,11 +132,19 @@ class Receiver {
   // disconnection notifications on |task_runner| rather than on the default
   // SequencedTaskRunner. Must only be called on an unbound Receiver.
   // |task_runner| must run tasks on the same sequence that owns this Receiver.
-  PendingRemote<Interface> BindNewPipeAndPassRemote(
-      scoped_refptr<base::SequencedTaskRunner> task_runner) WARN_UNUSED_RESULT {
+  [[nodiscard]] PendingRemote<Interface> BindNewPipeAndPassRemote(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) {
     DCHECK(!is_bound()) << "Receiver is already bound";
     PendingRemote<Interface> remote;
     Bind(remote.InitWithNewPipeAndPassReceiver(), std::move(task_runner));
+    return remote;
+  }
+
+  // Like above, but the returned PendingRemote has the version annotated.
+  [[nodiscard]] PendingRemote<Interface> BindNewPipeAndPassRemoteWithVersion(
+      scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
+    auto remote = BindNewPipeAndPassRemote(task_runner);
+    remote.internal_state()->version = Interface::Version_;
     return remote;
   }
 
@@ -145,6 +155,7 @@ class Receiver {
   // disconnection notifications on the default SequencedTaskRunner (i.e.
   // base::SequencedTaskRunnerHandle::Get() at the time of this call).
   void Bind(PendingReceiver<Interface> pending_receiver) {
+    DCHECK(!is_bound()) << "Receiver is already bound";
     Bind(std::move(pending_receiver), nullptr);
   }
 
@@ -155,6 +166,7 @@ class Receiver {
   // Receiver.
   void Bind(PendingReceiver<Interface> pending_receiver,
             scoped_refptr<base::SequencedTaskRunner> task_runner) {
+    DCHECK(!is_bound()) << "Receiver is already bound";
     if (pending_receiver) {
       internal_state_.Bind(pending_receiver.internal_state(),
                            std::move(task_runner));
@@ -177,18 +189,19 @@ class Receiver {
   // response callbacks that haven't been invoked, as once the Receiver is
   // unbound those response callbacks are no longer valid and the Remote will
   // never be able to receive its expected responses.
-  PendingReceiver<Interface> Unbind() WARN_UNUSED_RESULT {
+  [[nodiscard]] PendingReceiver<Interface> Unbind() {
+    DCHECK(is_bound());
     CHECK(!internal_state_.HasAssociatedInterfaces());
-    return PendingReceiver<Interface>(
-        internal_state_.Unbind().PassMessagePipe());
+    return internal_state_.Unbind();
   }
 
-  // Adds a message filter to be notified of each incoming message before
-  // dispatch. If a filter returns |false| from Accept(), the message is not
-  // dispatched and the pipe is closed. Filters cannot be removed once added.
-  void AddFilter(std::unique_ptr<MessageReceiver> filter) {
+  // Sets the message filter to be notified of each incoming message before
+  // dispatch. If a filter returns |false| from WillDispatch(), the message is
+  // not dispatched and the pipe is closed. Filters cannot be removed once
+  // added and only one can be set.
+  void SetFilter(std::unique_ptr<MessageFilter> filter) {
     DCHECK(is_bound());
-    internal_state_.AddFilter(std::move(filter));
+    internal_state_.SetFilter(std::move(filter));
   }
 
   // Pause and resume message dispatch.
@@ -202,19 +215,78 @@ class Receiver {
   // Blocks the calling thread until a new message arrives and is dispatched
   // to the bound implementation.
   bool WaitForIncomingCall() {
-    return internal_state_.WaitForIncomingMethodCall(MOJO_DEADLINE_INDEFINITE);
+    return internal_state_.WaitForIncomingMethodCall();
+  }
+
+  // Pauses the Remote endpoint, stopping dispatch of callbacks on that end. Any
+  // callbacks called prior to this will dispatch before the Remote endpoint is
+  // paused; any callbacks called after this will only be called once the flush
+  // operation corresponding to |flush| is completed or canceled.
+  //
+  // See documentation for |FlushAsync()| on Remote and Receiver for how to
+  // acquire a PendingFlush object, and documentation on PendingFlush for
+  // example usage.
+  void PauseRemoteCallbacksUntilFlushCompletes(PendingFlush flush) {
+    internal_state_.PauseRemoteCallbacksUntilFlushCompletes(std::move(flush));
+  }
+
+  // Flushes the Remote endpoint asynchronously using |flusher|. The
+  // corresponding PendingFlush will be notified only once all response
+  // callbacks issued prior to this operation have been dispatched at the Remote
+  // endpoint.
+  //
+  // NOTE: It is more common to use |FlushAsync()| defined below. If you really
+  // want to provide your own AsyncFlusher using this method, see the
+  // single-arugment constructor on PendingFlush. This would typically be used
+  // when code executing on the current sequence wishes to immediately pause
+  // one of its remote endpoints to wait on a flush operation that needs to be
+  // initiated on a separate sequence. Rather than bouncing to the second
+  // sequence to initiate a flush and then passing a PendingFlush back to the
+  // original sequence, the AsyncFlusher/PendingFlush can be created on the
+  // original sequence and a single task can be posted to pass the AsyncFlusher
+  // to the second sequence for use with this method.
+  void FlushAsyncWithFlusher(AsyncFlusher flusher) {
+    internal_state_.FlushAsync(std::move(flusher));
+  }
+
+  // Same as above but an AsyncFlusher/PendingFlush pair is created on the
+  // caller's behalf. The AsyncFlusher is immediately passed to a
+  // |FlushAsyncWithFlusher()| call on this object, while the PendingFlush is
+  // returned for use by the caller. See documentation on PendingFlush for
+  // example usage.
+  PendingFlush FlushAsync() {
+    AsyncFlusher flusher;
+    PendingFlush flush(&flusher);
+    FlushAsyncWithFlusher(std::move(flusher));
+    return flush;
   }
 
   // Flushes any replies previously sent by the Receiver, only unblocking once
   // acknowledgement from the Remote is received.
   void FlushForTesting() { internal_state_.FlushForTesting(); }
 
+  // Exposed for testing, should not generally be used.
+  void EnableTestingMode() { internal_state_.EnableTestingMode(); }
+
+  // Allows test code to swap the interface implementation.
+  //
+  // Returns the existing interface implementation to the caller.
+  //
+  // The caller needs to guarantee that `new_impl` will live longer than
+  // `this` Receiver.  One way to achieve this is to store the returned
+  // `old_impl` and swap it back in when `new_impl` is getting destroyed.
+  // Test code should prefer using `mojo::test::ScopedSwapImplForTesting` if
+  // possible.
+  [[nodiscard]] ImplPointerType SwapImplForTesting(ImplPointerType new_impl) {
+    return internal_state_.SwapImplForTesting(std::move(new_impl));
+  }
+
   // Reports the currently dispatching message as bad and resets this receiver.
   // Note that this is only legal to call from within the stack frame of a
   // message dispatch. If you need to do asynchronous work before determining
   // the legitimacy of a message, use GetBadMessageCallback() and retain its
   // result until ready to invoke or discard it.
-  void ReportBadMessage(const std::string& error) {
+  void ReportBadMessage(base::StringPiece error) {
     GetBadMessageCallback().Run(error);
   }
 
@@ -236,8 +308,6 @@ class Receiver {
 
  private:
   internal::BindingState<Interface, ImplRefTraits> internal_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(Receiver);
 };
 
 }  // namespace mojo

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 // multiple messages per run.
 
 #include "base/bind.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "mojo/core/embedder/embedder.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/system/message.h"
 #include "mojo/public/tools/fuzzers/fuzz_impl.h"
 #include "mojo/public/tools/fuzzers/mojo_fuzzer.pb.h"
 #include "testing/libfuzzer/proto/lpm_interface.h"
@@ -19,24 +21,28 @@ namespace mojo_proto_fuzzer {
 
 void FuzzMessage(const MojoFuzzerMessages& mojo_fuzzer_messages,
                  base::RunLoop* run) {
-  fuzz::mojom::FuzzInterfacePtr fuzz;
-  auto impl = std::make_unique<FuzzImpl>(MakeRequest(&fuzz));
-  auto router = impl->binding_.RouterForTesting();
+  mojo::PendingRemote<fuzz::mojom::FuzzInterface> fuzz;
+  auto impl = std::make_unique<FuzzImpl>(fuzz.InitWithNewPipeAndPassReceiver());
+  auto router = impl->receiver_.internal_state()->RouterForTesting();
 
   for (auto& message_str : mojo_fuzzer_messages.messages()) {
     // Create a mojo message with the appropriate payload size.
-    mojo::Message message(0, 0, message_str.size(), 0, nullptr);
-    if (message.data_num_bytes() < message_str.size()) {
-      message.payload_buffer()->Allocate(message_str.size() -
-                                         message.data_num_bytes());
-    }
-
-    // Set the raw message data.
-    memcpy(message.mutable_data(), message_str.data(), message_str.size());
+    mojo::ScopedMessageHandle handle;
+    mojo::CreateMessage(&handle, MOJO_CREATE_MESSAGE_FLAG_NONE);
+    MojoAppendMessageDataOptions options = {
+        .struct_size = sizeof(options),
+        .flags = MOJO_APPEND_MESSAGE_DATA_FLAG_COMMIT_SIZE};
+    void* buffer;
+    uint32_t buffer_size;
+    MojoAppendMessageData(handle->value(),
+                          static_cast<uint32_t>(message_str.size()), nullptr, 0,
+                          &options, &buffer, &buffer_size);
+    CHECK_GE(buffer_size, static_cast<uint32_t>(message_str.size()));
+    memcpy(buffer, message_str.data(), message_str.size());
 
     // Run the message through header validation, payload validation, and
     // dispatch to the impl.
-    router->SimulateReceivingMessageForTesting(&message);
+    router->SimulateReceivingMessageForTesting(std::move(handle));
   }
 
   // Allow the harness function to return now.
@@ -47,7 +53,7 @@ void FuzzMessage(const MojoFuzzerMessages& mojo_fuzzer_messages,
 // ThreadPool, because Mojo messages must be sent and processed from
 // TaskRunners.
 struct Environment {
-  Environment() : main_task_executor(base::MessagePump::Type::UI) {
+  Environment() : main_task_executor(base::MessagePumpType::UI) {
     base::ThreadPoolInstance::CreateAndStartWithDefaultParams(
         "MojoParseMessageFuzzerProcess");
     mojo::core::Init();

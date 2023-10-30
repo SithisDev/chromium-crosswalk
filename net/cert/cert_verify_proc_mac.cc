@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,15 +29,15 @@
 #include "net/cert/crl_set.h"
 #include "net/cert/ct_serialization.h"
 #include "net/cert/ev_root_ca_metadata.h"
-#include "net/cert/internal/certificate_policies.h"
-#include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/known_roots.h"
 #include "net/cert/known_roots_mac.h"
+#include "net/cert/pki/certificate_policies.h"
+#include "net/cert/pki/parsed_certificate.h"
 #include "net/cert/test_keychain_search_list_mac.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
-#include "net/cert/x509_util_ios_and_mac.h"
+#include "net/cert/x509_util_apple.h"
 #include "net/cert/x509_util_mac.h"
 
 // CSSM functions are deprecated as of OSX 10.7, but have no replacement.
@@ -47,20 +47,15 @@
 
 using base::ScopedCFTypeRef;
 
-extern "C" {
-// Declared in <Security/SecTrust.h>, available in 10.14.2+
-// TODO(mattm): Remove this weak_import once chromium compiles against the
-// macOS 10.14 SDK.
-OSStatus SecTrustSetSignedCertificateTimestamps(SecTrustRef, CFArrayRef)
-    __attribute__((weak_import));
-}  // extern "C"
-
 namespace net {
 
 namespace {
 
+const void* kResultDebugDataKey = &kResultDebugDataKey;
+
 typedef OSStatus (*SecTrustCopyExtendedResultFuncPtr)(SecTrustRef,
                                                       CFDictionaryRef*);
+using CertEvidenceInfo = CertVerifyProcMac::ResultDebugData::CertEvidenceInfo;
 
 int NetErrorFromOSStatus(OSStatus status) {
   switch (status) {
@@ -79,83 +74,121 @@ int NetErrorFromOSStatus(OSStatus status) {
   }
 }
 
+// Beginning with macOS 10.13, certificate verification is dispatched
+// to trustd, which uses OSStatus internally to track errors, and
+// then maps the internal codes into CSSM codes for applications still
+// calling the deprecated (since 10.7) APIs.
+//
+// The mapping is maintained in SecPolicyChecks.list, to see the
+// checks applied to leaves/intermediates/roots/chains and what
+// failure of those checks will cause, both the OSStatus and the
+// mapped CSSM error code.
+//
+// Not all checks in the table are applicable; some only apply to
+// Apple-specific services (e.g. iTunes checking for an Apple
+// policy), so only those applicable to TLS are mapped here.
+//
+// The downside is that it does mean that as Apple introduces
+// additional checks (e.g. as done in 10.15), any failures of these
+// checks are initially mapped to ERR_CERT_INVALID for safety, even
+// if there may be a more applicable CertStatus code.
 CertStatus CertStatusFromOSStatus(OSStatus status) {
   switch (status) {
     case noErr:
       return 0;
 
-    case CSSMERR_TP_INVALID_ANCHOR_CERT:
-    case CSSMERR_TP_NOT_TRUSTED:
-    case CSSMERR_TP_INVALID_CERT_AUTHORITY:
-      return CERT_STATUS_AUTHORITY_INVALID;
-
-    case CSSMERR_TP_CERT_EXPIRED:
-    case CSSMERR_TP_CERT_NOT_VALID_YET:
-      // "Expired" and "not yet valid" collapse into a single status.
-      return CERT_STATUS_DATE_INVALID;
-
-    case CSSMERR_TP_CERT_REVOKED:
-    case CSSMERR_TP_CERT_SUSPENDED:
-      return CERT_STATUS_REVOKED;
-
     case CSSMERR_APPLETP_HOSTNAME_MISMATCH:
       return CERT_STATUS_COMMON_NAME_INVALID;
 
-    case CSSMERR_APPLETP_CRL_NOT_FOUND:
-    case CSSMERR_APPLETP_OCSP_UNAVAILABLE:
-      return CERT_STATUS_NO_REVOCATION_MECHANISM;
+    case CSSMERR_TP_CERT_EXPIRED:
+    case CSSMERR_TP_CERT_NOT_VALID_YET:
+      return CERT_STATUS_DATE_INVALID;
+
+    case CSSMERR_APPLETP_TRUST_SETTING_DENY:
+    case CSSMERR_TP_NOT_TRUSTED:
+    // CSSMERR_TP_VERIFY_ACTION_FAILED is used when CT is required
+    // and not present. The OS rejected this chain, and so mapping
+    // to CERT_STATUS_CT_COMPLIANCE_FAILED (which is informational,
+    // as policy enforcement is not handled in the CertVerifier)
+    // would cause this error to be ignored and mapped to
+    // CERT_STATUS_INVALID. Rather than do that, mark it simply as
+    // "untrusted". The CT_COMPLIANCE_FAILED bit is not set, since
+    // it's not necessarily a compliance failure with the embedder's
+    // CT policy. It's a bit of a hack, but hopefully temporary.
+    // TP_NOT_TRUSTED is somewhat similar. It applies for
+    // situations where a root isn't trusted or an intermediate
+    // isn't trusted, when a key is restricted, or when the calling
+    // application requested CT enforcement (which CertVerifier
+    // should never being doing).
+    case CSSMERR_TP_VERIFY_ACTION_FAILED:
+      return CERT_STATUS_AUTHORITY_INVALID;
+
+    case CSSMERR_APPLETP_INVALID_AUTHORITY_ID:
+    case CSSMERR_APPLETP_INVALID_CA:
+    case CSSMERR_APPLETP_INVALID_EMPTY_SUBJECT:
+    case CSSMERR_APPLETP_INVALID_EXTENDED_KEY_USAGE:
+    case CSSMERR_APPLETP_INVALID_KEY_USAGE:
+    case CSSMERR_APPLETP_MISSING_REQUIRED_EXTENSION:
+    case CSSMERR_APPLETP_NO_BASIC_CONSTRAINTS:
+    case CSSMERR_APPLETP_PATH_LEN_CONSTRAINT:
+    case CSSMERR_APPLETP_UNKNOWN_CERT_EXTEN:
+    case CSSMERR_APPLETP_UNKNOWN_CRITICAL_EXTEN:
+    case CSSMERR_CSP_ALGID_MISMATCH:
+    // INVALID_POLICY_IDENTIFIERS and INVALID_NAME are used for
+    // certificates that violate the constraints imposed upon the
+    // issuer. Nominally this could be mapped to
+    // CERT_STATUS_AUTHORITY_INVALID, except the trustd behaviour
+    // is to treat this as a fatal (non-recoverable) error. That
+    // behavior is preserved here for consistency with Safari.
+    case CSSMERR_TP_INVALID_POLICY_IDENTIFIERS:
+    case CSSMERR_TP_INVALID_NAME:
+      return CERT_STATUS_INVALID;
+
+    // In trustd, an unsupported algorithm is CSP_ALGID_MISMATCH,
+    // which should cause a path building failure, while supported
+    // but weak algorithms use this code.
+    case CSSMERR_CSP_INVALID_DIGEST_ALGORITHM:
+      return CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
+
+    // In trustd, certificates that are too weak to process, period,
+    // are mapped to INVALID_CERTIFICATE. However, certificates which
+    // are too weak according to compliance policies (e.g. restrictions
+    // for publicly trusted certificates) are mapped to UNSUPPORTED_KEY_SIZE.
+    case CSSMERR_CSP_UNSUPPORTED_KEY_SIZE:
+      return CERT_STATUS_WEAK_KEY;
+
+    case CSSMERR_TP_CERT_REVOKED:
+      return CERT_STATUS_REVOKED;
 
     case CSSMERR_APPLETP_INCOMPLETE_REVOCATION_CHECK:
-      // Starting with later 10.12 versions,
-      // CSSMERR_APPLETP_INCOMPLETE_REVOCATION_CHECK is a catch-all code for
-      // failures to check revocation status.
-      // However, on pre-10.12 versions, it would also be used on revocation
-      // failures. (CERT_STATUS_NO_REVOCATION_MECHANISM isn't really right
-      // there either, but that's what the old code has, and it just gets
-      // masked off later so has no actual effect.)
-      return base::mac::IsAtLeastOS10_12()
-                 ? CERT_STATUS_UNABLE_TO_CHECK_REVOCATION
-                 : CERT_STATUS_NO_REVOCATION_MECHANISM;
-
-    case CSSMERR_APPLETP_CRL_EXPIRED:
-    case CSSMERR_APPLETP_CRL_NOT_VALID_YET:
-    case CSSMERR_APPLETP_CRL_SERVER_DOWN:
-    case CSSMERR_APPLETP_CRL_NOT_TRUSTED:
-    case CSSMERR_APPLETP_CRL_INVALID_ANCHOR_CERT:
-    case CSSMERR_APPLETP_CRL_POLICY_FAIL:
-    case CSSMERR_APPLETP_OCSP_BAD_RESPONSE:
-    case CSSMERR_APPLETP_OCSP_BAD_REQUEST:
-    case CSSMERR_APPLETP_OCSP_STATUS_UNRECOGNIZED:
-    case CSSMERR_APPLETP_NETWORK_FAILURE:
-    case CSSMERR_APPLETP_OCSP_NOT_TRUSTED:
-    case CSSMERR_APPLETP_OCSP_INVALID_ANCHOR_CERT:
-    case CSSMERR_APPLETP_OCSP_SIG_ERROR:
-    case CSSMERR_APPLETP_OCSP_NO_SIGNER:
-    case CSSMERR_APPLETP_OCSP_RESP_MALFORMED_REQ:
-    case CSSMERR_APPLETP_OCSP_RESP_INTERNAL_ERR:
-    case CSSMERR_APPLETP_OCSP_RESP_TRY_LATER:
-    case CSSMERR_APPLETP_OCSP_RESP_SIG_REQUIRED:
-    case CSSMERR_APPLETP_OCSP_RESP_UNAUTHORIZED:
-    case CSSMERR_APPLETP_OCSP_NONCE_MISMATCH:
-      // We asked for a revocation check, but didn't get it.
       return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
 
-    case CSSMERR_APPLETP_SSL_BAD_EXT_KEY_USE:
-      // TODO(wtc): Should we add CERT_STATUS_WRONG_USAGE?
-      return CERT_STATUS_INVALID;
+    // In the trustd world, if a CRL suspends a certificate,
+    // that's signaled by TP_CERT_REVOKED, with the revocation
+    // reason available in the error details dictionary. The
+    // SUSPENDED error is repurposed to indicate failure to
+    // comply with the macOS 10.15+ limits on certificate
+    // lifetimes - https://support.apple.com/en-us/HT210176
+    case CSSMERR_TP_CERT_SUSPENDED:
+      return CERT_STATUS_VALIDITY_TOO_LONG;
 
-    case CSSMERR_APPLETP_CRL_BAD_URI:
-    case CSSMERR_APPLETP_IDP_FAIL:
+    // CSSMERR_TP_INVALID_CERTIFICATE is unfortunate. It may be
+    // used to signal a weak key (CERT_STATUS_WEAK_KEY), which
+    // would be accompanied by a kSecTrustResultFatalTrustFailure, while
+    // the other situations (such as an invalid certificate, a
+    // name constraint violation, or a policy constraint violation)
+    // would be accompanied by a kSecTrustResultRecoverableTrustFailure.
+    // However, CertVerifier treats these as inverted: name constraint or
+    // policy violations are fatal (CERT_STATUS_INVALID), while WEAK_KEY
+    // may be recoverable.
+    // Further, because macOS attempts to gather all the errors, a different
+    // fatal error may have occurred elsewhere in the chain, so the overall
+    // result can't be used to distinguish individual certificate errors.
+    // For this complicated reason, the weak key case is mapped to
+    // CERT_STATUS_INVALID for safety, rather than mapping the policy
+    // violations as weak keys.
+    case CSSMERR_TP_INVALID_CERTIFICATE:
       return CERT_STATUS_INVALID;
-
-    case CSSMERR_CSP_UNSUPPORTED_KEY_SIZE:
-      // Mapping UNSUPPORTED_KEY_SIZE to CERT_STATUS_WEAK_KEY is not strictly
-      // accurate, as the error may have been returned due to a key size
-      // that exceeded the maximum supported. However, within
-      // CertVerifyProcMac::VerifyInternal(), this code should only be
-      // encountered as a certificate status code, and only when the key size
-      // is smaller than the minimum required (1024 bits).
-      return CERT_STATUS_WEAK_KEY;
 
     default: {
       // Failure was due to something Chromium doesn't define a
@@ -179,21 +212,30 @@ OSStatus CreateTrustPolicies(int flags, ScopedCFTypeRef<CFArrayRef>* policies) {
   if (!local_policies)
     return memFullErr;
 
-  SecPolicyRef ssl_policy;
-  OSStatus status =
-      x509_util::CreateSSLServerPolicy(std::string(), &ssl_policy);
-  if (status)
-    return status;
+  ScopedCFTypeRef<SecPolicyRef> ssl_policy(
+      SecPolicyCreateSSL(/*server=*/true, /*hostname=*/nullptr));
+  if (!ssl_policy)
+    return errSecNoPolicyModule;
   CFArrayAppendValue(local_policies, ssl_policy);
-  CFRelease(ssl_policy);
 
   // Explicitly add revocation policies, in order to override system
   // revocation checking policies and instead respect the application-level
   // revocation preference.
-  status = x509_util::CreateRevocationPolicies(
-      (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED), local_policies);
-  if (status)
-    return status;
+  if (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED) {
+    // If revocation checking is requested, enable checking and require positive
+    // results. Note that this will fail if there are certs with no
+    // CRLDistributionPoints or OCSP AIA urls, which differs from the behavior
+    // of |enable_revocation_checking| on pre-10.12. There does not appear to be
+    // a way around this, but it shouldn't matter much in practice since
+    // revocation checking is generally used with EV certs, where it is expected
+    // that all certs include revocation mechanisms.
+    ScopedCFTypeRef<SecPolicyRef> revocation_policy(
+        SecPolicyCreateRevocation(kSecRevocationUseAnyAvailableMethod |
+                                  kSecRevocationRequirePositiveResponse));
+    if (!revocation_policy)
+      return errSecNoPolicyModule;
+    CFArrayAppendValue(local_policies, revocation_policy);
+  }
 
   policies->reset(local_policies.release());
   return noErr;
@@ -205,15 +247,15 @@ void CopyCertChainToVerifyResult(CFArrayRef cert_chain,
                                  CertVerifyResult* verify_result) {
   DCHECK_LT(0, CFArrayGetCount(cert_chain));
 
-  SecCertificateRef verified_cert = NULL;
-  std::vector<SecCertificateRef> verified_chain;
+  base::ScopedCFTypeRef<SecCertificateRef> verified_cert;
+  std::vector<base::ScopedCFTypeRef<SecCertificateRef>> verified_chain;
   for (CFIndex i = 0, count = CFArrayGetCount(cert_chain); i < count; ++i) {
     SecCertificateRef chain_cert = reinterpret_cast<SecCertificateRef>(
         const_cast<void*>(CFArrayGetValueAtIndex(cert_chain, i)));
     if (i == 0) {
-      verified_cert = chain_cert;
+      verified_cert.reset(chain_cert, base::scoped_policy::RETAIN);
     } else {
-      verified_chain.push_back(chain_cert);
+      verified_chain.emplace_back(chain_cert, base::scoped_policy::RETAIN);
     }
   }
   if (!verified_cert) {
@@ -268,8 +310,10 @@ bool CertUsesWeakHash(SecCertificateRef cert_handle) {
 // weak hashing algorithm, but the target does not use a weak hash.
 bool IsWeakChainBasedOnHashingAlgorithms(
     CFArrayRef cert_chain,
-    CSSM_TP_APPLE_EVIDENCE_INFO* chain_info) {
+    const std::vector<CertEvidenceInfo>& chain_info) {
   DCHECK_LT(0, CFArrayGetCount(cert_chain));
+  DCHECK_EQ(chain_info.size(),
+            static_cast<size_t>(CFArrayGetCount(cert_chain)));
 
   bool intermediates_contain_weak_hash = false;
   bool leaf_uses_weak_hash = false;
@@ -278,8 +322,8 @@ bool IsWeakChainBasedOnHashingAlgorithms(
     SecCertificateRef chain_cert = reinterpret_cast<SecCertificateRef>(
         const_cast<void*>(CFArrayGetValueAtIndex(cert_chain, i)));
 
-    if ((chain_info[i].StatusBits & CSSM_CERT_STATUS_IS_IN_ANCHORS) ||
-        (chain_info[i].StatusBits & CSSM_CERT_STATUS_IS_ROOT)) {
+    if ((chain_info[i].status_bits & CSSM_CERT_STATUS_IS_IN_ANCHORS) ||
+        (chain_info[i].status_bits & CSSM_CERT_STATUS_IS_ROOT)) {
       // The current certificate is either in the user's trusted store or is
       // a root (self-signed) certificate. Ignore the signature algorithm for
       // these certificates, as it is meaningless for security. We allow
@@ -308,7 +352,7 @@ bool HasPolicyOrAnyPolicy(const ParsedCertificate* cert,
     return false;
 
   for (const der::Input& policy_oid : cert->policy_oids()) {
-    if (policy_oid == ev_policy_oid || policy_oid == AnyPolicy())
+    if (policy_oid == ev_policy_oid || policy_oid == der::Input(kAnyPolicyOid))
       return true;
   }
   return false;
@@ -527,8 +571,8 @@ int BuildAndEvaluateSecTrustRef(CFArrayRef cert_array,
                                 ScopedCFTypeRef<SecTrustRef>* trust_ref,
                                 SecTrustResultType* trust_result,
                                 ScopedCFTypeRef<CFArrayRef>* verified_chain,
-                                CSSM_TP_APPLE_EVIDENCE_INFO** chain_info) {
-  SecTrustRef tmp_trust = NULL;
+                                std::vector<CertEvidenceInfo>* chain_info) {
+  SecTrustRef tmp_trust = nullptr;
   OSStatus status = SecTrustCreateWithCertificates(cert_array, trust_policies,
                                                    &tmp_trust);
   if (status)
@@ -612,17 +656,29 @@ int BuildAndEvaluateSecTrustRef(CFArrayRef cert_array,
   status = SecTrustEvaluate(tmp_trust, &tmp_trust_result);
   if (status)
     return NetErrorFromOSStatus(status);
-  CFArrayRef tmp_verified_chain = NULL;
+  CFArrayRef tmp_verified_chain = nullptr;
   CSSM_TP_APPLE_EVIDENCE_INFO* tmp_chain_info;
   status = SecTrustGetResult(tmp_trust, &tmp_trust_result, &tmp_verified_chain,
                              &tmp_chain_info);
   if (status)
     return NetErrorFromOSStatus(status);
 
+  // WARNING: Beginning with OS X 10.13, |tmp_chain_info| may be freed by any
+  // other accesses via SecTrust APIs to |tmp_trust|, so copy the data.
+  chain_info->clear();
+  for (CFIndex i = 0, chain_length = CFArrayGetCount(tmp_verified_chain);
+       i < chain_length; ++i) {
+    CertEvidenceInfo info;
+    info.status_bits = tmp_chain_info[i].StatusBits;
+    info.status_codes.assign(
+        tmp_chain_info[i].StatusCodes,
+        tmp_chain_info[i].StatusCodes + tmp_chain_info[i].NumStatusCodes);
+    chain_info->push_back(std::move(info));
+  }
+
   trust_ref->swap(scoped_tmp_trust);
   *trust_result = tmp_trust_result;
   verified_chain->reset(tmp_verified_chain);
-  *chain_info = tmp_chain_info;
 
   return OK;
 }
@@ -635,6 +691,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
                          const std::string& ocsp_response,
                          const std::string& sct_list,
                          const int flags,
+                         bool rev_checking_soft_fail,
                          CRLSet* crl_set,
                          CertVerifyResult* verify_result,
                          CRLSetResult* completed_chain_crl_result) {
@@ -684,7 +741,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
   ScopedCFTypeRef<SecTrustRef> trust_ref;
   SecTrustResultType trust_result = kSecTrustResultDeny;
   ScopedCFTypeRef<CFArrayRef> completed_chain;
-  CSSM_TP_APPLE_EVIDENCE_INFO* chain_info = NULL;
+  std::vector<CertEvidenceInfo> chain_info;
   bool candidate_untrusted = true;
   bool candidate_weak = false;
 
@@ -783,7 +840,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       // keychain is not normally present in the keychain search list, but is
       // implicitly checked after the keychains in the search list. By
       // including it directly, force it to be checked first.  This is a gross
-      // hack, but the path is known to be valid on OS X 10.9-10.11.
+      // hack, but the path is known to be valid through macOS 12.
       status = SecKeychainOpen(
           "/System/Library/Keychains/SystemRootCertificates.keychain",
           &keychain);
@@ -810,7 +867,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       ScopedCFTypeRef<SecTrustRef> temp_ref;
       SecTrustResultType temp_trust_result = kSecTrustResultDeny;
       ScopedCFTypeRef<CFArrayRef> temp_chain;
-      CSSM_TP_APPLE_EVIDENCE_INFO* temp_chain_info = NULL;
+      std::vector<CertEvidenceInfo> temp_chain_info;
 
       int rv = BuildAndEvaluateSecTrustRef(
           cert_array, trust_policies, ocsp_response_ref.get(),
@@ -871,7 +928,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
         trust_result = temp_trust_result;
         completed_chain = temp_chain;
         *completed_chain_crl_result = crl_result;
-        chain_info = temp_chain_info;
+        chain_info = std::move(temp_chain_info);
 
         candidate_untrusted = untrusted;
         candidate_weak = weak_chain;
@@ -879,7 +936,18 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       // Short-circuit when a current, trusted chain is found.
       if (!untrusted && !weak_chain)
         break;
-      CFArrayRemoveValueAtIndex(cert_array, CFArrayGetCount(cert_array) - 1);
+      // Trim a cert off the end of chain, but if the chain is longer that 10
+      // certs, trim to at most 10 certs.
+      constexpr int kMaxTrimmedChainLength = 10;
+      if (CFArrayGetCount(cert_array) > kMaxTrimmedChainLength) {
+        CFArrayReplaceValues(
+            cert_array,
+            CFRangeMake(kMaxTrimmedChainLength,
+                        CFArrayGetCount(cert_array) - kMaxTrimmedChainLength),
+            /*newValues=*/nullptr, /*newCount=*/0);
+      } else {
+        CFArrayRemoveValueAtIndex(cert_array, CFArrayGetCount(cert_array) - 1);
+      }
     }
     // Short-circuit when a current, trusted chain is found.
     if (!candidate_untrusted && !candidate_weak)
@@ -896,17 +964,20 @@ int VerifyWithGivenFlags(X509Certificate* cert,
     CopyCertChainToVerifyResult(completed_chain, verify_result);
   }
 
-  // As of Security Update 2012-002/OS X 10.7.4, when an RSA key < 1024 bits
-  // is encountered, CSSM returns CSSMERR_TP_VERIFY_ACTION_FAILED and adds
-  // CSSMERR_CSP_UNSUPPORTED_KEY_SIZE as a certificate status. Avoid mapping
-  // the CSSMERR_TP_VERIFY_ACTION_FAILED to CERT_STATUS_INVALID if the only
-  // error was due to an unsupported key size.
-  bool policy_failed = false;
-  bool policy_fail_already_mapped = false;
-  bool weak_key_or_signature_algorithm = false;
+  // As of macOS 10.13, if |trust_result| (from SecTrustGetResult) returns
+  // kSecTrustResultInvalid, subsequent invocations of SecTrust APIs may
+  // result in revalidating the SecTrust. In releases earlier than 10.13, this
+  // call would have additional information, except that information is unused
+  // and irrelevant if the result was invalid, so the placeholder
+  // errSecInternalError is fine.
+  OSStatus cssm_result = errSecInternalError;
+  if (trust_result != kSecTrustResultInvalid) {
+    status = SecTrustGetCssmResultCode(trust_ref, &cssm_result);
+    if (status)
+      return NetErrorFromOSStatus(status);
+  }
 
   // Evaluate the results
-  OSStatus cssm_result;
   switch (trust_result) {
     case kSecTrustResultUnspecified:
     case kSecTrustResultProceed:
@@ -921,78 +992,35 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       verify_result->cert_status |= CERT_STATUS_AUTHORITY_INVALID;
       break;
 
+    case kSecTrustResultFatalTrustFailure:
+      // Certificate chain has a failure that cannot be overridden by the user.
     case kSecTrustResultRecoverableTrustFailure:
       // Certificate chain has a failure that can be overridden by the user.
-      status = SecTrustGetCssmResultCode(trust_ref, &cssm_result);
-      if (status)
-        return NetErrorFromOSStatus(status);
-      if (cssm_result == CSSMERR_TP_VERIFY_ACTION_FAILED) {
-        policy_failed = true;
-      } else {
-        verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
-      }
+
+      // Prior to 10.13, a violation of key size restrictions would, at minimum,
+      // result in a TP_VERIFY_ACTION_FAILED error. In 10.13+, this error has
+      // different semantics, and weak keys can no longer be distinguished
+      // as such.
+      verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
+
       // Walk the chain of error codes in the CSSM_TP_APPLE_EVIDENCE_INFO
       // structure which can catch multiple errors from each certificate.
       for (CFIndex index = 0, chain_count = CFArrayGetCount(completed_chain);
            index < chain_count; ++index) {
-        if (chain_info[index].StatusBits & CSSM_CERT_STATUS_EXPIRED ||
-            chain_info[index].StatusBits & CSSM_CERT_STATUS_NOT_VALID_YET)
+        if (chain_info[index].status_bits & CSSM_CERT_STATUS_EXPIRED ||
+            chain_info[index].status_bits & CSSM_CERT_STATUS_NOT_VALID_YET)
           verify_result->cert_status |= CERT_STATUS_DATE_INVALID;
         if (!IsCertStatusError(verify_result->cert_status) &&
-            chain_info[index].NumStatusCodes == 0) {
-          LOG(WARNING) << "chain_info[" << index << "].NumStatusCodes is 0"
-                          ", chain_info[" << index << "].StatusBits is "
-                       << chain_info[index].StatusBits;
+            chain_info[index].status_codes.empty()) {
+          LOG(WARNING) << "chain_info[" << index
+                       << "].status_codes is empty, chain_info[" << index
+                       << "].status_bits is " << chain_info[index].status_bits;
         }
-        for (uint32_t status_code_index = 0;
-             status_code_index < chain_info[index].NumStatusCodes;
-             ++status_code_index) {
-          // As of OS X 10.9, attempting to verify a certificate chain that
-          // contains a weak signature algorithm (MD2, MD5) in an intermediate
-          // or leaf cert will be treated as a (recoverable) policy validation
-          // failure, with the status code CSSMERR_TP_INVALID_CERTIFICATE
-          // added to the Status Codes. Don't treat this code as an invalid
-          // certificate; instead, map it to a weak key. Any truly invalid
-          // certificates will have the major error (cssm_result) set to
-          // CSSMERR_TP_INVALID_CERTIFICATE, rather than
-          // CSSMERR_TP_VERIFY_ACTION_FAILED.
-          CertStatus mapped_status = 0;
-          if (policy_failed &&
-              chain_info[index].StatusCodes[status_code_index] ==
-                  CSSMERR_TP_INVALID_CERTIFICATE) {
-            mapped_status = CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
-            weak_key_or_signature_algorithm = true;
-            policy_fail_already_mapped = true;
-          } else if (policy_failed &&
-                     (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED) &&
-                     chain_info[index].StatusCodes[status_code_index] ==
-                         CSSMERR_TP_VERIFY_ACTION_FAILED &&
-                     base::mac::IsOS10_12()) {
-            // On early versions of 10.12, using
-            // kSecRevocationRequirePositiveResponse flag causes a
-            // CSSMERR_TP_VERIFY_ACTION_FAILED status if revocation couldn't be
-            // checked. (Note: even if the cert had no crlDistributionPoints or
-            // OCSP AIA.) This isn't needed on later 10.12 versions, but it
-            // should be mostly harmless.
-            mapped_status = CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
-            policy_fail_already_mapped = true;
-          } else {
-            mapped_status = CertStatusFromOSStatus(
-                chain_info[index].StatusCodes[status_code_index]);
-            if (mapped_status == CERT_STATUS_WEAK_KEY) {
-              weak_key_or_signature_algorithm = true;
-              policy_fail_already_mapped = true;
-            }
-          }
-          verify_result->cert_status |= mapped_status;
+        for (int32_t status_code : chain_info[index].status_codes) {
+          verify_result->cert_status |= CertStatusFromOSStatus(status_code);
         }
       }
-      if (policy_failed && !policy_fail_already_mapped) {
-        // If CSSMERR_TP_VERIFY_ACTION_FAILED wasn't returned due to a weak
-        // key or problem checking revocation, map it back to an appropriate
-        // error code.
-        verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
-      }
+
       if (!IsCertStatusError(verify_result->cert_status)) {
         LOG(ERROR) << "cssm_result=" << cssm_result;
         verify_result->cert_status |= CERT_STATUS_INVALID;
@@ -1001,9 +1029,6 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       break;
 
     default:
-      status = SecTrustGetCssmResultCode(trust_ref, &cssm_result);
-      if (status)
-        return NetErrorFromOSStatus(status);
       verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
       if (!IsCertStatusError(verify_result->cert_status)) {
         LOG(WARNING) << "trust_result=" << trust_result;
@@ -1016,14 +1041,17 @@ int VerifyWithGivenFlags(X509Certificate* cert,
   // that SecTrustEvaluate may have set, as its results are not used.
   verify_result->cert_status &= ~CERT_STATUS_COMMON_NAME_INVALID;
 
-  // TODO(wtc): Suppress CERT_STATUS_NO_REVOCATION_MECHANISM for now to be
-  // compatible with Windows, which in turn implements this behavior to be
-  // compatible with WinHTTP, which doesn't report this error (bug 3004).
-  verify_result->cert_status &= ~CERT_STATUS_NO_REVOCATION_MECHANISM;
+  if (rev_checking_soft_fail) {
+    verify_result->cert_status &= ~(CERT_STATUS_NO_REVOCATION_MECHANISM |
+                                    CERT_STATUS_UNABLE_TO_CHECK_REVOCATION);
+  }
 
   AppendPublicKeyHashesAndUpdateKnownRoot(
       completed_chain, &verify_result->public_key_hashes,
       &verify_result->is_issued_by_known_root);
+
+  CertVerifyProcMac::ResultDebugData::Create(
+      trust_result, cssm_result, std::move(chain_info), verify_result);
 
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);
@@ -1033,9 +1061,55 @@ int VerifyWithGivenFlags(X509Certificate* cert,
 
 }  // namespace
 
-CertVerifyProcMac::CertVerifyProcMac() {}
+CertVerifyProcMac::ResultDebugData::CertEvidenceInfo::CertEvidenceInfo() =
+    default;
+CertVerifyProcMac::ResultDebugData::CertEvidenceInfo::~CertEvidenceInfo() =
+    default;
+CertVerifyProcMac::ResultDebugData::CertEvidenceInfo::CertEvidenceInfo(
+    const CertEvidenceInfo&) = default;
+CertVerifyProcMac::ResultDebugData::CertEvidenceInfo::CertEvidenceInfo(
+    CertEvidenceInfo&&) = default;
 
-CertVerifyProcMac::~CertVerifyProcMac() {}
+CertVerifyProcMac::ResultDebugData::ResultDebugData(
+    uint32_t trust_result,
+    int32_t result_code,
+    std::vector<CertEvidenceInfo> status_chain)
+    : trust_result_(trust_result),
+      result_code_(result_code),
+      status_chain_(std::move(status_chain)) {}
+
+CertVerifyProcMac::ResultDebugData::~ResultDebugData() = default;
+
+CertVerifyProcMac::ResultDebugData::ResultDebugData(const ResultDebugData&) =
+    default;
+
+// static
+const CertVerifyProcMac::ResultDebugData*
+CertVerifyProcMac::ResultDebugData::Get(
+    const base::SupportsUserData* debug_data) {
+  return static_cast<ResultDebugData*>(
+      debug_data->GetUserData(kResultDebugDataKey));
+}
+
+// static
+void CertVerifyProcMac::ResultDebugData::Create(
+    uint32_t trust_result,
+    int32_t result_code,
+    std::vector<CertEvidenceInfo> status_chain,
+    base::SupportsUserData* debug_data) {
+  debug_data->SetUserData(kResultDebugDataKey,
+                          std::make_unique<ResultDebugData>(
+                              trust_result, result_code, status_chain));
+}
+
+std::unique_ptr<base::SupportsUserData::Data>
+CertVerifyProcMac::ResultDebugData::Clone() {
+  return std::make_unique<ResultDebugData>(*this);
+}
+
+CertVerifyProcMac::CertVerifyProcMac() = default;
+
+CertVerifyProcMac::~CertVerifyProcMac() = default;
 
 bool CertVerifyProcMac::SupportsAdditionalTrustAnchors() const {
   return false;
@@ -1049,7 +1123,8 @@ int CertVerifyProcMac::VerifyInternal(
     int flags,
     CRLSet* crl_set,
     const CertificateList& additional_trust_anchors,
-    CertVerifyResult* verify_result) {
+    CertVerifyResult* verify_result,
+    const NetLogWithSource& net_log) {
   // Save the input state of |*verify_result|, which may be needed to re-do
   // verification with different flags.
   const CertVerifyResult input_verify_result(*verify_result);
@@ -1059,36 +1134,18 @@ int CertVerifyProcMac::VerifyInternal(
   GetCandidateEVPolicy(cert, &candidate_ev_policy_oid);
 
   CRLSetResult completed_chain_crl_result;
-  int rv =
-      VerifyWithGivenFlags(cert, hostname, ocsp_response, sct_list, flags,
-                           crl_set, verify_result, &completed_chain_crl_result);
+  int rv = VerifyWithGivenFlags(cert, hostname, ocsp_response, sct_list, flags,
+                                /*rev_checking_soft_fail=*/true, crl_set,
+                                verify_result, &completed_chain_crl_result);
   if (rv != OK)
     return rv;
 
   if (!candidate_ev_policy_oid.empty() &&
       CheckCertChainEV(verify_result->verified_cert.get(),
                        candidate_ev_policy_oid)) {
-    // EV policies check out and the verification succeeded. See if revocation
-    // checking still needs to be done before it can be marked as EV.
-    if (completed_chain_crl_result == kCRLSetUnknown &&
-        !(flags & VERIFY_REV_CHECKING_ENABLED)) {
-      // If this is an EV cert and it wasn't covered by CRLSets and revocation
-      // checking wasn't already on, try again with revocation forced on.
-      //
-      // Restore the input state of |*verify_result|, so that the
-      // re-verification starts with a clean slate.
-      *verify_result = input_verify_result;
-      int tmp_rv = VerifyWithGivenFlags(
-          verify_result->verified_cert.get(), hostname, ocsp_response, sct_list,
-          flags | VERIFY_REV_CHECKING_ENABLED, crl_set, verify_result,
-          &completed_chain_crl_result);
-      // If re-verification failed, return those results without setting EV
-      // status.
-      if (tmp_rv != OK)
-        return tmp_rv;
-      // Otherwise, fall through and add the EV status flag.
-    }
-    // EV cert and it was covered by CRLSets or revocation checking passed.
+    // EV policies check out and the verification succeeded. Revocation checking
+    // may have been done, but revocation checking is not required for EV certs
+    // (see https://crbug.com/705285).
     verify_result->cert_status |= CERT_STATUS_IS_EV;
   }
 

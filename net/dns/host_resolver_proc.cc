@@ -1,75 +1,57 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/dns/host_resolver_proc.h"
 
+#include <tuple>
+
 #include "build/build_config.h"
 
-#include "base/logging.h"
-#include "base/sys_byteorder.h"
+#include "base/check.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "net/base/address_family.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/sys_addrinfo.h"
+#include "net/dns/address_info.h"
 #include "net/dns/dns_reloader.h"
 #include "net/dns/dns_util.h"
 #include "net/dns/host_resolver.h"
 
-#if defined(OS_OPENBSD)
+#if BUILDFLAG(IS_OPENBSD)
 #define AI_ADDRCONFIG 0
 #endif
 
 namespace net {
 
-namespace {
-
-bool IsAllLocalhostOfOneFamily(const struct addrinfo* ai) {
-  bool saw_v4_localhost = false;
-  bool saw_v6_localhost = false;
-  for (; ai != nullptr; ai = ai->ai_next) {
-    switch (ai->ai_family) {
-      case AF_INET: {
-        const struct sockaddr_in* addr_in =
-            reinterpret_cast<struct sockaddr_in*>(ai->ai_addr);
-        if ((base::NetToHost32(addr_in->sin_addr.s_addr) & 0xff000000) ==
-            0x7f000000)
-          saw_v4_localhost = true;
-        else
-          return false;
-        break;
-      }
-      case AF_INET6: {
-        const struct sockaddr_in6* addr_in6 =
-            reinterpret_cast<struct sockaddr_in6*>(ai->ai_addr);
-        if (IN6_IS_ADDR_LOOPBACK(&addr_in6->sin6_addr))
-          saw_v6_localhost = true;
-        else
-          return false;
-        break;
-      }
-      default:
-        NOTREACHED();
-        return false;
-    }
-  }
-
-  return saw_v4_localhost != saw_v6_localhost;
-}
-
-}  // namespace
-
 HostResolverProc* HostResolverProc::default_proc_ = nullptr;
 
-HostResolverProc::HostResolverProc(HostResolverProc* previous) {
+HostResolverProc::HostResolverProc(scoped_refptr<HostResolverProc> previous,
+                                   bool allow_fallback_to_system_or_default)
+    : allow_fallback_to_system_(allow_fallback_to_system_or_default) {
   SetPreviousProc(previous);
 
   // Implicitly fall-back to the global default procedure.
-  if (!previous)
+  if (!previous && allow_fallback_to_system_or_default)
     SetPreviousProc(default_proc_);
 }
 
 HostResolverProc::~HostResolverProc() = default;
+
+int HostResolverProc::Resolve(const std::string& host,
+                              AddressFamily address_family,
+                              HostResolverFlags host_resolver_flags,
+                              AddressList* addrlist,
+                              int* os_error,
+                              handles::NetworkHandle network) {
+  if (network == handles::kInvalidNetworkHandle)
+    return Resolve(host, address_family, host_resolver_flags, addrlist,
+                   os_error);
+
+  NOTIMPLEMENTED();
+  return ERR_NOT_IMPLEMENTED;
+}
 
 int HostResolverProc::ResolveUsingPrevious(
     const std::string& host,
@@ -82,21 +64,28 @@ int HostResolverProc::ResolveUsingPrevious(
         host, address_family, host_resolver_flags, addrlist, os_error);
   }
 
+  // If `allow_fallback_to_system_` is false there is no final fallback. It must
+  // be ensured that the Procs can handle any allowed requests. If this check
+  // fails while using MockHostResolver or RuleBasedHostResolverProc, it means
+  // none of the configured rules matched a host resolution request.
+  CHECK(allow_fallback_to_system_);
+
   // Final fallback is the system resolver.
   return SystemHostResolverCall(host, address_family, host_resolver_flags,
                                 addrlist, os_error);
 }
 
-void HostResolverProc::SetPreviousProc(HostResolverProc* proc) {
-  HostResolverProc* current_previous = previous_proc_.get();
-  previous_proc_ = nullptr;
+void HostResolverProc::SetPreviousProc(scoped_refptr<HostResolverProc> proc) {
+  auto current_previous = std::move(previous_proc_);
   // Now that we've guaranteed |this| is the last proc in a chain, we can
   // detect potential cycles using GetLastProc().
-  previous_proc_ = (GetLastProc(proc) == this) ? current_previous : proc;
+  previous_proc_ = (GetLastProc(proc.get()) == this)
+                       ? std::move(current_previous)
+                       : std::move(proc);
 }
 
-void HostResolverProc::SetLastProc(HostResolverProc* proc) {
-  GetLastProc(this)->SetPreviousProc(proc);
+void HostResolverProc::SetLastProc(scoped_refptr<HostResolverProc> proc) {
+  GetLastProc(this)->SetPreviousProc(std::move(proc));
 }
 
 // static
@@ -121,37 +110,35 @@ HostResolverProc* HostResolverProc::GetDefault() {
   return default_proc_;
 }
 
+namespace {
+
+int AddressFamilyToAF(AddressFamily address_family) {
+  switch (address_family) {
+    case ADDRESS_FAMILY_IPV4:
+      return AF_INET;
+    case ADDRESS_FAMILY_IPV6:
+      return AF_INET6;
+    case ADDRESS_FAMILY_UNSPECIFIED:
+      return AF_UNSPEC;
+  }
+}
+
+}  // namespace
+
 int SystemHostResolverCall(const std::string& host,
                            AddressFamily address_family,
                            HostResolverFlags host_resolver_flags,
                            AddressList* addrlist,
-                           int* os_error) {
+                           int* os_error_opt,
+                           handles::NetworkHandle network) {
   // |host| should be a valid domain name. HostResolverImpl::Resolve has checks
   // to fail early if this is not the case.
   DCHECK(IsValidDNSDomain(host));
 
-  if (os_error)
-    *os_error = 0;
-
-  struct addrinfo* ai = nullptr;
   struct addrinfo hints = {0};
+  hints.ai_family = AddressFamilyToAF(address_family);
 
-  switch (address_family) {
-    case ADDRESS_FAMILY_IPV4:
-      hints.ai_family = AF_INET;
-      break;
-    case ADDRESS_FAMILY_IPV6:
-      hints.ai_family = AF_INET6;
-      break;
-    case ADDRESS_FAMILY_UNSPECIFIED:
-      hints.ai_family = AF_UNSPEC;
-      break;
-    default:
-      NOTREACHED();
-      hints.ai_family = AF_UNSPEC;
-  }
-
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // DO NOT USE AI_ADDRCONFIG ON WINDOWS.
   //
   // The following comment in <winsock2.h> is the best documentation I found
@@ -179,7 +166,7 @@ int SystemHostResolverCall(const std::string& host,
   hints.ai_flags = AI_ADDRCONFIG;
 #endif
 
-  // On Linux AI_ADDRCONFIG doesn't consider loopback addreses, even if only
+  // On Linux AI_ADDRCONFIG doesn't consider loopback addresses, even if only
   // loopback addresses are configured. So don't use it when there are only
   // loopback addresses.
   if (host_resolver_flags & HOST_RESOLVER_LOOPBACK_ONLY)
@@ -187,6 +174,14 @@ int SystemHostResolverCall(const std::string& host,
 
   if (host_resolver_flags & HOST_RESOLVER_CANONNAME)
     hints.ai_flags |= AI_CANONNAME;
+
+#if BUILDFLAG(IS_WIN)
+  // See crbug.com/1176970. Flag not documented (other than the declaration
+  // comment in ws2def.h) but confirmed by Microsoft to work for this purpose
+  // and be safe.
+  if (host_resolver_flags & HOST_RESOLVER_AVOID_MULTICAST)
+    hints.ai_flags |= AI_DNS_ONLY;
+#endif  // BUILDFLAG(IS_WIN)
 
   // Restrict result set to only this socket type to avoid duplicates.
   hints.ai_socktype = SOCK_STREAM;
@@ -197,18 +192,18 @@ int SystemHostResolverCall(const std::string& host,
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::WILL_BLOCK);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD) && \
-    !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) && \
+    !(BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ANDROID))
   DnsReloaderMaybeReload();
 #endif
-  int err = getaddrinfo(host.c_str(), nullptr, &hints, &ai);
+  auto [ai, err, os_error] = AddressInfo::Get(host, hints, nullptr, network);
   bool should_retry = false;
   // If the lookup was restricted (either by address family, or address
   // detection), and the results where all localhost of a single family,
   // maybe we should retry.  There were several bugs related to these
   // issues, for example http://crbug.com/42058 and http://crbug.com/49024
-  if ((hints.ai_family != AF_UNSPEC || hints.ai_flags & AI_ADDRCONFIG) &&
-      err == 0 && IsAllLocalhostOfOneFamily(ai)) {
+  if ((hints.ai_family != AF_UNSPEC || hints.ai_flags & AI_ADDRCONFIG) && ai &&
+      ai->IsAllLocalhostOfOneFamily()) {
     if (host_resolver_flags & HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6) {
       hints.ai_family = AF_UNSPEC;
       should_retry = true;
@@ -219,44 +214,17 @@ int SystemHostResolverCall(const std::string& host,
     }
   }
   if (should_retry) {
-    if (ai != nullptr) {
-      freeaddrinfo(ai);
-      ai = nullptr;
-    }
-    err = getaddrinfo(host.c_str(), nullptr, &hints, &ai);
+    std::tie(ai, err, os_error) =
+        AddressInfo::Get(host, hints, nullptr, network);
   }
 
-  if (err) {
-#if defined(OS_WIN)
-    err = WSAGetLastError();
-#endif
+  if (os_error_opt)
+    *os_error_opt = os_error;
 
-    // Return the OS error to the caller.
-    if (os_error)
-      *os_error = err;
+  if (!ai)
+    return err;
 
-    // If the call to getaddrinfo() failed because of a system error, report
-    // it separately from ERR_NAME_NOT_RESOLVED.
-#if defined(OS_WIN)
-    if (err != WSAHOST_NOT_FOUND && err != WSANO_DATA)
-      return ERR_NAME_RESOLUTION_FAILED;
-#elif defined(OS_POSIX) && !defined(OS_FREEBSD)
-    if (err != EAI_NONAME && err != EAI_NODATA)
-      return ERR_NAME_RESOLUTION_FAILED;
-#endif
-
-    return ERR_NAME_NOT_RESOLVED;
-  }
-
-#if defined(OS_ANDROID)
-  // Workaround for Android's getaddrinfo leaving ai==NULL without an error.
-  // http://crbug.com/134142
-  if (ai == NULL)
-    return ERR_NAME_NOT_RESOLVED;
-#endif
-
-  *addrlist = AddressList::CreateFromAddrinfo(ai);
-  freeaddrinfo(ai);
+  *addrlist = ai->CreateAddressList();
   return OK;
 }
 
@@ -266,25 +234,28 @@ int SystemHostResolverProc::Resolve(const std::string& hostname,
                                     AddressFamily address_family,
                                     HostResolverFlags host_resolver_flags,
                                     AddressList* addr_list,
+                                    int* os_error,
+                                    handles::NetworkHandle network) {
+  return SystemHostResolverCall(hostname, address_family, host_resolver_flags,
+                                addr_list, os_error, network);
+}
+
+int SystemHostResolverProc::Resolve(const std::string& hostname,
+                                    AddressFamily address_family,
+                                    HostResolverFlags host_resolver_flags,
+                                    AddressList* addr_list,
                                     int* os_error) {
-  return SystemHostResolverCall(hostname,
-                                address_family,
-                                host_resolver_flags,
-                                addr_list,
-                                os_error);
+  return Resolve(hostname, address_family, host_resolver_flags, addr_list,
+                 os_error, handles::kInvalidNetworkHandle);
 }
 
 SystemHostResolverProc::~SystemHostResolverProc() = default;
 
-const base::TimeDelta ProcTaskParams::kDnsDefaultUnresponsiveDelay =
-    base::TimeDelta::FromSeconds(6);
-
-ProcTaskParams::ProcTaskParams(HostResolverProc* resolver_proc,
+ProcTaskParams::ProcTaskParams(scoped_refptr<HostResolverProc> resolver_proc,
                                size_t in_max_retry_attempts)
-    : resolver_proc(resolver_proc),
+    : resolver_proc(std::move(resolver_proc)),
       max_retry_attempts(in_max_retry_attempts),
-      unresponsive_delay(kDnsDefaultUnresponsiveDelay),
-      retry_factor(2) {
+      unresponsive_delay(kDnsDefaultUnresponsiveDelay) {
   // Maximum of 4 retry attempts for host resolution.
   static const size_t kDefaultMaxRetryAttempts = 4u;
   if (max_retry_attempts == HostResolver::ManagerOptions::kDefaultRetryAttempts)

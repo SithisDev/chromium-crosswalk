@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,12 @@
 #define NET_SOCKET_CLIENT_SOCKET_HANDLE_H_
 
 #include <memory>
-#include <string>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_states.h"
@@ -21,12 +19,14 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/dns/public/resolve_error_info.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/connection_attempts.h"
 #include "net/socket/stream_socket.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -50,6 +50,10 @@ class NET_EXPORT ClientSocketHandle {
   };
 
   ClientSocketHandle();
+
+  ClientSocketHandle(const ClientSocketHandle&) = delete;
+  ClientSocketHandle& operator=(const ClientSocketHandle&) = delete;
+
   ~ClientSocketHandle();
 
   // Initializes a ClientSocketHandle object, which involves talking to the
@@ -84,7 +88,7 @@ class NET_EXPORT ClientSocketHandle {
   int Init(
       const ClientSocketPool::GroupId& group_id,
       scoped_refptr<ClientSocketPool::SocketParams> socket_params,
-      const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+      const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
       RequestPriority priority,
       const SocketTag& socket_tag,
       ClientSocketPool::RespectLimits respect_limits,
@@ -131,7 +135,7 @@ class NET_EXPORT ClientSocketHandle {
   void RemoveHigherLayeredPool(HigherLayeredPool* higher_pool);
 
   // Closes idle sockets that are in the same group with |this|.
-  void CloseIdleSocketsInGroup();
+  void CloseIdleSocketsInGroup(const char* net_log_reason_utf8);
 
   // Returns true when Init() has completed successfully.
   bool is_initialized() const { return is_initialized_; }
@@ -143,11 +147,6 @@ class NET_EXPORT ClientSocketHandle {
   // |socket_| is NULL.
   bool GetLoadTimingInfo(bool is_reused,
                          LoadTimingInfo* load_timing_info) const;
-
-  // Dumps memory allocation stats into |stats|. |stats| can be assumed as being
-  // default initialized upon entry. Implementation overrides fields in
-  // |stats|.
-  void DumpMemoryStats(StreamSocket::SocketMemoryStats* stats) const;
 
   // Used by ClientSocketPool to initialize the ClientSocketHandle.
   //
@@ -172,6 +171,7 @@ class NET_EXPORT ClientSocketHandle {
   void set_connection_attempts(const ConnectionAttempts& attempts) {
     connection_attempts_ = attempts;
   }
+  ResolveErrorInfo resolve_error_info() const { return resolve_error_info_; }
 
   // Only valid if there is no |socket_|.
   bool is_ssl_error() const {
@@ -185,9 +185,7 @@ class NET_EXPORT ClientSocketHandle {
     return ssl_cert_request_info_;
   }
 
-  // If the connection failed, returns the connection attempts made. (If it
-  // succeeded, they will be returned through the socket instead; see
-  // |StreamSocket::GetConnectionAttempts|.)
+  // If the connection failed, returns the connection attempts made.
   const ConnectionAttempts& connection_attempts() {
     return connection_attempts_;
   }
@@ -230,17 +228,18 @@ class NET_EXPORT ClientSocketHandle {
   // Resets the supplemental error state.
   void ResetErrorState();
 
-  bool is_initialized_;
-  ClientSocketPool* pool_;
-  HigherLayeredPool* higher_pool_;
+  bool is_initialized_ = false;
+  raw_ptr<ClientSocketPool> pool_ = nullptr;
+  raw_ptr<HigherLayeredPool> higher_pool_ = nullptr;
   std::unique_ptr<StreamSocket> socket_;
   ClientSocketPool::GroupId group_id_;
-  SocketReuseType reuse_type_;
+  SocketReuseType reuse_type_ = ClientSocketHandle::UNUSED;
   CompletionOnceCallback callback_;
   base::TimeDelta idle_time_;
   // See ClientSocketPool::ReleaseSocket() for an explanation.
-  int64_t group_generation_;
-  bool is_ssl_error_;
+  int64_t group_generation_ = -1;
+  ResolveErrorInfo resolve_error_info_;
+  bool is_ssl_error_ = false;
   scoped_refptr<SSLCertRequestInfo> ssl_cert_request_info_;
   std::vector<ConnectionAttempt> connection_attempts_;
 
@@ -248,8 +247,6 @@ class NET_EXPORT ClientSocketHandle {
 
   // Timing information is set when a connection is successfully established.
   LoadTimingInfo::ConnectTiming connect_timing_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClientSocketHandle);
 };
 
 }  // namespace net

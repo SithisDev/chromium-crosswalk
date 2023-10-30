@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,20 @@
 #include <iostream>
 #include <memory>
 
-#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "crypto/sha2.h"
 #include "net/cert/cert_net_fetcher.h"
 #include "net/cert/internal/cert_issuer_source_aia.h"
-#include "net/cert/internal/cert_issuer_source_static.h"
-#include "net/cert/internal/parse_name.h"
-#include "net/cert/internal/parsed_certificate.h"
-#include "net/cert/internal/path_builder.h"
-#include "net/cert/internal/simple_path_builder_delegate.h"
 #include "net/cert/internal/system_trust_store.h"
+#include "net/cert/pki/cert_issuer_source_static.h"
+#include "net/cert/pki/parse_name.h"
+#include "net/cert/pki/parsed_certificate.h"
+#include "net/cert/pki/path_builder.h"
+#include "net/cert/pki/simple_path_builder_delegate.h"
+#include "net/cert/pki/trust_store_collection.h"
+#include "net/cert/pki/trust_store_in_memory.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "net/tools/cert_verify_tool/cert_verify_tool_util.h"
@@ -41,8 +43,7 @@ net::der::GeneralizedTime ConvertExplodedTime(
 
 bool AddPemEncodedCert(const net::ParsedCertificate* cert,
                        std::vector<std::string>* pem_encoded_chain) {
-  std::string der_cert;
-  cert->der_cert().AsStringPiece().CopyToString(&der_cert);
+  std::string der_cert(cert->der_cert().AsStringPiece());
   std::string pem;
   if (!net::X509Certificate::GetPEMEncodedFromDER(der_cert, &pem)) {
     std::cerr << "ERROR: GetPEMEncodedFromDER failed\n";
@@ -132,22 +133,24 @@ bool VerifyUsingPathBuilder(
     const std::vector<CertInput>& root_der_certs,
     const base::Time at_time,
     const base::FilePath& dump_prefix_path,
-    scoped_refptr<net::CertNetFetcher> cert_net_fetcher) {
+    scoped_refptr<net::CertNetFetcher> cert_net_fetcher,
+    net::SystemTrustStore* system_trust_store) {
   base::Time::Exploded exploded_time;
   at_time.UTCExplode(&exploded_time);
   net::der::GeneralizedTime time = ConvertExplodedTime(exploded_time);
 
-  std::unique_ptr<net::SystemTrustStore> ssl_trust_store =
-      net::CreateSslSystemTrustStore();
-
+  net::TrustStoreInMemory additional_roots;
   for (const auto& der_cert : root_der_certs) {
     scoped_refptr<net::ParsedCertificate> cert = ParseCertificate(der_cert);
     if (cert) {
-      ssl_trust_store->AddTrustAnchor(cert);
+      additional_roots.AddTrustAnchor(std::move(cert));
     }
   }
+  net::TrustStoreCollection trust_store;
+  trust_store.AddTrustStore(&additional_roots);
+  trust_store.AddTrustStore(system_trust_store->GetTrustStore());
 
-  if (!ssl_trust_store->UsesSystemTrustStore() && root_der_certs.empty()) {
+  if (!system_trust_store->UsesSystemTrustStore() && root_der_certs.empty()) {
     std::cerr << "NOTE: CertPathBuilder does not currently use OS trust "
                  "settings (--roots must be specified).\n";
   }
@@ -166,12 +169,11 @@ bool VerifyUsingPathBuilder(
   // Verify the chain.
   net::SimplePathBuilderDelegate delegate(
       2048, net::SimplePathBuilderDelegate::DigestPolicy::kWeakAllowSha1);
-  net::CertPathBuilder::Result result;
   net::CertPathBuilder path_builder(
-      target_cert, ssl_trust_store->GetTrustStore(), &delegate, time,
-      net::KeyPurpose::SERVER_AUTH, net::InitialExplicitPolicy::kFalse,
-      {net::AnyPolicy()}, net::InitialPolicyMappingInhibit::kFalse,
-      net::InitialAnyPolicyInhibit::kFalse, &result);
+      target_cert, &trust_store, &delegate, time, net::KeyPurpose::SERVER_AUTH,
+      net::InitialExplicitPolicy::kFalse, {net::der::Input(net::kAnyPolicyOid)},
+      net::InitialPolicyMappingInhibit::kFalse,
+      net::InitialAnyPolicyInhibit::kFalse);
   path_builder.AddCertIssuerSource(&intermediate_cert_issuer_source);
 
   std::unique_ptr<net::CertIssuerSourceAia> aia_cert_issuer_source;
@@ -181,14 +183,19 @@ bool VerifyUsingPathBuilder(
     path_builder.AddCertIssuerSource(aia_cert_issuer_source.get());
   }
 
+  // TODO(mattm): should this be a command line flag?
+  path_builder.SetExploreAllPaths(true);
+
   // Run the path builder.
-  path_builder.Run();
+  net::CertPathBuilder::Result result = path_builder.Run();
 
   // TODO(crbug.com/634443): Display any errors/warnings associated with path
   //                         building that were not part of a particular
   //                         PathResult.
   std::cout << "CertPathBuilder result: "
             << (result.HasValidPath() ? "SUCCESS" : "FAILURE") << "\n";
+
+  PrintDebugData(&result);
 
   for (size_t i = 0; i < result.paths.size(); ++i) {
     PrintResultPath(result.paths[i].get(), i, i == result.best_result_index);

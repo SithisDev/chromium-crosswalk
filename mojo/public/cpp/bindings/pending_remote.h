@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,27 @@
 #define MOJO_PUBLIC_CPP_BINDINGS_PENDING_REMOTE_H_
 
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/interface_ptr_info.h"
+#include "build/build_config.h"
+#include "mojo/public/c/system/types.h"
+#include "mojo/public/cpp/bindings/disconnect_reason.h"
+#include "mojo/public/cpp/bindings/interface_id.h"
 #include "mojo/public/cpp/bindings/lib/pending_remote_state.h"
-#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/message.h"
+#include "mojo/public/cpp/bindings/pipe_control_message_proxy.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
+
+template <typename T>
+class PendingReceiver;
+
+template <typename T>
+struct PendingRemoteConverter;
 
 // A valid PendingRemote is entangled with exactly one Receiver or
 // PendingReceiver, and can be consumed to bind a Remote in order to begin
@@ -49,15 +59,28 @@ class PendingRemote {
   PendingRemote() = default;
   PendingRemote(PendingRemote&&) noexcept = default;
 
-  // Temporary helper for transitioning away from old types. Intentionally an
-  // implicit constructor.
-  PendingRemote(InterfacePtrInfo<Interface>&& ptr_info)
-      : PendingRemote(ptr_info.PassHandle(), ptr_info.version()) {}
-
   // Constructs a valid PendingRemote over a valid raw message pipe handle and
   // expected interface version number.
   PendingRemote(ScopedMessagePipeHandle pipe, uint32_t version)
       : state_(std::move(pipe), version) {}
+
+  // Disabled on NaCl since it crashes old version of clang.
+#if !BUILDFLAG(IS_NACL)
+  // Move conversion operator for custom remote types. Only participates in
+  // overload resolution if a typesafe conversion is supported.
+  template <typename T,
+            std::enable_if_t<std::is_same<
+                PendingRemote<Interface>,
+                std::invoke_result_t<decltype(&PendingRemoteConverter<
+                                              T>::template To<Interface>),
+                                     T&&>>::value>* = nullptr>
+  PendingRemote(T&& other)
+      : PendingRemote(PendingRemoteConverter<T>::template To<Interface>(
+            std::move(other))) {}
+#endif  // !BUILDFLAG(IS_NACL)
+
+  PendingRemote(const PendingRemote&) = delete;
+  PendingRemote& operator=(const PendingRemote&) = delete;
 
   ~PendingRemote() = default;
 
@@ -69,24 +92,34 @@ class PendingRemote {
   bool is_valid() const { return state_.pipe.is_valid(); }
   explicit operator bool() const { return is_valid(); }
 
-  // Temporary helper for transitioning away from old bindings types. This is
-  // intentionally an implicit conversion.
-  operator InterfacePtrInfo<Interface>() {
-    return InterfacePtrInfo<Interface>(PassPipe(), version());
-  }
-
   // Resets this PendingRemote to an invalid state. If it was entangled with a
   // Receiver or PendingReceiver, that object remains in a valid state and will
   // eventually detect that its remote caller is gone.
   void reset() { state_.reset(); }
 
+  // Like above but provides a reason for the disconnection.
+  void ResetWithReason(uint32_t reason, const std::string& description) {
+    CHECK(is_valid()) << "Cannot send reset reason to an invalid handle.";
+
+    Message message =
+        PipeControlMessageProxy::ConstructPeerEndpointClosedMessage(
+            kPrimaryInterfaceId, DisconnectReason(reason, description));
+    MojoResult result =
+        WriteMessageNew(state_.pipe.get(), message.TakeMojoMessage(),
+                        MOJO_WRITE_MESSAGE_FLAG_NONE);
+    DCHECK_EQ(MOJO_RESULT_OK, result);
+
+    reset();
+  }
+
   // Takes ownership of this PendingRemote's message pipe handle. After this
   // call, the PendingRemote is no longer in a valid state and can no longer be
   // used to bind a Remote.
-  ScopedMessagePipeHandle PassPipe() WARN_UNUSED_RESULT {
+  [[nodiscard]] ScopedMessagePipeHandle PassPipe() {
     state_.version = 0;
     return std::move(state_.pipe);
   }
+  const ScopedMessagePipeHandle& Pipe() const { return state_.pipe; }
 
   // The version of the interface this Remote is assuming when making method
   // calls. For the most common case of unversioned mojom interfaces, this is
@@ -96,21 +129,14 @@ class PendingRemote {
   // Creates a new message pipe, retaining one end in the PendingRemote (making
   // it valid) and returning the other end as its entangled PendingReceiver. May
   // only be called on an invalid PendingRemote.
-  PendingReceiver<Interface> InitWithNewPipeAndPassReceiver()
-      WARN_UNUSED_RESULT {
-    DCHECK(!is_valid()) << "PendingRemote already has a receiver";
-    MessagePipe pipe;
-    state_.pipe = std::move(pipe.handle0);
-    return PendingReceiver<Interface>(std::move(pipe.handle1));
-  }
+  [[nodiscard]] REINITIALIZES_AFTER_MOVE PendingReceiver<Interface>
+  InitWithNewPipeAndPassReceiver();
 
   // For internal Mojo use only.
   internal::PendingRemoteState* internal_state() { return &state_; }
 
  private:
   internal::PendingRemoteState state_;
-
-  DISALLOW_COPY_AND_ASSIGN(PendingRemote);
 };
 
 class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) NullRemote {
@@ -130,6 +156,21 @@ bool FusePipes(PendingReceiver<Interface> receiver,
                PendingRemote<Interface> remote) {
   MojoResult result = FuseMessagePipes(receiver.PassPipe(), remote.PassPipe());
   return result == MOJO_RESULT_OK;
+}
+
+}  // namespace mojo
+
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+
+namespace mojo {
+
+template <typename Interface>
+PendingReceiver<Interface>
+PendingRemote<Interface>::InitWithNewPipeAndPassReceiver() {
+  DCHECK(!is_valid()) << "PendingReceiver already has a remote";
+  MessagePipe pipe;
+  state_.pipe = std::move(pipe.handle0);
+  return PendingReceiver<Interface>(std::move(pipe.handle1));
 }
 
 }  // namespace mojo

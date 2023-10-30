@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -84,7 +84,7 @@ def main(args):
     raise Error('%s does not have "platforms" key.' % options.manifest_json)
 
   platforms = data['platforms']
-  if type(platforms) is not list:
+  if not isinstance(platforms, list):
     raise Error('Expected "platforms" key to be array.')
 
   if options.prefix:

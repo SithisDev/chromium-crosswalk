@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,14 @@ void MockClientSocketPoolManager::SetSocketPool(
   socket_pools_[proxy_server] = std::move(pool);
 }
 
-void MockClientSocketPoolManager::FlushSocketPoolsWithError(int error) {
+void MockClientSocketPoolManager::FlushSocketPoolsWithError(
+    int error,
+    const char* net_log_reason_utf8) {
   NOTIMPLEMENTED();
 }
 
-void MockClientSocketPoolManager::CloseIdleSockets() {
+void MockClientSocketPoolManager::CloseIdleSockets(
+    const char* net_log_reason_utf8) {
   NOTIMPLEMENTED();
 }
 
@@ -36,14 +39,9 @@ ClientSocketPool* MockClientSocketPoolManager::GetSocketPool(
   return nullptr;
 }
 
-std::unique_ptr<base::Value>
-MockClientSocketPoolManager::SocketPoolInfoToValue() const {
+base::Value MockClientSocketPoolManager::SocketPoolInfoToValue() const {
   NOTIMPLEMENTED();
-  return std::unique_ptr<base::Value>(nullptr);
+  return base::Value();
 }
-
-void MockClientSocketPoolManager::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_dump_absolute_name) const {}
 
 }  // namespace net

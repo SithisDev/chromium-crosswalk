@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 
 #include <Security/Security.h>
 
+#include "net/cert/cert_status_flags.h"
+
 namespace net {
 
 // Performs certificate path construction and validation using iOS's
@@ -17,9 +19,10 @@ class CertVerifyProcIOS : public CertVerifyProc {
  public:
   CertVerifyProcIOS();
 
-  // Returns error CertStatus from the given |trust| object. Returns
-  // CERT_STATUS_INVALID if the trust is null.
-  static CertStatus GetCertFailureStatusFromTrust(SecTrustRef trust);
+  // Maps a CFError result from SecTrustEvaluateWithError to CertStatus flags.
+  // This should only be called if the SecTrustEvaluateWithError return value
+  // indicated that the certificate is not trusted.
+  static CertStatus GetCertFailureStatusFromError(CFErrorRef error);
 
   bool SupportsAdditionalTrustAnchors() const override;
 
@@ -27,6 +30,13 @@ class CertVerifyProcIOS : public CertVerifyProc {
   ~CertVerifyProcIOS() override;
 
  private:
+#if !defined(__IPHONE_12_0) || __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_12_0
+  // Returns error CertStatus from the given |trust| object. Returns
+  // CERT_STATUS_INVALID if the trust is null.
+  // TODO(mattm): move this to an anonymous namespace function.
+  static CertStatus GetCertFailureStatusFromTrust(SecTrustRef trust);
+#endif
+
   int VerifyInternal(X509Certificate* cert,
                      const std::string& hostname,
                      const std::string& ocsp_response,
@@ -34,7 +44,8 @@ class CertVerifyProcIOS : public CertVerifyProc {
                      int flags,
                      CRLSet* crl_set,
                      const CertificateList& additional_trust_anchors,
-                     CertVerifyResult* verify_result) override;
+                     CertVerifyResult* verify_result,
+                     const NetLogWithSource& net_log) override;
 };
 
 }  // namespace net

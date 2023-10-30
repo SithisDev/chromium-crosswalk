@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <memory>
 
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "mojo/public/cpp/system/system_export.h"
 
@@ -44,19 +43,20 @@ class MOJO_CPP_SYSTEM_EXPORT FilteredDataSource final
 
   FilteredDataSource(std::unique_ptr<DataPipeProducer::DataSource> source,
                      std::unique_ptr<Filter> filter);
+
+  FilteredDataSource(const FilteredDataSource&) = delete;
+  FilteredDataSource& operator=(const FilteredDataSource&) = delete;
+
   ~FilteredDataSource() override;
 
  private:
   // DataPipeProducer::DataSource:
-  bool IsValid() const override;
-  int64_t GetLength() const override;
-  ReadResult Read(int64_t offset, base::span<char> buffer) override;
+  uint64_t GetLength() const override;
+  ReadResult Read(uint64_t offset, base::span<char> buffer) override;
   void Abort() override;
 
   std::unique_ptr<DataPipeProducer::DataSource> source_;
   std::unique_ptr<Filter> filter_;
-
-  DISALLOW_COPY_AND_ASSIGN(FilteredDataSource);
 };
 
 }  // namespace mojo

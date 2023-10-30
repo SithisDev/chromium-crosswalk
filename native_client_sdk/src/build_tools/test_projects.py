@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -222,7 +222,7 @@ def GetTestName(desc, toolchain, config):
 
 def IsTestDisabled(desc, toolchain, config):
   def AsList(value):
-    if type(value) not in (list, tuple):
+    if not isinstance(value, (list, tuple)):
       return [value]
     return value
 

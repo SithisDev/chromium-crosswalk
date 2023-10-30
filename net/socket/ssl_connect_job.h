@@ -1,26 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_SOCKET_SSL_CONNECT_JOB_H_
 #define NET_SOCKET_SSL_CONNECT_JOB_H_
 
-#include <memory>
-#include <string>
+#include <stdint.h>
 
-#include "base/macros.h"
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/net_export.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/privacy_mode.h"
+#include "net/dns/public/host_resolver_results.h"
+#include "net/dns/public/resolve_error_info.h"
 #include "net/socket/connect_job.h"
 #include "net/socket/connection_attempts.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -43,7 +49,10 @@ class NET_EXPORT_PRIVATE SSLSocketParams
                   const HostPortPair& host_and_port,
                   const SSLConfig& ssl_config,
                   PrivacyMode privacy_mode,
-                  NetworkIsolationKey network_isolation_key);
+                  NetworkAnonymizationKey network_anonymization_key);
+
+  SSLSocketParams(const SSLSocketParams&) = delete;
+  SSLSocketParams& operator=(const SSLSocketParams&) = delete;
 
   // Returns the type of the underlying connection.
   ConnectionType GetConnectionType() const;
@@ -61,8 +70,8 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const HostPortPair& host_and_port() const { return host_and_port_; }
   const SSLConfig& ssl_config() const { return ssl_config_; }
   PrivacyMode privacy_mode() const { return privacy_mode_; }
-  const NetworkIsolationKey& network_isolation_key() const {
-    return network_isolation_key_;
+  const NetworkAnonymizationKey& network_anonymization_key() const {
+    return network_anonymization_key_;
   }
 
  private:
@@ -75,9 +84,7 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const HostPortPair host_and_port_;
   const SSLConfig ssl_config_;
   const PrivacyMode privacy_mode_;
-  const NetworkIsolationKey network_isolation_key_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSLSocketParams);
+  const NetworkAnonymizationKey network_anonymization_key_;
 };
 
 // SSLConnectJob establishes a connection, through a proxy if needed, and then
@@ -85,6 +92,20 @@ class NET_EXPORT_PRIVATE SSLSocketParams
 class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
                                          public ConnectJob::Delegate {
  public:
+  class NET_EXPORT_PRIVATE Factory {
+   public:
+    Factory() = default;
+    virtual ~Factory() = default;
+
+    virtual std::unique_ptr<SSLConnectJob> Create(
+        RequestPriority priority,
+        const SocketTag& socket_tag,
+        const CommonConnectJobParams* common_connect_job_params,
+        scoped_refptr<SSLSocketParams> params,
+        ConnectJob::Delegate* delegate,
+        const NetLogWithSource* net_log);
+  };
+
   // Note: the SSLConnectJob does not own |messenger| so it must outlive the
   // job.
   SSLConnectJob(RequestPriority priority,
@@ -93,6 +114,10 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
                 scoped_refptr<SSLSocketParams> params,
                 ConnectJob::Delegate* delegate,
                 const NetLogWithSource* net_log);
+
+  SSLConnectJob(const SSLConnectJob&) = delete;
+  SSLConnectJob& operator=(const SSLConnectJob&) = delete;
+
   ~SSLConnectJob() override;
 
   // ConnectJob methods.
@@ -106,6 +131,7 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
                         base::OnceClosure restart_with_auth_callback,
                         ConnectJob* job) override;
   ConnectionAttempts GetConnectionAttempts() const override;
+  ResolveErrorInfo GetResolveErrorInfo() const override;
   bool IsSSLError() const override;
   scoped_refptr<SSLCertRequestInfo> GetCertRequestInfo() override;
 
@@ -149,6 +175,8 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
   // Otherwise, it returns a net error code.
   int ConnectInternal() override;
 
+  void ResetStateForRestart();
+
   void ChangePriorityInternal(RequestPriority priority) override;
 
   scoped_refptr<SSLSocketParams> params_;
@@ -160,17 +188,36 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
   std::unique_ptr<SSLClientSocket> ssl_socket_;
 
   // True once SSL negotiation has started.
-  bool ssl_negotiation_started_;
+  bool ssl_negotiation_started_ = false;
+
+  // True if legacy crypto should be disabled for the job's current connection
+  // attempt. On error, the connection will be retried with legacy crypto
+  // enabled.
+  bool disable_legacy_crypto_with_fallback_ = true;
 
   scoped_refptr<SSLCertRequestInfo> ssl_cert_request_info_;
 
   ConnectionAttempts connection_attempts_;
+  ResolveErrorInfo resolve_error_info_;
   // The address of the server the connect job is connected to. Populated if
   // and only if the connect job is connected *directly* to the server (not
   // through an HTTPS CONNECT request or a SOCKS proxy).
   IPEndPoint server_address_;
 
-  DISALLOW_COPY_AND_ASSIGN(SSLConnectJob);
+  // Any DNS aliases for the remote endpoint. Includes all known aliases, e.g.
+  // from A, AAAA, or HTTPS, not just from the address used for the connection,
+  // in no particular order. Stored because `nested_connect_job_` has a limited
+  // lifetime and the aliases can no longer be retrieved from there by by the
+  // time that the aliases are needed to be passed in SetSocket.
+  std::set<std::string> dns_aliases_;
+
+  // The endpoint result used by `nested_connect_job_`. Stored because
+  // `nested_connect_job_` has a limited lifetime.
+  absl::optional<HostResolverEndpointResult> endpoint_result_;
+
+  // If not `absl::nullopt`, the ECH retry configs to use in the ECH recovery
+  // flow. `endpoint_result_` will then contain the endpoint to reconnect to.
+  absl::optional<std::vector<uint8_t>> ech_retry_configs_;
 };
 
 }  // namespace net

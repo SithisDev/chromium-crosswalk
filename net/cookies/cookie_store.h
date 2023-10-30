@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,19 +14,16 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_access_delegate.h"
+#include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_deletion_info.h"
 #include "net/cookies/cookie_options.h"
+#include "net/cookies/cookie_partition_key_collection.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
-
-namespace base {
-namespace trace_event {
-class ProcessMemoryDump;
-}
-}  // namespace base
 
 namespace net {
 
@@ -42,63 +39,75 @@ class CookieChangeDispatcher;
 class NET_EXPORT CookieStore {
  public:
   // Callback definitions.
-  typedef base::OnceCallback<void(const CookieList& cookies,
-                                  const CookieStatusList& excluded_list)>
-      GetCookieListCallback;
-  typedef base::OnceCallback<void(
-      CanonicalCookie::CookieInclusionStatus status)>
-      SetCookiesCallback;
-  typedef base::OnceCallback<void(uint32_t num_deleted)> DeleteCallback;
-  typedef base::OnceCallback<void(bool success)> SetCookieableSchemesCallback;
+  using GetCookieListCallback =
+      base::OnceCallback<void(const CookieAccessResultList& included_cookies,
+                              const CookieAccessResultList& excluded_list)>;
+  using GetAllCookiesCallback =
+      base::OnceCallback<void(const CookieList& cookies)>;
+  // |access_semantics_list| is guaranteed to the same length as |cookies|.
+  using GetAllCookiesWithAccessSemanticsCallback = base::OnceCallback<void(
+      const CookieList& cookies,
+      const std::vector<CookieAccessSemantics>& access_semantics_list)>;
+  using SetCookiesCallback =
+      base::OnceCallback<void(CookieAccessResult access_result)>;
+  using DeleteCallback = base::OnceCallback<void(uint32_t num_deleted)>;
+  using DeletePredicate =
+      base::RepeatingCallback<bool(const CanonicalCookie& cookie)>;
+  using SetCookieableSchemesCallback = base::OnceCallback<void(bool success)>;
 
+  CookieStore();
   virtual ~CookieStore();
 
-  // Sets the cookies specified by |cookie_list| returned from |url|
-  // with options |options| in effect.  Expects a cookie line, like
-  // "a=1; domain=b.com".
-  //
-  // Fails either if the cookie is invalid or if this is a non-HTTPONLY cookie
-  // and it would overwrite an existing HTTPONLY cookie.
-  // Returns true if the cookie is successfully set.
-  virtual void SetCookieWithOptionsAsync(const GURL& url,
-                                         const std::string& cookie_line,
-                                         const CookieOptions& options,
-                                         SetCookiesCallback callback) = 0;
-
   // Set the cookie on the cookie store.  |cookie.IsCanonical()| must
-  // be true.  |source_scheme| denotes the scheme of the resource setting this.
+  // be true.  |source_url| denotes the url of the resource setting this.
   //
   // |options| is used to determine the context the operation is run in, and
   // which cookies it can alter (e.g. http only, or same site).
   //
   // The current time will be used in place of a null creation time.
-  virtual void SetCanonicalCookieAsync(std::unique_ptr<CanonicalCookie> cookie,
-                                       std::string source_scheme,
-                                       const CookieOptions& options,
-                                       SetCookiesCallback callback) = 0;
+  //
+  // |cookie_access_result| is an optional input status, to allow for status
+  // chaining from callers. It helps callers provide the status of a
+  // canonical cookie that may have warnings associated with it.
+  virtual void SetCanonicalCookieAsync(
+      std::unique_ptr<CanonicalCookie> cookie,
+      const GURL& source_url,
+      const CookieOptions& options,
+      SetCookiesCallback callback,
+      absl::optional<CookieAccessResult> cookie_access_result =
+          absl::nullopt) = 0;
 
   // Obtains a CookieList for the given |url| and |options|. The returned
   // cookies are passed into |callback|, ordered by longest path, then earliest
   // creation date.
+  // To get all the cookies for a URL, use this method with an all-inclusive
+  // |options|.
+  // If |cookie_partition_key_collection| is not empty, then this function will
+  // return the partitioned cookies for that URL whose partition keys are in the
+  // cookie_partition_key_collection *in addition to* the unpartitioned cookies
+  // for that URL.
   virtual void GetCookieListWithOptionsAsync(
       const GURL& url,
       const CookieOptions& options,
+      const CookiePartitionKeyCollection& cookie_partition_key_collection,
       GetCookieListCallback callback) = 0;
-
-  // Returns all cookies associated with |url|, including http-only, and
-  // same-site cookies. The returned cookies are ordered by longest path, then
-  // by earliest creation date, and are not marked as having been accessed.
-  //
-  // TODO(mkwst): This method is deprecated, and should be removed, either by
-  // updating callsites to use 'GetCookieListWithOptionsAsync' with an explicit
-  // CookieOptions, or by changing CookieOptions' defaults.
-  void GetAllCookiesForURLAsync(const GURL& url,
-                                GetCookieListCallback callback);
 
   // Returns all the cookies, for use in management UI, etc. This does not mark
   // the cookies as having been accessed. The returned cookies are ordered by
   // longest path, then by earliest creation date.
-  virtual void GetAllCookiesAsync(GetCookieListCallback callback) = 0;
+  virtual void GetAllCookiesAsync(GetAllCookiesCallback callback) = 0;
+
+  // Returns all the cookies, for use in management UI, etc. This does not mark
+  // the cookies as having been accessed. The returned cookies are ordered by
+  // longest path, then by earliest creation date.
+  // Additionally returns a vector of CookieAccessSemantics values for the
+  // returned cookies, which will be the same length as the vector of returned
+  // cookies. This vector will either contain all CookieAccessSemantics::UNKNOWN
+  // (if the default implementation is used), or each entry in the
+  // vector of CookieAccessSemantics will indicate the access semantics
+  // applicable to the cookie at the same index in the returned CookieList.
+  virtual void GetAllCookiesWithAccessSemanticsAsync(
+      GetAllCookiesWithAccessSemanticsCallback callback);
 
   // Deletes one specific cookie. |cookie| must have been returned by a previous
   // query on this CookieStore. Invokes |callback| with 1 if a cookie was
@@ -120,7 +129,13 @@ class NET_EXPORT CookieStore {
   virtual void DeleteAllMatchingInfoAsync(CookieDeletionInfo delete_info,
                                           DeleteCallback callback) = 0;
 
-  virtual void DeleteSessionCookiesAsync(DeleteCallback) = 0;
+  // Deletes all cookies without expiration data.
+  virtual void DeleteSessionCookiesAsync(DeleteCallback callback) = 0;
+
+  // Deletes all cookies where |predicate| returns true.
+  // Calls |callback| with the number of cookies deleted.
+  virtual void DeleteMatchingCookiesAsync(DeletePredicate predicate,
+                                          DeleteCallback callback) = 0;
 
   // Deletes all cookies in the store.
   void DeleteAllAsync(DeleteCallback callback);
@@ -145,11 +160,34 @@ class NET_EXPORT CookieStore {
   virtual void SetCookieableSchemes(const std::vector<std::string>& schemes,
                                     SetCookieableSchemesCallback callback) = 0;
 
-  // Reports the estimate of dynamically allocated memory in bytes.
-  virtual void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
-                               const std::string& parent_absolute_name) const;
+  // Transfer ownership of a CookieAccessDelegate.
+  void SetCookieAccessDelegate(std::unique_ptr<CookieAccessDelegate> delegate);
 
-  virtual void TriggerCookieFetch() {}
+  // This may be null if no delegate has been set yet, or the delegate has been
+  // reset to null.
+  const CookieAccessDelegate* cookie_access_delegate() const {
+    return cookie_access_delegate_.get();
+  }
+
+  // Will convert a site's partitioned cookies into unpartitioned cookies. This
+  // may result in multiple cookies which have the same (partition_key, name,
+  // host_key, path), which violates the database's unique constraint. The
+  // algorithm we use to coalesce the cookies into a single unpartitioned cookie
+  // is the following:
+  //
+  // 1.  If one of the cookies has no partition key (i.e. it is unpartitioned)
+  //     choose this cookie.
+  //
+  // 2.  Choose the partitioned cookie with the most recent last_access_time.
+  //
+  // TODO(crbug.com/1296161): Delete this when the partitioned cookies Origin
+  // Trial ends.
+  virtual void ConvertPartitionedCookiesToUnpartitioned(const GURL& url) {}
+
+ private:
+  // Used to determine whether a particular cookie should be subject to legacy
+  // or non-legacy access semantics.
+  std::unique_ptr<CookieAccessDelegate> cookie_access_delegate_;
 };
 
 }  // namespace net

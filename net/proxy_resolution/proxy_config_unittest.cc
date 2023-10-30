@@ -1,9 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/proxy_resolution/proxy_config.h"
-#include "base/stl_util.h"
+
+#include "base/json/json_writer.h"
+#include "base/values.h"
+#include "net/base/proxy_string_util.h"
 #include "net/proxy_resolution/proxy_config_service_common_unittest.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -53,20 +56,20 @@ TEST(ProxyConfigTest, Equals) {
 
   config2.proxy_rules().type = ProxyConfig::ProxyRules::Type::PROXY_LIST;
   config2.proxy_rules().single_proxies.SetSingleProxyServer(
-      ProxyServer::FromURI("myproxy:80", ProxyServer::SCHEME_HTTP));
+      ProxyUriToProxyServer("myproxy:80", ProxyServer::SCHEME_HTTP));
 
   EXPECT_FALSE(config1.Equals(config2));
   EXPECT_FALSE(config2.Equals(config1));
 
   config1.proxy_rules().type = ProxyConfig::ProxyRules::Type::PROXY_LIST;
   config1.proxy_rules().single_proxies.SetSingleProxyServer(
-      ProxyServer::FromURI("myproxy:100", ProxyServer::SCHEME_HTTP));
+      ProxyUriToProxyServer("myproxy:100", ProxyServer::SCHEME_HTTP));
 
   EXPECT_FALSE(config1.Equals(config2));
   EXPECT_FALSE(config2.Equals(config1));
 
   config1.proxy_rules().single_proxies.SetSingleProxyServer(
-      ProxyServer::FromURI("myproxy", ProxyServer::SCHEME_HTTP));
+      ProxyUriToProxyServer("myproxy", ProxyServer::SCHEME_HTTP));
 
   EXPECT_TRUE(config1.Equals(config2));
   EXPECT_TRUE(config2.Equals(config1));
@@ -95,6 +98,128 @@ TEST(ProxyConfigTest, Equals) {
   EXPECT_TRUE(config1.Equals(config2));
   EXPECT_TRUE(config2.Equals(config1));
 }
+
+struct ProxyConfigToValueTestCase {
+  ProxyConfig config;
+  const char* expected_value_json;
+};
+
+class ProxyConfigToValueTest
+    : public ::testing::TestWithParam<ProxyConfigToValueTestCase> {};
+
+TEST_P(ProxyConfigToValueTest, ToValueJSON) {
+  const ProxyConfigToValueTestCase& test_case = GetParam();
+
+  base::Value value = test_case.config.ToValue();
+
+  std::string json_string;
+  ASSERT_TRUE(base::JSONWriter::Write(value, &json_string));
+
+  EXPECT_EQ(std::string(test_case.expected_value_json), json_string);
+}
+
+ProxyConfigToValueTestCase GetTestCaseDirect() {
+  return {ProxyConfig::CreateDirect(), "{}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseAutoDetect() {
+  return {ProxyConfig::CreateAutoDetect(), "{\"auto_detect\":true}"};
+}
+
+ProxyConfigToValueTestCase GetTestCasePacUrl() {
+  ProxyConfig config;
+  config.set_pac_url(GURL("http://www.example.com/test.pac"));
+
+  return {std::move(config),
+          "{\"pac_url\":\"http://www.example.com/test.pac\"}"};
+}
+
+ProxyConfigToValueTestCase GetTestCasePacUrlMandatory() {
+  ProxyConfig config;
+  config.set_pac_url(GURL("http://www.example.com/test.pac"));
+  config.set_pac_mandatory(true);
+
+  return {std::move(config),
+          "{\"pac_mandatory\":true,\"pac_url\":\"http://www.example.com/"
+          "test.pac\"}"};
+}
+
+ProxyConfigToValueTestCase GetTestCasePacUrlAndAutoDetect() {
+  ProxyConfig config = ProxyConfig::CreateAutoDetect();
+  config.set_pac_url(GURL("http://www.example.com/test.pac"));
+
+  return {
+      std::move(config),
+      "{\"auto_detect\":true,\"pac_url\":\"http://www.example.com/test.pac\"}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseSingleProxy() {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString("https://proxy1:8080");
+
+  return {std::move(config), "{\"single_proxy\":[\"https://proxy1:8080\"]}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseSingleProxyWithBypass() {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString("https://proxy1:8080");
+  config.proxy_rules().bypass_rules.AddRuleFromString("*.google.com");
+  config.proxy_rules().bypass_rules.AddRuleFromString("192.168.0.1/16");
+
+  return {std::move(config),
+          "{\"bypass_list\":[\"*.google.com\",\"192.168.0.1/"
+          "16\"],\"single_proxy\":[\"https://proxy1:8080\"]}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseSingleProxyWithReversedBypass() {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString("https://proxy1:8080");
+  config.proxy_rules().bypass_rules.AddRuleFromString("*.google.com");
+  config.proxy_rules().reverse_bypass = true;
+
+  return {std::move(config),
+          "{\"bypass_list\":[\"*.google.com\"],\"reverse_bypass\":true,"
+          "\"single_proxy\":[\"https://proxy1:8080\"]}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseProxyPerScheme() {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString(
+      "http=https://proxy1:8080;https=socks5://proxy2");
+  config.proxy_rules().bypass_rules.AddRuleFromString("*.google.com");
+  config.set_pac_url(GURL("http://wpad/wpad.dat"));
+  config.set_auto_detect(true);
+
+  return {
+      std::move(config),
+      "{\"auto_detect\":true,\"bypass_list\":[\"*.google.com\"],\"pac_url\":"
+      "\"http://wpad/wpad.dat\",\"proxy_per_scheme\":{\"http\":[\"https://"
+      "proxy1:8080\"],\"https\":[\"socks5://proxy2:1080\"]}}"};
+}
+
+ProxyConfigToValueTestCase GetTestCaseSingleProxyList() {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString(
+      "https://proxy1:8080,http://proxy2,direct://");
+
+  return {std::move(config),
+          "{\"single_proxy\":[\"https://proxy1:8080\",\"proxy2:80\",\"direct://"
+          "\"]}"};
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    ProxyConfigToValueTest,
+    testing::Values(GetTestCaseDirect(),
+                    GetTestCaseAutoDetect(),
+                    GetTestCasePacUrl(),
+                    GetTestCasePacUrlMandatory(),
+                    GetTestCasePacUrlAndAutoDetect(),
+                    GetTestCaseSingleProxy(),
+                    GetTestCaseSingleProxyWithBypass(),
+                    GetTestCaseSingleProxyWithReversedBypass(),
+                    GetTestCaseProxyPerScheme(),
+                    GetTestCaseSingleProxyList()));
 
 TEST(ProxyConfigTest, ParseProxyRules) {
   const struct {
@@ -311,19 +436,19 @@ TEST(ProxyConfigTest, ParseProxyRules) {
 
   ProxyConfig config;
 
-  for (size_t i = 0; i < base::size(tests); ++i) {
-    config.proxy_rules().ParseFromString(tests[i].proxy_rules);
+  for (const auto& test : tests) {
+    config.proxy_rules().ParseFromString(test.proxy_rules);
 
-    EXPECT_EQ(tests[i].type, config.proxy_rules().type);
-    ExpectProxyServerEquals(tests[i].single_proxy,
+    EXPECT_EQ(test.type, config.proxy_rules().type);
+    ExpectProxyServerEquals(test.single_proxy,
                             config.proxy_rules().single_proxies);
-    ExpectProxyServerEquals(tests[i].proxy_for_http,
+    ExpectProxyServerEquals(test.proxy_for_http,
                             config.proxy_rules().proxies_for_http);
-    ExpectProxyServerEquals(tests[i].proxy_for_https,
+    ExpectProxyServerEquals(test.proxy_for_https,
                             config.proxy_rules().proxies_for_https);
-    ExpectProxyServerEquals(tests[i].proxy_for_ftp,
+    ExpectProxyServerEquals(test.proxy_for_ftp,
                             config.proxy_rules().proxies_for_ftp);
-    ExpectProxyServerEquals(tests[i].fallback_proxy,
+    ExpectProxyServerEquals(test.fallback_proxy,
                             config.proxy_rules().fallback_proxies);
   }
 }
@@ -381,18 +506,51 @@ TEST_F(ProxyConfigWebSocketTest, UsesProxy) {
   EXPECT_EQ("PROXY proxy:3128", ToPacString());
 }
 
-// See RFC6455 Section 4.1. item 3, "_Proxy Usage_".
-TEST_F(ProxyConfigWebSocketTest, PrefersSocks) {
+// See RFC6455 Section 4.1. item 3, "_Proxy Usage_". Note that this favors a
+// SOCKSv4 proxy (although technically the spec only notes SOCKSv5).
+TEST_F(ProxyConfigWebSocketTest, PrefersSocksV4) {
   ParseFromString(
       "http=proxy:3128 ; https=sslproxy:3128 ; socks=socksproxy:1080");
   Apply(WsUrl());
   EXPECT_EQ("SOCKS socksproxy:1080", ToPacString());
 }
 
+// See RFC6455 Section 4.1. item 3, "_Proxy Usage_".
+TEST_F(ProxyConfigWebSocketTest, PrefersSocksV5) {
+  ParseFromString(
+      "http=proxy:3128 ; https=sslproxy:3128 ; socks=socks5://socksproxy:1080");
+  Apply(WsUrl());
+  EXPECT_EQ("SOCKS5 socksproxy:1080", ToPacString());
+}
+
 TEST_F(ProxyConfigWebSocketTest, PrefersHttpsToHttp) {
   ParseFromString("http=proxy:3128 ; https=sslproxy:3128");
   Apply(WssUrl());
   EXPECT_EQ("PROXY sslproxy:3128", ToPacString());
+}
+
+// Tests when a proxy-per-url-scheme configuration was used, and proxies are
+// specified for http://, https://, and a fallback proxy (non-SOCKS).
+// Even though the fallback proxy is not SOCKS, it is still favored over the
+// proxy for http://* and https://*.
+TEST_F(ProxyConfigWebSocketTest, PrefersNonSocksFallbackOverHttps) {
+  // The notation for "socks=" is abused to set the "fallback proxy".
+  ParseFromString(
+      "http=proxy:3128 ; https=sslproxy:3128; socks=https://httpsproxy");
+  EXPECT_EQ("HTTPS httpsproxy:443", rules_.fallback_proxies.ToPacString());
+  Apply(WssUrl());
+  EXPECT_EQ("HTTPS httpsproxy:443", ToPacString());
+}
+
+// Tests when a proxy-per-url-scheme configuration was used, and the fallback
+// proxy is a non-SOCKS proxy, and no proxy was given for https://* or
+// http://*. The fallback proxy is used.
+TEST_F(ProxyConfigWebSocketTest, UsesNonSocksFallbackProxy) {
+  // The notation for "socks=" is abused to set the "fallback proxy".
+  ParseFromString("ftp=ftpproxy:3128; socks=https://httpsproxy");
+  EXPECT_EQ("HTTPS httpsproxy:443", rules_.fallback_proxies.ToPacString());
+  Apply(WssUrl());
+  EXPECT_EQ("HTTPS httpsproxy:443", ToPacString());
 }
 
 TEST_F(ProxyConfigWebSocketTest, PrefersHttpsEvenForWs) {

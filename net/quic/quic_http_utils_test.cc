@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,10 @@
 
 #include <limits>
 
-#include "net/third_party/quiche/src/quic/platform/api/quic_endian.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_alt_svc_wire_format.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_alt_svc_wire_format.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using quic::ParsedQuicVersion;
-using quic::PROTOCOL_QUIC_CRYPTO;
-
-namespace net {
-namespace test {
+namespace net::test {
 
 TEST(QuicHttpUtilsTest, ConvertRequestPriorityToQuicPriority) {
   EXPECT_EQ(0u, ConvertRequestPriorityToQuicPriority(HIGHEST));
@@ -40,43 +35,4 @@ TEST(QuicHttpUtilsTest, ConvertQuicPriorityToRequestPriority) {
   }
 }
 
-TEST(QuicHttpUtilsTest, FilterSupportedAltSvcVersions) {
-  quic::ParsedQuicVersionVector supported_versions = {
-      ParsedQuicVersion(PROTOCOL_QUIC_CRYPTO, quic::QUIC_VERSION_46),
-      ParsedQuicVersion(PROTOCOL_QUIC_CRYPTO, quic::QUIC_VERSION_39),
-  };
-
-  std::vector<uint32_t> alt_svc_versions_google = {quic::QUIC_VERSION_46,
-                                                   quic::QUIC_VERSION_43};
-  std::vector<uint32_t> alt_svc_versions_ietf = {
-      QuicVersionToQuicVersionLabel(quic::QUIC_VERSION_46),
-      QuicVersionToQuicVersionLabel(quic::QUIC_VERSION_43)};
-
-  quic::ParsedQuicVersionVector supported_alt_svc_versions = {
-      ParsedQuicVersion(PROTOCOL_QUIC_CRYPTO, quic::QUIC_VERSION_46)};
-  spdy::SpdyAltSvcWireFormat::AlternativeService altsvc;
-
-  altsvc.protocol_id = "quic";
-  altsvc.version = alt_svc_versions_google;
-  EXPECT_EQ(supported_alt_svc_versions,
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, true));
-  EXPECT_EQ(supported_alt_svc_versions,
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, false));
-
-  altsvc.protocol_id = "hq";
-  altsvc.version = alt_svc_versions_ietf;
-  EXPECT_EQ(supported_alt_svc_versions,
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, true));
-  EXPECT_EQ(quic::ParsedQuicVersionVector(),
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, false));
-
-  altsvc.protocol_id = "invalid_protocol";
-  altsvc.version = alt_svc_versions_ietf;
-  EXPECT_EQ(quic::ParsedQuicVersionVector(),
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, true));
-  EXPECT_EQ(quic::ParsedQuicVersionVector(),
-            FilterSupportedAltSvcVersions(altsvc, supported_versions, false));
-}
-
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

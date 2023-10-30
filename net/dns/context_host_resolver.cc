@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,123 +6,107 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/string_piece.h"
 #include "base/time/tick_clock.h"
+#include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/host_cache.h"
+#include "net/dns/host_resolver.h"
 #include "net/dns/host_resolver_manager.h"
 #include "net/dns/host_resolver_proc.h"
+#include "net/dns/public/host_resolver_results.h"
+#include "net/dns/public/resolve_error_info.h"
+#include "net/dns/resolve_context.h"
+#include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request_context.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 
-// Wrapper of ResolveHostRequests that on destruction will remove itself from
-// |ContextHostResolver::active_requests_|.
-class ContextHostResolver::WrappedRequest
-    : public HostResolver::ResolveHostRequest {
- public:
-  WrappedRequest(
-      std::unique_ptr<HostResolverManager::CancellableRequest> inner_request,
-      ContextHostResolver* resolver)
-      : inner_request_(std::move(inner_request)), resolver_(resolver) {}
-
-  ~WrappedRequest() override { Cancel(); }
-
-  void Cancel() {
-    // Cannot destroy |inner_request_| because it is still allowed to call
-    // Get...Results() methods if the request was already complete.
-    inner_request_->Cancel();
-
-    if (resolver_) {
-      resolver_->active_requests_.erase(this);
-      resolver_ = nullptr;
-    }
-  }
-
-  int Start(CompletionOnceCallback callback) override {
-    DCHECK(resolver_);
-    return inner_request_->Start(std::move(callback));
-  }
-
-  const base::Optional<AddressList>& GetAddressResults() const override {
-    return inner_request_->GetAddressResults();
-  }
-
-  const base::Optional<std::vector<std::string>>& GetTextResults()
-      const override {
-    return inner_request_->GetTextResults();
-  }
-
-  const base::Optional<std::vector<HostPortPair>>& GetHostnameResults()
-      const override {
-    return inner_request_->GetHostnameResults();
-  }
-
-  const base::Optional<HostCache::EntryStaleness>& GetStaleInfo()
-      const override {
-    return inner_request_->GetStaleInfo();
-  }
-
-  void ChangeRequestPriority(RequestPriority priority) override {
-    inner_request_->ChangeRequestPriority(priority);
-  }
-
- private:
-  std::unique_ptr<HostResolverManager::CancellableRequest> inner_request_;
-
-  // Resolver is expected to call Cancel() on destruction, clearing the pointer
-  // before it becomes invalid.
-  ContextHostResolver* resolver_;
-
-  DISALLOW_COPY_AND_ASSIGN(WrappedRequest);
-};
-
-ContextHostResolver::ContextHostResolver(HostResolverManager* manager,
-                                         std::unique_ptr<HostCache> host_cache)
-    : manager_(manager), host_cache_(std::move(host_cache)) {
+ContextHostResolver::ContextHostResolver(
+    HostResolverManager* manager,
+    std::unique_ptr<ResolveContext> resolve_context)
+    : manager_(manager), resolve_context_(std::move(resolve_context)) {
   DCHECK(manager_);
+  DCHECK(resolve_context_);
 
-  if (host_cache_)
-    manager_->AddHostCacheInvalidator(host_cache_->invalidator());
+  manager_->RegisterResolveContext(resolve_context_.get());
 }
 
 ContextHostResolver::ContextHostResolver(
     std::unique_ptr<HostResolverManager> owned_manager,
-    std::unique_ptr<HostCache> host_cache)
-    : manager_(owned_manager.get()),
-      owned_manager_(std::move(owned_manager)),
-      host_cache_(std::move(host_cache)) {
-  DCHECK(manager_);
-
-  if (host_cache_)
-    manager_->AddHostCacheInvalidator(host_cache_->invalidator());
+    std::unique_ptr<ResolveContext> resolve_context)
+    : ContextHostResolver(owned_manager.get(), std::move(resolve_context)) {
+  owned_manager_ = std::move(owned_manager);
 }
 
 ContextHostResolver::~ContextHostResolver() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (owned_manager_)
     DCHECK_EQ(owned_manager_.get(), manager_);
 
-  if (host_cache_)
-    manager_->RemoveHostCacheInvalidator(host_cache_->invalidator());
+  // No |resolve_context_| to deregister if OnShutdown() was already called.
+  if (resolve_context_)
+    manager_->DeregisterResolveContext(resolve_context_.get());
+}
 
-  // Silently cancel all requests associated with this resolver.
-  while (!active_requests_.empty())
-    (*active_requests_.begin())->Cancel();
+void ContextHostResolver::OnShutdown() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  DCHECK(resolve_context_);
+  manager_->DeregisterResolveContext(resolve_context_.get());
+  resolve_context_.reset();
+
+  DCHECK(!shutting_down_);
+  shutting_down_ = true;
+}
+
+std::unique_ptr<HostResolver::ResolveHostRequest>
+ContextHostResolver::CreateRequest(
+    url::SchemeHostPort host,
+    NetworkAnonymizationKey network_anonymization_key,
+    NetLogWithSource source_net_log,
+    absl::optional<ResolveHostParameters> optional_parameters) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (shutting_down_)
+    return HostResolver::CreateFailingRequest(ERR_CONTEXT_SHUT_DOWN);
+
+  return manager_->CreateRequest(
+      std::move(host), std::move(network_anonymization_key),
+      std::move(source_net_log), std::move(optional_parameters),
+      resolve_context_.get(), resolve_context_->host_cache());
 }
 
 std::unique_ptr<HostResolver::ResolveHostRequest>
 ContextHostResolver::CreateRequest(
     const HostPortPair& host,
+    const NetworkAnonymizationKey& network_anonymization_key,
     const NetLogWithSource& source_net_log,
-    const base::Optional<ResolveHostParameters>& optional_parameters) {
-  auto request = std::make_unique<WrappedRequest>(
-      manager_->CreateRequest(host, source_net_log, optional_parameters,
-                              context_, host_cache_.get()),
-      this);
-  active_requests_.insert(request.get());
-  return request;
+    const absl::optional<ResolveHostParameters>& optional_parameters) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (shutting_down_)
+    return HostResolver::CreateFailingRequest(ERR_CONTEXT_SHUT_DOWN);
+
+  return manager_->CreateRequest(
+      host, network_anonymization_key, source_net_log, optional_parameters,
+      resolve_context_.get(), resolve_context_->host_cache());
+}
+
+std::unique_ptr<HostResolver::ProbeRequest>
+ContextHostResolver::CreateDohProbeRequest() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (shutting_down_)
+    return HostResolver::CreateFailingProbeRequest(ERR_CONTEXT_SHUT_DOWN);
+
+  return manager_->CreateDohProbeRequest(resolve_context_.get());
 }
 
 std::unique_ptr<HostResolver::MdnsListener>
@@ -132,19 +116,20 @@ ContextHostResolver::CreateMdnsListener(const HostPortPair& host,
 }
 
 HostCache* ContextHostResolver::GetHostCache() {
-  return host_cache_.get();
+  return resolve_context_->host_cache();
 }
 
-std::unique_ptr<base::Value> ContextHostResolver::GetDnsConfigAsValue() const {
+base::Value ContextHostResolver::GetDnsConfigAsValue() const {
   return manager_->GetDnsConfigAsValue();
 }
 
 void ContextHostResolver::SetRequestContext(
     URLRequestContext* request_context) {
-  DCHECK(request_context);
-  DCHECK(!context_);
+  DCHECK(!shutting_down_);
+  DCHECK(resolve_context_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  context_ = request_context;
+  resolve_context_->set_url_request_context(request_context);
 }
 
 HostResolverManager* ContextHostResolver::GetManagerForTesting() {
@@ -152,15 +137,23 @@ HostResolverManager* ContextHostResolver::GetManagerForTesting() {
 }
 
 const URLRequestContext* ContextHostResolver::GetContextForTesting() const {
-  return context_;
+  return resolve_context_ ? resolve_context_->url_request_context() : nullptr;
+}
+
+handles::NetworkHandle ContextHostResolver::GetTargetNetworkForTesting() const {
+  return resolve_context_ ? resolve_context_->GetTargetNetwork()
+                          : handles::kInvalidNetworkHandle;
 }
 
 size_t ContextHostResolver::LastRestoredCacheSize() const {
-  return host_cache_ ? host_cache_->last_restore_size() : 0;
+  return resolve_context_->host_cache()
+             ? resolve_context_->host_cache()->last_restore_size()
+             : 0;
 }
 
 size_t ContextHostResolver::CacheSize() const {
-  return host_cache_ ? host_cache_->size() : 0;
+  return resolve_context_->host_cache() ? resolve_context_->host_cache()->size()
+                                        : 0;
 }
 
 void ContextHostResolver::SetProcParamsForTesting(
@@ -168,16 +161,11 @@ void ContextHostResolver::SetProcParamsForTesting(
   manager_->set_proc_params_for_test(proc_params);
 }
 
-void ContextHostResolver::SetBaseDnsConfigForTesting(
-    const DnsConfig& base_config) {
-  manager_->SetBaseDnsConfigForTesting(base_config);
-}
-
 void ContextHostResolver::SetTickClockForTesting(
     const base::TickClock* tick_clock) {
   manager_->SetTickClockForTesting(tick_clock);
-  if (host_cache_)
-    host_cache_->set_tick_clock_for_testing(tick_clock);
+  if (resolve_context_->host_cache())
+    resolve_context_->host_cache()->set_tick_clock_for_testing(tick_clock);
 }
 
 }  // namespace net

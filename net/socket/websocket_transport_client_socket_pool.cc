@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -21,8 +22,8 @@
 #include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/connect_job.h"
+#include "net/socket/connect_job_factory.h"
 #include "net/socket/websocket_endpoint_lock_manager.h"
-#include "net/socket/websocket_transport_connect_job.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
@@ -32,17 +33,17 @@ WebSocketTransportClientSocketPool::WebSocketTransportClientSocketPool(
     int max_sockets_per_group,
     const ProxyServer& proxy_server,
     const CommonConnectJobParams* common_connect_job_params)
-    : proxy_server_(proxy_server),
-      common_connect_job_params_(common_connect_job_params),
-      max_sockets_(max_sockets),
-      handed_out_socket_count_(0),
-      flushing_(false) {
-  DCHECK(common_connect_job_params_->websocket_endpoint_lock_manager);
+    : ClientSocketPool(/*is_for_websockets=*/true,
+                       common_connect_job_params,
+                       std::make_unique<ConnectJobFactory>()),
+      proxy_server_(proxy_server),
+      max_sockets_(max_sockets) {
+  DCHECK(common_connect_job_params->websocket_endpoint_lock_manager);
 }
 
 WebSocketTransportClientSocketPool::~WebSocketTransportClientSocketPool() {
   // Clean up any pending connect jobs.
-  FlushWithError(ERR_ABORTED);
+  FlushWithError(ERR_ABORTED, "");
   DCHECK(pending_connects_.empty());
   DCHECK_EQ(0, handed_out_socket_count_);
   DCHECK(stalled_request_queue_.empty());
@@ -63,7 +64,7 @@ void WebSocketTransportClientSocketPool::UnlockEndpoint(
 int WebSocketTransportClientSocketPool::RequestSocket(
     const GroupId& group_id,
     scoped_refptr<SocketParams> params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     RequestPriority priority,
     const SocketTag& socket_tag,
     RespectLimits respect_limits,
@@ -104,7 +105,6 @@ int WebSocketTransportClientSocketPool::RequestSocket(
 
   std::unique_ptr<ConnectJob> connect_job =
       CreateConnectJob(group_id, params, proxy_server_, proxy_annotation_tag,
-                       true /* is_for_websockets */, common_connect_job_params_,
                        priority, SocketTag(), connect_job_delegate.get());
 
   int result = connect_job_delegate->Connect(std::move(connect_job));
@@ -126,13 +126,15 @@ int WebSocketTransportClientSocketPool::RequestSocket(
   return result;
 }
 
-void WebSocketTransportClientSocketPool::RequestSockets(
+int WebSocketTransportClientSocketPool::RequestSockets(
     const GroupId& group_id,
     scoped_refptr<SocketParams> params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     int num_sockets,
+    CompletionOnceCallback callback,
     const NetLogWithSource& net_log) {
   NOTIMPLEMENTED();
+  return OK;
 }
 
 void WebSocketTransportClientSocketPool::SetPriority(const GroupId& group_id,
@@ -174,7 +176,9 @@ void WebSocketTransportClientSocketPool::ReleaseSocket(
   ActivateStalledRequest();
 }
 
-void WebSocketTransportClientSocketPool::FlushWithError(int error) {
+void WebSocketTransportClientSocketPool::FlushWithError(
+    int error,
+    const char* net_log_reason_utf8) {
   DCHECK_NE(error, OK);
 
   // Sockets which are in LOAD_STATE_CONNECTING are in danger of unlocking
@@ -187,23 +191,28 @@ void WebSocketTransportClientSocketPool::FlushWithError(int error) {
   for (auto it = pending_connects_.begin(); it != pending_connects_.end();) {
     InvokeUserCallbackLater(it->second->socket_handle(),
                             it->second->release_callback(), error);
+    it->second->connect_job_net_log().AddEventWithStringParams(
+        NetLogEventType::SOCKET_POOL_CLOSING_SOCKET, "reason",
+        net_log_reason_utf8);
     it = pending_connects_.erase(it);
   }
-  for (auto it = stalled_request_queue_.begin();
-       it != stalled_request_queue_.end(); ++it) {
-    InvokeUserCallbackLater(it->handle, std::move(it->callback), error);
+  for (auto& stalled_request : stalled_request_queue_) {
+    InvokeUserCallbackLater(stalled_request.handle,
+                            std::move(stalled_request.callback), error);
   }
   stalled_request_map_.clear();
   stalled_request_queue_.clear();
   flushing_ = false;
 }
 
-void WebSocketTransportClientSocketPool::CloseIdleSockets() {
+void WebSocketTransportClientSocketPool::CloseIdleSockets(
+    const char* net_log_reason_utf8) {
   // We have no idle sockets.
 }
 
 void WebSocketTransportClientSocketPool::CloseIdleSocketsInGroup(
-    const GroupId& group_id) {
+    const GroupId& group_id,
+    const char* net_log_reason_utf8) {
   // We have no idle sockets.
 }
 
@@ -226,25 +235,26 @@ LoadState WebSocketTransportClientSocketPool::GetLoadState(
   return LookupConnectJob(handle)->GetLoadState();
 }
 
-std::unique_ptr<base::DictionaryValue>
-WebSocketTransportClientSocketPool::GetInfoAsValue(
+base::Value WebSocketTransportClientSocketPool::GetInfoAsValue(
     const std::string& name,
     const std::string& type) const {
-  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->SetString("name", name);
-  dict->SetString("type", type);
-  dict->SetInteger("handed_out_socket_count", handed_out_socket_count_);
-  dict->SetInteger("connecting_socket_count", pending_connects_.size());
-  dict->SetInteger("idle_socket_count", 0);
-  dict->SetInteger("max_socket_count", max_sockets_);
-  dict->SetInteger("max_sockets_per_group", max_sockets_);
-  return dict;
+  base::Value::Dict dict;
+  dict.Set("name", name);
+  dict.Set("type", type);
+  dict.Set("handed_out_socket_count", handed_out_socket_count_);
+  dict.Set("connecting_socket_count",
+           static_cast<int>(pending_connects_.size()));
+  dict.Set("idle_socket_count", 0);
+  dict.Set("max_socket_count", max_sockets_);
+  dict.Set("max_sockets_per_group", max_sockets_);
+  return base::Value(std::move(dict));
 }
 
-void WebSocketTransportClientSocketPool::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_dump_absolute_name) const {
-  // Not supported.
+bool WebSocketTransportClientSocketPool::HasActiveSocket(
+    const GroupId& group_id) const {
+  // This method is not supported for WebSocket.
+  NOTREACHED();
+  return false;
 }
 
 bool WebSocketTransportClientSocketPool::IsStalled() const {
@@ -416,24 +426,21 @@ void WebSocketTransportClientSocketPool::ActivateStalledRequest() {
     stalled_request_queue_.pop_front();
     stalled_request_map_.erase(request.handle);
 
-    // Wrap request.callback into a copyable (repeating) callback so that it can
-    // be passed to RequestSocket() and yet called if RequestSocket() returns
-    // synchronously.
-    auto copyable_callback =
-        base::AdaptCallbackForRepeating(std::move(request.callback));
+    auto split_callback = base::SplitOnceCallback(std::move(request.callback));
 
     int rv = RequestSocket(
         request.group_id, request.params, request.proxy_annotation_tag,
         request.priority, SocketTag(),
         // Stalled requests can't have |respect_limits|
         // DISABLED.
-        RespectLimits::ENABLED, request.handle, copyable_callback,
+        RespectLimits::ENABLED, request.handle, std::move(split_callback.first),
         request.proxy_auth_callback, request.net_log);
 
     // ActivateStalledRequest() never returns synchronously, so it is never
     // called re-entrantly.
     if (rv != ERR_IO_PENDING)
-      InvokeUserCallbackLater(request.handle, copyable_callback, rv);
+      InvokeUserCallbackLater(request.handle, std::move(split_callback.second),
+                              rv);
   }
 }
 
@@ -491,7 +498,7 @@ WebSocketTransportClientSocketPool::ConnectJobDelegate::connect_job_net_log() {
 WebSocketTransportClientSocketPool::StalledRequest::StalledRequest(
     const GroupId& group_id,
     const scoped_refptr<SocketParams>& params,
-    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
+    const absl::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     RequestPriority priority,
     ClientSocketHandle* handle,
     CompletionOnceCallback callback,

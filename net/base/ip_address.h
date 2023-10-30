@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
+#include "base/check_op.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 
@@ -110,8 +110,7 @@ class NET_EXPORT IPAddress {
   // Copies the input address to |ip_address_|. The input is expected to be in
   // network byte order.
   template <size_t N>
-  IPAddress(const uint8_t(&address)[N])
-      : IPAddress(address, N) {}
+  explicit IPAddress(const uint8_t (&address)[N]) : IPAddress(address, N) {}
 
   // Copies the input address to |ip_address_| taking an additional length
   // parameter. The input is expected to be in network byte order.
@@ -166,7 +165,8 @@ class NET_EXPORT IPAddress {
   // Returns true if |ip_address_| is 127.0.0.1/8 or ::1/128
   bool IsLoopback() const;
 
-  // Returns true if |ip_address_| is 169.254.0.0/16 or fe80::/10
+  // Returns true if |ip_address_| is 169.254.0.0/16 or fe80::/10, or
+  // ::ffff:169.254.0.0/112 (IPv4 mapped IPv6 link-local).
   bool IsLinkLocal() const;
 
   // The size in bytes of |ip_address_|.
@@ -185,8 +185,7 @@ class NET_EXPORT IPAddress {
   //
   // When parsing fails, the original value of |this| will be overwritten such
   // that |this->empty()| and |!this->IsValid()|.
-  bool AssignFromIPLiteral(const base::StringPiece& ip_literal)
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] bool AssignFromIPLiteral(const base::StringPiece& ip_literal);
 
   // Returns the underlying bytes.
   const IPAddressBytes& bytes() const { return ip_address_; }
@@ -265,7 +264,7 @@ NET_EXPORT bool IPAddressMatchesPrefix(const IPAddress& ip_address,
 //    10.10.3.1/20
 //    a:b:c::/46
 //    ::1/128
-NET_EXPORT bool ParseCIDRBlock(const std::string& cidr_literal,
+NET_EXPORT bool ParseCIDRBlock(base::StringPiece cidr_literal,
                                IPAddress* ip_address,
                                size_t* prefix_length_in_bits);
 
@@ -274,9 +273,9 @@ NET_EXPORT bool ParseCIDRBlock(const std::string& cidr_literal,
 // In other words, |hostname| must be an IPv4 literal, or an IPv6 literal
 // surrounded by brackets as in [::1]. On failure |ip_address| may have been
 // overwritten and could contain an invalid IPAddress.
-NET_EXPORT bool ParseURLHostnameToAddress(const base::StringPiece& hostname,
-                                          IPAddress* ip_address)
-    WARN_UNUSED_RESULT;
+[[nodiscard]] NET_EXPORT bool ParseURLHostnameToAddress(
+    const base::StringPiece& hostname,
+    IPAddress* ip_address);
 
 // Returns number of matching initial bits between the addresses |a1| and |a2|.
 NET_EXPORT size_t CommonPrefixLength(const IPAddress& a1, const IPAddress& a2);

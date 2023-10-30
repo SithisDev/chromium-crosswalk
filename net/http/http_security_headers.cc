@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <limits>
 
 #include "base/base64.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -100,10 +102,11 @@ bool ParseHSTSHeader(const std::string& value,
       case DIRECTIVE_END:
         if (base::IsAsciiWhitespace(token[0]))
           continue;
-        if (base::LowerCaseEqualsASCII(token, "max-age")) {
+        if (base::EqualsCaseInsensitiveASCII(token, "max-age")) {
           state = AFTER_MAX_AGE_LABEL;
           max_age_observed++;
-        } else if (base::LowerCaseEqualsASCII(token, "includesubdomains")) {
+        } else if (base::EqualsCaseInsensitiveASCII(token,
+                                                    "includesubdomains")) {
           state = AFTER_INCLUDE_SUBDOMAINS;
           include_subdomains_observed++;
           include_subdomains_candidate = true;
@@ -160,7 +163,7 @@ bool ParseHSTSHeader(const std::string& value,
     case AFTER_MAX_AGE:
     case AFTER_INCLUDE_SUBDOMAINS:
     case AFTER_UNKNOWN_LABEL:
-      *max_age = base::TimeDelta::FromSeconds(max_age_candidate);
+      *max_age = base::Seconds(max_age_candidate);
       *include_subdomains = include_subdomains_candidate;
       return true;
     case START:
@@ -196,7 +199,7 @@ bool ParseExpectCTHeader(const std::string& value,
 
   while (name_value_pairs.GetNext()) {
     base::StringPiece name = name_value_pairs.name_piece();
-    if (base::LowerCaseEqualsASCII(name, "max-age")) {
+    if (base::EqualsCaseInsensitiveASCII(name, "max-age")) {
       // "A given directive MUST NOT appear more than once in a given header
       // field."
       if (parsed_max_age)
@@ -206,7 +209,7 @@ bool ParseExpectCTHeader(const std::string& value,
         return false;
       }
       parsed_max_age = true;
-    } else if (base::LowerCaseEqualsASCII(name, "enforce")) {
+    } else if (base::EqualsCaseInsensitiveASCII(name, "enforce")) {
       // "A given directive MUST NOT appear more than once in a given header
       // field."
       if (enforce_candidate)
@@ -214,7 +217,7 @@ bool ParseExpectCTHeader(const std::string& value,
       if (!name_value_pairs.value_piece().empty())
         return false;
       enforce_candidate = true;
-    } else if (base::LowerCaseEqualsASCII(name, "report-uri")) {
+    } else if (base::EqualsCaseInsensitiveASCII(name, "report-uri")) {
       // "A given directive MUST NOT appear more than once in a given header
       // field."
       if (has_report_uri)
@@ -235,7 +238,7 @@ bool ParseExpectCTHeader(const std::string& value,
   if (!parsed_max_age)
     return false;
 
-  *max_age = base::TimeDelta::FromSeconds(max_age_candidate);
+  *max_age = base::Seconds(max_age_candidate);
   *enforce = enforce_candidate;
   *report_uri = parsed_report_uri;
   return true;

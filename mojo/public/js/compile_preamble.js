@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 'use strict';
@@ -7,6 +7,8 @@
  * @fileoverview Preamble for JavaScript to be compiled with Closure Compiler.
  * We don't comple against the Closure library, so this provides a minimal set
  * of 'goog' namespace properties to support things like symbol exports.
+ *
+ * @provideGoog
  */
 
 /** @const */

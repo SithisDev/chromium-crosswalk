@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright 2009 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_private_key.h"
@@ -154,8 +153,8 @@ TEST(SSLClientAuthCacheTest, LookupNullPreference) {
   EXPECT_EQ(nullptr, cached_cert.get());
 }
 
-// Check that the OnCertDBChanged() method removes all cache entries.
-TEST(SSLClientAuthCacheTest, OnCertDBChanged) {
+// Check that the Clear() method removes all cache entries.
+TEST(SSLClientAuthCacheTest, Clear) {
   SSLClientAuthCache cache;
 
   HostPortPair server1("foo", 443);
@@ -178,7 +177,7 @@ TEST(SSLClientAuthCacheTest, OnCertDBChanged) {
   EXPECT_TRUE(cache.Lookup(server2, &cached_cert, &cached_pkey));
   EXPECT_EQ(nullptr, cached_cert.get());
 
-  cache.OnCertDBChanged();
+  cache.Clear();
 
   // Check that we no longer have entries for either server.
   EXPECT_FALSE(cache.Lookup(server1, &cached_cert, &cached_pkey));

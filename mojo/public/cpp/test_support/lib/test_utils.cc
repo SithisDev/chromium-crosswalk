@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "mojo/core/embedder/embedder.h"
-#include "mojo/public/cpp/system/core.h"
+#include "base/callback_helpers.h"
+#include "mojo/public/cpp/system/functions.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 #include "mojo/public/cpp/system/wait.h"
 #include "mojo/public/cpp/test_support/test_support.h"
 
@@ -80,13 +81,12 @@ void IterateAndReportPerf(const char* test_name,
 }
 
 BadMessageObserver::BadMessageObserver() : got_bad_message_(false) {
-  mojo::core::SetDefaultProcessErrorCallback(base::BindRepeating(
+  mojo::SetDefaultProcessErrorHandler(base::BindRepeating(
       &BadMessageObserver::OnReportBadMessage, base::Unretained(this)));
 }
 
 BadMessageObserver::~BadMessageObserver() {
-  mojo::core::SetDefaultProcessErrorCallback(
-      mojo::core::ProcessErrorCallback());
+  mojo::SetDefaultProcessErrorHandler(base::NullCallback());
 }
 
 std::string BadMessageObserver::WaitForBadMessage() {

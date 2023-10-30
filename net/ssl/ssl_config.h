@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 
 #include <stdint.h>
 
+#include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/privacy_mode.h"
+#include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
 #include "net/socket/next_proto.h"
 #include "net/ssl/ssl_private_key.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -39,6 +42,8 @@ NET_EXPORT extern const uint16_t kDefaultSSLVersionMax;
 
 // A collection of SSL-related configuration settings.
 struct NET_EXPORT SSLConfig {
+  using ApplicationSettings = base::flat_map<NextProto, std::vector<uint8_t>>;
+
   // Default to revocation checking.
   SSLConfig();
   SSLConfig(const SSLConfig& other);
@@ -54,12 +59,11 @@ struct NET_EXPORT SSLConfig {
   // configuration.
   int GetCertVerifyFlags() const;
 
-  // The minimum and maximum protocol versions that are enabled.
-  // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.)
-  // SSL 2.0 and SSL 3.0 are not supported. If version_max < version_min, it
-  // means no protocol versions are enabled.
-  uint16_t version_min;
-  uint16_t version_max;
+  // If specified, the minimum and maximum protocol versions that are enabled.
+  // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.) If
+  // unspecified, values from the SSLConfigService are used.
+  absl::optional<uint16_t> version_min_override;
+  absl::optional<uint16_t> version_max_override;
 
   // Whether early data is enabled on this connection. Note that early data has
   // weaker security properties than normal data and changes the
@@ -73,22 +77,13 @@ struct NET_EXPORT SSLConfig {
   // high-level operation.
   //
   // If unsure, do not enable this option.
-  bool early_data_enabled;
-
-  // Presorted list of cipher suites which should be explicitly prevented from
-  // being used in addition to those disabled by the net built-in policy.
-  //
-  // Though cipher suites are sent in TLS as "uint8_t CipherSuite[2]", in
-  // big-endian form, they should be declared in host byte order, with the
-  // first uint8_t occupying the most significant byte.
-  // Ex: To disable TLS_RSA_WITH_RC4_128_MD5, specify 0x0004, while to
-  // disable TLS_ECDH_ECDSA_WITH_RC4_128_SHA, specify 0xC002.
-  std::vector<uint16_t> disabled_cipher_suites;
-
-  bool false_start_enabled;  // True if we'll use TLS False Start.
+  bool early_data_enabled = false;
 
   // If true, causes only ECDHE cipher suites to be enabled.
-  bool require_ecdhe;
+  bool require_ecdhe = false;
+
+  // If true, causes SHA-1 signature algorithms in TLS 1.2 to be disabled.
+  bool disable_legacy_crypto = false;
 
   // TODO(wtc): move the following members to a new SSLParams structure.  They
   // are not SSL configuration settings.
@@ -110,7 +105,7 @@ struct NET_EXPORT SSLConfig {
   std::vector<CertAndStatus> allowed_bad_certs;
 
   // True if all certificate errors should be ignored.
-  bool ignore_certificate_errors;
+  bool ignore_certificate_errors = false;
 
   // True if, for a single connection, any dependent network fetches should
   // be disabled. This can be used to avoid triggering re-entrancy in the
@@ -118,10 +113,7 @@ struct NET_EXPORT SSLConfig {
   // AIA, OCSP, or CRL fetches to block on retrieving the PAC script, while
   // the PAC script fetch is waiting for those dependent fetches, creating a
   // deadlock.
-  bool disable_cert_verification_network_fetches;
-
-  // True if we should send client_cert to the server.
-  bool send_client_cert;
+  bool disable_cert_verification_network_fetches = false;
 
   // The list of application level protocols supported with ALPN (Application
   // Layer Protocol Negotiation), in decreasing order of preference.  Protocols
@@ -129,18 +121,25 @@ struct NET_EXPORT SSLConfig {
   NextProtoVector alpn_protos;
 
   // True if renegotiation should be allowed for the default application-level
-  // protocol when the peer negotiates neither ALPN nor NPN.
-  bool renego_allowed_default;
+  // protocol when the peer does not negotiate ALPN.
+  bool renego_allowed_default = false;
 
   // The list of application-level protocols to enable renegotiation for.
   NextProtoVector renego_allowed_for_protos;
 
-  scoped_refptr<X509Certificate> client_cert;
-  scoped_refptr<SSLPrivateKey> client_private_key;
+  // ALPS TLS extension is enabled and corresponding data is sent to server
+  // for each NextProto in |application_settings|.  Data might be empty.
+  ApplicationSettings application_settings;
 
   // If the PartitionSSLSessionsByNetworkIsolationKey feature is enabled, the
   // session cache is partitioned by this value.
-  NetworkIsolationKey network_isolation_key;
+  NetworkAnonymizationKey network_anonymization_key;
+
+  // If non-empty, a serialized ECHConfigList to use to encrypt the ClientHello.
+  // If this field is non-empty, callers should handle |ERR_ECH_NOT_NEGOTIATED|
+  // errors from Connect() by calling GetECHRetryConfigs() to determine how to
+  // retry the connection.
+  std::vector<uint8_t> ech_config_list;
 
   // An additional boolean to partition the session cache by.
   //
@@ -150,7 +149,12 @@ struct NET_EXPORT SSLConfig {
   // current session cache partitioning behavior will be needed to correctly
   // implement it. For now, it acts as an incomplete version of
   // PartitionSSLSessionsByNetworkIsolationKey.
-  PrivacyMode privacy_mode;
+  PrivacyMode privacy_mode = PRIVACY_MODE_DISABLED;
+
+  // True if the post-handshake peeking of the transport should be skipped. This
+  // logic ensures tickets are resolved early, but can interfere with some unit
+  // tests.
+  bool disable_post_handshake_peek_for_testing = false;
 };
 
 }  // namespace net

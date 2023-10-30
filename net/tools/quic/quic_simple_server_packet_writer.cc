@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,21 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/quic/address_utils.h"
 #include "net/socket/udp_server_socket.h"
-#include "net/third_party/quiche/src/quic/core/quic_dispatcher.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_dispatcher.h"
 
 namespace net {
 
 QuicSimpleServerPacketWriter::QuicSimpleServerPacketWriter(
     UDPServerSocket* socket,
     quic::QuicDispatcher* dispatcher)
-    : socket_(socket), dispatcher_(dispatcher), write_blocked_(false) {}
+    : socket_(socket), dispatcher_(dispatcher) {}
 
 QuicSimpleServerPacketWriter::~QuicSimpleServerPacketWriter() = default;
 
@@ -30,9 +30,6 @@ void QuicSimpleServerPacketWriter::OnWriteComplete(int rv) {
   write_blocked_ = false;
   quic::WriteResult result(
       rv < 0 ? quic::WRITE_STATUS_ERROR : quic::WRITE_STATUS_OK, rv);
-  if (!callback_.is_null()) {
-    std::move(callback_).Run(result);
-  }
   dispatcher_->OnCanWrite();
 }
 
@@ -42,6 +39,11 @@ bool QuicSimpleServerPacketWriter::IsWriteBlocked() const {
 
 void QuicSimpleServerPacketWriter::SetWritable() {
   write_blocked_ = false;
+}
+
+absl::optional<int> QuicSimpleServerPacketWriter::MessageTooBigErrorCode()
+    const {
+  return ERR_MSG_TOO_BIG;
 }
 
 quic::WriteResult QuicSimpleServerPacketWriter::WritePacket(
@@ -57,8 +59,8 @@ quic::WriteResult QuicSimpleServerPacketWriter::WritePacket(
   if (buf_len <= static_cast<size_t>(std::numeric_limits<int>::max())) {
     rv = socket_->SendTo(
         buf.get(), static_cast<int>(buf_len), ToIPEndPoint(peer_address),
-        base::Bind(&QuicSimpleServerPacketWriter::OnWriteComplete,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&QuicSimpleServerPacketWriter::OnWriteComplete,
+                       weak_factory_.GetWeakPtr()));
   } else {
     rv = ERR_MSG_TOO_BIG;
   }
@@ -88,10 +90,10 @@ bool QuicSimpleServerPacketWriter::IsBatchMode() const {
   return false;
 }
 
-char* QuicSimpleServerPacketWriter::GetNextWriteLocation(
+quic::QuicPacketBuffer QuicSimpleServerPacketWriter::GetNextWriteLocation(
     const quic::QuicIpAddress& self_address,
     const quic::QuicSocketAddress& peer_address) {
-  return nullptr;
+  return {nullptr, nullptr};
 }
 
 quic::WriteResult QuicSimpleServerPacketWriter::Flush() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,8 @@ bool HttpServerRequestInfo::HasHeaderValue(
   std::string complete_value = base::ToLowerASCII(GetHeaderValue(header_name));
 
   for (const base::StringPiece& cur :
-       base::SplitString(complete_value, ",", base::KEEP_WHITESPACE,
-                         base::SPLIT_WANT_NONEMPTY)) {
+       base::SplitStringPiece(complete_value, ",", base::KEEP_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
     if (base::TrimString(cur, " \t", base::TRIM_ALL) == header_value)
       return true;
   }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@ namespace mojo {
 namespace core {
 namespace ports {
 
-PortRef::~PortRef() {}
+PortRef::~PortRef() = default;
 
-PortRef::PortRef() {}
+PortRef::PortRef() = default;
 
 PortRef::PortRef(const PortName& name, scoped_refptr<Port> port)
     : name_(name), port_(std::move(port)) {}

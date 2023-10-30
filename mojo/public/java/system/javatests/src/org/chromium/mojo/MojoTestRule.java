@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.mojo;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.junit.rules.ExternalResource;
 
@@ -37,11 +37,12 @@ public class MojoTestRule extends ExternalResource {
 
     public MojoTestRule(@MojoCore int shouldInitMojoCore) {
         mShouldInitCore = shouldInitMojoCore == MojoCore.INITIALIZE;
+        LibraryLoader.getInstance().setLibraryProcessType(LibraryProcessType.PROCESS_BROWSER);
     }
 
     @Override
-    protected void before() throws Throwable {
-        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+    protected void before() {
+        LibraryLoader.getInstance().ensureInitialized();
         if (mShouldInitCore && !sIsCoreInitialized) {
             nativeInitCore();
             sIsCoreInitialized = true;

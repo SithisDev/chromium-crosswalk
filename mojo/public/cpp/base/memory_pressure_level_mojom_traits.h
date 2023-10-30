@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,12 @@
 #include "base/component_export.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
-#include "mojo/public/mojom/base/memory_pressure_level.mojom.h"
+#include "mojo/public/mojom/base/memory_pressure_level.mojom-shared.h"
 
 namespace mojo {
 
 template <>
-struct COMPONENT_EXPORT(MOJO_BASE_MOJOM)
+struct COMPONENT_EXPORT(MOJO_BASE_TRAITS)
     EnumTraits<mojo_base::mojom::MemoryPressureLevel,
                base::MemoryPressureListener::MemoryPressureLevel> {
   static mojo_base::mojom::MemoryPressureLevel ToMojom(

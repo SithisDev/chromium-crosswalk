@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/files/file.h"
 #include "base/memory/scoped_refptr.h"
 #include "net/base/net_export.h"
 #include "net/ssl/ssl_key_logger.h"
@@ -26,6 +26,14 @@ class NET_EXPORT SSLKeyLoggerImpl : public SSLKeyLogger {
   // Creates a new SSLKeyLoggerImpl which writes to |path|, scheduling write
   // operations in the background.
   explicit SSLKeyLoggerImpl(const base::FilePath& path);
+
+  // Creates a new SSLKeyLoggerImpl which writes to |file|, scheduling write
+  // operations in the background.
+  explicit SSLKeyLoggerImpl(base::File file);
+
+  SSLKeyLoggerImpl(const SSLKeyLoggerImpl&) = delete;
+  SSLKeyLoggerImpl& operator=(const SSLKeyLoggerImpl&) = delete;
+
   ~SSLKeyLoggerImpl() override;
 
   void WriteLine(const std::string& line) override;
@@ -33,8 +41,6 @@ class NET_EXPORT SSLKeyLoggerImpl : public SSLKeyLogger {
  private:
   class Core;
   scoped_refptr<Core> core_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSLKeyLoggerImpl);
 };
 
 }  // namespace net

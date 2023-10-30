@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.mojo.system.impl;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -13,9 +13,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.mojo.MojoTestRule;
 import org.chromium.mojo.system.Core;
-import org.chromium.mojo.system.Core.HandleSignals;
 import org.chromium.mojo.system.DataPipe;
 import org.chromium.mojo.system.Handle;
 import org.chromium.mojo.system.InvalidHandle;
@@ -32,24 +32,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Testing the core API.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.UNIT_TESTS)
 public class CoreImplTest {
     @Rule
     public MojoTestRule mTestRule = new MojoTestRule();
-
-    private static final long RUN_LOOP_TIMEOUT_MS = 5;
-
-    private static final ScheduledExecutorService WORKER =
-            Executors.newSingleThreadScheduledExecutor();
-
-    private static final HandleSignals ALL_SIGNALS =
-            HandleSignals.none().setPeerClosed(true).setReadable(true).setWritable(true);
 
     private List<Handle> mHandlesToClose = new ArrayList<Handle>();
 
@@ -57,7 +48,7 @@ public class CoreImplTest {
      * @see MojoTestCase#tearDown()
      */
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         MojoException toThrow = null;
         for (Handle handle : mHandlesToClose) {
             try {

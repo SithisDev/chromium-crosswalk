@@ -1,11 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_basic_stream.h"
 
+#include <set>
 #include <utility>
 
+#include "base/bind.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_raw_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_body_drainer.h"
@@ -17,25 +20,32 @@
 namespace net {
 
 HttpBasicStream::HttpBasicStream(std::unique_ptr<ClientSocketHandle> connection,
-                                 bool using_proxy,
-                                 bool http_09_on_non_default_ports_enabled)
-    : state_(std::move(connection),
-             using_proxy,
-             http_09_on_non_default_ports_enabled) {}
+                                 bool using_proxy)
+    : state_(std::move(connection), using_proxy) {}
 
 HttpBasicStream::~HttpBasicStream() = default;
 
-int HttpBasicStream::InitializeStream(const HttpRequestInfo* request_info,
-                                      bool can_send_early,
+void HttpBasicStream::RegisterRequest(const HttpRequestInfo* request_info) {
+  DCHECK(request_info);
+  DCHECK(request_info->traffic_annotation.is_valid());
+  request_info_ = request_info;
+}
+
+int HttpBasicStream::InitializeStream(bool can_send_early,
                                       RequestPriority priority,
                                       const NetLogWithSource& net_log,
                                       CompletionOnceCallback callback) {
-  DCHECK(request_info->traffic_annotation.is_valid());
-  state_.Initialize(request_info, priority, net_log);
+  DCHECK(request_info_);
+  state_.Initialize(request_info_, priority, net_log);
   int ret = OK;
   if (!can_send_early) {
-    ret = parser()->ConfirmHandshake(std::move(callback));
+    // parser() cannot outlive |this|, so we can use base::Unretained().
+    ret = parser()->ConfirmHandshake(
+        base::BindOnce(&HttpBasicStream::OnHandshakeConfirmed,
+                       base::Unretained(this), std::move(callback)));
   }
+  // RequestInfo is no longer needed after this point.
+  request_info_ = nullptr;
   return ret;
 }
 
@@ -79,18 +89,19 @@ void HttpBasicStream::Close(bool not_reusable) {
   StreamSocket* socket = state_.connection()->socket();
   if (not_reusable && socket)
     socket->Disconnect();
+  parser()->OnConnectionClose();
   state_.connection()->Reset();
 }
 
-HttpStream* HttpBasicStream::RenewStreamForAuth() {
+std::unique_ptr<HttpStream> HttpBasicStream::RenewStreamForAuth() {
   DCHECK(IsResponseBodyComplete());
   DCHECK(!parser()->IsMoreDataBuffered());
   // The HttpStreamParser object still has a pointer to the connection. Just to
   // be extra-sure it doesn't touch the connection again, delete it here rather
   // than leaving it until the destructor is called.
   state_.DeleteParser();
-  return new HttpBasicStream(state_.ReleaseConnection(), state_.using_proxy(),
-                             state_.http_09_on_non_default_ports_enabled());
+  return std::make_unique<HttpBasicStream>(state_.ReleaseConnection(),
+                                           state_.using_proxy());
 }
 
 bool HttpBasicStream::IsResponseBodyComplete() const {
@@ -106,7 +117,8 @@ void HttpBasicStream::SetConnectionReused() {
 }
 
 bool HttpBasicStream::CanReuseConnection() const {
-  return state_.connection()->socket() && parser()->CanReuseConnection();
+  return parser() && state_.connection()->socket() &&
+         parser()->CanReuseConnection();
 }
 
 int64_t HttpBasicStream::GetTotalReceivedBytes() const {
@@ -129,7 +141,19 @@ bool HttpBasicStream::GetLoadTimingInfo(
     return false;
   }
 
-  load_timing_info->receive_headers_start = parser()->response_start_time();
+  // If the request waited for handshake confirmation, shift |ssl_end| to
+  // include that time.
+  if (!load_timing_info->connect_timing.ssl_end.is_null() &&
+      !confirm_handshake_end_.is_null()) {
+    load_timing_info->connect_timing.ssl_end = confirm_handshake_end_;
+    load_timing_info->connect_timing.connect_end = confirm_handshake_end_;
+  }
+
+  load_timing_info->receive_headers_start =
+      parser()->first_response_start_time();
+  load_timing_info->receive_non_informational_headers_start =
+      parser()->non_informational_response_start_time();
+  load_timing_info->first_early_hints_time = parser()->first_early_hints_time();
   return true;
 }
 
@@ -155,16 +179,16 @@ void HttpBasicStream::GetSSLCertRequestInfo(
   parser()->GetSSLCertRequestInfo(cert_request_info);
 }
 
-bool HttpBasicStream::GetRemoteEndpoint(IPEndPoint* endpoint) {
+int HttpBasicStream::GetRemoteEndpoint(IPEndPoint* endpoint) {
   if (!state_.connection() || !state_.connection()->socket())
-    return false;
+    return ERR_SOCKET_NOT_CONNECTED;
 
-  return state_.connection()->socket()->GetPeerAddress(endpoint) == OK;
+  return state_.connection()->socket()->GetPeerAddress(endpoint);
 }
 
 void HttpBasicStream::Drain(HttpNetworkSession* session) {
-  HttpResponseBodyDrainer* drainer = new HttpResponseBodyDrainer(this);
-  drainer->Start(session);
+  session->StartResponseDrainer(
+      std::make_unique<HttpResponseBodyDrainer>(this));
   // |drainer| will delete itself.
 }
 
@@ -182,6 +206,25 @@ void HttpBasicStream::SetPriority(RequestPriority priority) {
 void HttpBasicStream::SetRequestHeadersCallback(
     RequestHeadersCallback callback) {
   request_headers_callback_ = std::move(callback);
+}
+
+const std::set<std::string>& HttpBasicStream::GetDnsAliases() const {
+  return state_.GetDnsAliases();
+}
+
+base::StringPiece HttpBasicStream::GetAcceptChViaAlps() const {
+  return {};
+}
+
+void HttpBasicStream::OnHandshakeConfirmed(CompletionOnceCallback callback,
+                                           int rv) {
+  if (rv == OK) {
+    // Note this time is only recorded if ConfirmHandshake() completed
+    // asynchronously. If it was synchronous, GetLoadTimingInfo() assumes the
+    // handshake was already confirmed or there was nothing to confirm.
+    confirm_handshake_end_ = base::TimeTicks::Now();
+  }
+  std::move(callback).Run(rv);
 }
 
 }  // namespace net

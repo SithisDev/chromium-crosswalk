@@ -1,11 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 
+#include <string>
+
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
+#include "mojo/public/cpp/bindings/lib/validation_context.h"
 #include "mojo/public/cpp/bindings/message.h"
+
+#if !BUILDFLAG(IS_NACL)
+#include "base/debug/crash_logging.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#endif  // !BUILDFLAG(IS_NACL)
 
 namespace mojo {
 namespace internal {
@@ -15,6 +26,20 @@ ValidationErrorObserverForTesting* g_validation_error_observer = nullptr;
 SerializationWarningObserverForTesting* g_serialization_warning_observer =
     nullptr;
 bool g_suppress_logging = false;
+
+#if !BUILDFLAG(IS_NACL)
+std::string MessageHeaderAsHexString(Message* message) {
+  if (!message) {
+    return "<null>";
+  }
+  if (message->data_num_bytes() < sizeof(*message->header())) {
+    return base::StrCat(
+        {"<incomplete>",
+         base::HexEncode(message->data(), message->data_num_bytes())});
+  }
+  return base::HexEncode(message->header(), sizeof(*message->header()));
+}
+#endif  // !BUILDFLAG(IS_NACL)
 
 }  // namespace
 
@@ -66,6 +91,11 @@ const char* ValidationErrorToString(ValidationError error) {
 void ReportValidationError(ValidationContext* context,
                            ValidationError error,
                            const char* description) {
+#if !BUILDFLAG(IS_NACL)
+  SCOPED_CRASH_KEY_STRING64("mojo-message", "header-bytes",
+                            MessageHeaderAsHexString(context->message()));
+#endif  // !BUILDFLAG(IS_NACL)
+
   if (g_validation_error_observer) {
     g_validation_error_observer->set_last_error(error);
     return;
@@ -79,7 +109,7 @@ void ReportValidationError(ValidationContext* context,
     if (context->message()) {
       context->message()->NotifyBadMessage(
           base::StringPrintf("Validation failed for %s [%s (%s)]",
-                             context->description().data(),
+                             context->GetFullDescription().c_str(),
                              ValidationErrorToString(error), description));
     }
   } else {
@@ -88,7 +118,7 @@ void ReportValidationError(ValidationContext* context,
     if (context->message()) {
       context->message()->NotifyBadMessage(
           base::StringPrintf("Validation failed for %s [%s]",
-                             context->description().data(),
+                             context->GetFullDescription().c_str(),
                              ValidationErrorToString(error)));
     }
   }
@@ -102,8 +132,9 @@ void ReportValidationErrorForMessage(mojo::Message* message,
   std::string description =
       base::StringPrintf("%s.%d %s", interface_name, method_ordinal,
                          is_response ? " response" : "");
-  ValidationContext validation_context(nullptr, 0, 0, 0, message, description);
-  ReportValidationError(&validation_context, error, description.c_str());
+  ValidationContext validation_context(nullptr, 0, 0, 0, message,
+                                       description.c_str());
+  ReportValidationError(&validation_context, error);
 }
 
 ScopedSuppressValidationErrorLoggingForTests
@@ -118,8 +149,8 @@ ScopedSuppressValidationErrorLoggingForTests
 }
 
 ValidationErrorObserverForTesting::ValidationErrorObserverForTesting(
-    const base::Closure& callback)
-    : last_error_(VALIDATION_ERROR_NONE), callback_(callback) {
+    base::RepeatingClosure callback)
+    : last_error_(VALIDATION_ERROR_NONE), callback_(std::move(callback)) {
   DCHECK(!g_validation_error_observer);
   g_validation_error_observer = this;
 }
@@ -148,6 +179,10 @@ SerializationWarningObserverForTesting::
     ~SerializationWarningObserverForTesting() {
   DCHECK(g_serialization_warning_observer == this);
   g_serialization_warning_observer = nullptr;
+}
+
+void RecordInvalidStringDeserialization() {
+  base::UmaHistogramBoolean("Mojo.InvalidUTF8String", false);
 }
 
 }  // namespace internal

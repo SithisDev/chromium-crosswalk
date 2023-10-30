@@ -1,8 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.mojo.system;
+
+import android.os.ParcelFileDescriptor;
 
 /**
  * Core mojo interface giving access to the base operations. See |src/mojo/public/c/system/core.h|
@@ -164,7 +166,16 @@ public interface Core {
      *
      * @return a new {@link UntypedHandle} representing the native handle.
      */
-    public UntypedHandle acquireNativeHandle(int handle);
+    public UntypedHandle acquireNativeHandle(long handle);
+
+    /**
+     * Creates and acquires a handle from the native side. The handle will be owned by the returned
+     * object and must not be closed outside of it.
+     *
+     * @param fd Java file descriptor to be wrapped as a native platform handle.
+     * @return a new {@link UntypedHandle} representing the native handle.
+     */
+    public UntypedHandle wrapFileDescriptor(ParcelFileDescriptor fd);
 
     /**
      * Returns an implementation of {@link Watcher}.

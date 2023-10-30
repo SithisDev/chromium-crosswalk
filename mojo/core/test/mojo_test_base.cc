@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ MojoTestBase::ClientController& MojoTestBase::StartClient(
 MojoTestBase::ClientController::ClientController(const std::string& client_name,
                                                  MojoTestBase* test,
                                                  LaunchType launch_type) {
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
   pipe_ = helper_.StartChild(client_name, launch_type);
 #endif
 }
@@ -49,7 +49,7 @@ MojoTestBase::ClientController::~ClientController() {
 
 int MojoTestBase::ClientController::WaitForShutdown() {
   was_shutdown_ = true;
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
   int retval = helper_.WaitForChildShutdown();
   return retval;
 #else
@@ -268,6 +268,9 @@ MojoResult MojoTestBase::WaitForSignals(MojoHandle handle,
   return Wait(Handle(handle), signals, MOJO_TRIGGER_CONDITION_SIGNALS_SATISFIED,
               state);
 }
+
+// static
+constexpr size_t MojoTestBase::kMaxMessageSizeInTests;
 
 }  // namespace test
 }  // namespace core

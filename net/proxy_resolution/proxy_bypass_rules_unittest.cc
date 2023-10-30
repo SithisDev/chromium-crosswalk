@@ -1,17 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/proxy_resolution/proxy_bypass_rules.h"
 
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "net/proxy_resolution/proxy_config_service_common_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // On Windows, "loopback" resolves to localhost and is implicitly bypassed to
 // match WinInet.
 #define BYPASS_LOOPBACK
@@ -57,27 +55,29 @@ void ExpectBypassLocalhost(
     "localhost",
     "localhost.",
     "foo.localhost",
-    "localhost6",
-    "localhost6.localdomain6",
     "127.0.0.1",
     "127.100.0.2",
     "[::1]",
+    "[::0:FFFF:127.0.0.1]",
+    "[::fFfF:127.100.0.0]",
+    "[0::ffff:7f00:1]",
 #if defined(BYPASS_LOOPBACK)
     "loopback",
     "loopback.",
 #endif
   };
 
-  ExpectRulesMatch(rules, kHosts, base::size(kHosts), bypasses, inverted_hosts);
+  ExpectRulesMatch(rules, kHosts, std::size(kHosts), bypasses, inverted_hosts);
 }
 
 // Tests calling |rules.Matches()| for link-local URLs returns |bypasses|.
 void ExpectBypassLinkLocal(const ProxyBypassRules& rules, bool bypasses) {
   const char* kHosts[] = {
-      "169.254.3.2", "169.254.100.1", "[FE80::8]", "[fe91::1]",
+      "169.254.3.2", "169.254.100.1",        "[FE80::8]",
+      "[fe91::1]",   "[::ffff:169.254.3.2]",
   };
 
-  ExpectRulesMatch(rules, kHosts, base::size(kHosts), bypasses, {});
+  ExpectRulesMatch(rules, kHosts, std::size(kHosts), bypasses, {});
 }
 
 // Tests calling |rules.Matches()| with miscelaneous URLs that are neither
@@ -94,13 +94,18 @@ void ExpectBypassMisc(
     "[FD80::1]",
     "foo",
     "www.example3.com",
+    "[::ffff:128.0.0.1]",
+    "[::ffff:126.100.0.0]",
+    "[::ffff::ffff:127.0.0.1]",
+    "[::ffff:0:127.0.0.1]",
+    "[::127.0.0.1]",
 #if !defined(BYPASS_LOOPBACK)
     "loopback",
     "loopback.",
 #endif
   };
 
-  ExpectRulesMatch(rules, kHosts, base::size(kHosts), bypasses, inverted_hosts);
+  ExpectRulesMatch(rules, kHosts, std::size(kHosts), bypasses, inverted_hosts);
 }
 
 TEST(ProxyBypassRulesTest, ParseAndMatchBasicHost) {
@@ -283,23 +288,22 @@ TEST(ProxyBypassRulesTest, HTTPOnlyWithWildcard) {
   EXPECT_FALSE(rules.Matches(GURL("https://www.google.com")));
 }
 
-TEST(ProxyBypassRulesTest, UseSuffixMatching) {
+TEST(ProxyBypassRulesTest, DoesNotUseSuffixMatching) {
   ProxyBypassRules rules;
   rules.ParseFromString(
       "foo1.com, .foo2.com, 192.168.1.1, "
-      "*foobar.com:80, *.foo, http://baz, <local>",
-      ProxyBypassRules::ParseFormat::kHostnameSuffixMatching);
+      "*foobar.com:80, *.foo, http://baz, <local>");
   ASSERT_EQ(7u, rules.rules().size());
-  EXPECT_EQ("*foo1.com", rules.rules()[0]->ToString());
+  EXPECT_EQ("foo1.com", rules.rules()[0]->ToString());
   EXPECT_EQ("*.foo2.com", rules.rules()[1]->ToString());
   EXPECT_EQ("192.168.1.1", rules.rules()[2]->ToString());
   EXPECT_EQ("*foobar.com:80", rules.rules()[3]->ToString());
   EXPECT_EQ("*.foo", rules.rules()[4]->ToString());
-  EXPECT_EQ("http://*baz", rules.rules()[5]->ToString());
+  EXPECT_EQ("http://baz", rules.rules()[5]->ToString());
   EXPECT_EQ("<local>", rules.rules()[6]->ToString());
 
   EXPECT_TRUE(rules.Matches(GURL("http://foo1.com")));
-  EXPECT_TRUE(rules.Matches(GURL("http://aaafoo1.com")));
+  EXPECT_FALSE(rules.Matches(GURL("http://aaafoo1.com")));
   EXPECT_FALSE(rules.Matches(GURL("http://aaafoo1.com.net")));
 }
 
@@ -358,10 +362,8 @@ TEST(ProxyBypassRulesTest, BypassSimpleHostnames) {
   EXPECT_FALSE(rules.Matches(GURL("http://[dead::beef]/")));
   EXPECT_FALSE(rules.Matches(GURL("http://192.168.1.1/")));
 
-  // Confusingly, <local> rule is NOT about localhost names. There is however
-  // overlap on "localhost6?" as it is both a simple hostname and a localhost
-  // name
-  ExpectBypassLocalhost(rules, false, {"localhost", "localhost6", "loopback"});
+  // Confusingly, <local> rule is NOT about localhost names.
+  ExpectBypassLocalhost(rules, false, {"localhost", "loopback"});
 
   // Should NOT bypass link-local addresses.
   ExpectBypassLinkLocal(rules, false);
@@ -379,6 +381,7 @@ TEST(ProxyBypassRulesTest, ParseAndMatchCIDR_IPv4) {
   EXPECT_TRUE(rules.Matches(GURL("http://192.168.1.1")));
   EXPECT_TRUE(rules.Matches(GURL("ftp://192.168.4.4")));
   EXPECT_TRUE(rules.Matches(GURL("https://192.168.0.0:81")));
+  // Test that an IPv4 mapped IPv6 literal matches an IPv4 CIDR rule.
   EXPECT_TRUE(rules.Matches(GURL("http://[::ffff:192.168.11.11]")));
 
   EXPECT_FALSE(rules.Matches(GURL("http://foobar.com")));
@@ -396,6 +399,21 @@ TEST(ProxyBypassRulesTest, ParseAndMatchCIDR_IPv6) {
   EXPECT_TRUE(rules.Matches(GURL("http://[A:b:C:9::]")));
   EXPECT_FALSE(rules.Matches(GURL("http://foobar.com")));
   EXPECT_FALSE(rules.Matches(GURL("http://192.169.1.1")));
+
+  // Test that an IPv4 literal matches an IPv4 mapped IPv6 CIDR rule.
+  // This is the IPv4 mapped equivalent to 192.168.1.1/16.
+  rules.ParseFromString("::ffff:192.168.1.1/112");
+  EXPECT_TRUE(rules.Matches(GURL("http://[::ffff:192.168.1.3]")));
+  EXPECT_TRUE(rules.Matches(GURL("http://192.168.11.11")));
+  EXPECT_FALSE(rules.Matches(GURL("http://10.10.1.1")));
+
+  // Test using an IP range that is close to IPv4 mapped, but not
+  // quite. Should not result in matches.
+  rules.ParseFromString("::fffe:192.168.1.1/112");
+  EXPECT_TRUE(rules.Matches(GURL("http://[::fffe:192.168.1.3]")));
+  EXPECT_FALSE(rules.Matches(GURL("http://[::ffff:192.168.1.3]")));
+  EXPECT_FALSE(rules.Matches(GURL("http://192.168.11.11")));
+  EXPECT_FALSE(rules.Matches(GURL("http://10.10.1.1")));
 }
 
 // Test that parsing an IPv6 range given a bracketed literal is not supported.

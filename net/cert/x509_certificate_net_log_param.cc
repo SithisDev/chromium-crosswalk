@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,13 @@
 
 namespace net {
 
-base::Value NetLogX509CertificateParams(const X509Certificate* certificate) {
-  base::Value dict(base::Value::Type::DICTIONARY);
+base::Value NetLogX509CertificateList(const X509Certificate* certificate) {
   base::Value certs(base::Value::Type::LIST);
   std::vector<std::string> encoded_chain;
   certificate->GetPEMEncodedChain(&encoded_chain);
   for (auto& pem : encoded_chain)
-    certs.GetList().emplace_back(std::move(pem));
-  dict.SetKey("certificates", std::move(certs));
-  return dict;
+    certs.Append(std::move(pem));
+  return certs;
 }
 
 }  // namespace net

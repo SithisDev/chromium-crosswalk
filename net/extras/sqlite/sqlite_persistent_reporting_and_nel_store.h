@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/task_traits.h"
 #include "net/network_error_logging/network_error_logging_service.h"
 #include "net/network_error_logging/persistent_reporting_and_nel_store.h"
 #include "net/reporting/reporting_cache.h"
@@ -22,6 +22,10 @@ class SequencedTaskRunner;
 
 namespace net {
 
+// Returns recommended task priority for |background_task_runner|.
+base::TaskPriority COMPONENT_EXPORT(NET_EXTRAS)
+    GetReportingAndNelStoreBackgroundSequencePriority();
+
 class COMPONENT_EXPORT(NET_EXTRAS) SQLitePersistentReportingAndNelStore
     : public PersistentReportingAndNelStore {
  public:
@@ -29,6 +33,11 @@ class COMPONENT_EXPORT(NET_EXTRAS) SQLitePersistentReportingAndNelStore
       const base::FilePath& path,
       const scoped_refptr<base::SequencedTaskRunner>& client_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& background_task_runner);
+
+  SQLitePersistentReportingAndNelStore(
+      const SQLitePersistentReportingAndNelStore&) = delete;
+  SQLitePersistentReportingAndNelStore& operator=(
+      const SQLitePersistentReportingAndNelStore&) = delete;
 
   ~SQLitePersistentReportingAndNelStore() override;
 
@@ -79,8 +88,6 @@ class COMPONENT_EXPORT(NET_EXTRAS) SQLitePersistentReportingAndNelStore
 
   base::WeakPtrFactory<SQLitePersistentReportingAndNelStore> weak_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(SQLitePersistentReportingAndNelStore);
 };
 
 }  // namespace net

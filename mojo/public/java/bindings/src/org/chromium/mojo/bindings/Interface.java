@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -400,21 +400,23 @@ public interface Interface extends ConnectionErrorHandler, Closeable {
 
         /**
          * Binds the given implementation to the handle.
+         * Returns the router that owns the implementation and connection handle, which can be used
+         * to close the binding if necessary. If the router (and by consequence the handle) is
+         * intentionally leaked it will close itself when the connection handle is closed and the
+         * proxy receives the connection error.
          */
-        public void bind(I impl, MessagePipeHandle handle) {
-            // The router (and by consequence the handle) is intentionally leaked. It will close
-            // itself when the connected handle is closed and the proxy receives the connection
-            // error.
+        public Router bind(I impl, MessagePipeHandle handle) {
             Router router = new RouterImpl(handle);
             bind(handle.getCore(), impl, router);
             router.start();
+            return router;
         }
 
         /**
          * Binds the given implementation to the InterfaceRequest.
          */
-        public final void bind(I impl, InterfaceRequest<I> request) {
-            bind(impl, request.passHandle());
+        public final Router bind(I impl, InterfaceRequest<I> request) {
+            return bind(impl, request.passHandle());
         }
 
         /**

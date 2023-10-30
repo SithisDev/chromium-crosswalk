@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define NET_BASE_NET_ERRORS_H__
 
 #include <string>
-#include <vector>
 
 #include "base/files/file.h"
 #include "base/logging.h"
@@ -38,7 +37,8 @@ NET_EXPORT std::string ErrorToShortString(int error);
 NET_EXPORT std::string ExtendedErrorToString(int error,
                                              int extended_error_code);
 
-// Returns true if |error| is a certificate error code.
+// Returns true if |error| is a certificate error code. Note this does not
+// include errors for client certificates.
 NET_EXPORT bool IsCertificateError(int error);
 
 // Returns true if |error| is a client certificate authentication error. This
@@ -46,8 +46,11 @@ NET_EXPORT bool IsCertificateError(int error);
 // certificate.
 NET_EXPORT bool IsClientCertificateError(int error);
 
-// Returns true if |error| is a DNS error.
-NET_EXPORT bool IsDnsError(int error);
+// Returns true if |error| is an error from hostname resolution.
+NET_EXPORT bool IsHostnameResolutionError(int error);
+
+// Returns true if |error| means that the request has been blocked.
+NET_EXPORT bool IsRequestBlockedError(int error);
 
 // Map system error code to Error.
 NET_EXPORT Error MapSystemError(logging::SystemErrorCode os_error);

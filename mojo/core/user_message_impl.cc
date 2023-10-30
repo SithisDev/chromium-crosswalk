@@ -1,15 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "mojo/core/user_message_impl.h"
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
-#include "base/atomicops.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros_local.h"
 #include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/numerics/safe_math.h"
@@ -17,6 +17,7 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/trace_event.h"
+#include "mojo/core/configuration.h"
 #include "mojo/core/core.h"
 #include "mojo/core/node_channel.h"
 #include "mojo/core/node_controller.h"
@@ -266,14 +267,14 @@ MojoResult CreateOrExtendSerializedEventMessage(
   return MOJO_RESULT_OK;
 }
 
-base::subtle::Atomic32 g_message_count = 0;
+std::atomic<uint32_t> g_message_count{0};
 
 void IncrementMessageCount() {
-  base::subtle::NoBarrier_AtomicIncrement(&g_message_count, 1);
+  g_message_count.fetch_add(1, std::memory_order_relaxed);
 }
 
 void DecrementMessageCount() {
-  base::subtle::NoBarrier_AtomicIncrement(&g_message_count, -1);
+  g_message_count.fetch_add(-1, std::memory_order_relaxed);
 }
 
 class MessageMemoryDumpProvider : public base::trace_event::MemoryDumpProvider {
@@ -282,6 +283,10 @@ class MessageMemoryDumpProvider : public base::trace_event::MemoryDumpProvider {
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         this, "MojoMessages", nullptr);
   }
+
+  MessageMemoryDumpProvider(const MessageMemoryDumpProvider&) = delete;
+  MessageMemoryDumpProvider& operator=(const MessageMemoryDumpProvider&) =
+      delete;
 
   ~MessageMemoryDumpProvider() override {
     base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
@@ -295,16 +300,14 @@ class MessageMemoryDumpProvider : public base::trace_event::MemoryDumpProvider {
     auto* dump = pmd->CreateAllocatorDump("mojo/messages");
     dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameObjectCount,
                     base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                    base::subtle::NoBarrier_Load(&g_message_count));
+                    g_message_count.load(std::memory_order_relaxed));
     return true;
   }
-
-  DISALLOW_COPY_AND_ASSIGN(MessageMemoryDumpProvider);
 };
 
 void EnsureMemoryDumpProviderExists() {
-  static base::NoDestructor<MessageMemoryDumpProvider> provider;
-  ALLOW_UNUSED_LOCAL(provider);
+  [[maybe_unused]] static base::NoDestructor<MessageMemoryDumpProvider>
+      provider;
 }
 
 }  // namespace
@@ -343,10 +346,10 @@ UserMessageImpl::~UserMessageImpl() {
 
 // static
 std::unique_ptr<ports::UserMessageEvent>
-UserMessageImpl::CreateEventForNewMessage() {
+UserMessageImpl::CreateEventForNewMessage(MojoCreateMessageFlags flags) {
   auto message_event = std::make_unique<ports::UserMessageEvent>(0);
   message_event->AttachMessage(
-      base::WrapUnique(new UserMessageImpl(message_event.get())));
+      base::WrapUnique(new UserMessageImpl(message_event.get(), flags)));
   return message_event;
 }
 
@@ -416,7 +419,14 @@ Channel::MessagePtr UserMessageImpl::FinalizeEventMessage(
   if (channel_message) {
     void* data;
     size_t size;
-    NodeChannel::GetEventMessageData(channel_message.get(), &data, &size);
+    // The `channel_message` must either be produced locally or must have
+    // already been validated by the caller, as is done for example by
+    // NodeController::DeserializeEventMessage before
+    // NodeController::OnBroadcast re-serializes each copy of the message it
+    // received.
+    bool result =
+        NodeChannel::GetEventMessageData(*channel_message, &data, &size);
+    DCHECK(result);
     message_event->Serialize(data);
   }
 
@@ -503,8 +513,9 @@ MojoResult UserMessageImpl::AppendData(uint32_t additional_payload_size,
       size_t user_payload_offset =
           static_cast<uint8_t*>(user_payload_) -
           static_cast<const uint8_t*>(channel_message_->payload());
-      channel_message_->ExtendPayload(user_payload_offset + user_payload_size_ +
-                                      additional_payload_size);
+      Channel::Message::ExtendPayload(
+          channel_message_,
+          user_payload_offset + user_payload_size_ + additional_payload_size);
       header_ = static_cast<uint8_t*>(channel_message_->mutable_payload()) +
                 header_offset;
       user_payload_ =
@@ -512,6 +523,16 @@ MojoResult UserMessageImpl::AppendData(uint32_t additional_payload_size,
           user_payload_offset;
       user_payload_size_ += additional_payload_size;
     }
+  }
+
+  if (!unlimited_size_ &&
+      user_payload_size_ > GetConfiguration().max_message_num_bytes) {
+    // We want to be aware of new undocumented cases of very large IPCs. Crashes
+    // which result from this stack should be addressed by either marking the
+    // corresponding mojom interface method with an [UnlimitedSize] attribute;
+    // or preferably by refactoring to avoid such large message contents, for
+    // example by batching calls or leveraging shared memory where feasible.
+    base::debug::DumpWithoutCrashing();
   }
 
   return MOJO_RESULT_OK;
@@ -596,7 +617,7 @@ MojoResult UserMessageImpl::ExtractSerializedHandles(
       channel_message_->TakeHandles();
   std::vector<PlatformHandle> msg_handles(handles_in_transit.size());
   for (size_t i = 0; i < handles_in_transit.size(); ++i) {
-    DCHECK(!handles_in_transit[i].owning_process().is_valid());
+    DCHECK(!handles_in_transit[i].owning_process().IsValid());
     msg_handles[i] = handles_in_transit[i].TakeHandle();
   }
   for (size_t i = 0; i < header->num_dispatchers; ++i) {
@@ -654,8 +675,11 @@ void UserMessageImpl::FailHandleSerializationForTesting(bool fail) {
   g_always_fail_handle_serialization = fail;
 }
 
-UserMessageImpl::UserMessageImpl(ports::UserMessageEvent* message_event)
-    : ports::UserMessage(&kUserMessageTypeInfo), message_event_(message_event) {
+UserMessageImpl::UserMessageImpl(ports::UserMessageEvent* message_event,
+                                 MojoCreateMessageFlags flags)
+    : ports::UserMessage(&kUserMessageTypeInfo),
+      message_event_(message_event),
+      unlimited_size_((flags & MOJO_CREATE_MESSAGE_FLAG_UNLIMITED_SIZE) != 0) {
   EnsureMemoryDumpProviderExists();
   IncrementMessageCount();
 }

@@ -1,20 +1,23 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/socket/socks_connect_job.h"
 
 #include "base/callback.h"
+#include "base/containers/flat_set.h"
 #include "base/containers/span.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/load_states.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/log/net_log.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
@@ -22,9 +25,10 @@
 #include "net/socket/socket_tag.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/socks_connect_job.h"
+#include "net/socket/transport_client_socket_pool_test_util.h"
 #include "net/socket/transport_connect_job.h"
 #include "net/test/gtest_util.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -35,10 +39,9 @@ namespace {
 const char kProxyHostName[] = "proxy.test";
 const int kProxyPort = 4321;
 
-constexpr base::TimeDelta kTinyTime = base::TimeDelta::FromMicroseconds(1);
+constexpr base::TimeDelta kTinyTime = base::Microseconds(1);
 
-class SOCKSConnectJobTest : public testing::Test,
-                            public WithScopedTaskEnvironment {
+class SOCKSConnectJobTest : public testing::Test, public WithTaskEnvironment {
  public:
   enum class SOCKSVersion {
     V4,
@@ -46,8 +49,7 @@ class SOCKSConnectJobTest : public testing::Test,
   };
 
   SOCKSConnectJobTest()
-      : WithScopedTaskEnvironment(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW),
+      : WithTaskEnvironment(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         common_connect_job_params_(
             &client_socket_factory_,
             &host_resolver_,
@@ -61,33 +63,35 @@ class SOCKSConnectJobTest : public testing::Test,
             nullptr /* ssl_client_context */,
             nullptr /* socket_performance_watcher_factory */,
             nullptr /* network_quality_estimator */,
-            &net_log_,
+            NetLog::Get(),
             nullptr /* websocket_endpoint_lock_manager */) {}
 
-  ~SOCKSConnectJobTest() override {}
+  ~SOCKSConnectJobTest() override = default;
 
   static scoped_refptr<SOCKSSocketParams> CreateSOCKSParams(
-      SOCKSVersion socks_version) {
+      SOCKSVersion socks_version,
+      SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow) {
     return base::MakeRefCounted<SOCKSSocketParams>(
         base::MakeRefCounted<TransportSocketParams>(
-            HostPortPair(kProxyHostName, kProxyPort),
-            OnHostResolutionCallback()),
+            HostPortPair(kProxyHostName, kProxyPort), NetworkAnonymizationKey(),
+            secure_dns_policy, OnHostResolutionCallback(),
+            /*supported_alpns=*/base::flat_set<std::string>()),
         socks_version == SOCKSVersion::V5,
         socks_version == SOCKSVersion::V4
             ? HostPortPair(kSOCKS4TestHost, kSOCKS4TestPort)
             : HostPortPair(kSOCKS5TestHost, kSOCKS5TestPort),
-        TRAFFIC_ANNOTATION_FOR_TESTS);
+        NetworkAnonymizationKey(), TRAFFIC_ANNOTATION_FOR_TESTS);
   }
 
  protected:
-  NetLog net_log_;
-  MockHostResolver host_resolver_;
+  MockHostResolver host_resolver_{/*default_result=*/MockHostResolverBase::
+                                      RuleResolver::GetLocalhostResult()};
   MockTaggingClientSocketFactory client_socket_factory_;
   const CommonConnectJobParams common_connect_job_params_;
 };
 
 TEST_F(SOCKSConnectJobTest, HostResolutionFailure) {
-  host_resolver_.rules()->AddSimulatedFailure(kProxyHostName);
+  host_resolver_.rules()->AddSimulatedTimeoutFailure(kProxyHostName);
 
   for (bool failure_synchronous : {false, true}) {
     host_resolver_.set_synchronous_mode(failure_synchronous);
@@ -98,6 +102,41 @@ TEST_F(SOCKSConnectJobTest, HostResolutionFailure) {
                                       &test_delegate, nullptr /* net_log */);
     test_delegate.StartJobExpectingResult(
         &socks_connect_job, ERR_PROXY_CONNECTION_FAILED, failure_synchronous);
+    EXPECT_THAT(socks_connect_job.GetResolveErrorInfo().error,
+                test::IsError(ERR_DNS_TIMED_OUT));
+  }
+}
+
+TEST_F(SOCKSConnectJobTest, HostResolutionFailureSOCKS4Endpoint) {
+  const char hostname[] = "google.com";
+  host_resolver_.rules()->AddSimulatedTimeoutFailure(hostname);
+
+  for (bool failure_synchronous : {false, true}) {
+    host_resolver_.set_synchronous_mode(failure_synchronous);
+
+    SequencedSocketData sequenced_socket_data{base::span<MockRead>(),
+                                              base::span<MockWrite>()};
+    sequenced_socket_data.set_connect_data(MockConnect(SYNCHRONOUS, OK));
+    client_socket_factory_.AddSocketDataProvider(&sequenced_socket_data);
+
+    scoped_refptr<SOCKSSocketParams> socket_params =
+        base::MakeRefCounted<SOCKSSocketParams>(
+            base::MakeRefCounted<TransportSocketParams>(
+                HostPortPair(kProxyHostName, kProxyPort),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                OnHostResolutionCallback(),
+                /*supported_alpns=*/base::flat_set<std::string>()),
+            false /* socks_v5 */, HostPortPair(hostname, kSOCKS4TestPort),
+            NetworkAnonymizationKey(), TRAFFIC_ANNOTATION_FOR_TESTS);
+
+    TestConnectJobDelegate test_delegate;
+    SOCKSConnectJob socks_connect_job(
+        DEFAULT_PRIORITY, SocketTag(), &common_connect_job_params_,
+        socket_params, &test_delegate, nullptr /* net_log */);
+    test_delegate.StartJobExpectingResult(
+        &socks_connect_job, ERR_NAME_NOT_RESOLVED, failure_synchronous);
+    EXPECT_THAT(socks_connect_job.GetResolveErrorInfo().error,
+                test::IsError(ERR_DNS_TIMED_OUT));
   }
 }
 
@@ -162,6 +201,9 @@ TEST_F(SOCKSConnectJobTest, SOCKS4) {
       test_delegate.StartJobExpectingResult(
           &socks_connect_job, OK,
           host_resolution_synchronous && read_and_writes_synchronous);
+
+      // Proxies should not set any DNS aliases.
+      EXPECT_TRUE(test_delegate.socket()->GetDnsAliases().empty());
     }
   }
 }
@@ -199,6 +241,9 @@ TEST_F(SOCKSConnectJobTest, SOCKS5) {
       test_delegate.StartJobExpectingResult(
           &socks_connect_job, OK,
           host_resolution_synchronous && read_and_writes_synchronous);
+
+      // Proxies should not set any DNS aliases.
+      EXPECT_TRUE(test_delegate.socket()->GetDnsAliases().empty());
     }
   }
 }
@@ -348,6 +393,19 @@ TEST_F(SOCKSConnectJobTest, Priority) {
   }
 }
 
+TEST_F(SOCKSConnectJobTest, SecureDnsPolicy) {
+  for (auto secure_dns_policy :
+       {SecureDnsPolicy::kAllow, SecureDnsPolicy::kDisable}) {
+    TestConnectJobDelegate test_delegate;
+    SOCKSConnectJob socks_connect_job(
+        DEFAULT_PRIORITY, SocketTag(), &common_connect_job_params_,
+        CreateSOCKSParams(SOCKSVersion::V4, secure_dns_policy), &test_delegate,
+        nullptr /* net_log */);
+    ASSERT_THAT(socks_connect_job.Connect(), test::IsError(ERR_IO_PENDING));
+    EXPECT_EQ(secure_dns_policy, host_resolver_.last_secure_dns_policy());
+  }
+}
+
 TEST_F(SOCKSConnectJobTest, ConnectTiming) {
   host_resolver_.set_ondemand_mode(true);
 
@@ -393,8 +451,10 @@ TEST_F(SOCKSConnectJobTest, ConnectTiming) {
   // Proxy name resolution is not considered resolving the host name for
   // ConnectionInfo. For SOCKS4, where the host name is also looked up via DNS,
   // the resolution time is not currently reported.
-  EXPECT_EQ(base::TimeTicks(), socks_connect_job.connect_timing().dns_start);
-  EXPECT_EQ(base::TimeTicks(), socks_connect_job.connect_timing().dns_end);
+  EXPECT_EQ(base::TimeTicks(),
+            socks_connect_job.connect_timing().domain_lookup_start);
+  EXPECT_EQ(base::TimeTicks(),
+            socks_connect_job.connect_timing().domain_lookup_end);
 
   // The "connect" time for socks proxies includes DNS resolution time.
   EXPECT_EQ(start, socks_connect_job.connect_timing().connect_start);

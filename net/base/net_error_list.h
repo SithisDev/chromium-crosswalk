@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ NET_ERROR(BLOCKED_BY_CLIENT, -20)
 // The network changed.
 NET_ERROR(NETWORK_CHANGED, -21)
 
-// The request was blocked by the URL blacklist configured by the domain
+// The request was blocked by the URL block list configured by the domain
 // administrator.
 NET_ERROR(BLOCKED_BY_ADMINISTRATOR, -22)
 
@@ -115,13 +115,17 @@ NET_ERROR(CONTEXT_SHUT_DOWN, -26)
 // checks and 'Cross-Origin-Resource-Policy', for instance).
 NET_ERROR(BLOCKED_BY_RESPONSE, -27)
 
-// The request failed after the response was received, based on client-side
-// heuristics that point to the possiblility of a cross-site scripting attack.
-NET_ERROR(BLOCKED_BY_XSS_AUDITOR, -28)
+// Error -28 was removed (BLOCKED_BY_XSS_AUDITOR).
 
 // The request was blocked by system policy disallowing some or all cleartext
 // requests. Used for NetworkSecurityPolicy on Android.
 NET_ERROR(CLEARTEXT_NOT_PERMITTED, -29)
+
+// The request was blocked by a Content Security Policy
+NET_ERROR(BLOCKED_BY_CSP, -30)
+
+// The request was blocked because of no H/2 or QUIC session.
+NET_ERROR(H2_OR_QUIC_REQUIRED, -31)
 
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
@@ -176,12 +180,7 @@ NET_ERROR(SSL_RENEGOTIATION_REQUESTED, -114)
 // unsupported method.
 NET_ERROR(PROXY_AUTH_UNSUPPORTED, -115)
 
-// During SSL renegotiation (rehandshake), the server sent a certificate with
-// an error.
-//
-// Note: this error is not in the -2xx range so that it won't be handled as a
-// certificate error.
-NET_ERROR(CERT_ERROR_IN_SSL_RENEGOTIATION, -116)
+// Error -116 was removed (CERT_ERROR_IN_SSL_RENEGOTIATION)
 
 // The SSL handshake failed because of a bad or missing client certificate.
 NET_ERROR(BAD_SSL_CLIENT_AUTH_CERT, -117)
@@ -222,8 +221,7 @@ NET_ERROR(SSL_BAD_RECORD_MAC_ALERT, -126)
 // The proxy requested authentication (for tunnel establishment).
 NET_ERROR(PROXY_AUTH_REQUESTED, -127)
 
-// The SSL server attempted to use a weak ephemeral Diffie-Hellman key.
-NET_ERROR(SSL_WEAK_SERVER_EPHEMERAL_DH_KEY, -129)
+// Error -129 was removed (SSL_WEAK_SERVER_EPHEMERAL_DH_KEY).
 
 // Could not create a connection to the proxy server. An error occurred
 // either in resolving its name, or in connecting a socket to it.
@@ -427,6 +425,17 @@ NET_ERROR(TLS13_DOWNGRADE_DETECTED, -180)
 // negotiated TLS key exchange method.
 NET_ERROR(SSL_KEY_USAGE_INCOMPATIBLE, -181)
 
+// The ECHConfigList fetched over DNS cannot be parsed.
+NET_ERROR(INVALID_ECH_CONFIG_LIST, -182)
+
+// ECH was enabled, but the server was unable to decrypt the encrypted
+// ClientHello.
+NET_ERROR(ECH_NOT_NEGOTIATED, -183)
+
+// ECH was enabled, the server was unable to decrypt the encrypted ClientHello,
+// and additionally did not present a certificate valid for the public name.
+NET_ERROR(ECH_FALLBACK_CERTIFICATE_INVALID, -184)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -515,7 +524,7 @@ NET_ERROR(CERT_INVALID, -207)
 // signature algorithm.
 NET_ERROR(CERT_WEAK_SIGNATURE_ALGORITHM, -208)
 
-// -209 is availible: was CERT_NOT_IN_DNS.
+// -209 is available: was CERT_NOT_IN_DNS.
 
 // The host name specified in the certificate is not unique.
 NET_ERROR(CERT_NON_UNIQUE_NAME, -210)
@@ -538,13 +547,23 @@ NET_ERROR(CERTIFICATE_TRANSPARENCY_REQUIRED, -214)
 // https://g.co/chrome/symantecpkicerts
 NET_ERROR(CERT_SYMANTEC_LEGACY, -215)
 
+// -216 was QUIC_CERT_ROOT_NOT_KNOWN which has been renumbered to not be in the
+// certificate error range.
+
+// The certificate is known to be used for interception by an entity other
+// the device owner.
+NET_ERROR(CERT_KNOWN_INTERCEPTION_BLOCKED, -217)
+
+// -218 was SSL_OBSOLETE_VERSION which is not longer used. TLS 1.0/1.1 instead
+// cause SSL_VERSION_OR_CIPHER_MISMATCH now.
+
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -216)
+NET_ERROR(CERT_END, -219)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -590,8 +609,7 @@ NET_ERROR(EMPTY_RESPONSE, -324)
 // The headers section of the response is too large.
 NET_ERROR(RESPONSE_HEADERS_TOO_BIG, -325)
 
-// The PAC requested by HTTP did not have a valid status code (non-200).
-NET_ERROR(PAC_STATUS_NOT_OK, -326)
+// Error -326 was removed (PAC_STATUS_NOT_OK)
 
 // The evaluation of the PAC script failed.
 NET_ERROR(PAC_SCRIPT_FAILED, -327)
@@ -700,7 +718,7 @@ NET_ERROR(QUIC_PROTOCOL_ERROR, -356)
 // The HTTP headers were truncated by an EOF.
 NET_ERROR(RESPONSE_HEADERS_TRUNCATED, -357)
 
-// The QUIC crytpo handshake failed.  This means that the server was unable
+// The QUIC crypto handshake failed.  This means that the server was unable
 // to read any requests sent, so they may be resent.
 NET_ERROR(QUIC_HANDSHAKE_FAILED, -358)
 
@@ -772,6 +790,35 @@ NET_ERROR(HTTP2_CLIENT_REFUSED_STREAM, -377)
 // request headers, but the pushed response headers do not match the request.
 NET_ERROR(HTTP2_PUSHED_RESPONSE_DOES_NOT_MATCH, -378)
 
+// The server returned a non-2xx HTTP response code.
+//
+// Not that this error is only used by certain APIs that interpret the HTTP
+// response itself. URLRequest for instance just passes most non-2xx
+// response back as success.
+NET_ERROR(HTTP_RESPONSE_CODE_FAILURE, -379)
+
+// The certificate presented on a QUIC connection does not chain to a known root
+// and the origin connected to is not on a list of domains where unknown roots
+// are allowed.
+NET_ERROR(QUIC_CERT_ROOT_NOT_KNOWN, -380)
+
+// A GOAWAY frame has been received indicating that the request has not been
+// processed and is therefore safe to retry on a different connection.
+NET_ERROR(QUIC_GOAWAY_REQUEST_CAN_BE_RETRIED, -381)
+
+// The ACCEPT_CH restart has been triggered too many times
+NET_ERROR(TOO_MANY_ACCEPT_CH_RESTARTS, -382)
+
+// The IP address space of the remote endpoint differed from the previous
+// observed value during the same request. Any cache entry for the affected
+// request should be invalidated.
+NET_ERROR(INCONSISTENT_IP_ADDRESS_SPACE, -383)
+
+// The IP address space of the cached remote endpoint is blocked by private
+// network access check.
+NET_ERROR(CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY,
+          -384)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -815,7 +862,7 @@ NET_ERROR(CACHE_LOCK_TIMEOUT, -409)
 NET_ERROR(CACHE_AUTH_FAILURE_AFTER_READ, -410)
 
 // Internal not-quite error code for the HTTP cache. In-memory hints suggest
-// that the cache entry would not have been useable with the transaction's
+// that the cache entry would not have been usable with the transaction's
 // current configuration (e.g. load flags, mode, etc.)
 NET_ERROR(CACHE_ENTRY_NOT_SUITABLE, -411)
 
@@ -837,6 +884,20 @@ NET_ERROR(ADD_USER_CERT_FAILED, -503)
 
 // An error occurred while handling a signed exchange.
 NET_ERROR(INVALID_SIGNED_EXCHANGE, -504)
+
+// An error occurred while handling a Web Bundle source.
+NET_ERROR(INVALID_WEB_BUNDLE, -505)
+
+// A Trust Tokens protocol operation-executing request failed for one of a
+// number of reasons (precondition failure, internal error, bad response).
+NET_ERROR(TRUST_TOKEN_OPERATION_FAILED, -506)
+
+// When handling a Trust Tokens protocol operation-executing request, the system
+// was able to execute the request's Trust Tokens operation without sending the
+// request to its destination: for instance, the results could have been present
+// in a local cache (for redemption) or the operation could have been diverted
+// to a local provider (for "platform-provided" issuance).
+NET_ERROR(TRUST_TOKEN_OPERATION_SUCCESS_WITHOUT_SENDING_REQUEST, -507)
 
 // *** Code -600 is reserved (was FTP_PASV_COMMAND_FAILED). ***
 
@@ -938,7 +999,10 @@ NET_ERROR(DNS_SERVER_FAILED, -802)
 // DNS transaction timed out.
 NET_ERROR(DNS_TIMED_OUT, -803)
 
-// The entry was not found in cache, for cache-only lookups.
+// The entry was not found in cache or other local sources, for lookups where
+// only local sources were queried.
+// TODO(ericorth): Consider renaming to DNS_LOCAL_MISS or something like that as
+// the cache is not necessarily queried either.
 NET_ERROR(DNS_CACHE_MISS, -804)
 
 // Suffix search list rules prevent resolution of the given host name.
@@ -947,5 +1011,19 @@ NET_ERROR(DNS_SEARCH_EMPTY, -805)
 // Failed to sort addresses according to RFC3484.
 NET_ERROR(DNS_SORT_ERROR, -806)
 
-// Failed to resolve over HTTP, fallback to legacy
-NET_ERROR(DNS_HTTP_FAILED, -807)
+// Error -807 was removed (DNS_HTTP_FAILED)
+
+// Failed to resolve the hostname of a DNS-over-HTTPS server.
+NET_ERROR(DNS_SECURE_RESOLVER_HOSTNAME_RESOLUTION_FAILED, -808)
+
+// DNS identified the request as disallowed for insecure connection (http/ws).
+// Error should be handled as if an HTTP redirect was received to redirect to
+// https or wss.
+NET_ERROR(DNS_NAME_HTTPS_ONLY, -809)
+
+// All DNS requests associated with this job have been cancelled.
+NET_ERROR(DNS_REQUEST_CANCELLED, -810)
+
+// The hostname resolution of HTTPS record was expected to be resolved with
+// alpn values of supported protocols, but did not.
+NET_ERROR(DNS_NO_MACHING_SUPPORTED_ALPN, -811)

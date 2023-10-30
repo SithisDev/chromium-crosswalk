@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "net/reporting/reporting_cache_observer.h"
 #include "net/reporting/reporting_delegate.h"
 #include "net/reporting/reporting_delivery_agent.h"
-#include "net/reporting/reporting_endpoint_manager.h"
 #include "net/reporting/reporting_garbage_collector.h"
 #include "net/reporting/reporting_network_change_observer.h"
 #include "net/reporting/reporting_policy.h"
@@ -72,9 +71,25 @@ void ReportingContext::NotifyCachedReportsUpdated() {
     observer.OnReportsUpdated();
 }
 
+void ReportingContext::NotifyReportAdded(const ReportingReport* report) {
+  for (auto& observer : cache_observers_)
+    observer.OnReportAdded(report);
+}
+
+void ReportingContext::NotifyReportUpdated(const ReportingReport* report) {
+  for (auto& observer : cache_observers_)
+    observer.OnReportUpdated(report);
+}
+
 void ReportingContext::NotifyCachedClientsUpdated() {
   for (auto& observer : cache_observers_)
     observer.OnClientsUpdated();
+}
+
+void ReportingContext::NotifyEndpointsUpdatedForOrigin(
+    const std::vector<ReportingEndpoint>& endpoints) {
+  for (auto& observer : cache_observers_)
+    observer.OnEndpointsUpdatedForOrigin(endpoints);
 }
 
 bool ReportingContext::IsReportDataPersisted() const {
@@ -87,8 +102,6 @@ bool ReportingContext::IsClientDataPersisted() const {
 
 void ReportingContext::OnShutdown() {
   uploader_->OnShutdown();
-  if (store_)
-    store_->Flush();
 }
 
 ReportingContext::ReportingContext(
@@ -106,8 +119,7 @@ ReportingContext::ReportingContext(
       delegate_(std::move(delegate)),
       cache_(ReportingCache::Create(this)),
       store_(store),
-      endpoint_manager_(ReportingEndpointManager::Create(this, rand_callback)),
-      delivery_agent_(ReportingDeliveryAgent::Create(this)),
+      delivery_agent_(ReportingDeliveryAgent::Create(this, rand_callback)),
       garbage_collector_(ReportingGarbageCollector::Create(this)),
       network_change_observer_(ReportingNetworkChangeObserver::Create(this)) {}
 

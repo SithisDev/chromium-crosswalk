@@ -5,9 +5,9 @@
 {%-   endfor -%}
 {%-   if method.response_parameters != None %}
 {%-     if method.response_parameters|length == 0 %}
-   * @return {Promise}
+   * @return {!Promise}
 {%-     else %}
-   * @return {Promise<{
+   * @return {!Promise<{
 {%-       for response_parameter in method.response_parameters %}
         {{response_parameter.name}}: {{response_parameter.kind|lite_closure_type_with_nullability}},
 {%-       endfor %}
@@ -18,22 +18,33 @@
 {% endmacro %}
 
 {%  if generate_closure_exports -%}
-{% if not use_old_names -%}
 goog.provide('{{module.namespace}}.{{interface.name}}');
-{% endif %}
-goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.receiver}}');
+goog.provide('{{module.namespace}}.{{interface.name}}Receiver');
 goog.provide('{{module.namespace}}.{{interface.name}}CallbackRouter');
 goog.provide('{{module.namespace}}.{{interface.name}}Interface');
-goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.remote}}');
-goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_receiver}}');
+goog.provide('{{module.namespace}}.{{interface.name}}Remote');
+goog.provide('{{module.namespace}}.{{interface.name}}PendingReceiver');
 {% endif %}
 
-/** @export */
-{{module.namespace}}.{{interface.name}}{{primitives_names.pending_receiver}} = class {
-  /** @param {!MojoHandle} handle */
+/**
+ * @implements {mojo.internal.interfaceSupport.PendingReceiver}
+ * @export
+ */
+{{module.namespace}}.{{interface.name}}PendingReceiver = class {
+  /**
+   * @param {!MojoHandle|!mojo.internal.interfaceSupport.Endpoint} handle
+   */
   constructor(handle) {
-    /** @public {!MojoHandle} */
-    this.handle = handle;
+    /** @public {!mojo.internal.interfaceSupport.Endpoint} */
+    this.handle = mojo.internal.interfaceSupport.getEndpointForReceiver(handle);
+  }
+
+  /** @param {string=} scope */
+  bindInBrowser(scope = 'context') {
+    mojo.internal.interfaceSupport.bind(
+        this.handle,
+        {{module.namespace}}.{{interface.name}}.$interfaceName,
+        scope);
   }
 };
 
@@ -55,19 +66,19 @@ goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_
  * @export
  * @implements { {{module.namespace}}.{{interface.name}}Interface }
  */
-{{module.namespace}}.{{interface.name}}{{primitives_names.remote}} = class {
-  /** @param {MojoHandle=} opt_handle */
-  constructor(opt_handle) {
+{{module.namespace}}.{{interface.name}}Remote = class {
+  /** @param {MojoHandle|mojo.internal.interfaceSupport.Endpoint=} handle */
+  constructor(handle = undefined) {
     /**
-     * @private {!mojo.internal.interfaceSupport.InterfaceRemoteBase<!{{module.namespace}}.{{interface.name}}{{primitives_names.pending_receiver}}>}
+     * @private {!mojo.internal.interfaceSupport.InterfaceRemoteBase<!{{module.namespace}}.{{interface.name}}PendingReceiver>}
      */
     this.proxy =
         new mojo.internal.interfaceSupport.InterfaceRemoteBase(
-          {{module.namespace}}.{{interface.name}}{{primitives_names.pending_receiver}},
-          opt_handle);
+          {{module.namespace}}.{{interface.name}}PendingReceiver,
+          handle);
 
     /**
-     * @public {!mojo.internal.interfaceSupport.InterfaceRemoteBaseWrapper<!{{module.namespace}}.{{interface.name}}{{primitives_names.pending_receiver}}>}
+     * @public {!mojo.internal.interfaceSupport.InterfaceRemoteBaseWrapper<!{{module.namespace}}.{{interface.name}}PendingReceiver>}
      */
     this.$ = new mojo.internal.interfaceSupport.InterfaceRemoteBaseWrapper(this.proxy);
 
@@ -112,17 +123,17 @@ goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_
  *
  * @export
  */
-{{module.namespace}}.{{interface.name}}{{primitives_names.receiver}} = class {
+{{module.namespace}}.{{interface.name}}Receiver = class {
   /**
    * @param {!{{module.namespace}}.{{interface.name}}Interface } impl
    */
   constructor(impl) {
-    /** @private {!mojo.internal.interfaceSupport.InterfaceReceiverHelperInternal<!{{module.namespace}}.{{interface.name}}{{primitives_names.remote}}>} */
+    /** @private {!mojo.internal.interfaceSupport.InterfaceReceiverHelperInternal<!{{module.namespace}}.{{interface.name}}Remote>} */
     this.helper_internal_ = new mojo.internal.interfaceSupport.InterfaceReceiverHelperInternal(
-        {{module.namespace}}.{{interface.name}}{{primitives_names.remote}});
+        {{module.namespace}}.{{interface.name}}Remote);
 
     /**
-     * @public {!mojo.internal.interfaceSupport.InterfaceReceiverHelper<!{{module.namespace}}.{{interface.name}}{{primitives_names.remote}}>}
+     * @public {!mojo.internal.interfaceSupport.InterfaceReceiverHelper<!{{module.namespace}}.{{interface.name}}Remote>}
      */
     this.$ = new mojo.internal.interfaceSupport.InterfaceReceiverHelper(this.helper_internal_);
 
@@ -142,41 +153,7 @@ goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_
     /** @public {!mojo.internal.interfaceSupport.ConnectionErrorEventRouter} */
     this.onConnectionError = this.helper_internal_.getConnectionErrorEventRouter();
   }
-
-  {% if use_old_names -%}
-  /**
-   * Returns a proxy for this interface which sends messages to the browser.
-   * The browser must have an interface request binder registered for this
-   * interface and accessible to the calling document's frame.
-   *
-   * @return {!{{module.namespace}}.{{interface.name}}Proxy}
-   * @export
-   */
-  static getProxy() {
-    let proxy = new {{module.namespace}}.{{interface.name}}Proxy;
-    Mojo.bindInterface('{{mojom_namespace}}.{{interface.name}}',
-                       proxy.$.bindNewPipeAndPassReceiver().handle);
-    return proxy;
-  }
-
-  /**
-   * @return {!string}
-   */
-  static get $interfaceName() {
-    return "{{mojom_namespace}}.{{interface.name}}";
-  }
-  {% endif %}
 };
-
-{#--- Enums #}
-{% from "lite/enum_definition.tmpl" import enum_def with context %}
-{%- for enum in interface.enums %}
-{{ enum_def("%s.%s"|format(module.namespace, interface.name),
-            "%s.%s"|format(module.namespace, interface.name),
-            enum) }}
-{%-  endfor %}
-
-{% if not use_old_names -%}
 
 /**
  *  @export
@@ -199,13 +176,18 @@ goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_
    */
   static getRemote() {
     let remote = new {{module.namespace}}.{{interface.name}}Remote;
-    Mojo.bindInterface(this.$interfaceName,
-                       remote.$.bindNewPipeAndPassReceiver().handle);
+    remote.$.bindNewPipeAndPassReceiver().bindInBrowser();
     return remote;
   }
 };
 
-{% endif %}
+{#--- Enums #}
+{% from "lite/enum_definition.tmpl" import enum_def with context %}
+{%- for enum in interface.enums %}
+{{ enum_def("%s.%s"|format(module.namespace, interface.name),
+            "%s.%s"|format(module.namespace, interface.name),
+            enum) }}
+{%-  endfor %}
 
 /**
  * An object which receives request messages for the {{interface.name}}
@@ -218,10 +200,10 @@ goog.provide('{{module.namespace}}.{{interface.name}}{{primitives_names.pending_
 {{module.namespace}}.{{interface.name}}CallbackRouter = class {
   constructor() {
     this.helper_internal_ = new mojo.internal.interfaceSupport.InterfaceReceiverHelperInternal(
-      {{module.namespace}}.{{interface.name}}{{primitives_names.remote}});
+      {{module.namespace}}.{{interface.name}}Remote);
 
     /**
-     * @public {!mojo.internal.interfaceSupport.InterfaceReceiverHelper<!{{module.namespace}}.{{interface.name}}{{primitives_names.remote}}>}
+     * @public {!mojo.internal.interfaceSupport.InterfaceReceiverHelper<!{{module.namespace}}.{{interface.name}}Remote>}
      */
     this.$ = new mojo.internal.interfaceSupport.InterfaceReceiverHelper(this.helper_internal_);
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,16 +40,18 @@ std::string ReadMessage(const ScopedMessagePipeHandle& handle) {
 
 class ThreadedRunner : public base::SimpleThread {
  public:
-  explicit ThreadedRunner(const base::Closure& callback)
-      : SimpleThread("ThreadedRunner"), callback_(callback) {}
+  explicit ThreadedRunner(base::OnceClosure callback)
+      : SimpleThread("ThreadedRunner"), callback_(std::move(callback)) {}
+
+  ThreadedRunner(const ThreadedRunner&) = delete;
+  ThreadedRunner& operator=(const ThreadedRunner&) = delete;
+
   ~ThreadedRunner() override { Join(); }
 
-  void Run() override { callback_.Run(); }
+  void Run() override { std::move(callback_).Run(); }
 
  private:
-  const base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadedRunner);
+  base::OnceClosure callback_;
 };
 
 TEST_F(WaitSetTest, Satisfied) {
@@ -162,10 +164,10 @@ TEST_F(WaitSetTest, CloseWhileWaiting) {
   wait_set.AddHandle(p.handle0.get(), MOJO_HANDLE_SIGNAL_READABLE);
 
   const Handle handle0_value = p.handle0.get();
-  ThreadedRunner close_after_delay(base::Bind(
+  ThreadedRunner close_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then close the handle.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         handle->reset();
       },
       &p.handle0));
@@ -239,10 +241,10 @@ TEST_F(WaitSetTest, SatisfiedThenUnsatisfied) {
 
   EXPECT_EQ(kTestMessage1, ReadMessage(p.handle1));
 
-  ThreadedRunner write_after_delay(base::Bind(
+  ThreadedRunner write_after_delay(base::BindOnce(
       [](ScopedMessagePipeHandle* handle) {
         // Wait a little while, then write a message.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         WriteMessage(*handle, "wakey wakey");
       },
       &p.handle1));
@@ -295,10 +297,10 @@ TEST_F(WaitSetTest, EventAndHandle) {
 
   EXPECT_EQ(kTestMessage, ReadMessage(p.handle1));
 
-  ThreadedRunner signal_after_delay(base::Bind(
+  ThreadedRunner signal_after_delay(base::BindOnce(
       [](base::WaitableEvent* event) {
         // Wait a little while, then close the handle.
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+        base::PlatformThread::Sleep(base::Milliseconds(200));
         event->Signal();
       },
       &event));

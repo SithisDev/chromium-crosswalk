@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,10 +35,10 @@ std::string ComputeMethodForRedirect(const std::string& method,
 // (https://w3c.github.io/webappsec-referrer-policy/). This function checks for
 // a Referrer-Policy header, and parses it if present. Returns the referrer
 // policy that should be used for the request.
-URLRequest::ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
-    URLRequest::ReferrerPolicy original_referrer_policy,
-    const base::Optional<std::string>& referrer_policy_header) {
-  URLRequest::ReferrerPolicy new_policy = original_referrer_policy;
+ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
+    ReferrerPolicy original_referrer_policy,
+    const absl::optional<std::string>& referrer_policy_header) {
+  ReferrerPolicy new_policy = original_referrer_policy;
   std::vector<base::StringPiece> policy_tokens;
   if (referrer_policy_header) {
     policy_tokens = base::SplitStringPiece(*referrer_policy_header, ",",
@@ -46,55 +46,51 @@ URLRequest::ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
                                            base::SPLIT_WANT_NONEMPTY);
   }
 
-  UMA_HISTOGRAM_BOOLEAN("Net.URLRequest.ReferrerPolicyHeaderPresentOnRedirect",
-                        !policy_tokens.empty());
-
   // Per https://w3c.github.io/webappsec-referrer-policy/#unknown-policy-values,
   // use the last recognized policy value, and ignore unknown policies.
   for (const auto& token : policy_tokens) {
     if (base::CompareCaseInsensitiveASCII(token, "no-referrer") == 0) {
-      new_policy = URLRequest::NO_REFERRER;
+      new_policy = ReferrerPolicy::NO_REFERRER;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token,
                                           "no-referrer-when-downgrade") == 0) {
-      new_policy =
-          URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
+      new_policy = ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token, "origin") == 0) {
-      new_policy = URLRequest::ORIGIN;
+      new_policy = ReferrerPolicy::ORIGIN;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token, "origin-when-cross-origin") ==
         0) {
-      new_policy = URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN;
+      new_policy = ReferrerPolicy::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token, "unsafe-url") == 0) {
-      new_policy = URLRequest::NEVER_CLEAR_REFERRER;
+      new_policy = ReferrerPolicy::NEVER_CLEAR;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token, "same-origin") == 0) {
-      new_policy = URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN;
+      new_policy = ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(token, "strict-origin") == 0) {
       new_policy =
-          URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
+          ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
       continue;
     }
 
     if (base::CompareCaseInsensitiveASCII(
             token, "strict-origin-when-cross-origin") == 0) {
       new_policy =
-          URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN;
+          ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN;
       continue;
     }
   }
@@ -103,12 +99,7 @@ URLRequest::ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
 
 }  // namespace
 
-RedirectInfo::RedirectInfo()
-    : status_code(-1),
-      insecure_scheme_was_upgraded(false),
-      is_signed_exchange_fallback_redirect(false),
-      new_referrer_policy(
-          URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE) {}
+RedirectInfo::RedirectInfo() = default;
 
 RedirectInfo::RedirectInfo(const RedirectInfo& other) = default;
 
@@ -117,14 +108,13 @@ RedirectInfo::~RedirectInfo() = default;
 RedirectInfo RedirectInfo::ComputeRedirectInfo(
     const std::string& original_method,
     const GURL& original_url,
-    const GURL& original_site_for_cookies,
-    const base::Optional<url::Origin>& original_top_frame_origin,
-    URLRequest::FirstPartyURLPolicy original_first_party_url_policy,
-    URLRequest::ReferrerPolicy original_referrer_policy,
+    const SiteForCookies& original_site_for_cookies,
+    RedirectInfo::FirstPartyURLPolicy original_first_party_url_policy,
+    ReferrerPolicy original_referrer_policy,
     const std::string& original_referrer,
     int http_status_code,
     const GURL& new_location,
-    const base::Optional<std::string>& referrer_policy_header,
+    const absl::optional<std::string>& referrer_policy_header,
     bool insecure_scheme_was_upgraded,
     bool copy_fragment,
     bool is_signed_exchange_fallback_redirect) {
@@ -143,8 +133,7 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     GURL::Replacements replacements;
     // Reference the |ref| directly out of the original URL to avoid a
     // malloc.
-    replacements.SetRef(original_url.spec().data(),
-                        original_url.parsed_for_possibly_invalid_spec().ref);
+    replacements.SetRefStr(original_url.ref_piece());
     redirect_info.new_url = new_location.ReplaceComponents(replacements);
   } else {
     redirect_info.new_url = new_location;
@@ -156,15 +145,11 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
 
   // Update the first-party URL if appropriate.
   if (original_first_party_url_policy ==
-      URLRequest::UPDATE_FIRST_PARTY_URL_ON_REDIRECT) {
-    redirect_info.new_site_for_cookies = redirect_info.new_url;
-    if (original_top_frame_origin) {
-      redirect_info.new_top_frame_origin =
-          url::Origin::Create(redirect_info.new_url);
-    }
+      FirstPartyURLPolicy::UPDATE_URL_ON_REDIRECT) {
+    redirect_info.new_site_for_cookies =
+        SiteForCookies::FromUrl(redirect_info.new_url);
   } else {
     redirect_info.new_site_for_cookies = original_site_for_cookies;
-    redirect_info.new_top_frame_origin = original_top_frame_origin;
   }
 
   redirect_info.new_referrer_policy = ProcessReferrerPolicyHeaderOnRedirect(

@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -20,12 +21,19 @@ base::RepeatingClosure BindLambda(Functor callable) {
 
 class DataPipeDrainerTest : public testing::Test,
                             public DataPipeDrainer::Client {
+ public:
+  DataPipeDrainerTest(const DataPipeDrainerTest&) = delete;
+  DataPipeDrainerTest& operator=(const DataPipeDrainerTest&) = delete;
+
  protected:
   DataPipeDrainerTest() {
-    DataPipe pipe;
-    drainer_ = std::make_unique<DataPipeDrainer>(
-        this, std::move(pipe.consumer_handle));
-    producer_handle_ = std::move(pipe.producer_handle);
+    ScopedDataPipeProducerHandle producer_handle;
+    ScopedDataPipeConsumerHandle consumer_handle;
+    EXPECT_EQ(CreateDataPipe(nullptr, producer_handle, consumer_handle),
+              MOJO_RESULT_OK);
+    drainer_ =
+        std::make_unique<DataPipeDrainer>(this, std::move(consumer_handle));
+    producer_handle_ = std::move(producer_handle);
   }
 
   ScopedDataPipeProducerHandle producer_handle_;
@@ -37,11 +45,9 @@ class DataPipeDrainerTest : public testing::Test,
 
   void OnDataComplete() override { completion_callback_.Run(); }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::string data_;
   std::unique_ptr<DataPipeDrainer> drainer_;
-
-  DISALLOW_COPY_AND_ASSIGN(DataPipeDrainerTest);
 };
 
 TEST_F(DataPipeDrainerTest, TestCompleteIsCalledOnce) {

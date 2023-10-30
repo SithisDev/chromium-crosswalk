@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,36 +14,43 @@
 #include "mojo/core/broker_messages.h"
 #include "mojo/core/platform_handle_utils.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
 namespace mojo {
 namespace core {
 
-BrokerHost::BrokerHost(base::ProcessHandle client_process,
+BrokerHost::BrokerHost(base::Process client_process,
                        ConnectionParams connection_params,
                        const ProcessErrorCallback& process_error_callback)
     : process_error_callback_(process_error_callback)
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       ,
-      client_process_(ScopedProcessHandle::CloneFrom(client_process))
+      client_process_(std::move(client_process))
 #endif
 {
   CHECK(connection_params.endpoint().is_valid() ||
         connection_params.server_endpoint().is_valid());
 
-  base::MessageLoopCurrent::Get()->AddDestructionObserver(this);
+  base::CurrentThread::Get()->AddDestructionObserver(this);
 
   channel_ = Channel::Create(this, std::move(connection_params),
-                             Channel::HandlePolicy::kAcceptHandles,
+#if BUILDFLAG(IS_WIN)
+                             client_process_
+#else
+                             client_process
+#endif
+                                     .IsValid()
+                                 ? Channel::HandlePolicy::kAcceptHandles
+                                 : Channel::HandlePolicy::kRejectHandles,
                              base::ThreadTaskRunnerHandle::Get());
   channel_->Start();
 }
 
 BrokerHost::~BrokerHost() {
   // We're always destroyed on the creation thread, which is the IO thread.
-  base::MessageLoopCurrent::Get()->RemoveDestructionObserver(this);
+  base::CurrentThread::Get()->RemoveDestructionObserver(this);
 
   if (channel_)
     channel_->ShutDown();
@@ -51,10 +58,12 @@ BrokerHost::~BrokerHost() {
 
 bool BrokerHost::PrepareHandlesForClient(
     std::vector<PlatformHandleInTransit>* handles) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+  if (!client_process_.IsValid())
+    return false;
   bool handles_ok = true;
   for (auto& handle : *handles) {
-    if (!handle.TransferToProcess(client_process_.Clone()))
+    if (!handle.TransferToProcess(client_process_.Duplicate()))
       handles_ok = false;
   }
   return handles_ok;
@@ -67,7 +76,7 @@ bool BrokerHost::SendChannel(PlatformHandle handle) {
   CHECK(handle.is_valid());
   CHECK(channel_);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   InitData* data;
   Channel::MessagePtr message =
       CreateBrokerMessage(BrokerMessageType::INIT, 1, 0, &data);
@@ -89,11 +98,11 @@ bool BrokerHost::SendChannel(PlatformHandle handle) {
   return true;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
-void BrokerHost::SendNamedChannel(const base::StringPiece16& pipe_name) {
+void BrokerHost::SendNamedChannel(base::WStringPiece pipe_name) {
   InitData* data;
-  base::char16* name_data;
+  wchar_t* name_data;
   Channel::MessagePtr message = CreateBrokerMessage(
       BrokerMessageType::INIT, 0, sizeof(*name_data) * pipe_name.length(),
       &data, reinterpret_cast<void**>(&name_data));
@@ -102,7 +111,7 @@ void BrokerHost::SendNamedChannel(const base::StringPiece16& pipe_name) {
   channel_->Write(std::move(message));
 }
 
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 void BrokerHost::OnBufferRequest(uint32_t num_bytes) {
   base::subtle::PlatformSharedMemoryRegion region =
@@ -115,10 +124,9 @@ void BrokerHost::OnBufferRequest(uint32_t num_bytes) {
     ExtractPlatformHandlesFromSharedMemoryRegionHandle(
         region.PassPlatformHandle(), &h[0], &h[1]);
     handles.emplace_back(std::move(h[0]));
-#if !defined(OS_POSIX) || defined(OS_ANDROID) || \
-    (defined(OS_MACOSX) && !defined(OS_IOS))
-    // Non-POSIX systems, as well as Android, and non-iOS Mac, only use a single
-    // handle to represent a writable region.
+#if !BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
+    // Non-POSIX systems, as well as Android and Mac, only use a single handle
+    // to represent a writable region.
     DCHECK(!h[1].is_valid());
 #else
     DCHECK(h[1].is_valid());

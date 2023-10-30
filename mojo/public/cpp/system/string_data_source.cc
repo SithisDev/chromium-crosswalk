@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,36 +6,34 @@
 
 #include <algorithm>
 
+#include "base/notreached.h"
+
 namespace mojo {
 
-StringDataSource::StringDataSource(base::StringPiece data,
+StringDataSource::StringDataSource(base::span<const char> data,
                                    AsyncWritingMode mode) {
   switch (mode) {
     case AsyncWritingMode::STRING_MAY_BE_INVALIDATED_BEFORE_COMPLETION:
       data_ = std::string(data.data(), data.size());
-      data_view_ = base::span<const char>(data_.data(), data_.size());
+      data_view_ = base::make_span(data_);
       break;
     case AsyncWritingMode::STRING_STAYS_VALID_UNTIL_COMPLETION:
-      data_view_ = base::span<const char>(data.data(), data.size());
+      data_view_ = data;
       break;
   }
 }
 
 StringDataSource::~StringDataSource() = default;
 
-bool StringDataSource::IsValid() const {
-  return true;
-}
-
-int64_t StringDataSource::GetLength() const {
+uint64_t StringDataSource::GetLength() const {
   return data_view_.size();
 }
 
 DataPipeProducer::DataSource::ReadResult StringDataSource::Read(
-    int64_t offset,
+    uint64_t offset,
     base::span<char> buffer) {
   ReadResult result;
-  if (static_cast<size_t>(offset) <= data_view_.size()) {
+  if (offset <= data_view_.size()) {
     size_t readable_size = data_view_.size() - offset;
     size_t writable_size = buffer.size();
     size_t copyable_size = std::min(readable_size, writable_size);

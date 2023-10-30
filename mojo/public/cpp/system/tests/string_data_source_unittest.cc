@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
@@ -34,11 +33,15 @@ class DataPipeReader {
         watcher_(FROM_HERE,
                  SimpleWatcher::ArmingPolicy::AUTOMATIC,
                  base::SequencedTaskRunnerHandle::Get()) {
-    watcher_.Watch(
-        consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
-        MOJO_WATCH_CONDITION_SATISFIED,
-        base::Bind(&DataPipeReader::OnDataAvailable, base::Unretained(this)));
+    watcher_.Watch(consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
+                   MOJO_WATCH_CONDITION_SATISFIED,
+                   base::BindRepeating(&DataPipeReader::OnDataAvailable,
+                                       base::Unretained(this)));
   }
+
+  DataPipeReader(const DataPipeReader&) = delete;
+  DataPipeReader& operator=(const DataPipeReader&) = delete;
+
   ~DataPipeReader() = default;
 
   const std::string& data() const { return data_; }
@@ -72,13 +75,15 @@ class DataPipeReader {
   base::OnceClosure on_read_done_;
   SimpleWatcher watcher_;
   std::string data_;
-
-  DISALLOW_COPY_AND_ASSIGN(DataPipeReader);
 };
 
 class StringDataSourceTest : public testing::Test {
  public:
   StringDataSourceTest() = default;
+
+  StringDataSourceTest(const StringDataSourceTest&) = delete;
+  StringDataSourceTest& operator=(const StringDataSourceTest&) = delete;
+
   ~StringDataSourceTest() override = default;
 
  protected:
@@ -90,7 +95,7 @@ class StringDataSourceTest : public testing::Test {
     options.element_num_bytes = 1;
     options.capacity_num_bytes = capacity;
     ASSERT_EQ(MOJO_RESULT_OK,
-              mojo::CreateDataPipe(&options, producer, consumer));
+              mojo::CreateDataPipe(&options, *producer, *consumer));
   }
 
   static void WriteStringThenCloseProducer(
@@ -126,9 +131,7 @@ class StringDataSourceTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(StringDataSourceTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(StringDataSourceTest, EqualCapacity) {

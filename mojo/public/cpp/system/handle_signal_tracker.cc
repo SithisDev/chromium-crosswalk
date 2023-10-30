@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,12 +22,14 @@ HandleSignalTracker::HandleSignalTracker(
                    std::move(task_runner)) {
   MojoResult rv = high_watcher_.Watch(
       handle, signals, MOJO_TRIGGER_CONDITION_SIGNALS_SATISFIED,
-      base::Bind(&HandleSignalTracker::OnNotify, base::Unretained(this)));
+      base::BindRepeating(&HandleSignalTracker::OnNotify,
+                          base::Unretained(this)));
   DCHECK_EQ(MOJO_RESULT_OK, rv);
 
-  rv = low_watcher_.Watch(
-      handle, signals, MOJO_TRIGGER_CONDITION_SIGNALS_UNSATISFIED,
-      base::Bind(&HandleSignalTracker::OnNotify, base::Unretained(this)));
+  rv = low_watcher_.Watch(handle, signals,
+                          MOJO_TRIGGER_CONDITION_SIGNALS_UNSATISFIED,
+                          base::BindRepeating(&HandleSignalTracker::OnNotify,
+                                              base::Unretained(this)));
   DCHECK_EQ(MOJO_RESULT_OK, rv);
 
   last_known_state_ = handle.QuerySignalsState();

@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,11 +20,13 @@ import mojom.generate.generator as generator
 import mojom.generate.module as mojom
 from mojom.generate.template_expander import UseJinja
 
-sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir,
-                             os.pardir, os.pardir, os.pardir, os.pardir,
-                             'build', 'android', 'gyp'))
+# Item 0 of sys.path is the directory of the main file; item 1 is PYTHONPATH
+# (if set); item 2 is system libraries.
+sys.path.insert(
+    1,
+    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
+                 os.pardir, os.pardir, 'build', 'android', 'gyp'))
 from util import build_utils
-
 
 GENERATOR_PREFIX = 'java'
 
@@ -40,12 +42,14 @@ _spec_to_java_type = {
   mojom.INT64.spec: 'long',
   mojom.INT8.spec: 'byte',
   mojom.MSGPIPE.spec: 'org.chromium.mojo.system.MessagePipeHandle',
+  mojom.PLATFORMHANDLE.spec: 'org.chromium.mojo.system.UntypedHandle',
   mojom.NULLABLE_DCPIPE.spec:
       'org.chromium.mojo.system.DataPipe.ConsumerHandle',
   mojom.NULLABLE_DPPIPE.spec:
       'org.chromium.mojo.system.DataPipe.ProducerHandle',
   mojom.NULLABLE_HANDLE.spec: 'org.chromium.mojo.system.UntypedHandle',
   mojom.NULLABLE_MSGPIPE.spec: 'org.chromium.mojo.system.MessagePipeHandle',
+  mojom.NULLABLE_PLATFORMHANDLE.spec: 'org.chromium.mojo.system.UntypedHandle',
   mojom.NULLABLE_SHAREDBUFFER.spec:
       'org.chromium.mojo.system.SharedBufferHandle',
   mojom.NULLABLE_STRING.spec: 'String',
@@ -69,10 +73,12 @@ _spec_to_decode_method = {
   mojom.INT64.spec:                 'readLong',
   mojom.INT8.spec:                  'readByte',
   mojom.MSGPIPE.spec:               'readMessagePipeHandle',
+  mojom.PLATFORMHANDLE.spec:        'readUntypedHandle',
   mojom.NULLABLE_DCPIPE.spec:       'readConsumerHandle',
   mojom.NULLABLE_DPPIPE.spec:       'readProducerHandle',
   mojom.NULLABLE_HANDLE.spec:       'readUntypedHandle',
   mojom.NULLABLE_MSGPIPE.spec:      'readMessagePipeHandle',
+  mojom.NULLABLE_PLATFORMHANDLE.spec: 'readUntypedHandle',
   mojom.NULLABLE_SHAREDBUFFER.spec: 'readSharedBufferHandle',
   mojom.NULLABLE_STRING.spec:       'readString',
   mojom.SHAREDBUFFER.spec:          'readSharedBufferHandle',
@@ -99,33 +105,16 @@ _java_reserved_types = [
   'R'
 ]
 
-def NameToComponent(name):
-  """ Returns a list of lowercase words corresponding to a given name. """
-  # Add underscores after uppercase letters when appropriate. An uppercase
-  # letter is considered the end of a word if it is followed by an upper and a
-  # lower. E.g. URLLoaderFactory -> URL_LoaderFactory
-  name = re.sub('([A-Z][0-9]*)(?=[A-Z][0-9]*[a-z])', r'\1_', name)
-  # Add underscores after lowercase letters when appropriate. A lowercase letter
-  # is considered the end of a word if it is followed by an upper.
-  # E.g. URLLoaderFactory -> URLLoader_Factory
-  name = re.sub('([a-z][0-9]*)(?=[A-Z])', r'\1_', name)
-  return [x.lower() for x in name.split('_')]
-
 def UpperCamelCase(name):
-  return ''.join([x.capitalize() for x in NameToComponent(name)])
+  return ''.join([x.capitalize() for x in generator.SplitCamelCase(name)])
 
 def CamelCase(name):
   uccc = UpperCamelCase(name)
   return uccc[0].lower() + uccc[1:]
 
 def ConstantStyle(name):
-  components = NameToComponent(name)
-  if components[0] == 'k' and len(components) > 1:
-    components = components[1:]
-  # variable cannot starts with a digit.
-  if components[0][0].isdigit():
-    components[0] = '_' + components[0]
-  return '_'.join([x.upper() for x in components])
+  return generator.ToUpperSnakeCase(name)
+
 
 def GetNameForElement(element):
   if (mojom.IsEnumKind(element) or mojom.IsInterfaceKind(element) or
@@ -152,39 +141,39 @@ def GetNameForElement(element):
   raise Exception('Unexpected element: %s' % element)
 
 def GetInterfaceResponseName(method):
-  return UpperCamelCase(method.name + '_Response')
+  return UpperCamelCase(method.name) + '_Response'
 
 def ParseStringAttribute(attribute):
-  assert isinstance(attribute, basestring)
+  assert isinstance(attribute, str)
   return attribute
 
 def GetJavaTrueFalse(value):
   return 'true' if value else 'false'
 
 def GetArrayNullabilityFlags(kind):
-    """Returns nullability flags for an array type, see Decoder.java.
+  """Returns nullability flags for an array type, see Decoder.java.
 
     As we have dedicated decoding functions for arrays, we have to pass
     nullability information about both the array itself, as well as the array
     element type there.
     """
-    assert mojom.IsArrayKind(kind)
-    ARRAY_NULLABLE   = \
-        'org.chromium.mojo.bindings.BindingsHelper.ARRAY_NULLABLE'
-    ELEMENT_NULLABLE = \
-        'org.chromium.mojo.bindings.BindingsHelper.ELEMENT_NULLABLE'
-    NOTHING_NULLABLE = \
-        'org.chromium.mojo.bindings.BindingsHelper.NOTHING_NULLABLE'
+  assert mojom.IsArrayKind(kind)
+  ARRAY_NULLABLE   = \
+      'org.chromium.mojo.bindings.BindingsHelper.ARRAY_NULLABLE'
+  ELEMENT_NULLABLE = \
+      'org.chromium.mojo.bindings.BindingsHelper.ELEMENT_NULLABLE'
+  NOTHING_NULLABLE = \
+      'org.chromium.mojo.bindings.BindingsHelper.NOTHING_NULLABLE'
 
-    flags_to_set = []
-    if mojom.IsNullableKind(kind):
-        flags_to_set.append(ARRAY_NULLABLE)
-    if mojom.IsNullableKind(kind.kind):
-        flags_to_set.append(ELEMENT_NULLABLE)
+  flags_to_set = []
+  if mojom.IsNullableKind(kind):
+    flags_to_set.append(ARRAY_NULLABLE)
+  if mojom.IsNullableKind(kind.kind):
+    flags_to_set.append(ELEMENT_NULLABLE)
 
-    if not flags_to_set:
-        flags_to_set = [NOTHING_NULLABLE]
-    return ' | '.join(flags_to_set)
+  if not flags_to_set:
+    flags_to_set = [NOTHING_NULLABLE]
+  return ' | '.join(flags_to_set)
 
 
 def AppendEncodeDecodeParams(initial_params, context, kind, bit):
@@ -344,7 +333,7 @@ def ExpressionToText(context, token, kind_spec=''):
     return _TranslateNamedValue(token)
   if kind_spec.startswith('i') or kind_spec.startswith('u'):
     number = ast.literal_eval(token.lstrip('+ '))
-    if not isinstance(number, (int, long)):
+    if not isinstance(number, int):
       raise ValueError('got unexpected type %r for int literal %r' % (
           type(number), token))
     # If the literal is too large to fit a signed long, convert it to the
@@ -447,35 +436,35 @@ class Generator(generator.Generator):
 
   def GetFilters(self):
     java_filters = {
-      'array_expected_length': GetArrayExpectedLength,
-      'array': GetArrayKind,
-      'constant_value': ConstantValue,
-      'covers_continuous_range': EnumCoversContinuousRange,
-      'decode_method': DecodeMethod,
-      'default_value': DefaultValue,
-      'encode_method': EncodeMethod,
-      'expression_to_text': ExpressionToText,
-      'has_method_without_response': HasMethodWithoutResponse,
-      'has_method_with_response': HasMethodWithResponse,
-      'interface_response_name': GetInterfaceResponseName,
-      'is_array_kind': mojom.IsArrayKind,
-      'is_any_handle_kind': mojom.IsAnyHandleKind,
-      "is_enum_kind": mojom.IsEnumKind,
-      'is_interface_request_kind': mojom.IsInterfaceRequestKind,
-      'is_map_kind': mojom.IsMapKind,
-      'is_nullable_kind': mojom.IsNullableKind,
-      'is_pointer_array_kind': IsPointerArrayKind,
-      'is_reference_kind': mojom.IsReferenceKind,
-      'is_struct_kind': mojom.IsStructKind,
-      'is_union_array_kind': IsUnionArrayKind,
-      'is_union_kind': mojom.IsUnionKind,
-      'java_class_for_enum': GetJavaClassForEnum,
-      'java_true_false': GetJavaTrueFalse,
-      'java_type': GetJavaType,
-      'method_ordinal_name': GetMethodOrdinalName,
-      'name': GetNameForElement,
-      'new_array': NewArray,
-      'ucc': lambda x: UpperCamelCase(x.name),
+        'array_expected_length': GetArrayExpectedLength,
+        'array': GetArrayKind,
+        'constant_value': ConstantValue,
+        'covers_continuous_range': EnumCoversContinuousRange,
+        'decode_method': DecodeMethod,
+        'default_value': DefaultValue,
+        'encode_method': EncodeMethod,
+        'expression_to_text': ExpressionToText,
+        'has_method_without_response': HasMethodWithoutResponse,
+        'has_method_with_response': HasMethodWithResponse,
+        'interface_response_name': GetInterfaceResponseName,
+        'is_array_kind': mojom.IsArrayKind,
+        'is_any_handle_kind': mojom.IsAnyHandleKind,
+        "is_enum_kind": mojom.IsEnumKind,
+        'is_interface_request_kind': mojom.IsInterfaceRequestKind,
+        'is_map_kind': mojom.IsMapKind,
+        'is_nullable_kind': mojom.IsNullableKind,
+        'is_pointer_array_kind': IsPointerArrayKind,
+        'is_reference_kind': mojom.IsReferenceKind,
+        'is_struct_kind': mojom.IsStructKind,
+        'is_union_array_kind': IsUnionArrayKind,
+        'is_union_kind': mojom.IsUnionKind,
+        'java_class_for_enum': GetJavaClassForEnum,
+        'java_true_false': GetJavaTrueFalse,
+        'java_type': GetJavaType,
+        'method_ordinal_name': GetMethodOrdinalName,
+        'name': GetNameForElement,
+        'new_array': NewArray,
+        'ucc': lambda x: UpperCamelCase(x.name),
     }
     return java_filters
 
@@ -521,26 +510,26 @@ class Generator(generator.Generator):
     fileutil.EnsureDirectoryExists(self.output_dir)
 
     for struct in self.module.structs:
-      self.Write(self._GenerateStructSource(struct),
-                 '%s.java' % GetNameForElement(struct))
+      self.WriteWithComment(self._GenerateStructSource(struct),
+                            '%s.java' % GetNameForElement(struct))
 
     for union in self.module.unions:
-      self.Write(self._GenerateUnionSource(union),
-                 '%s.java' % GetNameForElement(union))
+      self.WriteWithComment(self._GenerateUnionSource(union),
+                            '%s.java' % GetNameForElement(union))
 
     for enum in self.module.enums:
-      self.Write(self._GenerateEnumSource(enum),
-                 '%s.java' % GetNameForElement(enum))
+      self.WriteWithComment(self._GenerateEnumSource(enum),
+                            '%s.java' % GetNameForElement(enum))
 
     for interface in self.module.interfaces:
-      self.Write(self._GenerateInterfaceSource(interface),
-                 '%s.java' % GetNameForElement(interface))
-      self.Write(self._GenerateInterfaceInternalSource(interface),
-                 '%s_Internal.java' % GetNameForElement(interface))
+      self.WriteWithComment(self._GenerateInterfaceSource(interface),
+                            '%s.java' % GetNameForElement(interface))
+      self.WriteWithComment(self._GenerateInterfaceInternalSource(interface),
+                            '%s_Internal.java' % GetNameForElement(interface))
 
     if self.module.constants:
-      self.Write(self._GenerateConstantsSource(self.module),
-                 '%s.java' % GetConstantsMainEntityName(self.module))
+      self.WriteWithComment(self._GenerateConstantsSource(self.module),
+                            '%s.java' % GetConstantsMainEntityName(self.module))
 
   def GenerateFiles(self, unparsed_args):
     # TODO(rockot): Support variant output for Java.

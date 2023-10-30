@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,20 @@ typedef uint32_t MojoInvitationTransportType;
 // and wrap the handle to that connection using a CHANNEL transport.
 #define MOJO_INVITATION_TRANSPORT_TYPE_CHANNEL_SERVER \
   ((MojoInvitationTransportType)1)
+
+// Similar to CHANNEL transport. Normally with a CHANNEL transport, the inviting
+// client sends a secondary sync channel to the invited client, and the invited
+// client synchronously waits for this before it can accept the invitation.
+//
+// With this transport type, the invited client creates its own sync channel and
+// sends the remote endpoint to the inviting client to be passed along to the
+// broker. This allows acceptance of incoming invitations to avoid blocking
+// operations, making both sides of the channel initialization process fully
+// asynchronous.
+//
+// Not supported in all platform sandbox configurations.
+#define MOJO_INVITATION_TRANSPORT_TYPE_CHANNEL_ASYNC \
+  ((MojoInvitationTransportType)2)
 
 // A transport endpoint over which an invitation may be sent or received via
 // |MojoSendInvitation()| or |MojoAcceptInvitation()| respectively.
@@ -186,6 +200,12 @@ typedef uint32_t MojoSendInvitationFlags;
 // message pipe attached with a name of exactly four zero-bytes ("\0\0\0\0").
 #define MOJO_SEND_INVITATION_FLAG_ISOLATED ((MojoSendInvitationFlags)1)
 
+// Indicates that the invitation is being sent to a process which should be
+// considered "untrusted."" This may impose various security constraints on what
+// can be transferred by Mojo between e.g. a broker process and the remote
+// process in question.
+#define MOJO_SEND_INVITATION_FLAG_UNTRUSTED_PROCESS ((MojoSendInvitationFlags)2)
+
 // Options passed to |MojoSendInvitation()|.
 struct MOJO_ALIGNAS(8) MojoSendInvitationOptions {
   // The size of this structure, used for versioning.
@@ -215,6 +235,17 @@ typedef uint32_t MojoAcceptInvitationFlags;
 // |MOJO_SEND_INVITATION_FLAG_ISOLATED| for details.
 #define MOJO_ACCEPT_INVITATION_FLAG_ISOLATED ((MojoAcceptInvitationFlags)1)
 
+// The transport endpoint used to accept this invitation should be leaked, i.e.
+// never closed until it's implicitly closed on process death. This exists to
+// support adaptation of legacy code to Mojo IPC so that, e.g., a broken pipe
+// can be used as a reliable indication of remote process death.
+//
+// This flag should generally not be used unless strictly necessary, and it is
+// unsafe to use in any situation where a process may accept multiple
+// invitations over the course of its lifetime.
+#define MOJO_ACCEPT_INVITATION_FLAG_LEAK_TRANSPORT_ENDPOINT \
+  ((MojoAcceptInvitationFlags)2)
+
 // Options passed to |MojoAcceptInvitation()|.
 struct MOJO_ALIGNAS(8) MojoAcceptInvitationOptions {
   // The size of this structure, used for versioning.
@@ -225,6 +256,25 @@ struct MOJO_ALIGNAS(8) MojoAcceptInvitationOptions {
 };
 MOJO_STATIC_ASSERT(sizeof(struct MojoAcceptInvitationOptions) == 8,
                    "MojoAcceptInvitationOptions has wrong size");
+
+// Flags passed to |MojoSetDefaultProcessErrorHandler()| via
+// |MojoSetDefaultProcessErrorHandlerOptions|.
+typedef uint32_t MojoSetDefaultProcessErrorHandlerFlags;
+
+// No flags. Default behavior.
+#define MOJO_SET_DEFAULT_PROCESS_ERROR_HANDLER_FLAG_NONE \
+  ((MojoSetDefaultProcessErrorHandlerFlags)0)
+
+// Options passed to |MojoSetDefaultProcessErrorHandler()|.
+struct MOJO_ALIGNAS(8) MojoSetDefaultProcessErrorHandlerOptions {
+  // The size of this structure, used for versioning.
+  uint32_t struct_size;
+
+  // See |MojoSetDefaultProcessErrorHandlerFlags|.
+  MojoSetDefaultProcessErrorHandlerFlags flags;
+};
+MOJO_STATIC_ASSERT(sizeof(struct MojoSetDefaultProcessErrorHandlerOptions) == 8,
+                   "MojoSetDefaultProcessErrorHandlerOptions has wrong size");
 
 #ifdef __cplusplus
 extern "C" {
@@ -239,6 +289,12 @@ extern "C" {
 // inviting the process for whom this callback is being invoked.
 typedef void (*MojoProcessErrorHandler)(
     uintptr_t context,
+    const struct MojoProcessErrorDetails* details);
+
+// Similar to above, but registered globally via
+// |MojoSetDefaultProcessErrorHandler()| and invoked only for communication
+// errors regarding processes NOT invited by the calling process.
+typedef void (*MojoDefaultProcessErrorHandler)(
     const struct MojoProcessErrorDetails* details);
 
 // Creates a new invitation to be sent to another process.
@@ -448,6 +504,31 @@ MOJO_SYSTEM_EXPORT MojoResult MojoAcceptInvitation(
     const struct MojoInvitationTransportEndpoint* transport_endpoint,
     const struct MojoAcceptInvitationOptions* options,
     MojoHandle* invitation_handle);
+
+// Registers a process-wide handler to be invoked when an error is raised on a
+// connection to a peer process. Such errors can be raised if the peer process
+// sends malformed data to this process.
+//
+// Note that this handler is only invoked for connections to processes NOT
+// explicitly invited by this process. To handle errors concerning processes
+// invited by this process, see the MojoProcessErrorHandler argument to
+// |MojoSendInvitation()|.
+//
+// The general use case for this API is to be able to log or report instances of
+// bad IPCs received by a client process which no real ability or authority to
+// identify the source.
+//
+// Returns:
+//   |MOJO_RESULT_OK| if |handler| is successfully registered as the global
+//       default process error handler within the calling process. If |handler|
+//       is null, any registered default process error handler is removed.
+//   |MOJO_RESULT_ALREADY_EXISTS| if |handler| is non-null and there is already
+//       a registered error handler. Callers wishing to replace an existing
+//       handler must first call |MojoSetDefaultProcessErrorHandler()| with null
+//       in order to do so.
+MOJO_SYSTEM_EXPORT MojoResult MojoSetDefaultProcessErrorHandler(
+    MojoDefaultProcessErrorHandler handler,
+    const struct MojoSetDefaultProcessErrorHandlerOptions* options);
 
 #ifdef __cplusplus
 }  // extern "C"

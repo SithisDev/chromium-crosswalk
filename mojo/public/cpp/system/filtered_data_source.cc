@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,16 +18,12 @@ FilteredDataSource::~FilteredDataSource() {
     filter_->OnDone();
 }
 
-bool FilteredDataSource::IsValid() const {
-  return source_->IsValid();
-}
-
-int64_t FilteredDataSource::GetLength() const {
+uint64_t FilteredDataSource::GetLength() const {
   return source_->GetLength();
 }
 
 FilteredDataSource::ReadResult FilteredDataSource::Read(
-    int64_t offset,
+    uint64_t offset,
     base::span<char> buffer) {
   ReadResult result = source_->Read(offset, buffer);
   if (filter_)

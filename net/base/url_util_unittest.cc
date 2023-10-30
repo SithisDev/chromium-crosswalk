@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 
 #include "base/format_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/scheme_host_port.h"
+#include "url/url_util.h"
 
 using base::ASCIIToUTF16;
 using base::WideToUTF16;
@@ -246,16 +247,22 @@ TEST(UrlUtilTest, GetHostAndOptionalPort) {
     GURL url;
     const char* const expected_host_and_port;
   } tests[] = {
-    { GURL("http://www.foo.com/x"), "www.foo.com"},
-    { GURL("http://www.foo.com:21/x"), "www.foo.com:21"},
+      {GURL("http://www.foo.com/x"), "www.foo.com"},
+      {GURL("http://www.foo.com:21/x"), "www.foo.com:21"},
+      {GURL("http://www.foo.com:443/x"), "www.foo.com:443"},
 
-    // For IPv6 literals should always include the brackets.
-    { GURL("http://[1::2]/x"), "[1::2]"},
-    { GURL("http://[::a]:33/x"), "[::a]:33"},
+      {GURL("https://www.foo.com/x"), "www.foo.com"},
+      {GURL("https://www.foo.com:80/x"), "www.foo.com:80"},
+
+      // For IPv6 literals should always include the brackets.
+      {GURL("http://[1::2]/x"), "[1::2]"},
+      {GURL("http://[::a]:33/x"), "[::a]:33"},
   };
   for (const auto& test : tests) {
-    std::string host_and_port = GetHostAndOptionalPort(test.url);
-    EXPECT_EQ(std::string(test.expected_host_and_port), host_and_port);
+    EXPECT_EQ(test.expected_host_and_port, GetHostAndOptionalPort(test.url));
+    // Also test the SchemeHostPort variant.
+    EXPECT_EQ(test.expected_host_and_port,
+              GetHostAndOptionalPort(url::SchemeHostPort(test.url)));
   }
 }
 
@@ -266,6 +273,63 @@ TEST(UrlUtilTest, GetHostOrSpecFromURL) {
             GetHostOrSpecFromURL(GURL("http://example.com./test")));
   EXPECT_EQ("file:///tmp/test.html",
             GetHostOrSpecFromURL(GURL("file:///tmp/test.html")));
+}
+
+TEST(UrlUtilTest, GetSuperdomain) {
+  struct {
+    const char* const domain;
+    const char* const expected_superdomain;
+  } tests[] = {
+      // Basic cases
+      {"foo.bar.example", "bar.example"},
+      {"bar.example", "example"},
+      {"example", ""},
+
+      // Returned value may be an eTLD.
+      {"google.com", "com"},
+      {"google.co.uk", "co.uk"},
+
+      // Weird cases.
+      {"", ""},
+      {"has.trailing.dot.", "trailing.dot."},
+      {"dot.", ""},
+      {".has.leading.dot", "has.leading.dot"},
+      {".", ""},
+      {"..", "."},
+      {"127.0.0.1", "0.0.1"},
+  };
+
+  for (const auto& test : tests) {
+    EXPECT_EQ(test.expected_superdomain, GetSuperdomain(test.domain));
+  }
+}
+
+TEST(UrlUtilTest, IsSubdomainOf) {
+  struct {
+    const char* subdomain;
+    const char* superdomain;
+    bool is_subdomain;
+  } tests[] = {
+      {"bar.foo.com", "foo.com", true},
+      {"barfoo.com", "foo.com", false},
+      {"bar.foo.com", "com", true},
+      {"bar.foo.com", "other.com", false},
+      {"bar.foo.com", "bar.foo.com", true},
+      {"bar.foo.com", "baz.foo.com", false},
+      {"bar.foo.com", "baz.bar.foo.com", false},
+      {"bar.foo.com", "ar.foo.com", false},
+      {"foo.com", "foo.com.", false},
+      {"bar.foo.com", "foo.com.", false},
+      {"", "", true},
+      {"a", "", false},
+      {"", "a", false},
+      {"127.0.0.1", "0.0.1", true},  // Don't do this...
+  };
+
+  for (const auto& test : tests) {
+    EXPECT_EQ(test.is_subdomain,
+              IsSubdomainOf(test.subdomain, test.superdomain));
+  }
 }
 
 TEST(UrlUtilTest, CompliantHost) {
@@ -366,7 +430,7 @@ const NonUniqueNameTestData kNonUniqueNameTestData[] = {
 class UrlUtilNonUniqueNameTest
     : public testing::TestWithParam<NonUniqueNameTestData> {
  public:
-  virtual ~UrlUtilNonUniqueNameTest() = default;
+  ~UrlUtilNonUniqueNameTest() override = default;
 
  protected:
   bool IsUnique(const std::string& hostname) {
@@ -383,7 +447,7 @@ TEST_P(UrlUtilNonUniqueNameTest, IsHostnameNonUnique) {
   EXPECT_EQ(test_data.is_unique, IsUnique(test_data.hostname));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          UrlUtilNonUniqueNameTest,
                          testing::ValuesIn(kNonUniqueNameTestData));
 
@@ -392,13 +456,6 @@ TEST(UrlUtilTest, IsLocalhost) {
   EXPECT_TRUE(HostStringIsLocalhost("localHosT"));
   EXPECT_TRUE(HostStringIsLocalhost("localhost."));
   EXPECT_TRUE(HostStringIsLocalhost("localHost."));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost.localdomain"));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost.localDOMain"));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost.localdomain."));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost6"));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost6."));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost6.localdomain6"));
-  EXPECT_TRUE(HostStringIsLocalhost("localhost6.localdomain6."));
   EXPECT_TRUE(HostStringIsLocalhost("127.0.0.1"));
   EXPECT_TRUE(HostStringIsLocalhost("127.0.1.0"));
   EXPECT_TRUE(HostStringIsLocalhost("127.1.0.0"));
@@ -411,6 +468,14 @@ TEST(UrlUtilTest, IsLocalhost) {
   EXPECT_TRUE(HostStringIsLocalhost("foo.localhost."));
   EXPECT_TRUE(HostStringIsLocalhost("foo.localhoST"));
   EXPECT_TRUE(HostStringIsLocalhost("foo.localhoST."));
+
+  EXPECT_FALSE(HostStringIsLocalhost("localhost.localdomain"));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost.localDOMain"));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost.localdomain."));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost6"));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost6."));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost6.localdomain6"));
+  EXPECT_FALSE(HostStringIsLocalhost("localhost6.localdomain6."));
 
   EXPECT_FALSE(HostStringIsLocalhost("localhostx"));
   EXPECT_FALSE(HostStringIsLocalhost("localhost.x"));
@@ -494,6 +559,39 @@ TEST(UrlUtilTest, ChangeWebSocketSchemeToHttpScheme) {
   }
 }
 
+TEST(UrlUtilTest, SchemeHasNetworkHost) {
+  const char kCustomSchemeWithHostPortAndUserInformation[] = "foo";
+  const char kCustomSchemeWithHostAndPort[] = "bar";
+  const char kCustomSchemeWithHost[] = "baz";
+  const char kCustomSchemeWithoutAuthority[] = "qux";
+  const char kNonStandardScheme[] = "not-registered";
+
+  url::ScopedSchemeRegistryForTests scheme_registry;
+  AddStandardScheme(kCustomSchemeWithHostPortAndUserInformation,
+                    url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION);
+  AddStandardScheme(kCustomSchemeWithHostAndPort,
+                    url::SCHEME_WITH_HOST_AND_PORT);
+  AddStandardScheme(kCustomSchemeWithHost, url::SCHEME_WITH_HOST);
+  AddStandardScheme(kCustomSchemeWithoutAuthority,
+                    url::SCHEME_WITHOUT_AUTHORITY);
+
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kHttpScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kHttpsScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kWsScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kWssScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kQuicTransportScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kFtpScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(url::kFileScheme));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(
+      kCustomSchemeWithHostPortAndUserInformation));
+  EXPECT_TRUE(IsStandardSchemeWithNetworkHost(kCustomSchemeWithHostAndPort));
+
+  EXPECT_FALSE(IsStandardSchemeWithNetworkHost(url::kFileSystemScheme));
+  EXPECT_FALSE(IsStandardSchemeWithNetworkHost(kCustomSchemeWithHost));
+  EXPECT_FALSE(IsStandardSchemeWithNetworkHost(kCustomSchemeWithoutAuthority));
+  EXPECT_FALSE(IsStandardSchemeWithNetworkHost(kNonStandardScheme));
+}
+
 TEST(UrlUtilTest, GetIdentityFromURL) {
   struct {
     const char* const input_url;
@@ -575,7 +673,7 @@ TEST(UrlUtilTest, GetIdentityFromURL) {
     SCOPED_TRACE(test.input_url);
     GURL url(test.input_url);
 
-    base::string16 username, password;
+    std::u16string username, password;
     GetIdentityFromURL(url, &username, &password);
 
     EXPECT_EQ(base::UTF8ToUTF16(test.expected_username), username);
@@ -585,18 +683,18 @@ TEST(UrlUtilTest, GetIdentityFromURL) {
 
 // Try extracting a username which was encoded with UTF8.
 TEST(UrlUtilTest, GetIdentityFromURL_UTF8) {
-  GURL url(WideToUTF16(L"http://foo:\x4f60\x597d@blah.com"));
+  GURL url(u"http://foo:\x4f60\x597d@blah.com");
 
   EXPECT_EQ("foo", url.username());
   EXPECT_EQ("%E4%BD%A0%E5%A5%BD", url.password());
 
   // Extract the unescaped identity.
-  base::string16 username, password;
+  std::u16string username, password;
   GetIdentityFromURL(url, &username, &password);
 
   // Verify that it was decoded as UTF8.
-  EXPECT_EQ(ASCIIToUTF16("foo"), username);
-  EXPECT_EQ(WideToUTF16(L"\x4f60\x597d"), password);
+  EXPECT_EQ(u"foo", username);
+  EXPECT_EQ(u"\x4f60\x597d", password);
 }
 
 TEST(UrlUtilTest, GoogleHost) {

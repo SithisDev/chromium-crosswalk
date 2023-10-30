@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/android/jni_android.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
 #include "net/proxy_resolution/proxy_config_service.h"
@@ -29,14 +28,14 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
   // key. If it was not found, an empty string is returned. Note that this
   // interface does not let you distinguish an empty property from a
   // non-existing property. This callback is invoked on the JNI thread.
-  typedef base::Callback<std::string (const std::string& property)>
+  typedef base::RepeatingCallback<std::string(const std::string& property)>
       GetPropertyCallback;
 
   // Separate class whose instance is owned by the Delegate class implemented in
   // the .cc file.
   class JNIDelegate {
    public:
-    virtual ~JNIDelegate() {}
+    virtual ~JNIDelegate() = default;
 
     // Called from Java (on JNI thread) to signal that the proxy settings have
     // changed. The string and int arguments (the host/port pair for the proxy)
@@ -61,6 +60,10 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
   ProxyConfigServiceAndroid(
       const scoped_refptr<base::SequencedTaskRunner>& main_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& jni_task_runner);
+
+  ProxyConfigServiceAndroid(const ProxyConfigServiceAndroid&) = delete;
+  ProxyConfigServiceAndroid& operator=(const ProxyConfigServiceAndroid&) =
+      delete;
 
   ~ProxyConfigServiceAndroid() override;
 
@@ -103,6 +106,7 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
   std::string SetProxyOverride(
       const std::vector<ProxyOverrideRule>& proxy_rules,
       const std::vector<std::string>& bypass_rules,
+      const bool reverse_bypass,
       base::OnceClosure callback);
   void ClearProxyOverride(base::OnceClosure callback);
 
@@ -126,8 +130,6 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
                               const std::vector<std::string>& exclusion_list);
 
   scoped_refptr<Delegate> delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyConfigServiceAndroid);
 };
 
 } // namespace net

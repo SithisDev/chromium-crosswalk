@@ -1,19 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/socket/fuzzed_socket.h"
 
+#include <fuzzer/FuzzedDataProvider.h>
+
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/log/net_log_source_type.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 namespace net {
 
@@ -242,14 +244,6 @@ NextProto FuzzedSocket::GetNegotiatedProtocol() const {
 bool FuzzedSocket::GetSSLInfo(SSLInfo* ssl_info) {
   return false;
 }
-
-void FuzzedSocket::GetConnectionAttempts(ConnectionAttempts* out) const {
-  out->clear();
-}
-
-void FuzzedSocket::ClearConnectionAttempts() {}
-
-void FuzzedSocket::AddConnectionAttempts(const ConnectionAttempts& attempts) {}
 
 int64_t FuzzedSocket::GetTotalReceivedBytes() const {
   return total_bytes_read_;

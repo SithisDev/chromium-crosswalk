@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,19 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/thread_annotations.h"
 
 namespace net {
@@ -42,8 +42,17 @@ class SSLKeyLoggerImpl::Core
     // waiting to flush these to disk, but some buggy antiviruses point this at
     // a pipe and hang, so we avoid blocking shutdown. If writing to a real
     // file, writes should complete quickly enough that this does not matter.
-    task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+    task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
         {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
+  }
+
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
+
+  void SetFile(base::File file) {
+    file_.reset(base::FileToFILE(std::move(file), "a"));
+    if (!file_)
+      DVLOG(1) << "Could not adopt file";
   }
 
   void OpenFile(const base::FilePath& path) {
@@ -76,7 +85,7 @@ class SSLKeyLoggerImpl::Core
     DCHECK(!file_);
     file_.reset(base::OpenFile(path, "a"));
     if (!file_)
-      LOG(WARNING) << "Could not open " << path.value();
+      DVLOG(1) << "Could not open " << path.value();
   }
 
   void Flush() {
@@ -108,13 +117,16 @@ class SSLKeyLoggerImpl::Core
   base::Lock lock_;
   bool lines_dropped_ GUARDED_BY(lock_) = false;
   std::vector<std::string> buffer_ GUARDED_BY(lock_);
-
-  DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 SSLKeyLoggerImpl::SSLKeyLoggerImpl(const base::FilePath& path)
-    : core_(new Core) {
+    : core_(base::MakeRefCounted<Core>()) {
   core_->OpenFile(path);
+}
+
+SSLKeyLoggerImpl::SSLKeyLoggerImpl(base::File file)
+    : core_(base::MakeRefCounted<Core>()) {
+  core_->SetFile(std::move(file));
 }
 
 SSLKeyLoggerImpl::~SSLKeyLoggerImpl() = default;

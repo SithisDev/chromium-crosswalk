@@ -1,15 +1,14 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_REPORTING_MOCK_PERSISTENT_REPORTING_STORE_H_
 #define NET_REPORTING_MOCK_PERSISTENT_REPORTING_STORE_H_
 
-#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/reporting/reporting_cache.h"
 #include "net/reporting/reporting_endpoint.h"
 #include "url/origin.h"
@@ -40,12 +39,22 @@ class MockPersistentReportingStore
 
     // Constructor for LOAD_REPORTING_CLIENTS commands.
     Command(Type type, ReportingClientsLoadedCallback loaded_callback);
-    // Constructor for endpoint commands.
+    // Constructors for endpoint commands. |type| must be one of
+    // ADD_REPORTING_ENDPOINT, UPDATE_REPORTING_ENDPOINT_DETAILS, or
+    // DELETE_REPORTING_ENDPOINT
     Command(Type type, const ReportingEndpoint& endpoint);
-    // Constructor for endpoint group commands.
+    Command(Type type,
+            const ReportingEndpointGroupKey& group_key,
+            const GURL& endpoint_url);
+    // Constructors for endpoint group commands. |type| must be one of
+    // ADD_REPORTING_ENDPOINT_GROUP,
+    // UPDATE_REPORTING_ENDPOINT_GROUP_ACCESS_TIME,
+    // UPDATE_REPORTING_ENDPOINT_GROUP_DETAILS, or
+    // DELETE_REPORTING_ENDPOINT_GROUP
     Command(Type type, const CachedReportingEndpointGroup& group);
-    // Constructor for FLUSH commands.
-    Command(Type type);
+    Command(Type type, const ReportingEndpointGroupKey& group_key);
+    // |type| must be LOAD_REPORTING_CLIENTS or FLUSH.
+    explicit Command(Type type);
 
     Command(const Command& other);
     Command(Command&& other);
@@ -57,8 +66,7 @@ class MockPersistentReportingStore
 
     // Identifies the group to which the command pertains. (Applies to endpoint
     // and endpoint group commands.)
-    ReportingEndpointGroupKey group_key =
-        ReportingEndpointGroupKey(url::Origin(), "");
+    ReportingEndpointGroupKey group_key = ReportingEndpointGroupKey();
 
     // Identifies the endpoint to which the command pertains. (Applies to
     // endpoint commands only.)
@@ -72,6 +80,11 @@ class MockPersistentReportingStore
   using CommandList = std::vector<Command>;
 
   MockPersistentReportingStore();
+
+  MockPersistentReportingStore(const MockPersistentReportingStore&) = delete;
+  MockPersistentReportingStore& operator=(const MockPersistentReportingStore&) =
+      delete;
+
   ~MockPersistentReportingStore() override;
 
   // PersistentReportingStore implementation:
@@ -111,6 +124,8 @@ class MockPersistentReportingStore
   // Count the number of commands with type |t|.
   int CountCommands(Command::Type t);
 
+  void ClearCommands();
+
   CommandList GetAllCommands() const;
 
   // Gets the number of stored endpoints/groups, simulating the actual number
@@ -127,26 +142,26 @@ class MockPersistentReportingStore
   std::vector<CachedReportingEndpointGroup> prestored_endpoint_groups_;
 
   // Set when LoadReportingClients() is called.
-  bool load_started_;
+  bool load_started_ = false;
 
   // Simulates the total number of endpoints/groups that would be stored in the
   // store. Updated when pre-stored policies are added, and when Flush() is
   // called.
-  int endpoint_count_;
-  int endpoint_group_count_;
+  int endpoint_count_ = 0;
+  int endpoint_group_count_ = 0;
 
   // Simulates the delta to be added to to the counts the next time Flush() is
   // called. Reset to 0 when Flush() is called.
-  int queued_endpoint_count_delta_;
-  int queued_endpoint_group_count_delta_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockPersistentReportingStore);
+  int queued_endpoint_count_delta_ = 0;
+  int queued_endpoint_group_count_delta_ = 0;
 };
 
 bool operator==(const MockPersistentReportingStore::Command& lhs,
                 const MockPersistentReportingStore::Command& rhs);
 bool operator!=(const MockPersistentReportingStore::Command& lhs,
                 const MockPersistentReportingStore::Command& rhs);
+std::ostream& operator<<(std::ostream& out,
+                         const MockPersistentReportingStore::Command& cmd);
 
 }  // namespace net
 

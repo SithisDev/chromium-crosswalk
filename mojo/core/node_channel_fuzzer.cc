@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_executor.h"
@@ -13,66 +14,16 @@
 #include "mojo/core/connection_params.h"
 #include "mojo/core/entrypoints.h"
 #include "mojo/core/node_channel.h"  // nogncheck
+#include "mojo/core/test/mock_node_channel_delegate.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
-using namespace mojo::core;
-
-// Implementation of NodeChannel::Delegate which does nothing. All of the
-// interesting NodeChannel control message message parsing is done by
-// NodeChannel by the time any of the delegate methods are invoked, so there's
-// no need for this to do any work.
-class FakeNodeChannelDelegate : public NodeChannel::Delegate {
- public:
-  FakeNodeChannelDelegate() = default;
-  ~FakeNodeChannelDelegate() override = default;
-
-  void OnAcceptInvitee(const ports::NodeName& from_node,
-                       const ports::NodeName& inviter_name,
-                       const ports::NodeName& token) override {}
-  void OnAcceptInvitation(const ports::NodeName& from_node,
-                          const ports::NodeName& token,
-                          const ports::NodeName& invitee_name) override {}
-  void OnAddBrokerClient(const ports::NodeName& from_node,
-                         const ports::NodeName& client_name,
-                         base::ProcessHandle process_handle) override {}
-  void OnBrokerClientAdded(const ports::NodeName& from_node,
-                           const ports::NodeName& client_name,
-                           mojo::PlatformHandle broker_channel) override {}
-  void OnAcceptBrokerClient(const ports::NodeName& from_node,
-                            const ports::NodeName& broker_name,
-                            mojo::PlatformHandle broker_channel) override {}
-  void OnEventMessage(const ports::NodeName& from_node,
-                      Channel::MessagePtr message) override {}
-  void OnRequestPortMerge(const ports::NodeName& from_node,
-                          const ports::PortName& connector_port_name,
-                          const std::string& token) override {}
-  void OnRequestIntroduction(const ports::NodeName& from_node,
-                             const ports::NodeName& name) override {}
-  void OnIntroduce(const ports::NodeName& from_node,
-                   const ports::NodeName& name,
-                   mojo::PlatformHandle channel_handle) override {}
-  void OnBroadcast(const ports::NodeName& from_node,
-                   Channel::MessagePtr message) override {}
-#if defined(OS_WIN)
-  void OnRelayEventMessage(const ports::NodeName& from_node,
-                           base::ProcessHandle from_process,
-                           const ports::NodeName& destination,
-                           Channel::MessagePtr message) override {}
-  void OnEventMessageFromRelay(const ports::NodeName& from_node,
-                               const ports::NodeName& source_node,
-                               Channel::MessagePtr message) override {}
-#endif
-  void OnAcceptPeer(const ports::NodeName& from_node,
-                    const ports::NodeName& token,
-                    const ports::NodeName& peer_name,
-                    const ports::PortName& port_name) override {}
-  void OnChannelError(const ports::NodeName& node,
-                      NodeChannel* channel) override {}
-};
+using mojo::core::Channel;
+using mojo::core::ConnectionParams;
+using mojo::core::ports::NodeName;
 
 // A fake delegate for the sending Channel endpoint. The sending Channel is not
 // being fuzzed and won't receive any interesting messages, so this doesn't need
@@ -91,8 +42,8 @@ class FakeChannelDelegate : public Channel::Delegate {
 // Message deserialization may register handles in the global handle table. We
 // need to initialize Core for that to be OK.
 struct Environment {
-  Environment() : main_thread_task_executor(base::MessagePump::Type::IO) {
-    InitializeCore();
+  Environment() : main_thread_task_executor(base::MessagePumpType::IO) {
+    mojo::core::InitializeCore();
   }
 
   base::SingleThreadTaskExecutor main_thread_task_executor;
@@ -105,13 +56,13 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* data, size_t size) {
   // used to carry messages between processes.
   mojo::PlatformChannel channel;
 
-  FakeNodeChannelDelegate receiver_delegate;
-  auto receiver = NodeChannel::Create(
+  mojo::core::MockNodeChannelDelegate receiver_delegate;
+  auto receiver = mojo::core::NodeChannel::Create(
       &receiver_delegate, ConnectionParams(channel.TakeLocalEndpoint()),
       Channel::HandlePolicy::kRejectHandles,
       environment->main_thread_task_executor.task_runner(), base::DoNothing());
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, it's important that the receiver behaves like a broker process
   // receiving messages from a non-broker process. This is because that case can
   // safely handle invalid HANDLE attachments without crashing. The same is not
@@ -119,12 +70,7 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* data, size_t size) {
   // receiver has to assume that the broker has already duplicated the HANDLE
   // into the non-broker's process), but fuzzing that direction is not
   // interesting since a compromised broker process has much bigger problems.
-  //
-  // Note that in order for this hack to work properly, the remote process
-  // handle needs to be a "real" process handle rather than the pseudo-handle
-  // returned by GetCurrentProcessHandle(). Hence the use of OpenProcess().
-  receiver->SetRemoteProcessHandle(mojo::core::ScopedProcessHandle(
-      ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, ::GetCurrentProcessId())));
+  receiver->SetRemoteProcessHandle(base::Process::Current());
 #endif
 
   receiver->Start();
@@ -140,7 +86,7 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* data, size_t size) {
       Channel::HandlePolicy::kRejectHandles,
       environment->main_thread_task_executor.task_runner());
   sender->Start();
-  auto message = std::make_unique<Channel::Message>(size, 0 /* num_handles */);
+  auto message = Channel::Message::CreateMessage(size, 0 /* num_handles */);
   std::copy(data, data + size,
             static_cast<unsigned char*>(message->mutable_payload()));
   sender->Write(std::move(message));

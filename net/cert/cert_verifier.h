@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/string_piece.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_export.h"
@@ -22,6 +22,7 @@ namespace net {
 class CertVerifyResult;
 class CRLSet;
 class NetLogWithSource;
+class ChromeRootStoreData;
 
 // CertVerifier represents a service for verifying certificates.
 //
@@ -56,7 +57,7 @@ class NET_EXPORT CertVerifier {
 
     // Provides an optional CRLSet structure that can be used to avoid
     // revocation checks over the network. CRLSets can be used to add
-    // additional certificates to be blacklisted beyond the internal blacklist,
+    // additional certificates to be blocked beyond the internal block list,
     // whether leaves or intermediates.
     scoped_refptr<CRLSet> crl_set;
 
@@ -65,17 +66,23 @@ class NET_EXPORT CertVerifier {
     // system store. This is implementation-specific plumbing for passing
     // additional anchors through.
     CertificateList additional_trust_anchors;
+
+    // Additional temporary certs to consider as intermediates during path
+    // validation. Ordinarily, implementations of CertVerifier use intermediate
+    // certs from the configured system store. This is implementation-specific
+    // plumbing for passing additional intermediates through.
+    CertificateList additional_untrusted_authorities;
   };
 
   class Request {
    public:
-    Request() {}
+    Request() = default;
+
+    Request(const Request&) = delete;
+    Request& operator=(const Request&) = delete;
 
     // Destruction of the Request cancels it.
-    virtual ~Request() {}
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Request);
+    virtual ~Request() = default;
   };
 
   enum VerifyFlags {
@@ -89,6 +96,8 @@ class NET_EXPORT CertVerifier {
     // Note that cached information may still be used, if it can be accessed
     // without accessing the network.
     VERIFY_DISABLE_NETWORK_FETCHES = 1 << 0,
+
+    VERIFY_FLAGS_LAST = VERIFY_DISABLE_NETWORK_FETCHES
   };
 
   // Parameters to verify |certificate| against the supplied
@@ -113,11 +122,12 @@ class NET_EXPORT CertVerifier {
   // RFC6962 section 3.3.1. It may be ignored by the CertVerifier.
   class NET_EXPORT RequestParams {
    public:
+    RequestParams();
     RequestParams(scoped_refptr<X509Certificate> certificate,
-                  const std::string& hostname,
+                  base::StringPiece hostname,
                   int flags,
-                  const std::string& ocsp_response,
-                  const std::string& sct_list);
+                  base::StringPiece ocsp_response,
+                  base::StringPiece sct_list);
     RequestParams(const RequestParams& other);
     ~RequestParams();
 
@@ -145,24 +155,29 @@ class NET_EXPORT CertVerifier {
 
   // When the verifier is destroyed, all certificate verification requests are
   // canceled, and their completion callbacks will not be called.
-  virtual ~CertVerifier() {}
+  virtual ~CertVerifier() = default;
 
   // Verifies the given certificate against the given hostname as an SSL server.
   // Returns OK if successful or an error code upon failure.
   //
   // The |*verify_result| structure, including the |verify_result->cert_status|
-  // bitmask, is always filled out regardless of the return value.  If the
-  // certificate has multiple errors, the corresponding status flags are set in
-  // |verify_result->cert_status|, and the error code for the most serious
-  // error is returned.
+  // bitmask and |verify_result->verified_cert|, is always filled out regardless
+  // of the return value. If the certificate has multiple errors, the
+  // corresponding status flags are set in |verify_result->cert_status|, and the
+  // error code for the most serious error is returned.
   //
-  // |callback| must not be null.  ERR_IO_PENDING is returned if the operation
+  // |callback| must not be null. ERR_IO_PENDING is returned if the operation
   // could not be completed synchronously, in which case the result code will
   // be passed to the callback when available.
   //
-  // On asynchronous completion (when Verify returns ERR_IO_PENDING) |out_req|
-  // will be reset with a pointer to the request. Freeing this pointer before
-  // the request has completed will cancel it.
+  // |*out_req| is used to store a request handle in the event of asynchronous
+  // completion (when Verify returns ERR_IO_PENDING). Provided that neither
+  // the CertVerifier nor the Request have been deleted, |callback| will be
+  // invoked once the underlying verification finishes. If either the
+  // CertVerifier or the Request are deleted, then |callback| will be Reset()
+  // and will not be invoked. It is fine for |out_req| to outlive the
+  // CertVerifier, and it is fine to reset |out_req| or delete the
+  // CertVerifier during the processing of |callback|.
   //
   // If Verify() completes synchronously then |out_req| *may* be reset to
   // nullptr. However it is not guaranteed that all implementations will reset
@@ -188,6 +203,11 @@ class NET_EXPORT CertVerifier {
   // Creates a CertVerifier implementation that verifies certificates using
   // the preferred underlying cryptographic libraries.  |cert_net_fetcher| may
   // not be used, depending on the platform.
+  static std::unique_ptr<CertVerifier> CreateDefaultWithoutCaching(
+      scoped_refptr<CertNetFetcher> cert_net_fetcher);
+
+  // Wraps the result of |CreateDefaultWithoutCaching| in a CachingCertVerifier
+  // and a CoalescingCertVerifier.
   static std::unique_ptr<CertVerifier> CreateDefault(
       scoped_refptr<CertNetFetcher> cert_net_fetcher);
 };
@@ -199,6 +219,15 @@ NET_EXPORT bool operator==(const CertVerifier::Config& lhs,
                            const CertVerifier::Config& rhs);
 NET_EXPORT bool operator!=(const CertVerifier::Config& lhs,
                            const CertVerifier::Config& rhs);
+
+// A CertVerifier that can update its CertVerifyProc while it is running.
+class NET_EXPORT CertVerifierWithUpdatableProc : public CertVerifier {
+ public:
+  // Update the CertVerifyProc with new ChromeRootStoreData.
+  virtual void UpdateChromeRootStoreData(
+      scoped_refptr<CertNetFetcher> cert_net_fetcher,
+      const ChromeRootStoreData* root_store_data) = 0;
+};
 
 }  // namespace net
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,24 @@
 #include <stdio.h>
 #include <algorithm>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_math.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/c/system/macros.h"
 #include "mojo/public/cpp/bindings/connector.h"
-#include "mojo/public/cpp/bindings/filter_chain.h"
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 #include "mojo/public/cpp/bindings/message.h"
+#include "mojo/public/cpp/bindings/message_dispatcher.h"
 #include "mojo/public/cpp/bindings/message_header_validator.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/tests/validation_test_input_parser.h"
-#include "mojo/public/cpp/system/core.h"
 #include "mojo/public/cpp/system/message.h"
 #include "mojo/public/cpp/test_support/test_support.h"
 #include "mojo/public/interfaces/bindings/tests/validation_test_associated_interfaces.mojom.h"
@@ -37,7 +37,7 @@ namespace {
 
 Message CreateRawMessage(size_t size) {
   ScopedMessageHandle handle;
-  MojoResult rv = CreateMessage(&handle);
+  MojoResult rv = CreateMessage(&handle, MOJO_CREATE_MESSAGE_FLAG_NONE);
   DCHECK_EQ(MOJO_RESULT_OK, rv);
   DCHECK(handle.is_valid());
 
@@ -196,7 +196,7 @@ void RunValidationTests(const std::string& prefix,
     base::RunLoop run_loop;
     mojo::internal::ValidationErrorObserverForTesting observer(
         run_loop.QuitClosure());
-    ignore_result(test_message_receiver->Accept(&message));
+    std::ignore = test_message_receiver->Accept(&message);
     if (expected != "PASS")  // Observer only gets called on errors.
       run_loop.Run();
     if (observer.last_error() == mojo::internal::VALIDATION_ERROR_NONE)
@@ -207,6 +207,23 @@ void RunValidationTests(const std::string& prefix,
     EXPECT_EQ(expected, result) << "failed test: " << tests[i];
   }
 }
+
+class TwoStepValidator : public MessageReceiver {
+ public:
+  TwoStepValidator(std::unique_ptr<MessageReceiver> first_validator,
+                   std::unique_ptr<MessageReceiver> second_validator)
+      : first_validator_(std::move(first_validator)),
+        second_validator_(std::move(second_validator)) {}
+
+  bool Accept(Message* message) override {
+    return first_validator_->Accept(message) &&
+           second_validator_->Accept(message);
+  }
+
+ private:
+  std::unique_ptr<MessageReceiver> first_validator_;
+  std::unique_ptr<MessageReceiver> second_validator_;
+};
 
 class DummyMessageReceiver : public MessageReceiver {
  public:
@@ -220,7 +237,7 @@ class ValidationTest : public testing::Test {
   ValidationTest() {}
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 class ValidationIntegrationTest : public ValidationTest {
@@ -270,13 +287,13 @@ class ValidationIntegrationTest : public ValidationTest {
     }
 
    public:
-    ValidationIntegrationTest* owner_;
+    raw_ptr<ValidationIntegrationTest> owner_;
     mojo::Connector connector_;
   };
 
   void PumpMessages() { base::RunLoop().RunUntilIdle(); }
 
-  TestMessageReceiver* test_message_receiver_;
+  raw_ptr<TestMessageReceiver> test_message_receiver_;
   ScopedMessagePipeHandle testee_endpoint_;
 };
 
@@ -395,18 +412,21 @@ TEST_F(ValidationTest, InputParser) {
 
 TEST_F(ValidationTest, Conformance) {
   DummyMessageReceiver dummy_receiver;
-  mojo::FilterChain validators(&dummy_receiver);
-  validators.Append<mojo::MessageHeaderValidator>();
-  validators.Append<ConformanceTestInterface::RequestValidator_>();
+  mojo::MessageDispatcher validators(&dummy_receiver);
+  validators.SetValidator(std::make_unique<TwoStepValidator>(
+      std::make_unique<mojo::MessageHeaderValidator>(),
+      std::make_unique<ConformanceTestInterface::RequestValidator_>()));
 
   RunValidationTests("conformance_", &validators);
 }
 
 TEST_F(ValidationTest, AssociatedConformace) {
   DummyMessageReceiver dummy_receiver;
-  mojo::FilterChain validators(&dummy_receiver);
-  validators.Append<mojo::MessageHeaderValidator>();
-  validators.Append<AssociatedConformanceTestInterface::RequestValidator_>();
+  mojo::MessageDispatcher validators(&dummy_receiver);
+  validators.SetValidator(std::make_unique<TwoStepValidator>(
+      std::make_unique<mojo::MessageHeaderValidator>(),
+      std::make_unique<
+          AssociatedConformanceTestInterface::RequestValidator_>()));
 
   RunValidationTests("associated_conformance_", &validators);
 }
@@ -416,19 +436,20 @@ TEST_F(ValidationTest, AssociatedConformace) {
 // detection of off-by-one errors in method ordinals.
 TEST_F(ValidationTest, BoundsCheck) {
   DummyMessageReceiver dummy_receiver;
-  mojo::FilterChain validators(&dummy_receiver);
-  validators.Append<mojo::MessageHeaderValidator>();
-  validators.Append<BoundsCheckTestInterface::RequestValidator_>();
-
+  mojo::MessageDispatcher validators(&dummy_receiver);
+  validators.SetValidator(std::make_unique<TwoStepValidator>(
+      std::make_unique<mojo::MessageHeaderValidator>(),
+      std::make_unique<BoundsCheckTestInterface::RequestValidator_>()));
   RunValidationTests("boundscheck_", &validators);
 }
 
 // This test is similar to the Conformance test but for responses.
 TEST_F(ValidationTest, ResponseConformance) {
   DummyMessageReceiver dummy_receiver;
-  mojo::FilterChain validators(&dummy_receiver);
-  validators.Append<mojo::MessageHeaderValidator>();
-  validators.Append<ConformanceTestInterface::ResponseValidator_>();
+  mojo::MessageDispatcher validators(&dummy_receiver);
+  validators.SetValidator(std::make_unique<TwoStepValidator>(
+      std::make_unique<mojo::MessageHeaderValidator>(),
+      std::make_unique<ConformanceTestInterface::ResponseValidator_>()));
 
   RunValidationTests("resp_conformance_", &validators);
 }
@@ -436,9 +457,10 @@ TEST_F(ValidationTest, ResponseConformance) {
 // This test is similar to the BoundsCheck test but for responses.
 TEST_F(ValidationTest, ResponseBoundsCheck) {
   DummyMessageReceiver dummy_receiver;
-  mojo::FilterChain validators(&dummy_receiver);
-  validators.Append<mojo::MessageHeaderValidator>();
-  validators.Append<BoundsCheckTestInterface::ResponseValidator_>();
+  mojo::MessageDispatcher validators(&dummy_receiver);
+  validators.SetValidator(std::make_unique<TwoStepValidator>(
+      std::make_unique<mojo::MessageHeaderValidator>(),
+      std::make_unique<BoundsCheckTestInterface::ResponseValidator_>()));
 
   RunValidationTests("resp_boundscheck_", &validators);
 }

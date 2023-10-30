@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,23 +11,24 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_util.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "url/gurl.h"
 
-namespace net {
-namespace test_server {
-const char kMockHttpHeadersExtension[] = "mock-http-headers";
+namespace net::test_server {
+constexpr base::FilePath::CharType kMockHttpHeadersExtension[] =
+    FILE_PATH_LITERAL("mock-http-headers");
 
 std::string GetContentType(const base::FilePath& path) {
   if (path.MatchesExtension(FILE_PATH_LITERAL(".crx")))
@@ -52,10 +53,18 @@ std::string GetContentType(const base::FilePath& path) {
     return "application/json";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".pdf")))
     return "application/pdf";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".svg")))
+    return "image/svg+xml";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".txt")))
     return "text/plain";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".wav")))
     return "audio/wav";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".webp")))
+    return "image/webp";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".mp4")))
+    return "video/mp4";
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".webm")))
+    return "video/webm";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".xml")))
     return "text/xml";
   if (path.MatchesExtension(FILE_PATH_LITERAL(".mhtml")))
@@ -88,8 +97,8 @@ std::unique_ptr<HttpResponse> HandlePrefixedRequest(
 RequestQuery ParseQuery(const GURL& url) {
   RequestQuery queries;
   for (QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
-    std::string unescaped_query = UnescapeBinaryURLComponent(
-        it.GetKey(), UnescapeRule::REPLACE_PLUS_WITH_SPACE);
+    std::string unescaped_query = base::UnescapeBinaryURLComponent(
+        it.GetKey(), base::UnescapeRule::REPLACE_PLUS_WITH_SPACE);
     queries[unescaped_query].push_back(it.GetUnescapedValue());
   }
   return queries;
@@ -201,15 +210,8 @@ std::unique_ptr<HttpResponse> HandleFileRequest(
   if (!UpdateReplacedText(query, &file_contents))
     return failed_response;
 
-  base::FilePath::StringPieceType mock_headers_extension;
-#if defined(OS_WIN)
-  base::string16 temp = base::ASCIIToUTF16(kMockHttpHeadersExtension);
-  mock_headers_extension = temp;
-#else
-  mock_headers_extension = kMockHttpHeadersExtension;
-#endif
-
-  base::FilePath headers_path(file_path.AddExtension(mock_headers_extension));
+  base::FilePath headers_path(
+      file_path.AddExtension(kMockHttpHeadersExtension));
 
   if (base::PathExists(headers_path)) {
     std::string headers_contents;
@@ -251,5 +253,4 @@ std::unique_ptr<HttpResponse> HandleFileRequest(
   return http_response;
 }
 
-}  // namespace test_server
-}  // namespace net
+}  // namespace net::test_server

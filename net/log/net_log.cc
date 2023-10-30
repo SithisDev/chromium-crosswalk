@@ -1,17 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/log/net_log.h"
 
+#include "base/check_op.h"
+#include "base/containers/contains.h"
+#include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "net/log/net_log_values.h"
 
 namespace net {
 
-NetLog::ThreadSafeObserver::ThreadSafeObserver()
-    : capture_mode_(NetLogCaptureMode::kDefault), net_log_(nullptr) {}
+NetLog::ThreadSafeObserver::ThreadSafeObserver() = default;
 
 NetLog::ThreadSafeObserver::~ThreadSafeObserver() {
   // Make sure we aren't watching a NetLog on destruction.  Because the NetLog
@@ -29,11 +32,36 @@ NetLog* NetLog::ThreadSafeObserver::net_log() const {
   return net_log_;
 }
 
-NetLog::NetLog() : last_id_(0), observer_capture_modes_(0) {}
+NetLog::ThreadSafeCaptureModeObserver::ThreadSafeCaptureModeObserver() =
+    default;
+NetLog::ThreadSafeCaptureModeObserver::~ThreadSafeCaptureModeObserver() =
+    default;
 
-NetLog::~NetLog() {
-  MarkDead();
+NetLogCaptureModeSet
+NetLog::ThreadSafeCaptureModeObserver::GetObserverCaptureModes() const {
+  DCHECK(net_log_);
+  return net_log_->GetObserverCaptureModes();
 }
+
+void NetLog::ThreadSafeCaptureModeObserver::
+    AddEntryAtTimeWithMaterializedParams(NetLogEventType type,
+                                         const NetLogSource& source,
+                                         NetLogEventPhase phase,
+                                         base::TimeTicks time,
+                                         base::Value&& params) {
+  DCHECK(net_log_);
+  net_log_->AddEntryAtTimeWithMaterializedParams(type, source, phase, time,
+                                                 std::move(params));
+}
+
+// static
+NetLog* NetLog::Get() {
+  static base::NoDestructor<NetLog> instance{base::PassKey<NetLog>()};
+  return instance.get();
+}
+
+NetLog::NetLog(base::PassKey<NetLog>) {}
+NetLog::NetLog(base::PassKey<NetLogWithSource>) {}
 
 void NetLog::AddEntry(NetLogEventType type,
                       const NetLogSource& source,
@@ -54,11 +82,6 @@ void NetLog::AddGlobalEntryWithStringParams(NetLogEventType type,
 
 uint32_t NetLog::NextID() {
   return base::subtle::NoBarrier_AtomicIncrement(&last_id_, 1);
-}
-
-bool NetLog::IsCapturing() const {
-  CheckAlive();
-  return GetObserverCaptureModes() != 0;
 }
 
 void NetLog::AddObserver(NetLog::ThreadSafeObserver* observer,
@@ -90,6 +113,33 @@ void NetLog::RemoveObserver(NetLog::ThreadSafeObserver* observer) {
   UpdateObserverCaptureModes();
 }
 
+void NetLog::AddCaptureModeObserver(
+    NetLog::ThreadSafeCaptureModeObserver* observer) {
+  base::AutoLock lock(lock_);
+
+  DCHECK(!observer->net_log_);
+  DCHECK(!HasCaptureModeObserver(observer));
+  DCHECK_LT(capture_mode_observers_.size(), 20u);  // Performance sanity check.
+
+  observer->net_log_ = this;
+  capture_mode_observers_.push_back(observer);
+}
+
+void NetLog::RemoveCaptureModeObserver(
+    NetLog::ThreadSafeCaptureModeObserver* observer) {
+  base::AutoLock lock(lock_);
+
+  DCHECK_EQ(this, observer->net_log_);
+  DCHECK(HasCaptureModeObserver(observer));
+
+  auto it = std::find(capture_mode_observers_.begin(),
+                      capture_mode_observers_.end(), observer);
+  DCHECK(it != capture_mode_observers_.end());
+  capture_mode_observers_.erase(it);
+
+  observer->net_log_ = nullptr;
+}
+
 void NetLog::UpdateObserverCaptureModes() {
   lock_.AssertAcquired();
 
@@ -98,11 +148,20 @@ void NetLog::UpdateObserverCaptureModes() {
     NetLogCaptureModeSetAdd(observer->capture_mode_, &capture_mode_set);
 
   base::subtle::NoBarrier_Store(&observer_capture_modes_, capture_mode_set);
+
+  // Notify any capture mode observers with the new |capture_mode_set|.
+  for (auto* capture_mode_observer : capture_mode_observers_)
+    capture_mode_observer->OnCaptureModeUpdated(capture_mode_set);
 }
 
 bool NetLog::HasObserver(ThreadSafeObserver* observer) {
   lock_.AssertAcquired();
   return base::Contains(observers_, observer);
+}
+
+bool NetLog::HasCaptureModeObserver(ThreadSafeCaptureModeObserver* observer) {
+  lock_.AssertAcquired();
+  return base::Contains(capture_mode_observers_, observer);
 }
 
 // static
@@ -121,26 +180,12 @@ std::string NetLog::TimeToString(const base::Time& time) {
 }
 
 // static
-const char* NetLog::EventTypeToString(NetLogEventType event) {
-  switch (event) {
-#define EVENT_TYPE(label)      \
-  case NetLogEventType::label: \
-    return #label;
-#include "net/log/net_log_event_type_list.h"
-#undef EVENT_TYPE
-    default:
-      NOTREACHED();
-      return nullptr;
-  }
-}
-
-// static
 base::Value NetLog::GetEventTypesAsValue() {
-  base::DictionaryValue dict;
+  base::Value::Dict dict;
   for (int i = 0; i < static_cast<int>(NetLogEventType::COUNT); ++i) {
-    dict.SetInteger(EventTypeToString(static_cast<NetLogEventType>(i)), i);
+    dict.Set(NetLogEventTypeToString(static_cast<NetLogEventType>(i)), i);
   }
-  return std::move(dict);
+  return base::Value(std::move(dict));
 }
 
 // static
@@ -159,11 +204,11 @@ const char* NetLog::SourceTypeToString(NetLogSourceType source) {
 
 // static
 base::Value NetLog::GetSourceTypesAsValue() {
-  base::DictionaryValue dict;
+  base::Value::Dict dict;
   for (int i = 0; i < static_cast<int>(NetLogSourceType::COUNT); ++i) {
-    dict.SetInteger(SourceTypeToString(static_cast<NetLogSourceType>(i)), i);
+    dict.Set(SourceTypeToString(static_cast<NetLogSourceType>(i)), i);
   }
-  return std::move(dict);
+  return base::Value(std::move(dict));
 }
 
 // static
@@ -178,6 +223,13 @@ const char* NetLog::EventPhaseToString(NetLogEventPhase phase) {
   }
   NOTREACHED();
   return nullptr;
+}
+
+void NetLog::InitializeSourceIdPartition() {
+  int32_t old_value = base::subtle::NoBarrier_AtomicExchange(
+      &last_id_, std::numeric_limits<base::subtle::Atomic32>::min());
+  DCHECK_EQ(old_value, 0) << " NetLog::InitializeSourceIdPartition() called "
+                             "after NextID() or called multiple times";
 }
 
 void NetLog::AddEntryInternal(NetLogEventType type,
@@ -203,18 +255,22 @@ void NetLog::AddEntryInternal(NetLogEventType type,
   }
 }
 
-NetLogCaptureModeSet NetLog::GetObserverCaptureModes() const {
-  return base::subtle::NoBarrier_Load(&observer_capture_modes_);
-}
-
 void NetLog::AddEntryWithMaterializedParams(NetLogEventType type,
                                             const NetLogSource& source,
                                             NetLogEventPhase phase,
                                             base::Value&& params) {
-  NetLogEntry entry(type, source, phase, base::TimeTicks::Now(),
-                    std::move(params));
+  AddEntryAtTimeWithMaterializedParams(
+      type, source, phase, base::TimeTicks::Now(), std::move(params));
+}
 
-  // Notify all of the log observers with |capture_mode|.
+void NetLog::AddEntryAtTimeWithMaterializedParams(NetLogEventType type,
+                                                  const NetLogSource& source,
+                                                  NetLogEventPhase phase,
+                                                  base::TimeTicks time,
+                                                  base::Value&& params) {
+  NetLogEntry entry(type, source, phase, time, std::move(params));
+
+  // Notify all of the log observers, regardless of capture mode.
   base::AutoLock lock(lock_);
   for (auto* observer : observers_) {
     observer->OnAddEntry(entry);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,17 @@
 
 #include "build/build_config.h"
 
-#if defined(USE_NSS_CERTS)
-#include <secoidt.h>
-#endif
-
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "crypto/crypto_buildflags.h"
 #include "net/base/net_export.h"
 #include "net/cert/x509_certificate.h"
 
-#if defined(USE_NSS_CERTS) || defined(OS_WIN) || defined(OS_MACOSX) || \
-    defined(OS_FUCHSIA)
+#if BUILDFLAG(USE_NSS_CERTS) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || \
+    BUILDFLAG(IS_FUCHSIA)
 // When not defined, the EVRootCAMetadata singleton is a dumb placeholder
 // implementation that will fail all EV lookup operations.
 #define PLATFORM_USES_CHROMIUM_EV_METADATA
@@ -42,9 +38,7 @@ class Input;
 // extended-validation (EV) certificates.
 class NET_EXPORT_PRIVATE EVRootCAMetadata {
  public:
-#if defined(USE_NSS_CERTS)
-  typedef SECOidTag PolicyOID;
-#elif defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   typedef const char* PolicyOID;
 #else
   // DER-encoded OID value (no tag or length).
@@ -52,6 +46,9 @@ class NET_EXPORT_PRIVATE EVRootCAMetadata {
 #endif
 
   static EVRootCAMetadata* GetInstance();
+
+  EVRootCAMetadata(const EVRootCAMetadata&) = delete;
+  EVRootCAMetadata& operator=(const EVRootCAMetadata&) = delete;
 
   // Returns true if policy_oid is an EV policy OID of some root CA.
   bool IsEVPolicyOID(PolicyOID policy_oid) const;
@@ -90,16 +87,7 @@ class NET_EXPORT_PRIVATE EVRootCAMetadata {
   EVRootCAMetadata();
   ~EVRootCAMetadata();
 
-#if defined(USE_NSS_CERTS)
-  using PolicyOIDMap = std::map<SHA256HashValue, std::vector<PolicyOID>>;
-
-  // RegisterOID registers |policy|, a policy OID in dotted string form, and
-  // writes the memoized form to |*out|. It returns true on success.
-  static bool RegisterOID(const char* policy, PolicyOID* out);
-
-  PolicyOIDMap ev_policy_;
-  std::set<PolicyOID> policy_oids_;
-#elif defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   using ExtraEVCAMap = std::map<SHA256HashValue, std::string>;
 
   // extra_cas_ contains any EV CA metadata that was added at runtime.
@@ -110,8 +98,6 @@ class NET_EXPORT_PRIVATE EVRootCAMetadata {
   PolicyOIDMap ev_policy_;
   std::set<std::string> policy_oids_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(EVRootCAMetadata);
 };
 
 }  // namespace net

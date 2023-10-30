@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/c/system/types.h"
 #include "mojo/public/cpp/system/data_pipe.h"
@@ -27,7 +26,7 @@ void RunResultHandler(Handler f, MojoResult result) {
 
 template <typename Handler>
 SimpleWatcher::ReadyCallback OnReady(Handler f) {
-  return base::Bind(&RunResultHandler<Handler>, f);
+  return base::BindRepeating(&RunResultHandler<Handler>, f);
 }
 
 SimpleWatcher::ReadyCallback NotReached() {
@@ -37,12 +36,14 @@ SimpleWatcher::ReadyCallback NotReached() {
 class SimpleWatcherTest : public testing::Test {
  public:
   SimpleWatcherTest() {}
+
+  SimpleWatcherTest(const SimpleWatcherTest&) = delete;
+  SimpleWatcherTest& operator=(const SimpleWatcherTest&) = delete;
+
   ~SimpleWatcherTest() override {}
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleWatcherTest);
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(SimpleWatcherTest, WatchBasic) {
@@ -84,21 +85,24 @@ TEST_F(SimpleWatcherTest, WatchUnsatisfiable) {
 }
 
 TEST_F(SimpleWatcherTest, WatchFailedPreconditionNoSpam) {
-  DataPipe pipe;
+  ScopedDataPipeProducerHandle producer_handle;
+  ScopedDataPipeConsumerHandle consumer_handle;
+  ASSERT_EQ(CreateDataPipe(nullptr, producer_handle, consumer_handle),
+            MOJO_RESULT_OK);
   bool had_failed_precondition = false;
 
   SimpleWatcher watcher(FROM_HERE, SimpleWatcher::ArmingPolicy::AUTOMATIC);
   MojoResult rc =
-      watcher.Watch(pipe.consumer_handle.get(), MOJO_HANDLE_SIGNAL_READABLE,
+      watcher.Watch(consumer_handle.get(), MOJO_HANDLE_SIGNAL_READABLE,
                     OnReady([&](MojoResult result) {
                       EXPECT_FALSE(had_failed_precondition);
                       switch (result) {
                         case MOJO_RESULT_OK:
                           const void* begin;
                           uint32_t num_bytes;
-                          pipe.consumer_handle->BeginReadData(
+                          consumer_handle->BeginReadData(
                               &begin, &num_bytes, MOJO_READ_DATA_FLAG_NONE);
-                          pipe.consumer_handle->EndReadData(num_bytes);
+                          consumer_handle->EndReadData(num_bytes);
                           break;
                         case MOJO_RESULT_FAILED_PRECONDITION:
                           had_failed_precondition = true;
@@ -108,10 +112,10 @@ TEST_F(SimpleWatcherTest, WatchFailedPreconditionNoSpam) {
   EXPECT_EQ(MOJO_RESULT_OK, rc);
 
   uint32_t size = 5;
-  EXPECT_EQ(MOJO_RESULT_OK, pipe.producer_handle->WriteData(
+  EXPECT_EQ(MOJO_RESULT_OK, producer_handle->WriteData(
                                 "hello", &size, MOJO_WRITE_DATA_FLAG_NONE));
   base::RunLoop().RunUntilIdle();
-  pipe.producer_handle.reset();
+  producer_handle.reset();
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(had_failed_precondition);
 }
@@ -229,7 +233,7 @@ TEST_F(SimpleWatcherTest, UnarmedCancel) {
   base::RunLoop loop;
   EXPECT_EQ(MOJO_RESULT_OK,
             b_watcher.Watch(b.get(), MOJO_HANDLE_SIGNAL_READABLE,
-                            base::Bind(
+                            base::BindRepeating(
                                 [](base::RunLoop* loop, MojoResult result) {
                                   EXPECT_EQ(result, MOJO_RESULT_CANCELLED);
                                   loop->Quit();
@@ -253,7 +257,7 @@ TEST_F(SimpleWatcherTest, ManualArming) {
   base::RunLoop loop;
   EXPECT_EQ(MOJO_RESULT_OK,
             b_watcher.Watch(b.get(), MOJO_HANDLE_SIGNAL_READABLE,
-                            base::Bind(
+                            base::BindRepeating(
                                 [](base::RunLoop* loop, MojoResult result) {
                                   EXPECT_EQ(result, MOJO_RESULT_OK);
                                   loop->Quit();
@@ -276,7 +280,7 @@ TEST_F(SimpleWatcherTest, ManualArmOrNotifyWhileSignaled) {
   EXPECT_EQ(MOJO_RESULT_OK,
             b_watcher1.Watch(
                 b.get(), MOJO_HANDLE_SIGNAL_READABLE,
-                base::Bind(
+                base::BindRepeating(
                     [](base::RunLoop* loop, bool* notified, MojoResult result) {
                       EXPECT_EQ(result, MOJO_RESULT_OK);
                       *notified = true;
@@ -290,7 +294,7 @@ TEST_F(SimpleWatcherTest, ManualArmOrNotifyWhileSignaled) {
   EXPECT_EQ(MOJO_RESULT_OK,
             b_watcher2.Watch(
                 b.get(), MOJO_HANDLE_SIGNAL_READABLE,
-                base::Bind(
+                base::BindRepeating(
                     [](base::RunLoop* loop, bool* notified, MojoResult result) {
                       EXPECT_EQ(result, MOJO_RESULT_OK);
                       *notified = true;

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,13 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/feature_list.h"
-#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
@@ -30,7 +29,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/application_status_listener.h"
 #endif
 
@@ -45,8 +44,6 @@ class BackendCleanupTracker;
 class SimpleIndexDelegate;
 class SimpleIndexFile;
 struct SimpleIndexLoadResult;
-
-NET_EXPORT_PRIVATE extern const base::Feature kSimpleCacheEvictionWithSize;
 
 class NET_EXPORT_PRIVATE EntryMetadata {
  public:
@@ -80,7 +77,7 @@ class NET_EXPORT_PRIVATE EntryMetadata {
                    bool app_cache_has_trailer_prefetch_size);
 
   static base::TimeDelta GetLowerEpsilonForTimeComparisons() {
-    return base::TimeDelta::FromSeconds(1);
+    return base::Seconds(1);
   }
   static base::TimeDelta GetUpperEpsilonForTimeComparisons() {
     return base::TimeDelta();
@@ -185,7 +182,8 @@ class NET_EXPORT_PRIVATE SimpleIndex
                              const EntryMetadata& entry_metadata);
 
   // Executes the |callback| when the index is ready. Allows multiple callbacks.
-  net::Error ExecuteWhenReady(net::CompletionOnceCallback callback);
+  // Never synchronous.
+  void ExecuteWhenReady(net::CompletionOnceCallback callback);
 
   // Returns entries from the index that have last accessed time matching the
   // range between |initial_time| and |end_time| where open intervals are
@@ -219,14 +217,11 @@ class NET_EXPORT_PRIVATE SimpleIndex
 
   IndexInitMethod init_method() const { return init_method_; }
 
-  // Returns the estimate of dynamically allocated memory in bytes.
-  size_t EstimateMemoryUsage() const;
-
   // Returns base::Time() if hash not known.
   base::Time GetLastUsedTime(uint64_t entry_hash);
   void SetLastUsedTimeForTest(uint64_t entry_hash, const base::Time last_used);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void set_app_status_listener(
       base::android::ApplicationStatusListener* app_status_listener) {
     app_status_listener_ = app_status_listener;
@@ -244,6 +239,8 @@ class NET_EXPORT_PRIVATE SimpleIndex
   FRIEND_TEST_ALL_PREFIXES(SimpleIndexTest, DiskWriteExecuted);
   FRIEND_TEST_ALL_PREFIXES(SimpleIndexTest, DiskWritePostponed);
   FRIEND_TEST_ALL_PREFIXES(SimpleIndexAppCacheTest, DiskWriteQueued);
+  FRIEND_TEST_ALL_PREFIXES(SimpleIndexCodeCacheTest, DisableEvictBySize);
+  FRIEND_TEST_ALL_PREFIXES(SimpleIndexCodeCacheTest, EnableEvictBySize);
 
   void StartEvictionIfNeeded();
   void EvictionDone(int result);
@@ -258,18 +255,19 @@ class NET_EXPORT_PRIVATE SimpleIndex
   // Must run on IO Thread.
   void MergeInitializingSet(std::unique_ptr<SimpleIndexLoadResult> load_result);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void OnApplicationStateChange(base::android::ApplicationState state);
 
   std::unique_ptr<base::android::ApplicationStatusListener>
       owned_app_status_listener_;
-  base::android::ApplicationStatusListener* app_status_listener_ = nullptr;
+  raw_ptr<base::android::ApplicationStatusListener> app_status_listener_ =
+      nullptr;
 #endif
 
   scoped_refptr<BackendCleanupTracker> cleanup_tracker_;
 
   // The owner of |this| must ensure the |delegate_| outlives |this|.
-  SimpleIndexDelegate* delegate_;
+  raw_ptr<SimpleIndexDelegate> delegate_;
 
   EntrySet entries_set_;
 
@@ -296,13 +294,8 @@ class NET_EXPORT_PRIVATE SimpleIndex
   // enforces this.
   SEQUENCE_CHECKER(sequence_checker_);
 
-  // Timestamp of the last time we wrote the index to disk.
-  // PostponeWritingToDisk() may give up postponing and allow the write if it
-  // has been a while since last time we wrote.
-  base::TimeTicks last_write_to_disk_;
-
   base::OneShotTimer write_to_disk_timer_;
-  base::Closure write_to_disk_cb_;
+  base::RepeatingClosure write_to_disk_cb_;
 
   typedef std::list<net::CompletionOnceCallback> CallbackList;
   CallbackList to_run_when_initialized_;

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/mac/mach_logging.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_executor.h"
 #include "mojo/core/channel.h"
@@ -25,12 +26,12 @@ class ChannelMacFuzzer {
     logging::SetMinLogLevel(logging::LOG_FATAL);
   }
 
-  scoped_refptr<base::TaskRunner> io_task_runner() {
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner() {
     return io_task_executor_.task_runner();
   }
 
  private:
-  base::SingleThreadTaskExecutor io_task_executor_{base::MessagePump::Type::IO};
+  base::SingleThreadTaskExecutor io_task_executor_{base::MessagePumpType::IO};
 };
 
 class FakeChannelDelegate : public mojo::core::Channel::Delegate {

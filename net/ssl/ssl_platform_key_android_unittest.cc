@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "net/ssl/ssl_private_key_test_util.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
@@ -75,7 +75,7 @@ std::string TestKeyToString(const testing::TestParamInfo<TestKey>& params) {
 }  // namespace
 
 class SSLPlatformKeyAndroidTest : public testing::TestWithParam<TestKey>,
-                                  public WithScopedTaskEnvironment {};
+                                  public WithTaskEnvironment {};
 
 TEST_P(SSLPlatformKeyAndroidTest, Matches) {
   const TestKey& test_key = GetParam();
@@ -100,7 +100,7 @@ TEST_P(SSLPlatformKeyAndroidTest, Matches) {
   TestSSLPrivateKeyMatches(key.get(), key_bytes);
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          SSLPlatformKeyAndroidTest,
                          testing::ValuesIn(kTestKeys),
                          TestKeyToString);

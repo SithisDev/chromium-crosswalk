@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 
 namespace mojo {
 
@@ -34,6 +34,10 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) GenericPendingReceiver {
       : GenericPendingReceiver(Interface::Name_, receiver.PassPipe()) {}
 
   GenericPendingReceiver(GenericPendingReceiver&&);
+
+  GenericPendingReceiver(const GenericPendingReceiver&) = delete;
+  GenericPendingReceiver& operator=(const GenericPendingReceiver&) = delete;
+
   ~GenericPendingReceiver();
 
   GenericPendingReceiver& operator=(GenericPendingReceiver&&);
@@ -41,7 +45,9 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) GenericPendingReceiver {
   bool is_valid() const { return pipe_.is_valid(); }
   explicit operator bool() const { return is_valid(); }
 
-  const base::Optional<std::string>& interface_name() const {
+  void reset();
+
+  const absl::optional<std::string>& interface_name() const {
     return interface_name_;
   }
 
@@ -58,13 +64,13 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) GenericPendingReceiver {
     return mojo::PendingReceiver<Interface>(PassPipeIfNameIs(Interface::Name_));
   }
 
+  void WriteIntoTrace(perfetto::TracedValue ctx) const;
+
  private:
   mojo::ScopedMessagePipeHandle PassPipeIfNameIs(const char* interface_name);
 
-  base::Optional<std::string> interface_name_;
+  absl::optional<std::string> interface_name_;
   mojo::ScopedMessagePipeHandle pipe_;
-
-  DISALLOW_COPY_AND_ASSIGN(GenericPendingReceiver);
 };
 
 }  // namespace mojo

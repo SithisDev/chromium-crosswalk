@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,33 +11,16 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/test_timeouts.h"
-#include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/win/scoped_handle.h"
 #include "net/test/python_utils.h"
 
 namespace {
-
-// Writes |size| bytes to |handle| and sets |*unblocked| to true.
-// Used as a crude timeout mechanism by ReadData().
-void UnblockPipe(HANDLE handle, DWORD size, bool* unblocked) {
-  std::string unblock_data(size, '\0');
-  // Unblock the ReadFile in LocalTestServer::WaitToStart by writing to the
-  // pipe. Make sure the call succeeded, otherwise we are very likely to hang.
-  DWORD bytes_written = 0;
-  LOG(WARNING) << "Timeout reached; unblocking pipe by writing "
-               << size << " bytes";
-  CHECK(WriteFile(handle, unblock_data.data(), size, &bytes_written, nullptr));
-  CHECK_EQ(size, bytes_written);
-  *unblocked = true;
-}
 
 // Given a file handle, reads into |buffer| until |bytes_max| bytes
 // has been read or an error has been encountered.  Returns
@@ -46,16 +29,6 @@ bool ReadData(HANDLE read_fd,
               HANDLE write_fd,
               DWORD bytes_max,
               uint8_t* buffer) {
-  base::Thread thread("test_server_watcher");
-  if (!thread.Start())
-    return false;
-
-  // Prepare a timeout in case the server fails to start.
-  bool unblocked = false;
-  thread.task_runner()->PostDelayedTask(
-      FROM_HERE, base::BindOnce(UnblockPipe, write_fd, bytes_max, &unblocked),
-      TestTimeouts::action_max_timeout());
-
   DWORD bytes_read = 0;
   while (bytes_read < bytes_max) {
     DWORD num_bytes;
@@ -71,15 +44,6 @@ bool ReadData(HANDLE read_fd,
     bytes_read += num_bytes;
   }
 
-  base::ScopedAllowBaseSyncPrimitivesForTesting allow_thread_join;
-  thread.Stop();
-
-  // If the timeout kicked in, abort.
-  if (unblocked) {
-    LOG(ERROR) << "Timeout exceeded for ReadData";
-    return false;
-  }
-
   return true;
 }
 
@@ -91,7 +55,7 @@ bool LocalTestServer::LaunchPython(
     const base::FilePath& testserver_path,
     const std::vector<base::FilePath>& python_path) {
   base::CommandLine python_command(base::CommandLine::NO_PROGRAM);
-  if (!GetPythonCommand(&python_command))
+  if (!GetPython3Command(&python_command))
     return false;
 
   python_command.AppendArgPath(testserver_path);

@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,10 +10,7 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.dirname(SCRIPT_DIR)
 CHROME_SRC = os.path.dirname(os.path.dirname(os.path.dirname(TOOLS_DIR)))
-MOCK_DIR = os.path.join(CHROME_SRC, 'third_party', 'pymock')
 
-# For the mock library
-sys.path.append(MOCK_DIR)
 import mock
 
 # For nacl_config, the module under test

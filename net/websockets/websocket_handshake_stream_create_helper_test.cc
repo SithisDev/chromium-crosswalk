@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
@@ -18,6 +16,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/base/proxy_server.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
@@ -38,15 +37,18 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/test/test_with_scoped_task_environment.h"
+#include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/websockets/websocket_basic_handshake_stream.h"
 #include "net/websockets/websocket_stream.h"
 #include "net/websockets/websocket_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/scheme_host_port.h"
+#include "url/url_constants.h"
 
 using ::net::test::IsError;
 using ::net::test::IsOk;
@@ -81,6 +83,10 @@ class MockClientSocketHandleFactory {
             nullptr /* websocket_endpoint_lock_manager */),
         pool_(1, 1, &common_connect_job_params_) {}
 
+  MockClientSocketHandleFactory(const MockClientSocketHandleFactory&) = delete;
+  MockClientSocketHandleFactory& operator=(
+      const MockClientSocketHandleFactory&) = delete;
+
   // The created socket expects |expect_written| to be written to the socket,
   // and will respond with |return_to_read|. The test will fail if the expected
   // text is not written, or if all the bytes are not read.
@@ -90,11 +96,12 @@ class MockClientSocketHandleFactory {
     socket_factory_maker_.SetExpectations(expect_written, return_to_read);
     auto socket_handle = std::make_unique<ClientSocketHandle>();
     socket_handle->Init(
-        ClientSocketPool::GroupId(HostPortPair("a", 80),
-                                  ClientSocketPool::SocketType::kHttp,
-                                  PrivacyMode::PRIVACY_MODE_DISABLED),
+        ClientSocketPool::GroupId(
+            url::SchemeHostPort(url::kHttpScheme, "a", 80),
+            PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
+            SecureDnsPolicy::kAllow),
         scoped_refptr<ClientSocketPool::SocketParams>(),
-        base::nullopt /* proxy_annotation_tag */, MEDIUM, SocketTag(),
+        absl::nullopt /* proxy_annotation_tag */, MEDIUM, SocketTag(),
         ClientSocketPool::RespectLimits::ENABLED, CompletionOnceCallback(),
         ClientSocketPool::ProxyAuthCallback(), &pool_, NetLogWithSource());
     return socket_handle;
@@ -104,8 +111,6 @@ class MockClientSocketHandleFactory {
   WebSocketMockClientSocketFactoryMaker socket_factory_maker_;
   const CommonConnectJobParams common_connect_job_params_;
   MockTransportClientSocketPool pool_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockClientSocketHandleFactory);
 };
 
 class TestConnectDelegate : public WebSocketStream::ConnectDelegate {
@@ -113,12 +118,14 @@ class TestConnectDelegate : public WebSocketStream::ConnectDelegate {
   ~TestConnectDelegate() override = default;
 
   void OnCreateRequest(URLRequest* request) override {}
-  void OnSuccess(std::unique_ptr<WebSocketStream> stream) override {}
-  void OnFailure(const std::string& failure_message) override {}
+  void OnSuccess(
+      std::unique_ptr<WebSocketStream> stream,
+      std::unique_ptr<WebSocketHandshakeResponseInfo> response) override {}
+  void OnFailure(const std::string& failure_message,
+                 int net_error,
+                 absl::optional<int> response_code) override {}
   void OnStartOpeningHandshake(
       std::unique_ptr<WebSocketHandshakeRequestInfo> request) override {}
-  void OnFinishOpeningHandshake(
-      std::unique_ptr<WebSocketHandshakeResponseInfo> response) override {}
   void OnSSLCertificateError(
       std::unique_ptr<WebSocketEventInterface::SSLErrorCallbacks>
           ssl_error_callbacks,
@@ -129,8 +136,8 @@ class TestConnectDelegate : public WebSocketStream::ConnectDelegate {
                      scoped_refptr<HttpResponseHeaders> response_headers,
                      const IPEndPoint& host_port_pair,
                      base::OnceCallback<void(const AuthCredentials*)> callback,
-                     base::Optional<AuthCredentials>* credentials) override {
-    *credentials = base::nullopt;
+                     absl::optional<AuthCredentials>* credentials) override {
+    *credentials = absl::nullopt;
     return OK;
   }
 };
@@ -143,12 +150,15 @@ class MockWebSocketStreamRequestAPI : public WebSocketStreamRequestAPI {
                void(WebSocketBasicHandshakeStream* handshake_stream));
   MOCK_METHOD1(OnHttp2HandshakeStreamCreated,
                void(WebSocketHttp2HandshakeStream* handshake_stream));
-  MOCK_METHOD1(OnFailure, void(const std::string& message));
+  MOCK_METHOD3(OnFailure,
+               void(const std::string& message,
+                    int net_error,
+                    absl::optional<int> response_code));
 };
 
 class WebSocketHandshakeStreamCreateHelperTest
     : public TestWithParam<HandshakeStreamType>,
-      public WithScopedTaskEnvironment {
+      public WithTaskEnvironment {
  protected:
   std::unique_ptr<WebSocketStream> CreateAndInitializeStream(
       const std::vector<std::string>& sub_protocols,
@@ -175,7 +185,7 @@ class WebSocketHandshakeStreamCreateHelperTest
         NOTREACHED();
     }
 
-    EXPECT_CALL(stream_request_, OnFailure(_)).Times(0);
+    EXPECT_CALL(stream_request_, OnFailure(_, _, _)).Times(0);
 
     HttpRequestInfo request_info;
     request_info.url = url;
@@ -190,10 +200,10 @@ class WebSocketHandshakeStreamCreateHelperTest
       case BASIC_HANDSHAKE_STREAM: {
         std::unique_ptr<ClientSocketHandle> socket_handle =
             socket_handle_factory_.CreateClientSocketHandle(
-                WebSocketStandardRequest(
-                    kPath, "www.example.org",
-                    url::Origin::Create(GURL(kOrigin)), "",
-                    WebSocketExtraHeadersToString(extra_request_headers)),
+                WebSocketStandardRequest(kPath, "www.example.org",
+                                         url::Origin::Create(GURL(kOrigin)),
+                                         /*send_additional_request_headers=*/{},
+                                         extra_request_headers),
                 WebSocketStandardResponse(
                     WebSocketExtraHeadersToString(extra_response_headers)));
 
@@ -207,9 +217,9 @@ class WebSocketHandshakeStreamCreateHelperTest
         static_cast<WebSocketBasicHandshakeStream*>(handshake.get())
             ->SetWebSocketKeyForTesting("dGhlIHNhbXBsZSBub25jZQ==");
 
-        int rv =
-            handshake->InitializeStream(&request_info, true, DEFAULT_PRIORITY,
-                                        net_log, CompletionOnceCallback());
+        handshake->RegisterRequest(&request_info);
+        int rv = handshake->InitializeStream(true, DEFAULT_PRIORITY, net_log,
+                                             CompletionOnceCallback());
         EXPECT_THAT(rv, IsOk());
 
         HttpResponseInfo response;
@@ -228,14 +238,14 @@ class WebSocketHandshakeStreamCreateHelperTest
       }
       case HTTP2_HANDSHAKE_STREAM: {
         SpdyTestUtil spdy_util;
-        spdy::SpdyHeaderBlock request_header_block = WebSocketHttp2Request(
+        spdy::Http2HeaderBlock request_header_block = WebSocketHttp2Request(
             kPath, "www.example.org", kOrigin, extra_request_headers);
         spdy::SpdySerializedFrame request_headers(
             spdy_util.ConstructSpdyHeaders(1, std::move(request_header_block),
                                            DEFAULT_PRIORITY, false));
         MockWrite writes[] = {CreateMockWrite(request_headers, 0)};
 
-        spdy::SpdyHeaderBlock response_header_block =
+        spdy::Http2HeaderBlock response_header_block =
             WebSocketHttp2Response(extra_response_headers);
         spdy::SpdySerializedFrame response_headers(
             spdy_util.ConstructSpdyResponseHeaders(
@@ -255,18 +265,19 @@ class WebSocketHandshakeStreamCreateHelperTest
 
         std::unique_ptr<HttpNetworkSession> http_network_session =
             SpdySessionDependencies::SpdyCreateSession(&session_deps);
-        const SpdySessionKey key(HostPortPair::FromURL(url),
-                                 ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
-                                 SpdySessionKey::IsProxySession::kFalse,
-                                 SocketTag());
+        const SpdySessionKey key(
+            HostPortPair::FromURL(url), ProxyServer::Direct(),
+            PRIVACY_MODE_DISABLED, SpdySessionKey::IsProxySession::kFalse,
+            SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
         base::WeakPtr<SpdySession> spdy_session =
             CreateSpdySession(http_network_session.get(), key, net_log);
         std::unique_ptr<WebSocketHandshakeStreamBase> handshake =
-            create_helper.CreateHttp2Stream(spdy_session);
+            create_helper.CreateHttp2Stream(spdy_session, {} /* dns_aliases */);
 
-        int rv = handshake->InitializeStream(
-            &request_info, true, DEFAULT_PRIORITY, NetLogWithSource(),
-            CompletionOnceCallback());
+        handshake->RegisterRequest(&request_info);
+        int rv = handshake->InitializeStream(true, DEFAULT_PRIORITY,
+                                             NetLogWithSource(),
+                                             CompletionOnceCallback());
         EXPECT_THAT(rv, IsOk());
 
         HttpResponseInfo response;
@@ -299,7 +310,7 @@ class WebSocketHandshakeStreamCreateHelperTest
   WebSocketEndpointLockManager websocket_endpoint_lock_manager_;
 };
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebSocketHandshakeStreamCreateHelperTest,
                          Values(BASIC_HANDSHAKE_STREAM,
                                 HTTP2_HANDSHAKE_STREAM));

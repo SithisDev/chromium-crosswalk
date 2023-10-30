@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ namespace {
 
 bool BlockingCopyHelper(
     ScopedDataPipeConsumerHandle source,
-    const base::Callback<size_t(const void*, uint32_t)>& write_bytes) {
+    base::RepeatingCallback<size_t(const void*, uint32_t)> write_bytes) {
   for (;;) {
     const void* buffer;
     uint32_t num_bytes;
@@ -58,7 +58,7 @@ bool BlockingCopyToString(ScopedDataPipeConsumerHandle source,
   CHECK(result);
   result->clear();
   return BlockingCopyHelper(std::move(source),
-                            base::Bind(&CopyToStringHelper, result));
+                            base::BindRepeating(&CopyToStringHelper, result));
 }
 
 bool MOJO_CPP_SYSTEM_EXPORT
@@ -67,7 +67,7 @@ BlockingCopyFromString(const std::string& source,
   auto it = source.begin();
   for (;;) {
     void* buffer = nullptr;
-    uint32_t buffer_num_bytes = 0;
+    uint32_t buffer_num_bytes = static_cast<uint32_t>(source.end() - it);
     MojoResult result = destination->BeginWriteData(&buffer, &buffer_num_bytes,
                                                     MOJO_WRITE_DATA_FLAG_NONE);
     if (result == MOJO_RESULT_OK) {

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include <utility>
 
-#include "base/logging.h"
-#include "pdf/document_loader.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
+#include "pdf/loader/document_loader.h"
 
 namespace chrome_pdf {
 
@@ -30,7 +31,7 @@ class FileAvail : public FX_FILEAVAIL {
     return file_avail->doc_loader_->IsDataAvailable(offset, size);
   }
 
-  DocumentLoader* doc_loader_;
+  raw_ptr<DocumentLoader> doc_loader_;
 };
 
 class DownloadHints : public FX_DOWNLOADHINTS {
@@ -50,7 +51,7 @@ class DownloadHints : public FX_DOWNLOADHINTS {
     return download_hints->doc_loader_->RequestData(offset, size);
   }
 
-  DocumentLoader* doc_loader_;
+  raw_ptr<DocumentLoader> doc_loader_;
 };
 
 class FileAccess : public FPDF_FILEACCESS {
@@ -72,7 +73,7 @@ class FileAccess : public FPDF_FILEACCESS {
     return file_access->doc_loader_->GetBlock(position, size, buffer);
   }
 
-  DocumentLoader* doc_loader_;
+  raw_ptr<DocumentLoader> doc_loader_;
 };
 
 }  // namespace

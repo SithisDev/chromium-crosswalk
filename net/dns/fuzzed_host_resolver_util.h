@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,11 @@ class NetLog;
 // return. It inherits from ContextHostResolver, unlike MockHostResolver, so
 // more closely matches real behavior.
 //
-// By default uses a mocked out system resolver, though can be configured (using
-// SetDnsClientEnabled() on the underlying manager) to use the built-in async
-// resolver (Built in DNS stub resolver) with a fuzzed set of UDP/TCP sockets.
+// By default uses a mocked out system resolver, though can be configured to use
+// the built-in async resolver (Built in DNS stub resolver) with a fuzzed set
+// of UDP/TCP sockets by setting ManagerOptions.insecure_dns_client_enabled to
+// true or calling SetInsecureDnsClientEnabled on the underlying
+// HostResolverManager.
 //
 // To make behavior most deterministic, does not use the WorkerPool to run its
 // simulated platform host resolver calls, instead runs them on the thread it is

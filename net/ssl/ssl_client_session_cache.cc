@@ -1,45 +1,56 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/ssl/ssl_client_session_cache.h"
 
+#include <tuple>
 #include <utility>
 
 #include "base/containers/flat_set.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
-#include "base/trace_event/process_memory_dump.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace net {
 
 namespace {
 
-bool IsTLS13(const SSL_SESSION* session) {
-  return SSL_SESSION_get_protocol_version(session) >= TLS1_3_VERSION;
+// Returns a tuple of references to fields of |key|, for comparison purposes.
+auto TieKeyFields(const SSLClientSessionCache::Key& key) {
+  return std::tie(key.server, key.dest_ip_addr, key.network_anonymization_key,
+                  key.privacy_mode, key.disable_legacy_crypto);
 }
 
 }  // namespace
 
+SSLClientSessionCache::Key::Key() = default;
+SSLClientSessionCache::Key::Key(const Key& other) = default;
+SSLClientSessionCache::Key::Key(Key&& other) = default;
+SSLClientSessionCache::Key::~Key() = default;
+SSLClientSessionCache::Key& SSLClientSessionCache::Key::operator=(
+    const Key& other) = default;
+SSLClientSessionCache::Key& SSLClientSessionCache::Key::operator=(Key&& other) =
+    default;
+
+bool SSLClientSessionCache::Key::operator==(const Key& other) const {
+  return TieKeyFields(*this) == TieKeyFields(other);
+}
+
+bool SSLClientSessionCache::Key::operator<(const Key& other) const {
+  return TieKeyFields(*this) < TieKeyFields(other);
+}
+
 SSLClientSessionCache::SSLClientSessionCache(const Config& config)
     : clock_(base::DefaultClock::GetInstance()),
       config_(config),
-      cache_(config.max_entries),
-      lookups_since_flush_(0) {
-  memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
-      &SSLClientSessionCache::OnMemoryPressure, base::Unretained(this))));
-  CertDatabase::GetInstance()->AddObserver(this);
+      cache_(config.max_entries) {
+  memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
+      FROM_HERE, base::BindRepeating(&SSLClientSessionCache::OnMemoryPressure,
+                                     base::Unretained(this)));
 }
 
 SSLClientSessionCache::~SSLClientSessionCache() {
-  CertDatabase::GetInstance()->RemoveObserver(this);
-  Flush();
-}
-
-void SSLClientSessionCache::OnCertDBChanged() {
   Flush();
 }
 
@@ -48,7 +59,7 @@ size_t SSLClientSessionCache::size() const {
 }
 
 bssl::UniquePtr<SSL_SESSION> SSLClientSessionCache::Lookup(
-    const std::string& cache_key) {
+    const Key& cache_key) {
   // Expire stale sessions.
   lookups_since_flush_++;
   if (lookups_since_flush_ >= config_.expiration_check_count) {
@@ -68,31 +79,37 @@ bssl::UniquePtr<SSL_SESSION> SSLClientSessionCache::Lookup(
   if (IsExpired(session.get(), now))
     session = nullptr;
 
-  if (session != nullptr && IsTLS13(session.get())) {
-    base::Time session_created =
-        base::Time::FromTimeT(SSL_SESSION_get_time(session.get()));
-    base::TimeDelta time_to_use = clock_->Now() - session_created;
-    UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSLTLS13SessionTimeToUse", time_to_use,
-                               base::TimeDelta::FromMinutes(1),
-                               base::TimeDelta::FromDays(7), 50);
-  }
   return session;
 }
 
-void SSLClientSessionCache::Insert(const std::string& cache_key,
+void SSLClientSessionCache::Insert(const Key& cache_key,
                                    bssl::UniquePtr<SSL_SESSION> session) {
-  if (IsTLS13(session.get())) {
-    base::TimeDelta lifetime =
-        base::TimeDelta::FromSeconds(SSL_SESSION_get_timeout(session.get()));
-    UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSLTLS13SessionLifetime", lifetime,
-                               base::TimeDelta::FromMinutes(1),
-                               base::TimeDelta::FromDays(7), 50);
-  }
-
   auto iter = cache_.Get(cache_key);
   if (iter == cache_.end())
     iter = cache_.Put(cache_key, Entry());
   iter->second.Push(std::move(session));
+}
+
+void SSLClientSessionCache::ClearEarlyData(const Key& cache_key) {
+  auto iter = cache_.Get(cache_key);
+  if (iter != cache_.end()) {
+    for (auto& session : iter->second.sessions) {
+      if (session) {
+        session.reset(SSL_SESSION_copy_without_early_data(session.get()));
+      }
+    }
+  }
+}
+
+void SSLClientSessionCache::FlushForServer(const HostPortPair& server) {
+  auto iter = cache_.begin();
+  while (iter != cache_.end()) {
+    if (iter->first.server == server) {
+      iter = cache_.Erase(iter);
+    } else {
+      ++iter;
+    }
+  }
 }
 
 void SSLClientSessionCache::Flush() {
@@ -114,59 +131,6 @@ bool SSLClientSessionCache::IsExpired(SSL_SESSION* session, time_t now) {
   return now_u64 < SSL_SESSION_get_time(session) - 1 ||
          now_u64 >=
              SSL_SESSION_get_time(session) + SSL_SESSION_get_timeout(session);
-}
-
-void SSLClientSessionCache::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_absolute_name) const {
-  std::string name = parent_absolute_name + "/ssl_client_session_cache";
-  base::trace_event::MemoryAllocatorDump* cache_dump =
-      pmd->CreateAllocatorDump(name);
-  size_t cert_size = 0;
-  size_t cert_count = 0;
-  size_t undeduped_cert_size = 0;
-  size_t undeduped_cert_count = 0;
-  for (const auto& pair : cache_) {
-    for (const auto& session : pair.second.sessions) {
-      if (!session)
-        continue;
-      undeduped_cert_count += sk_CRYPTO_BUFFER_num(
-          SSL_SESSION_get0_peer_certificates(session.get()));
-    }
-  }
-  // Use a flat_set here to avoid malloc upon insertion.
-  base::flat_set<const CRYPTO_BUFFER*> crypto_buffer_set;
-  crypto_buffer_set.reserve(undeduped_cert_count);
-  for (const auto& pair : cache_) {
-    for (const auto& session : pair.second.sessions) {
-      if (!session)
-        continue;
-      for (const CRYPTO_BUFFER* cert :
-           SSL_SESSION_get0_peer_certificates(session.get())) {
-        undeduped_cert_size += CRYPTO_BUFFER_len(cert);
-        auto result = crypto_buffer_set.insert(cert);
-        if (!result.second)
-          continue;
-        cert_size += CRYPTO_BUFFER_len(cert);
-        cert_count++;
-      }
-    }
-  }
-  cache_dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
-                        base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-                        cert_size);
-  cache_dump->AddScalar("cert_size",
-                        base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-                        cert_size);
-  cache_dump->AddScalar("cert_count",
-                        base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                        cert_count);
-  cache_dump->AddScalar("undeduped_cert_size",
-                        base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-                        undeduped_cert_size);
-  cache_dump->AddScalar("undeduped_cert_count",
-                        base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                        undeduped_cert_count);
 }
 
 SSLClientSessionCache::Entry::Entry() = default;

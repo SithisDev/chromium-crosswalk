@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,12 @@
 #include "net/base/completion_once_callback.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/net_export.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/host_resolver.h"
+#include "net/log/net_log_with_source.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
 
 namespace net {
 
@@ -27,6 +31,8 @@ class NET_EXPORT MappedHostResolver : public HostResolver {
   // |impl|.
   explicit MappedHostResolver(std::unique_ptr<HostResolver> impl);
   ~MappedHostResolver() override;
+
+  void OnShutdown() override;
 
   // Adds a rule to this mapper. The format of the rule can be one of:
   //
@@ -49,18 +55,23 @@ class NET_EXPORT MappedHostResolver : public HostResolver {
 
   // HostResolver methods:
   std::unique_ptr<ResolveHostRequest> CreateRequest(
+      url::SchemeHostPort host,
+      NetworkAnonymizationKey network_anonymization_key,
+      NetLogWithSource net_log,
+      absl::optional<ResolveHostParameters> optional_parameters) override;
+  std::unique_ptr<ResolveHostRequest> CreateRequest(
       const HostPortPair& host,
+      const NetworkAnonymizationKey& network_anonymization_key,
       const NetLogWithSource& net_log,
-      const base::Optional<ResolveHostParameters>& optional_parameters)
+      const absl::optional<ResolveHostParameters>& optional_parameters)
       override;
+  std::unique_ptr<ProbeRequest> CreateDohProbeRequest() override;
   HostCache* GetHostCache() override;
-  std::unique_ptr<base::Value> GetDnsConfigAsValue() const override;
+  base::Value GetDnsConfigAsValue() const override;
   void SetRequestContext(URLRequestContext* request_context) override;
   HostResolverManager* GetManagerForTesting() override;
 
  private:
-  class AlwaysErrorRequestImpl;
-
   std::unique_ptr<HostResolver> impl_;
 
   HostMappingRules rules_;

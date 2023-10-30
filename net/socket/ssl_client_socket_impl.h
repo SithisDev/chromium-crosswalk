@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,16 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/mru_cache.h"
-#include "base/macros.h"
+#include "base/containers/lru_cache.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_result.h"
-#include "net/cert/ct_verify_result.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_bio_adapter.h"
@@ -30,8 +30,10 @@
 #include "net/socket/stream_socket.h"
 #include "net/ssl/openssl_ssl_util.h"
 #include "net/ssl/ssl_client_cert_type.h"
+#include "net/ssl/ssl_client_session_cache.h"
 #include "net/ssl/ssl_config.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
@@ -43,7 +45,9 @@ namespace net {
 
 class SSLCertRequestInfo;
 class SSLInfo;
+class SSLPrivateKey;
 class SSLKeyLogger;
+class X509Certificate;
 
 class SSLClientSocketImpl : public SSLClientSocket,
                             public SocketBIOAdapter::Delegate {
@@ -56,6 +60,10 @@ class SSLClientSocketImpl : public SSLClientSocket,
                       std::unique_ptr<StreamSocket> stream_socket,
                       const HostPortPair& host_and_port,
                       const SSLConfig& ssl_config);
+
+  SSLClientSocketImpl(const SSLClientSocketImpl&) = delete;
+  SSLClientSocketImpl& operator=(const SSLClientSocketImpl&) = delete;
+
   ~SSLClientSocketImpl() override;
 
   const HostPortPair& host_and_port() const { return host_and_port_; }
@@ -63,6 +71,9 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // Log SSL key material to |logger|. Must be called before any
   // SSLClientSockets are created.
   static void SetSSLKeyLogger(std::unique_ptr<SSLKeyLogger> logger);
+
+  // SSLClientSocket implementation.
+  std::vector<uint8_t> GetECHRetryConfigs() override;
 
   // SSLSocket implementation.
   int ExportKeyingMaterial(const base::StringPiece& label,
@@ -83,12 +94,9 @@ class SSLClientSocketImpl : public SSLClientSocket,
   bool WasEverUsed() const override;
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
+  absl::optional<base::StringPiece> GetPeerApplicationSettings() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
-  void DumpMemoryStats(SocketMemoryStats* stats) const override;
   void GetSSLCertRequestInfo(
       SSLCertRequestInfo* cert_request_info) const override;
 
@@ -133,6 +141,7 @@ class SSLClientSocketImpl : public SSLClientSocket,
   int DoHandshakeLoop(int last_io_result);
   int DoPayloadRead(IOBuffer* buf, int buf_len);
   int DoPayloadWrite();
+  void DoPeek();
 
   // Called when an asynchronous event completes which may have blocked the
   // pending Connect, Read or Write calls, if any. Retries all state machines
@@ -145,7 +154,7 @@ class SSLClientSocketImpl : public SSLClientSocket,
   static ssl_verify_result_t VerifyCertCallback(SSL* ssl, uint8_t* out_alert);
   ssl_verify_result_t VerifyCert();
   ssl_verify_result_t HandleVerifyResult();
-  int VerifyCT();
+  int CheckCTCompliance();
 
   // Callback from the SSL layer that indicates the remote server is requesting
   // a certificate for this client.
@@ -154,16 +163,9 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // Called from the SSL layer whenever a new session is established.
   int NewSessionCallback(SSL_SESSION* session);
 
-  // Adds the Certificate Transparency info from ct_verify_result_ to
-  // |ssl_info|.
-  // SCTs are held in three separate vectors in ct_verify_result, each
-  // vetor representing a particular verification state, this method associates
-  // each of the SCTs with the corresponding SCTVerifyStatus as it adds it to
-  // the |ssl_info|.signed_certificate_timestamps list.
-  void AddCTInfoToSSLInfo(SSLInfo* ssl_info) const;
-
-  // Returns a unique key string for the SSL session cache for this socket.
-  std::string GetSessionCacheKey(base::Optional<IPAddress> dest_ip_addr) const;
+  // Returns a session cache key for this socket.
+  SSLClientSessionCache::Key GetSessionCacheKey(
+      absl::optional<IPAddress> dest_ip_addr) const;
 
   // Returns true if renegotiations are allowed.
   bool IsRenegotiationAllowed() const;
@@ -184,9 +186,6 @@ class SSLClientSocketImpl : public SSLClientSocket,
 
   void OnPrivateKeyComplete(Error error, const std::vector<uint8_t>& signature);
 
-  // Called from the BoringSSL info callback. (See |SSL_CTX_set_info_callback|.)
-  void InfoCallback(int type, int value);
-
   // Called whenever BoringSSL processes a protocol message.
   void MessageCallback(int is_write,
                        int content_type,
@@ -205,6 +204,15 @@ class SSLClientSocketImpl : public SSLClientSocket,
                           const crypto::OpenSSLErrStackTracer& tracer,
                           OpenSSLErrorInfo* info);
 
+  // Wraps SSL_get0_ech_name_override. See documentation for that function.
+  base::StringPiece GetECHNameOverride() const;
+
+  // Returns true if |cert| is one of the certs in |allowed_bad_certs|.
+  // The expected cert status is written to |cert_status|. |*cert_status| can
+  // be nullptr if user doesn't care about the cert status. This method checks
+  // handshake state, so it may only be called during certificate verification.
+  bool IsAllowedBadCert(X509Certificate* cert, CertStatus* cert_status) const;
+
   CompletionOnceCallback user_connect_callback_;
   CompletionOnceCallback user_read_callback_;
   CompletionOnceCallback user_write_callback_;
@@ -218,6 +226,9 @@ class SSLClientSocketImpl : public SSLClientSocket,
   int user_write_buf_len_;
   bool first_post_handshake_write_ = true;
 
+  // True if we've already handled the result of our attempt to use early data.
+  bool handled_early_data_result_ = false;
+
   // Used by DoPayloadRead() when attempting to fill the caller's buffer with
   // as much data as possible without blocking.
   // If DoPayloadRead() encounters an error after having read some data, stores
@@ -228,7 +239,7 @@ class SSLClientSocketImpl : public SSLClientSocket,
 
   // If there is a pending read result, the OpenSSL result code (output of
   // SSL_get_error) associated with it.
-  int pending_read_ssl_error_;
+  int pending_read_ssl_error_ = SSL_ERROR_NONE;
 
   // If there is a pending read result, the OpenSSLErrorInfo associated with it.
   OpenSSLErrorInfo pending_read_error_info_;
@@ -236,22 +247,19 @@ class SSLClientSocketImpl : public SSLClientSocket,
   // Set when Connect finishes.
   scoped_refptr<X509Certificate> server_cert_;
   CertVerifyResult server_cert_verify_result_;
-  bool completed_connect_;
+  bool completed_connect_ = false;
 
   // Set when Read() or Write() successfully reads or writes data to or from the
   // network.
-  bool was_ever_used_;
+  bool was_ever_used_ = false;
 
-  SSLClientContext* const context_;
+  const raw_ptr<SSLClientContext> context_;
 
   std::unique_ptr<CertVerifier::Request> cert_verifier_request_;
   base::TimeTicks start_cert_verification_time_;
 
   // Result from Cert Verifier.
   int cert_verification_result_;
-
-  // Certificate Transparency: Verifier and result holder.
-  ct::CTVerifyResult ct_verify_result_;
 
   // OpenSSL stuff
   bssl::UniquePtr<SSL> ssl_;
@@ -266,17 +274,24 @@ class SSLClientSocketImpl : public SSLClientSocket,
     STATE_HANDSHAKE,
     STATE_HANDSHAKE_COMPLETE,
   };
-  State next_handshake_state_;
+  State next_handshake_state_ = STATE_NONE;
 
   // True if we are currently confirming the handshake.
-  bool in_confirm_handshake_;
+  bool in_confirm_handshake_ = false;
+
+  // True if the post-handshake SSL_peek has completed.
+  bool peek_complete_ = false;
 
   // True if the socket has been disconnected.
-  bool disconnected_;
+  bool disconnected_ = false;
 
-  NextProto negotiated_protocol_;
+  // True if certificate verification used an ECH name override.
+  bool used_ech_name_override_ = false;
+
+  NextProto negotiated_protocol_ = kProtoUnknown;
+
   // Set to true if a CertificateRequest was received.
-  bool certificate_requested_;
+  bool certificate_requested_ = false;
 
   int signature_result_;
   std::vector<uint8_t> signature_;
@@ -287,16 +302,22 @@ class SSLClientSocketImpl : public SSLClientSocket,
   std::string pinning_failure_log_;
 
   // True if PKP is bypassed due to a local trust anchor.
-  bool pkp_bypassed_;
+  bool pkp_bypassed_ = false;
 
   // True if there was a certificate error which should be treated as fatal,
   // and false otherwise.
-  bool is_fatal_cert_error_;
+  bool is_fatal_cert_error_ = false;
+
+  // True if the socket should respond to client certificate requests with
+  // |client_cert_| and |client_private_key_|, which may be null to continue
+  // with no certificate. If false, client certificate requests will result in
+  // ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
+  bool send_client_cert_;
+  scoped_refptr<X509Certificate> client_cert_;
+  scoped_refptr<SSLPrivateKey> client_private_key_;
 
   NetLogWithSource net_log_;
   base::WeakPtrFactory<SSLClientSocketImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SSLClientSocketImpl);
 };
 
 }  // namespace net

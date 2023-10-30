@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 #include "base/no_destructor.h"
 #include "base/rand_util.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/bindings/lib/binding_state.h"
 #include "mojo/public/cpp/bindings/lib/test_random_mojo_delays.h"
@@ -24,10 +24,8 @@ namespace internal {
 namespace {
 constexpr int kInverseProbabilityOfDelay = 8;
 constexpr int kInverseProbabilityOfNotResuming = 10;
-constexpr base::TimeDelta kMillisecondsToResume =
-    base::TimeDelta::FromMilliseconds(2);
-constexpr base::TimeDelta kPauseBindingsFrequency =
-    base::TimeDelta::FromMilliseconds(7);
+constexpr base::TimeDelta kMillisecondsToResume = base::Milliseconds(2);
+constexpr base::TimeDelta kPauseBindingsFrequency = base::Milliseconds(7);
 }  // namespace
 
 // TODO(mpdenton) This only adds random delays on method call processing. This
@@ -38,8 +36,7 @@ constexpr base::TimeDelta kPauseBindingsFrequency =
 class RandomMojoDelays {
  public:
   RandomMojoDelays()
-      : runner_for_pauses_(
-            base::CreateSequencedTaskRunnerWithTraits(base::TaskTraits())) {
+      : runner_for_pauses_(base::ThreadPool::CreateSequencedTaskRunner({})) {
     DETACH_FROM_SEQUENCE(runner_for_pauses_sequence_checker);
   }
 
@@ -152,7 +149,7 @@ class RandomMojoDelays {
     }
     // Set the bindings to resume soon.
     // TODO(mpdenton) may cause deadlock on shutdown if this doesn't run. But
-    // there is no PostDelayedTaskWithTraits for a SequencedTaskRunner.
+    // there is no PostDelayedTask for a SequencedTaskRunner.
     if (paused_binding_state_bases.size() > 0) {
       base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,

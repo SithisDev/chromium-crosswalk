@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 
 #include <string>
 
+#include "base/check.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -41,9 +41,9 @@ base::FilePath ResolveSourceRootRelativePath(const char* relative_path) {
 
 }  // namespace
 
-TestSupportImpl::TestSupportImpl() {}
+TestSupportImpl::TestSupportImpl() = default;
 
-TestSupportImpl::~TestSupportImpl() {}
+TestSupportImpl::~TestSupportImpl() = default;
 
 void TestSupportImpl::LogPerfResult(const char* test_name,
                                     const char* sub_test_name,

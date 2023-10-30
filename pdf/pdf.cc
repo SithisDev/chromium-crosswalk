@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 
 #include <utility>
 
-#include "base/logging.h"
-#include "base/macros.h"
-#include "pdf/out_of_process_instance.h"
-#include "pdf/pdf_ppapi.h"
+#include "build/build_config.h"
+#include "pdf/pdf_engine.h"
+#include "pdf/pdf_init.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace chrome_pdf {
 
@@ -19,34 +20,31 @@ namespace {
 
 class ScopedSdkInitializer {
  public:
-  ScopedSdkInitializer() {}
+  explicit ScopedSdkInitializer(bool enable_v8) {
+    if (!IsSDKInitializedViaPlugin())
+      InitializeSDK(enable_v8, FontMappingMode::kNoMapping);
+  }
+
+  ScopedSdkInitializer(const ScopedSdkInitializer&) = delete;
+  ScopedSdkInitializer& operator=(const ScopedSdkInitializer&) = delete;
+
   ~ScopedSdkInitializer() {
-#if DCHECK_IS_ON()
-    DCHECK(initialized_);
-#endif
-    if (!IsSDKInitializedViaPepper())
+    if (!IsSDKInitializedViaPlugin())
       ShutdownSDK();
   }
-
-  // Must be called.
-  bool Init() {
-#if DCHECK_IS_ON()
-    initialized_ = true;
-#endif
-    return IsSDKInitializedViaPepper() || InitializeSDK();
-  }
-
- private:
-#if DCHECK_IS_ON()
-  bool initialized_ = false;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedSdkInitializer);
 };
 
 }  // namespace
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_CHROMEOS)
+std::vector<uint8_t> CreateFlattenedPdf(
+    base::span<const uint8_t> input_buffer) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/false);
+  return PDFEngineExports::Get()->CreateFlattenedPdf(input_buffer);
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_WIN)
 bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
                        int page_number,
                        HDC dc,
@@ -62,76 +60,66 @@ bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
                        bool center_in_bounds,
                        bool autorotate,
                        bool use_color) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return false;
-
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   PDFEngineExports::RenderingSettings settings(
-      dpi_x, dpi_y,
-      pp::Rect(bounds_origin_x, bounds_origin_y, bounds_width, bounds_height),
+      gfx::Size(dpi_x, dpi_y),
+      gfx::Rect(bounds_origin_x, bounds_origin_y, bounds_width, bounds_height),
       fit_to_bounds, stretch_to_bounds, keep_aspect_ratio, center_in_bounds,
-      autorotate, use_color);
+      autorotate, use_color, /*render_for_printing=*/true);
   return engine_exports->RenderPDFPageToDC(pdf_buffer, page_number, settings,
                                            dc);
-}
-
-void SetPDFEnsureTypefaceCharactersAccessible(
-    PDFEnsureTypefaceCharactersAccessible func) {
-  PDFEngineExports::Get()->SetPDFEnsureTypefaceCharactersAccessible(func);
-}
-
-void SetPDFUseGDIPrinting(bool enable) {
-  PDFEngineExports::Get()->SetPDFUseGDIPrinting(enable);
 }
 
 void SetPDFUsePrintMode(int mode) {
   PDFEngineExports::Get()->SetPDFUsePrintMode(mode);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 bool GetPDFDocInfo(base::span<const uint8_t> pdf_buffer,
                    int* page_count,
-                   double* max_page_width) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return false;
-
+                   float* max_page_width) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   return engine_exports->GetPDFDocInfo(pdf_buffer, page_count, max_page_width);
 }
 
-bool GetPDFPageSizeByIndex(base::span<const uint8_t> pdf_buffer,
-                           int page_number,
-                           double* width,
-                           double* height) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return false;
+absl::optional<bool> IsPDFDocTagged(base::span<const uint8_t> pdf_buffer) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
+  PDFEngineExports* engine_exports = PDFEngineExports::Get();
+  return engine_exports->IsPDFDocTagged(pdf_buffer);
+}
 
+base::Value GetPDFStructTreeForPage(base::span<const uint8_t> pdf_buffer,
+                                    int page_index) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
+  PDFEngineExports* engine_exports = PDFEngineExports::Get();
+  return engine_exports->GetPDFStructTreeForPage(pdf_buffer, page_index);
+}
+
+absl::optional<gfx::SizeF> GetPDFPageSizeByIndex(
+    base::span<const uint8_t> pdf_buffer,
+    int page_number) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   chrome_pdf::PDFEngineExports* engine_exports =
       chrome_pdf::PDFEngineExports::Get();
-  return engine_exports->GetPDFPageSizeByIndex(pdf_buffer, page_number, width,
-                                               height);
+  return engine_exports->GetPDFPageSizeByIndex(pdf_buffer, page_number);
 }
 
 bool RenderPDFPageToBitmap(base::span<const uint8_t> pdf_buffer,
                            int page_number,
                            void* bitmap_buffer,
-                           int bitmap_width,
-                           int bitmap_height,
-                           int dpi_x,
-                           int dpi_y,
-                           bool autorotate,
-                           bool use_color) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return false;
-
+                           const gfx::Size& bitmap_size,
+                           const gfx::Size& dpi,
+                           const RenderOptions& options) {
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   PDFEngineExports::RenderingSettings settings(
-      dpi_x, dpi_y, pp::Rect(bitmap_width, bitmap_height), true, false, true,
-      true, autorotate, use_color);
+      dpi, gfx::Rect(bitmap_size),
+      /*fit_to_bounds=*/true, options.stretch_to_bounds,
+      options.keep_aspect_ratio,
+      /*center_in_bounds=*/true, options.autorotate, options.use_color,
+      options.render_device_type == RenderDeviceType::kPrinter);
   return engine_exports->RenderPDFPageToBitmap(pdf_buffer, page_number,
                                                settings, bitmap_buffer);
 }
@@ -141,10 +129,7 @@ std::vector<uint8_t> ConvertPdfPagesToNupPdf(
     size_t pages_per_sheet,
     const gfx::Size& page_size,
     const gfx::Rect& printable_area) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return std::vector<uint8_t>();
-
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/false);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   return engine_exports->ConvertPdfPagesToNupPdf(
       std::move(input_buffers), pages_per_sheet, page_size, printable_area);
@@ -155,10 +140,7 @@ std::vector<uint8_t> ConvertPdfDocumentToNupPdf(
     size_t pages_per_sheet,
     const gfx::Size& page_size,
     const gfx::Rect& printable_area) {
-  ScopedSdkInitializer scoped_sdk_initializer;
-  if (!scoped_sdk_initializer.Init())
-    return std::vector<uint8_t>();
-
+  ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/false);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   return engine_exports->ConvertPdfDocumentToNupPdf(
       input_buffer, pages_per_sheet, page_size, printable_area);

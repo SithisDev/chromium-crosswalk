@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,9 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory_handle.h"
 #include "base/synchronization/lock.h"
-#include "base/task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/core/dispatcher.h"
 #include "mojo/core/handle_signals_state.h"
@@ -40,21 +38,24 @@ class PlatformSharedMemoryMapping;
 class MOJO_SYSTEM_IMPL_EXPORT Core {
  public:
   Core();
+
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
+
   virtual ~Core();
 
   static Core* Get();
 
   // Called exactly once, shortly after construction, and before any other
   // methods are called on this object.
-  void SetIOTaskRunner(scoped_refptr<base::TaskRunner> io_task_runner);
+  void SetIOTaskRunner(
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
 
   // Retrieves the NodeController for the current process.
   NodeController* GetNodeController();
 
   scoped_refptr<Dispatcher> GetDispatcher(MojoHandle handle);
   scoped_refptr<Dispatcher> GetAndRemoveDispatcher(MojoHandle handle);
-
-  void SetDefaultProcessErrorCallback(const ProcessErrorCallback& callback);
 
   // Creates a message pipe endpoint with an unbound peer port returned in
   // |*peer|. Useful for setting up cross-process bootstrap message pipes. The
@@ -78,15 +79,10 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   // invitation. An attached port can be claimed (as a message pipe handle) by
   // the invitee.
   void SendBrokerClientInvitation(
-      base::ProcessHandle target_process,
+      base::Process target_process,
       ConnectionParams connection_params,
       const std::vector<std::pair<std::string, ports::PortRef>>& attached_ports,
       const ProcessErrorCallback& process_error_callback);
-
-  // Accepts an invitation via |connection_params|. The other end of the
-  // connection medium in |connection_params| must have been used by some other
-  // process to send an invitation.
-  void AcceptBrokerClientInvitation(ConnectionParams connection_params);
 
   // Extracts a named message pipe endpoint from the broker client invitation
   // accepted by this process. Must only be called after
@@ -141,7 +137,7 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   // loop, and the calling thread must continue running a MessageLoop at least
   // until the callback is called. If there is no running loop, the |callback|
   // may be called from any thread. Beware!
-  void RequestShutdown(const base::Closure& callback);
+  void RequestShutdown(base::OnceClosure callback);
 
   // ---------------------------------------------------------------------------
 
@@ -330,7 +326,13 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
                         uint64_t* limit,
                         uint64_t* usage);
 
+  MojoResult SetDefaultProcessErrorHandler(
+      MojoDefaultProcessErrorHandler handler,
+      const MojoSetDefaultProcessErrorHandlerOptions* options);
+
   void GetActiveHandlesForTest(std::vector<MojoHandle>* handles);
+
+  static void set_avoid_random_pipe_id(bool avoid_random_pipe_id);
 
  private:
   // Used to pass ownership of our NodeController over to the IO thread in the
@@ -363,8 +365,6 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   using MappingTable =
       std::unordered_map<void*, std::unique_ptr<PlatformSharedMemoryMapping>>;
   MappingTable mapping_table_;
-
-  DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 }  // namespace core

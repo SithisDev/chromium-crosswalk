@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "base/command_line.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/process/launch.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
@@ -15,11 +14,11 @@
 namespace mojo {
 
 // PlatformChannel encapsulates construction and ownership of two entangled
-// endpoints of a platform-specific communication primitive, e.g. a Windows pipe
-// or a Unix domain socket. One endpoint is designated as the "local" endpoint
-// and should be retained by the creating process; the other endpoint is
-// designated as the "remote" endpoint and should be passed to an external
-// process.
+// endpoints of a platform-specific communication primitive, e.g. a Windows
+// pipe, a Unix domain socket, or a macOS Mach port pair. One endpoint is
+// designated as the "local" endpoint and should be retained by the creating
+// process; the other endpoint is designated as the "remote" endpoint and
+// should be passed to an external process.
 //
 // PlatformChannels can be used to bootstrap Mojo IPC between one process and
 // another. Typically the other process is a child of this process, and there
@@ -35,22 +34,14 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformChannel {
   // command line when the relevant methods are used on this class.
   static const char kHandleSwitch[];
 
-// Unfortunately base process support code has no unified handle-passing
-// data pipe, so we have this.
-#if defined(OS_WIN)
-  using HandlePassingInfo = base::HandlesToInheritVector;
-#elif defined(OS_FUCHSIA)
-  using HandlePassingInfo = base::HandlesToTransferVector;
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
-  using HandlePassingInfo = base::MachPortsForRendezvous;
-#elif defined(OS_POSIX)
-  using HandlePassingInfo = base::FileHandleMappingVector;
-#else
-#error "Unsupported platform."
-#endif
+  using HandlePassingInfo = PlatformChannelEndpoint::HandlePassingInfo;
 
   PlatformChannel();
   PlatformChannel(PlatformChannel&& other);
+
+  PlatformChannel(const PlatformChannel&) = delete;
+  PlatformChannel& operator=(const PlatformChannel&) = delete;
+
   ~PlatformChannel();
 
   PlatformChannel& operator=(PlatformChannel&& other);
@@ -62,11 +53,11 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformChannel {
     return remote_endpoint_;
   }
 
-  PlatformChannelEndpoint TakeLocalEndpoint() WARN_UNUSED_RESULT {
+  [[nodiscard]] PlatformChannelEndpoint TakeLocalEndpoint() {
     return std::move(local_endpoint_);
   }
 
-  PlatformChannelEndpoint TakeRemoteEndpoint() WARN_UNUSED_RESULT {
+  [[nodiscard]] PlatformChannelEndpoint TakeRemoteEndpoint() {
     return std::move(remote_endpoint_);
   }
 
@@ -99,19 +90,21 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformChannel {
   // Recovers an endpoint handle which was passed to the calling process by
   // its creator. |value| is a string returned by
   // |PrepareToPassRemoteEndpoint()| in the creator's process.
-  static PlatformChannelEndpoint RecoverPassedEndpointFromString(
-      base::StringPiece value) WARN_UNUSED_RESULT;
+  [[nodiscard]] static PlatformChannelEndpoint RecoverPassedEndpointFromString(
+      base::StringPiece value);
 
   // Like above but extracts the input string from |command_line| via the
   // |kHandleSwitch| flag.
-  static PlatformChannelEndpoint RecoverPassedEndpointFromCommandLine(
-      const base::CommandLine& command_line) WARN_UNUSED_RESULT;
+  [[nodiscard]] static PlatformChannelEndpoint
+  RecoverPassedEndpointFromCommandLine(const base::CommandLine& command_line);
+
+  // Indicates whether |RecoverPassedEndpointFromCommandLine()| would succeed.
+  static bool CommandLineHasPassedEndpoint(
+      const base::CommandLine& command_line);
 
  private:
   PlatformChannelEndpoint local_endpoint_;
   PlatformChannelEndpoint remote_endpoint_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformChannel);
 };
 
 }  // namespace mojo

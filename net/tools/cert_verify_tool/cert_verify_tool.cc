@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -20,7 +20,9 @@
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_proc_builtin.h"
 #include "net/cert/crl_set.h"
-#include "net/cert_net/cert_net_fetcher_impl.h"
+#include "net/cert/internal/system_trust_store.h"
+#include "net/cert/x509_util.h"
+#include "net/cert_net/cert_net_fetcher_url_request.h"
 #include "net/tools/cert_verify_tool/cert_verify_tool_util.h"
 #include "net/tools/cert_verify_tool/verify_using_cert_verify_proc.h"
 #include "net/tools/cert_verify_tool/verify_using_path_builder.h"
@@ -28,16 +30,25 @@
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #endif
 
-#if defined(USE_NSS_CERTS)
-#include "net/cert_net/nss_ocsp.h"
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+#include "net/cert/internal/trust_store_chrome.h"
 #endif
 
 namespace {
+
+enum class RootStoreType {
+  // No roots other than those explicitly passed in on the command line.
+  kEmpty,
+  // Use the system root store.
+  kSystem,
+  // Use the Chrome Root Store.
+  kChrome
+};
 
 std::string GetUserAgent() {
   return "cert_verify_tool/0.1";
@@ -45,11 +56,11 @@ std::string GetUserAgent() {
 
 void SetUpOnNetworkThread(
     std::unique_ptr<net::URLRequestContext>* context,
-    scoped_refptr<net::CertNetFetcherImpl>* cert_net_fetcher,
+    scoped_refptr<net::CertNetFetcherURLRequest>* cert_net_fetcher,
     base::WaitableEvent* initialization_complete_event) {
   net::URLRequestContextBuilder url_request_context_builder;
   url_request_context_builder.set_user_agent(GetUserAgent());
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // On Linux, use a fixed ProxyConfigService, since the default one
   // depends on glib.
   //
@@ -60,19 +71,16 @@ void SetUpOnNetworkThread(
 #endif
   *context = url_request_context_builder.Build();
 
-#if defined(USE_NSS_CERTS)
-  net::SetURLRequestContextForNSSHttpIO(context->get());
-#endif
   // TODO(mattm): add command line flag to configure using
   // CertNetFetcher
-  *cert_net_fetcher = base::MakeRefCounted<net::CertNetFetcherImpl>();
+  *cert_net_fetcher = base::MakeRefCounted<net::CertNetFetcherURLRequest>();
   (*cert_net_fetcher)->SetURLRequestContext(context->get());
   initialization_complete_event->Signal();
 }
 
 void ShutdownOnNetworkThread(
     std::unique_ptr<net::URLRequestContext>* context,
-    scoped_refptr<net::CertNetFetcherImpl>* cert_net_fetcher) {
+    scoped_refptr<net::CertNetFetcherURLRequest>* cert_net_fetcher) {
   (*cert_net_fetcher)->Shutdown();
   cert_net_fetcher->reset();
   context->reset();
@@ -146,8 +154,10 @@ class CertVerifyImplUsingProc : public CertVerifyImpl {
 class CertVerifyImplUsingPathBuilder : public CertVerifyImpl {
  public:
   explicit CertVerifyImplUsingPathBuilder(
-      scoped_refptr<net::CertNetFetcher> cert_net_fetcher)
-      : cert_net_fetcher_(std::move(cert_net_fetcher)) {}
+      scoped_refptr<net::CertNetFetcher> cert_net_fetcher,
+      std::unique_ptr<net::SystemTrustStore> system_trust_store)
+      : cert_net_fetcher_(std::move(cert_net_fetcher)),
+        system_trust_store_(std::move(system_trust_store)) {}
 
   std::string GetName() const override { return "CertPathBuilder"; }
 
@@ -168,37 +178,101 @@ class CertVerifyImplUsingPathBuilder : public CertVerifyImpl {
 
     return VerifyUsingPathBuilder(target_der_cert, intermediate_der_certs,
                                   root_der_certs, verify_time, dump_prefix_path,
-                                  cert_net_fetcher_);
+                                  cert_net_fetcher_, system_trust_store_.get());
   }
 
  private:
   scoped_refptr<net::CertNetFetcher> cert_net_fetcher_;
+  std::unique_ptr<net::SystemTrustStore> system_trust_store_;
 };
+
+std::unique_ptr<net::SystemTrustStore> CreateSystemTrustStore(
+    base::StringPiece impl_name,
+    RootStoreType root_store_type) {
+  switch (root_store_type) {
+    case RootStoreType::kSystem:
+      std::cerr << impl_name
+                << ": using system roots (--roots are in addition).\n";
+      return net::CreateSslSystemTrustStore();
+    case RootStoreType::kChrome:
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+      std::cerr << impl_name
+                << ": using Chrome Root Store (--roots are in addition).\n";
+      return net::CreateSslSystemTrustStoreChromeRoot(
+          std::make_unique<net::TrustStoreChrome>());
+#else
+      std::cerr << impl_name << ": not supported.\n";
+      [[fallthrough]];
+#endif
+
+    case RootStoreType::kEmpty:
+    default:
+      std::cerr << impl_name << ": only using --roots specified.\n";
+      return net::CreateEmptySystemTrustStore();
+  }
+}
 
 // Creates an subclass of CertVerifyImpl based on its name, or returns nullptr.
 std::unique_ptr<CertVerifyImpl> CreateCertVerifyImplFromName(
     base::StringPiece impl_name,
-    scoped_refptr<net::CertNetFetcher> cert_net_fetcher) {
+    scoped_refptr<net::CertNetFetcher> cert_net_fetcher,
+    RootStoreType root_store_type) {
+#if !(BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
   if (impl_name == "platform") {
+    if (root_store_type != RootStoreType::kSystem) {
+      std::cerr << "WARNING: platform verifier not supported with "
+                   "--no-system-roots and --use-chrome-root-store, using "
+                   "system roots (--roots are in addition).\n";
+    }
+
     return std::make_unique<CertVerifyImplUsingProc>(
-        "CertVerifyProc (default)",
-        net::CertVerifyProc::CreateDefault(std::move(cert_net_fetcher)));
+        "CertVerifyProc (system)", net::CertVerifyProc::CreateSystemVerifyProc(
+                                       std::move(cert_net_fetcher)));
   }
+#endif
 
   if (impl_name == "builtin") {
     return std::make_unique<CertVerifyImplUsingProc>(
         "CertVerifyProcBuiltin",
         net::CreateCertVerifyProcBuiltin(
             std::move(cert_net_fetcher),
-            nullptr /* system_trust_store_provider */));
+            CreateSystemTrustStore(impl_name, root_store_type)));
   }
 
-  if (impl_name == "pathbuilder")
+  if (impl_name == "pathbuilder") {
     return std::make_unique<CertVerifyImplUsingPathBuilder>(
-        std::move(cert_net_fetcher));
+        std::move(cert_net_fetcher),
+        CreateSystemTrustStore(impl_name, root_store_type));
+  }
 
   std::cerr << "WARNING: Unrecognized impl: " << impl_name << "\n";
   return nullptr;
+}
+
+void PrintCertHashAndSubject(CRYPTO_BUFFER* cert) {
+  std::cout << " " << FingerPrintCryptoBuffer(cert) << " "
+            << SubjectFromCryptoBuffer(cert) << "\n";
+}
+
+void PrintInputChain(const CertInput& target,
+                     const std::vector<CertInput>& intermediates) {
+  std::cout << "Input chain:\n";
+  PrintCertHashAndSubject(
+      net::x509_util::CreateCryptoBuffer(target.der_cert).get());
+  for (const auto& intermediate : intermediates) {
+    PrintCertHashAndSubject(
+        net::x509_util::CreateCryptoBuffer(intermediate.der_cert).get());
+  }
+  std::cout << "\n";
+}
+
+void PrintAdditionalRoots(const std::vector<CertInput>& root_der_certs) {
+  std::cout << "Additional roots:\n";
+  for (const auto& cert : root_der_certs) {
+    PrintCertHashAndSubject(
+        net::x509_util::CreateCryptoBuffer(cert.der_cert).get());
+  }
+  std::cout << "\n";
 }
 
 const char kUsage[] =
@@ -218,6 +292,16 @@ const char kUsage[] =
     " --roots=<certs path>\n"
     "      <certs path> is a file containing certificates [1] to interpret as\n"
     "      trust anchors (without any anchor constraints).\n"
+    "\n"
+    " --no-system-roots\n"
+    "      Do not use system provided trust roots, only trust roots specified\n"
+    "      by --roots or --trust-last-cert will be used. Only supported by\n"
+    "      the builtin and pathbuilter impls.\n"
+    "\n"
+    " --use-chrome-root-store\n"
+    "      Use the Chrome Root Store. Only supported by the builtin and \n"
+    "      pathbuilder impls; if set will override the --no-system-roots \n"
+    "      flag.\n"
     "\n"
     " --intermediates=<certs path>\n"
     "      <certs path> is a file containing certificates [1] for use when\n"
@@ -265,6 +349,7 @@ void PrintUsage(const char* argv0) {
   // TODO(mattm): allow target to specify an HTTPS URL to check the cert of?
   // TODO(mattm): allow target to be a verify_certificate_chain_unittest .test
   // file?
+  // TODO(mattm): allow specifying ocsp_response and sct_list inputs as well.
 }
 
 }  // namespace
@@ -299,6 +384,14 @@ int main(int argc, char** argv) {
       std::cerr << "Error parsing --time flag\n";
       return 1;
     }
+  }
+
+  RootStoreType root_store_type = RootStoreType::kSystem;
+  if (command_line.HasSwitch("no-system-roots")) {
+    root_store_type = RootStoreType::kEmpty;
+  }
+  if (command_line.HasSwitch("use-chrome-root-store")) {
+    root_store_type = RootStoreType::kChrome;
   }
 
   base::FilePath roots_path = command_line.GetSwitchValuePath("roots");
@@ -352,15 +445,19 @@ int main(int argc, char** argv) {
     intermediate_der_certs.pop_back();
   }
 
+  PrintInputChain(target_der_cert, intermediate_der_certs);
+  if (!root_der_certs.empty())
+    PrintAdditionalRoots(root_der_certs);
+
   // Create a network thread to be used for AIA fetches, and wait for a
   // CertNetFetcher to be constructed on that thread.
-  base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
+  base::Thread::Options options(base::MessagePumpType::IO, 0);
   base::Thread thread("network_thread");
-  CHECK(thread.StartWithOptions(options));
+  CHECK(thread.StartWithOptions(std::move(options)));
   // Owned by this thread, but initialized, used, and shutdown on the network
   // thread.
   std::unique_ptr<net::URLRequestContext> context;
-  scoped_refptr<net::CertNetFetcherImpl> cert_net_fetcher;
+  scoped_refptr<net::CertNetFetcherURLRequest> cert_net_fetcher;
   base::WaitableEvent initialization_complete_event(
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
@@ -375,15 +472,20 @@ int main(int argc, char** argv) {
   // Parse the ordered list of CertVerifyImpl passed via command line flags into
   // |impls|.
   std::string impls_str = command_line.GetSwitchValueASCII("impls");
-  if (impls_str.empty())
-    impls_str = "platform,builtin,pathbuilder";  // Default value.
+  if (impls_str.empty()) {
+    // Default value.
+#if !(BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
+    impls_str = "platform,";
+#endif
+    impls_str += "builtin,pathbuilder";
+  }
 
   std::vector<std::string> impl_names = base::SplitString(
       impls_str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
   for (const std::string& impl_name : impl_names) {
-    auto verify_impl =
-        CreateCertVerifyImplFromName(impl_name, cert_net_fetcher);
+    auto verify_impl = CreateCertVerifyImplFromName(impl_name, cert_net_fetcher,
+                                                    root_store_type);
     if (verify_impl)
       impls.push_back(std::move(verify_impl));
   }

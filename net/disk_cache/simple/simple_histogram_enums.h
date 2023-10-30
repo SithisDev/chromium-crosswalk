@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,6 @@
 #define NET_DISK_CACHE_SIMPLE_SIMPLE_HISTOGRAM_ENUMS_H_
 
 namespace disk_cache {
-
-// Used in histograms, please only add entries at the end.
-enum SimpleReadResult {
-  READ_RESULT_SUCCESS = 0,
-  READ_RESULT_INVALID_ARGUMENT = 1,
-  READ_RESULT_NONBLOCK_EMPTY_RETURN = 2,
-  READ_RESULT_BAD_STATE = 3,
-  READ_RESULT_FAST_EMPTY_RETURN = 4,
-  READ_RESULT_SYNC_READ_FAILURE = 5,
-  READ_RESULT_SYNC_CHECKSUM_FAILURE = 6,
-  READ_RESULT_MAX = 7,
-};
 
 // Used in histograms, please only add entries at the end.
 enum OpenEntryResult {
@@ -69,14 +57,6 @@ enum CloseResult {
   CLOSE_RESULT_SUCCESS = 0,
   CLOSE_RESULT_WRITE_FAILURE = 1,
   CLOSE_RESULT_MAX = 2,
-};
-
-// Used in histograms, please only add entries at the end.
-enum class KeySHA256Result {
-  NOT_PRESENT = 0,
-  MATCHED = 1,
-  NO_MATCH = 2,
-  MAX = 3
 };
 
 // Used in histograms, please only add entries at the end.

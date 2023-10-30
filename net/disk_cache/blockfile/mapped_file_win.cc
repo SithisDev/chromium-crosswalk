@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <memory>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "net/disk_cache/disk_cache.h"
 
 #include <windows.h>
@@ -32,7 +32,7 @@ void* MappedFile::Init(const base::FilePath& name, size_t size) {
 
   // Make sure we detect hardware failures reading the headers.
   size_t temp_len = size ? size : 4096;
-  std::unique_ptr<char[]> temp(new char[temp_len]);
+  auto temp = std::make_unique<char[]>(temp_len);
   if (!Read(temp.get(), temp_len, 0))
     return nullptr;
 

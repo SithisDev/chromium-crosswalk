@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,7 @@ bool IsValidMessageHeader(const internal::MessageHeader* header,
     size_t num_ids = header_v2->payload_interface_ids.Get()->size();
     const uint32_t* ids = header_v2->payload_interface_ids.Get()->storage();
     for (size_t i = 0; i < num_ids; ++i) {
-      if (!IsValidInterfaceId(ids[i]) || IsMasterInterfaceId(ids[i])) {
+      if (!IsValidInterfaceId(ids[i]) || IsPrimaryInterfaceId(ids[i])) {
         internal::ReportValidationError(
             validation_context,
             internal::VALIDATION_ERROR_ILLEGAL_INTERFACE_ID);
@@ -123,7 +123,8 @@ bool MessageHeaderValidator::Accept(Message* message) {
   // Pass 0 as number of handles and associated endpoint handles because we
   // don't expect any in the header, even if |message| contains handles.
   internal::ValidationContext validation_context(
-      message->data(), message->data_num_bytes(), 0, 0, message, description_);
+      message->data(), message->data_num_bytes(), 0, 0, message,
+      description_.c_str());
 
   if (!internal::ValidateStructHeaderAndClaimMemory(message->data(),
                                                     &validation_context))

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/containers/cxx20_erase_list.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
@@ -28,16 +29,6 @@ namespace {
 typedef std::list<URLRequestTestJob*> URLRequestJobList;
 base::LazyInstance<URLRequestJobList>::Leaky
     g_pending_jobs = LAZY_INSTANCE_INITIALIZER;
-
-class TestJobProtocolHandler : public URLRequestJobFactory::ProtocolHandler {
- public:
-  // URLRequestJobFactory::ProtocolHandler implementation:
-  URLRequestJob* MaybeCreateJob(
-      URLRequest* request,
-      NetworkDelegate* network_delegate) const override {
-    return new URLRequestTestJob(request, network_delegate);
-  }
-};
 
 }  // namespace
 
@@ -94,7 +85,7 @@ std::string URLRequestTestJob::test_headers() {
       "HTTP/1.1 200 OK\n"
       "Content-type: text/html\n"
       "\n";
-  return std::string(kHeaders, base::size(kHeaders));
+  return std::string(kHeaders, std::size(kHeaders));
 }
 
 // static getter for redirect response headers
@@ -103,7 +94,7 @@ std::string URLRequestTestJob::test_redirect_headers() {
       "HTTP/1.1 302 MOVED\n"
       "Location: somewhere\n"
       "\n";
-  return std::string(kHeaders, base::size(kHeaders));
+  return std::string(kHeaders, std::size(kHeaders));
 }
 
 // static getter for redirect response headers
@@ -133,49 +124,24 @@ std::string URLRequestTestJob::test_error_headers() {
   static const char kHeaders[] =
       "HTTP/1.1 500 BOO HOO\n"
       "\n";
-  return std::string(kHeaders, base::size(kHeaders));
+  return std::string(kHeaders, std::size(kHeaders));
 }
 
-// static
-std::unique_ptr<URLRequestJobFactory::ProtocolHandler>
-URLRequestTestJob::CreateProtocolHandler() {
-  return std::make_unique<TestJobProtocolHandler>();
-}
-
-URLRequestTestJob::URLRequestTestJob(URLRequest* request,
-                                     NetworkDelegate* network_delegate)
-    : URLRequestTestJob(request, network_delegate, false) {}
-
-URLRequestTestJob::URLRequestTestJob(URLRequest* request,
-                                     NetworkDelegate* network_delegate,
-                                     bool auto_advance)
-    : URLRequestJob(request, network_delegate),
+URLRequestTestJob::URLRequestTestJob(URLRequest* request, bool auto_advance)
+    : URLRequestJob(request),
       auto_advance_(auto_advance),
-      stage_(WAITING),
-      priority_(DEFAULT_PRIORITY),
-      offset_(0),
-      async_buf_(nullptr),
-      async_buf_size_(0),
-      response_headers_length_(0),
-      async_reads_(false) {}
+      response_headers_length_(0) {}
 
 URLRequestTestJob::URLRequestTestJob(URLRequest* request,
-                                     NetworkDelegate* network_delegate,
                                      const std::string& response_headers,
                                      const std::string& response_data,
                                      bool auto_advance)
-    : URLRequestJob(request, network_delegate),
+    : URLRequestJob(request),
       auto_advance_(auto_advance),
-      stage_(WAITING),
-      priority_(DEFAULT_PRIORITY),
       response_data_(response_data),
-      offset_(0),
-      async_buf_(nullptr),
-      async_buf_size_(0),
       response_headers_(base::MakeRefCounted<net::HttpResponseHeaders>(
           net::HttpUtil::AssembleRawHeaders(response_headers))),
-      response_headers_length_(response_headers.size()),
-      async_reads_(false) {}
+      response_headers_length_(response_headers.size()) {}
 
 URLRequestTestJob::~URLRequestTestJob() {
   base::Erase(g_pending_jobs.Get(), this);
@@ -223,13 +189,8 @@ void URLRequestTestJob::StartAsync() {
     } else {
       AdvanceJob();
 
-      // unexpected url, return error
-      // FIXME(brettw) we may want to use WININET errors or have some more types
-      // of errors
-      NotifyStartError(
-          URLRequestStatus(URLRequestStatus::FAILED, ERR_INVALID_URL));
-      // FIXME(brettw): this should emulate a network error, and not just fail
-      // initiating a connection
+      // Return an error on unexpected urls.
+      NotifyStartError(ERR_INVALID_URL);
       return;
     }
   }

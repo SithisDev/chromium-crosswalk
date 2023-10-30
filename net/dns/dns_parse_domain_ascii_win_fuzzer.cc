@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,16 @@
 #include <string>
 
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  base::StringPiece16 widestr(
-      reinterpret_cast<const base::StringPiece16::value_type*>(data), size / 2);
-  std::string result;
+  if (size > 8 * 1024)
+    return 0;
 
-  if (net::internal::ParseDomainASCII(widestr, &result))
+  base::WStringPiece widestr(reinterpret_cast<const wchar_t*>(data), size / 2);
+  std::string result = net::internal::ParseDomainASCII(widestr);
+
+  if (!result.empty())
     // Call base::ToLowerASCII to get some additional code coverage signal.
     result = base::ToLowerASCII(result);
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/waitable_event.h"
@@ -24,7 +24,10 @@ namespace mojo {
 // This class is not thread safe.
 class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncEventWatcher {
  public:
-  SyncEventWatcher(base::WaitableEvent* event, const base::Closure& callback);
+  SyncEventWatcher(base::WaitableEvent* event, base::RepeatingClosure callback);
+
+  SyncEventWatcher(const SyncEventWatcher&) = delete;
+  SyncEventWatcher& operator=(const SyncEventWatcher&) = delete;
 
   ~SyncEventWatcher();
 
@@ -50,22 +53,21 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncEventWatcher {
   void IncrementRegisterCount();
   void DecrementRegisterCount();
 
-  base::WaitableEvent* const event_;
-  const base::Closure callback_;
+  const raw_ptr<base::WaitableEvent> event_;
+  const base::RepeatingClosure callback_;
 
-  // Whether |event_| has been registered with SyncHandleRegistry.
-  bool registered_ = false;
+  // Must outlive (and thus be declared before) |subscription_|, since
+  // it subscribes to a callback list stored in the registry.
+  scoped_refptr<SyncHandleRegistry> registry_;
+
+  SyncHandleRegistry::EventCallbackSubscription subscription_;
 
   // If non-zero, |event_| should be registered with SyncHandleRegistry.
   size_t register_request_count_ = 0;
 
-  scoped_refptr<SyncHandleRegistry> registry_;
-
   scoped_refptr<base::RefCountedData<bool>> destroyed_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(SyncEventWatcher);
 };
 
 }  // namespace mojo

@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MOJO_CORE_BROKER_H_
 #define MOJO_CORE_BROKER_H_
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/writable_shared_memory_region.h"
 #include "base/synchronization/lock.h"
@@ -19,9 +18,17 @@ namespace core {
 // to fulfill shared memory allocation requests on some platforms.
 class Broker {
  public:
-  // Note: This is blocking, and will wait for the first message over
-  // the endpoint handle in |handle|.
-  explicit Broker(PlatformHandle handle);
+  // Note: If |wait_for_channel_handle| is |true|, this constructor blocks the
+  // calling thread until it reads first message from |handle|, which must
+  // contain another PlatformHandle for a NodeChannel.
+  //
+  // Otherwise, no initialization message is expected and this will not wait for
+  // one.
+  Broker(PlatformHandle handle, bool wait_for_channel_handle);
+
+  Broker(const Broker&) = delete;
+  Broker& operator=(const Broker&) = delete;
+
   ~Broker();
 
   // Returns the platform handle that should be used to establish a NodeChannel
@@ -45,8 +52,6 @@ class Broker {
   // with message ordering since we can only have one request at a time
   // in-flight.
   base::Lock lock_;
-
-  DISALLOW_COPY_AND_ASSIGN(Broker);
 };
 
 }  // namespace core

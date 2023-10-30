@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 
@@ -39,18 +38,19 @@ class NET_EXPORT_PRIVATE MDnsCache {
     bool operator==(const Key& key) const;
 
     unsigned type() const { return type_; }
-    const std::string& name() const  { return name_; }
+    const std::string& name_lowercase() const { return name_lowercase_; }
     const std::string& optional() const { return optional_; }
 
     // Create the cache key corresponding to |record|.
     static Key CreateFor(const RecordParsed* record);
    private:
     unsigned type_;
-    std::string name_;
+    std::string name_lowercase_;
     std::string optional_;
   };
 
-  typedef base::Callback<void(const RecordParsed*)> RecordRemovedCallback;
+  typedef base::RepeatingCallback<void(const RecordParsed*)>
+      RecordRemovedCallback;
 
   enum UpdateType {
     RecordAdded,
@@ -60,6 +60,10 @@ class NET_EXPORT_PRIVATE MDnsCache {
   };
 
   MDnsCache();
+
+  MDnsCache(const MDnsCache&) = delete;
+  MDnsCache& operator=(const MDnsCache&) = delete;
+
   ~MDnsCache();
 
   // Return value indicates whether the record was added, changed
@@ -115,8 +119,6 @@ class NET_EXPORT_PRIVATE MDnsCache {
 
   base::Time next_expiration_;
   size_t entry_limit_;
-
-  DISALLOW_COPY_AND_ASSIGN(MDnsCache);
 };
 
 }  // namespace net

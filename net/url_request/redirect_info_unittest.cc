@@ -1,12 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/url_request/redirect_info.h"
 
+#include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_util.h"
+#include "net/url_request/referrer_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -30,12 +33,12 @@ TEST(RedirectInfoTest, MethodForRedirect) {
   };
 
   const GURL kOriginalUrl = GURL("https://foo.test/original");
-  const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
+  const SiteForCookies kOriginalSiteForCookies =
+      SiteForCookies::FromUrl(GURL("https://foo.test/"));
   const url::Origin kOriginalTopFrameOrigin = url::Origin::Create(kOriginalUrl);
-  const URLRequest::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
-      net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL;
-  const URLRequest::ReferrerPolicy kOriginalReferrerPolicy =
-      net::URLRequest::NEVER_CLEAR_REFERRER;
+  const RedirectInfo::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
+      RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL;
+  const ReferrerPolicy kOriginalReferrerPolicy = ReferrerPolicy::NEVER_CLEAR;
   const std::string kOriginalReferrer = "";
   const GURL kNewLocation = GURL("https://foo.test/redirected");
   const bool kInsecureSchemeWasUpgraded = false;
@@ -48,10 +51,10 @@ TEST(RedirectInfoTest, MethodForRedirect) {
 
     RedirectInfo redirect_info = RedirectInfo::ComputeRedirectInfo(
         test.original_method, kOriginalUrl, kOriginalSiteForCookies,
-        kOriginalTopFrameOrigin, kOriginalFirstPartyUrlPolicy,
-        kOriginalReferrerPolicy, kOriginalReferrer, test.http_status_code,
-        kNewLocation, base::nullopt /* referrer_policy_header */,
-        kInsecureSchemeWasUpgraded, kCopyFragment);
+        kOriginalFirstPartyUrlPolicy, kOriginalReferrerPolicy,
+        kOriginalReferrer, test.http_status_code, kNewLocation,
+        absl::nullopt /* referrer_policy_header */, kInsecureSchemeWasUpgraded,
+        kCopyFragment);
 
     EXPECT_EQ(test.expected_new_method, redirect_info.new_method);
     EXPECT_EQ(test.http_status_code, redirect_info.status_code);
@@ -81,12 +84,12 @@ TEST(RedirectInfoTest, CopyFragment) {
        "http://foo.test/redirected#2"},
   };
 
-  const std::string KOriginalMethod = "GET";
-  const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
-  const URLRequest::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
-      net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL;
-  const URLRequest::ReferrerPolicy kOriginalReferrerPolicy =
-      net::URLRequest::NEVER_CLEAR_REFERRER;
+  const std::string kOriginalMethod = "GET";
+  const SiteForCookies kOriginalSiteForCookies =
+      SiteForCookies::FromUrl(GURL("https://foo.test/"));
+  const RedirectInfo::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
+      RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL;
+  const ReferrerPolicy kOriginalReferrerPolicy = ReferrerPolicy::NEVER_CLEAR;
   const std::string kOriginalReferrer = "";
   const int kHttpStatusCode = 301;
   const bool kInsecureSchemeWasUpgraded = false;
@@ -98,35 +101,33 @@ TEST(RedirectInfoTest, CopyFragment) {
                  << " new_location: " << test.new_location);
 
     RedirectInfo redirect_info = RedirectInfo::ComputeRedirectInfo(
-        KOriginalMethod, GURL(test.original_url), kOriginalSiteForCookies,
-        url::Origin::Create(GURL(test.original_url)),
+        kOriginalMethod, GURL(test.original_url), kOriginalSiteForCookies,
         kOriginalFirstPartyUrlPolicy, kOriginalReferrerPolicy,
         kOriginalReferrer, kHttpStatusCode, GURL(test.new_location),
-        base::nullopt /* referrer_policy_header */, kInsecureSchemeWasUpgraded,
+        absl::nullopt /* referrer_policy_header */, kInsecureSchemeWasUpgraded,
         test.copy_fragment);
 
     EXPECT_EQ(GURL(test.expected_new_url), redirect_info.new_url);
-    EXPECT_EQ(url::Origin::Create(GURL(test.original_url)),
-              redirect_info.new_top_frame_origin);
   }
 }
 
 TEST(RedirectInfoTest, FirstPartyURLPolicy) {
   struct TestCase {
-    URLRequest::FirstPartyURLPolicy original_first_party_url_policy;
+    RedirectInfo::FirstPartyURLPolicy original_first_party_url_policy;
     const char* expected_new_site_for_cookies;
   };
   const TestCase kTests[] = {
-      {URLRequest::NEVER_CHANGE_FIRST_PARTY_URL, "https://foo.test/"},
-      {URLRequest::UPDATE_FIRST_PARTY_URL_ON_REDIRECT,
+      {RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL,
+       "https://foo.test/"},
+      {RedirectInfo::FirstPartyURLPolicy::UPDATE_URL_ON_REDIRECT,
        "https://foo.test/redirected"},
   };
 
-  const std::string KOriginalMethod = "GET";
+  const std::string kOriginalMethod = "GET";
   const GURL kOriginalUrl = GURL("https://foo.test/");
-  const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
-  const URLRequest::ReferrerPolicy kOriginalReferrerPolicy =
-      net::URLRequest::NEVER_CLEAR_REFERRER;
+  const SiteForCookies kOriginalSiteForCookies =
+      SiteForCookies::FromUrl(GURL("https://foo.test/"));
+  const ReferrerPolicy kOriginalReferrerPolicy = ReferrerPolicy::NEVER_CLEAR;
   const std::string kOriginalReferrer = "";
   const GURL kNewLocation = GURL("https://foo.test/redirected");
   const bool kInsecureSchemeWasUpgraded = false;
@@ -139,20 +140,14 @@ TEST(RedirectInfoTest, FirstPartyURLPolicy) {
                  << static_cast<int>(test.original_first_party_url_policy));
 
     RedirectInfo redirect_info = RedirectInfo::ComputeRedirectInfo(
-        KOriginalMethod, kOriginalUrl, kOriginalSiteForCookies,
-        url::Origin::Create(kOriginalUrl), test.original_first_party_url_policy,
-        kOriginalReferrerPolicy, kOriginalReferrer, kHttpStatusCode,
-        kNewLocation, base::nullopt /* referrer_policy_header */,
-        kInsecureSchemeWasUpgraded, kCopyFragment);
+        kOriginalMethod, kOriginalUrl, kOriginalSiteForCookies,
+        test.original_first_party_url_policy, kOriginalReferrerPolicy,
+        kOriginalReferrer, kHttpStatusCode, kNewLocation,
+        absl::nullopt /* referrer_policy_header */, kInsecureSchemeWasUpgraded,
+        kCopyFragment);
 
-    EXPECT_EQ(GURL(test.expected_new_site_for_cookies),
-              redirect_info.new_site_for_cookies);
-    url::Origin expected_top_frame_origin =
-        test.original_first_party_url_policy ==
-                URLRequest::UPDATE_FIRST_PARTY_URL_ON_REDIRECT
-            ? url::Origin::Create(GURL(test.expected_new_site_for_cookies))
-            : url::Origin::Create(kOriginalUrl);
-    EXPECT_EQ(expected_top_frame_origin, redirect_info.new_top_frame_origin);
+    EXPECT_TRUE(redirect_info.new_site_for_cookies.IsEquivalent(
+        SiteForCookies::FromUrl(GURL(test.expected_new_site_for_cookies))));
   }
 }
 
@@ -161,8 +156,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
     const char* original_url;
     const char* original_referrer;
     const char* response_headers;
-    URLRequest::ReferrerPolicy original_referrer_policy;
-    URLRequest::ReferrerPolicy expected_new_referrer_policy;
+    ReferrerPolicy original_referrer_policy;
+    ReferrerPolicy expected_new_referrer_policy;
     const char* expected_referrer;
   };
 
@@ -174,8 +169,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "Location: http://foo.test/test\n"
        "Referrer-Policy: no-referrer\n",
        // original policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
-       URLRequest::NO_REFERRER /* expected new policy */,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::NO_REFERRER /* expected new policy */,
        "" /* expected new referrer */},
 
       // Same as above but for the legacy keyword 'never', which should not be
@@ -184,9 +179,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "http://foo.test/one" /* original referrer */,
        "Location: http://foo.test/test\nReferrer-Policy: never\n",
        // original policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        // expected new policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "http://foo.test/one" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: no-referrer-when-downgrade',
@@ -196,9 +191,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: http://foo.test\n"
        "Referrer-Policy: no-referrer-when-downgrade\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
        // expected new policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "" /* expected new referrer */},
 
       // Same as above but for the legacy keyword 'default', which should not be
@@ -207,9 +202,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: http://foo.test\n"
        "Referrer-Policy: default\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
        // expected new policy
-       URLRequest::NEVER_CLEAR_REFERRER,
+       ReferrerPolicy::NEVER_CLEAR,
        "https://foo.test/one" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: no-referrer-when-downgrade',
@@ -219,9 +214,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: https://foo.test\n"
        "Referrer-Policy: no-referrer-when-downgrade\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
        // expected new policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "https://foo.test/one" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: origin', then the referrer
@@ -231,8 +226,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: https://foo.test/two\n"
        "Referrer-Policy: origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::ORIGIN /* expected new policy */,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: origin-when-cross-origin', then
@@ -241,8 +236,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://foo.test/two\n"
        "Referrer-Policy: origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected new policy */,
        "https://foo.test/referrer" /* expected new referrer */},
 
@@ -251,8 +246,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
@@ -262,8 +257,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://foo.test/two\n"
        "Referrer-Policy: same-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN /* new policy */
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN /* new policy */
        ,
        "https://foo.test/referrer" /* expected new referrer */},
 
@@ -272,8 +267,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: same-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN,
        "" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: strict-origin', then the
@@ -283,15 +278,15 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: strict-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "https://foo.test/" /* expected new referrer */},
       {"http://foo.test/one" /* original url */,
        "http://foo.test/referrer" /* original referrer */,
        "Location: http://bar.test/two\n"
        "Referrer-Policy: strict-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "http://foo.test/" /* expected new referrer */},
 
       // ... but should be cleared for a downgrading redirect.
@@ -299,8 +294,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: http://foo.test/two\n"
        "Referrer-Policy: strict-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy:
@@ -310,15 +305,15 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://foo.test/two\n"
        "Referrer-Policy: strict-origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
        "https://foo.test/referrer" /* expected new referrer */},
       {"http://foo.test/one" /* original url */,
        "http://foo.test/referrer" /* original referrer */,
        "Location: http://foo.test/two\n"
        "Referrer-Policy: strict-origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
        "http://foo.test/referrer" /* expected new referrer */},
 
       // ... but should be stripped to the origin for a cross-origin
@@ -327,15 +322,15 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: strict-origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
        "https://foo.test/" /* expected new referrer */},
       {"http://foo.test/one" /* original url */,
        "http://foo.test/referrer" /* original referrer */,
        "Location: http://bar.test/two\n"
        "Referrer-Policy: strict-origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
        "http://foo.test/" /* expected new referrer */},
 
       // ... and should be cleared for a downgrading redirect.
@@ -343,8 +338,8 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/referrer" /* original referrer */,
        "Location: http://foo.test/two\n"
        "Referrer-Policy: strict-origin-when-cross-origin\n",
-       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
-       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       ReferrerPolicy::NEVER_CLEAR /* original policy */,
+       ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
        "" /* expected new referrer */},
 
       // If a redirect serves 'Referrer-Policy: unsafe-url', then the referrer
@@ -353,8 +348,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: http://bar.test/two\n"
        "Referrer-Policy: unsafe-url\n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::NEVER_CLEAR_REFERRER /* expected new policy */,
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::NEVER_CLEAR /* expected new policy */,
        "https://foo.test/one" /* expected new referrer */},
 
       // Same as above but for the legacy keyword 'always', which should not be
@@ -363,8 +359,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: http://bar.test/two\n"
        "Referrer-Policy: always\n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
@@ -373,8 +370,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: not-a-valid-policy\n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
@@ -383,9 +381,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "Location: http://bar.test/two\n"
        "Referrer-Policy: not-a-valid-policy\n",
        // original policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        // expected new policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "" /* expected new referrer */},
 
       // The last valid keyword should take precedence.
@@ -394,8 +392,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "Location: https://bar.test/two\n"
        "Referrer-Policy: unsafe-url\n"
        "Referrer-Policy: not-a-valid-policy\n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::NEVER_CLEAR_REFERRER /* expected new policy */,
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::NEVER_CLEAR /* expected new policy */,
        "https://foo.test/one" /* expected new referrer */},
 
       {"https://foo.test/one" /* original url */,
@@ -403,8 +402,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "Location: https://bar.test/two\n"
        "Referrer-Policy: unsafe-url\n"
        "Referrer-Policy: origin\n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::ORIGIN /* expected new policy */,
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
       // An empty header should not affect the request.
@@ -412,8 +412,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "https://foo.test/one" /* original referrer */,
        "Location: https://bar.test/two\n"
        "Referrer-Policy: \n",
-       URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
-       URLRequest::
+       ReferrerPolicy::
+           ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* original policy */,
+       ReferrerPolicy::
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected new policy */,
        "https://foo.test/" /* expected new referrer */},
 
@@ -423,16 +424,17 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
        "http://foo.test/one" /* original referrer */,
        "Location: http://foo.test/test\n",
        // original policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        // expected new policy
-       URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
        "http://foo.test/one" /* expected new referrer */},
   };
 
-  const std::string KOriginalMethod = "GET";
-  const GURL kOriginalSiteForCookies = GURL("https://foo.test/");
-  const URLRequest::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
-      net::URLRequest::NEVER_CHANGE_FIRST_PARTY_URL;
+  const std::string kOriginalMethod = "GET";
+  const SiteForCookies kOriginalSiteForCookies =
+      SiteForCookies::FromUrl(GURL("https://foo.test/"));
+  const RedirectInfo::FirstPartyURLPolicy kOriginalFirstPartyUrlPolicy =
+      RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL;
   const bool kInsecureSchemeWasUpgraded = false;
   const bool kCopyFragment = true;
 
@@ -458,10 +460,9 @@ TEST(RedirectInfoTest, ReferrerPolicy) {
     const GURL new_location = original_url.Resolve(location_string);
 
     RedirectInfo redirect_info = RedirectInfo::ComputeRedirectInfo(
-        KOriginalMethod, original_url, kOriginalSiteForCookies,
-        url::Origin::Create(original_url), kOriginalFirstPartyUrlPolicy,
-        test.original_referrer_policy, test.original_referrer,
-        response_headers->response_code(), new_location,
+        kOriginalMethod, original_url, kOriginalSiteForCookies,
+        kOriginalFirstPartyUrlPolicy, test.original_referrer_policy,
+        test.original_referrer, response_headers->response_code(), new_location,
         RedirectUtil::GetReferrerPolicyHeader(response_headers.get()),
         kInsecureSchemeWasUpgraded, kCopyFragment);
 

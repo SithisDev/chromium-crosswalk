@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   net::ProxyBypassRules rules;
   std::string input(data, data + size);
-
-  const net::ProxyBypassRules::ParseFormat kFormats[] = {
-      net::ProxyBypassRules::ParseFormat::kDefault,
-      net::ProxyBypassRules::ParseFormat::kHostnameSuffixMatching,
-  };
-
-  for (auto format : kFormats)
-    rules.ParseFromString(input, format);
+  rules.ParseFromString(input);
 
   return 0;
 }
