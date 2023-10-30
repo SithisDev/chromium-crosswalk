@@ -2,6 +2,8 @@ include_rules = [
   "+content/public/browser",
   "+content/public/common",
   "+content/public/test",
+  "+components/app_restore",
+  "+components/services/app_service/public",
   "+components/keyed_service",
   "+components/user_manager",
   "+extensions",
@@ -18,6 +20,7 @@ specific_include_rules = {
     "+chrome/browser/extensions/test_extension_environment.h",
     "+chrome/browser/profiles/profile_manager.h",
     "+chrome/browser/ui/simple_message_box_internal.h",
+    "+chrome/common/chrome_result_codes.h",
     "+chrome/common/chrome_switches.h",
     "+chrome/test/base/testing_profile.h",
     # Temporary allowed testing include.
@@ -28,6 +31,6 @@ specific_include_rules = {
     # See http://crbug.com/162530 for details.
     "+chrome/browser/extensions/api/file_system/file_system_api.h",
     # To access sandbox includes.
-    "+services/service_manager/sandbox",
-  ]
+    "+sandbox/policy",
+  ],
 }

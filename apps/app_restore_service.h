@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "apps/app_lifetime_monitor.h"
+#include "base/memory/raw_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 
@@ -31,6 +32,8 @@ class AppRestoreService : public KeyedService,
   static bool ShouldRestoreApps(bool is_browser_restart);
 
   explicit AppRestoreService(content::BrowserContext* context);
+  AppRestoreService(const AppRestoreService&) = delete;
+  AppRestoreService& operator=(const AppRestoreService&) = delete;
 
   // Restart apps that need to be restarted and clear the "running" preference
   // from apps to prevent them being restarted in subsequent restarts.
@@ -68,9 +71,7 @@ class AppRestoreService : public KeyedService,
   void StartObservingAppLifetime();
   void StopObservingAppLifetime();
 
-  content::BrowserContext* context_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppRestoreService);
+  raw_ptr<content::BrowserContext> context_;
 };
 
 }  // namespace apps

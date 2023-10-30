@@ -1,13 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef APPS_UI_VIEWS_APP_WINDOW_FRAME_VIEW_H_
 #define APPS_UI_VIEWS_APP_WINDOW_FRAME_VIEW_H_
 
-#include <string>
-
+#include "base/memory/raw_ptr.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/controls/button/button.h"
@@ -22,10 +22,6 @@ class Canvas;
 class Point;
 }
 
-namespace ui {
-class Event;
-}
-
 namespace views {
 class ImageButton;
 class Widget;
@@ -34,10 +30,9 @@ class Widget;
 namespace apps {
 
 // A frameless or non-Ash, non-panel NonClientFrameView for app windows.
-class AppWindowFrameView : public views::NonClientFrameView,
-                           public views::ButtonListener {
+class AppWindowFrameView : public views::NonClientFrameView {
  public:
-  static const char kViewClassName[];
+  METADATA_HEADER(AppWindowFrameView);
 
   // AppWindowFrameView is used to draw frames for app windows when a non
   // standard frame is needed. This occurs if there is no frame needed, or if
@@ -52,6 +47,8 @@ class AppWindowFrameView : public views::NonClientFrameView,
                      bool draw_frame,
                      const SkColor& active_frame_color,
                      const SkColor& inactive_frame_color);
+  AppWindowFrameView(const AppWindowFrameView&) = delete;
+  AppWindowFrameView& operator=(const AppWindowFrameView&) = delete;
   ~AppWindowFrameView() override;
 
   void Init();
@@ -76,13 +73,9 @@ class AppWindowFrameView : public views::NonClientFrameView,
   // views::View implementation.
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
-  const char* GetClassName() const override;
   void OnPaint(gfx::Canvas* canvas) override;
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
-
-  // views::ButtonListener implementation.
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Some button images we use depend on the color of the frame. This
   // will set these images based on the color of the frame.
@@ -91,15 +84,15 @@ class AppWindowFrameView : public views::NonClientFrameView,
   // Return the current frame color based on the active state of the window.
   SkColor CurrentFrameColor();
 
-  views::Widget* widget_;
-  extensions::NativeAppWindow* window_;
+  raw_ptr<views::Widget> widget_;
+  raw_ptr<extensions::NativeAppWindow> window_;
   bool draw_frame_;
   SkColor active_frame_color_;
   SkColor inactive_frame_color_;
-  views::ImageButton* close_button_ = nullptr;
-  views::ImageButton* maximize_button_ = nullptr;
-  views::ImageButton* restore_button_ = nullptr;
-  views::ImageButton* minimize_button_ = nullptr;
+  raw_ptr<views::ImageButton> close_button_ = nullptr;
+  raw_ptr<views::ImageButton> maximize_button_ = nullptr;
+  raw_ptr<views::ImageButton> restore_button_ = nullptr;
+  raw_ptr<views::ImageButton> minimize_button_ = nullptr;
 
   // Allow resize for clicks this many pixels inside the bounds.
   int resize_inside_bounds_size_ = 5;
@@ -109,8 +102,6 @@ class AppWindowFrameView : public views::NonClientFrameView,
 
   // Size in pixels of the lower-right corner resize handle.
   int resize_area_corner_size_ = 16;
-
-  DISALLOW_COPY_AND_ASSIGN(AppWindowFrameView);
 };
 
 }  // namespace apps

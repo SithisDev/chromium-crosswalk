@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "apps/app_restore_service_factory.h"
 #include "apps/launcher.h"
 #include "apps/saved_files_service.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/extension_host.h"
@@ -26,7 +27,7 @@ namespace apps {
 // static
 bool AppRestoreService::ShouldRestoreApps(bool is_browser_restart) {
   bool should_restore_apps = is_browser_restart;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Chromeos always restarts apps, even if it was a regular shutdown.
   should_restore_apps = true;
 #endif

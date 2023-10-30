@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,14 +61,18 @@ void LaunchPlatformAppWithPath(content::BrowserContext* context,
                                const extensions::Extension* app,
                                const base::FilePath& file_path);
 
-// Launches the platform app |app| with the specific |action_data|. |file_path|
-// is an optional argument and if present contains the file that the app should
-// open w.r.t. the given action.
+// Launches the platform app |app| by issuing an onLaunched event with the
+// contents of |file_paths| available through the launch data.
+void LaunchPlatformAppWithFilePaths(
+    content::BrowserContext* context,
+    const extensions::Extension* app,
+    const std::vector<base::FilePath>& file_paths);
+
+// Launches the platform app |app| with the specific |action_data|.
 void LaunchPlatformAppWithAction(
     content::BrowserContext* context,
     const extensions::Extension* app,
-    std::unique_ptr<extensions::api::app_runtime::ActionData> action_data,
-    const base::FilePath& file_path);
+    extensions::api::app_runtime::ActionData action_data);
 
 // Launches the platform app |app|. |source| tells us how the app is launched.
 void LaunchPlatformApp(content::BrowserContext* context,
