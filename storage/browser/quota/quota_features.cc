@@ -1,45 +1,48 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "storage/browser/quota/quota_features.h"
+#include "base/feature_list.h"
 
 namespace storage {
 
 namespace features {
 
-#if defined(OS_CHROMEOS)
-// Chrome OS is given a larger fraction, as web content is the considered
-// the primary use of the platform. Chrome OS itself maintains free space by
-// starting to evict data (old profiles) when less than 1GB remains,
-// stopping eviction once 2GB is free.
-// Prior to M66 this was 1/3, same as other platforms.
-const constexpr double kTemporaryPoolSizeRatioThirds = 2.0 / 3.0;  // 66%
-#else
-const constexpr double kTemporaryPoolSizeRatioThirds = 1.0 / 3.0;  // 33%
-#endif
+namespace {
+constexpr int64_t kMBytes = 1024 * 1024;
+}  // namespace
 
-const base::Feature kQuotaExpandPoolSize{"QuotaExpandPoolSize",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables Storage Pressure Event.
+const base::Feature kStoragePressureEvent{"StoragePressureEvent",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
-constexpr base::FeatureParam<double> kExperimentalPoolSizeRatio{
-    &kQuotaExpandPoolSize, "PoolSizeRatio", kTemporaryPoolSizeRatioThirds};
+// Enables customized storage quota settings for embedders.
+const base::Feature kStorageQuotaSettings{"StorageQuotaSettings",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+constexpr base::FeatureParam<double> kMustRemainAvailableBytes{
+    &kStorageQuotaSettings, "MustRemainAvailableBytes", 1024 * kMBytes /* 1GB */
+};
+constexpr base::FeatureParam<double> kMustRemainAvailableRatio{
+    &kStorageQuotaSettings, "MustRemainAvailableRatio", 0.01 /* 1% */
+};
+constexpr base::FeatureParam<double> kPoolSizeBytes{&kStorageQuotaSettings,
+                                                    "PoolSizeBytes", 0};
+constexpr base::FeatureParam<double> kPoolSizeRatio{
+    &kStorageQuotaSettings, "PoolSizeRatio", 0.8 /* 80% */
+};
+constexpr base::FeatureParam<double> kShouldRemainAvailableBytes{
+    &kStorageQuotaSettings, "ShouldRemainAvailableBytes",
+    2048 * kMBytes /* 2GB */
+};
+constexpr base::FeatureParam<double> kShouldRemainAvailableRatio{
+    &kStorageQuotaSettings, "ShouldRemainAvailableRatio", 0.1 /* 10% */
+};
 
-constexpr base::FeatureParam<double> kPerHostRatio{&kQuotaExpandPoolSize,
-                                                   "PerHostRatio", 0.2};
+// Whether the StoragePolicyObserver only sends updates for modified origins.
+const base::Feature kOnlySendStoragePolicyUpdatesForModifiedOrigins{
+    "OnlySendStoragePolicyUpdatesForModifiedOrigins",
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
-// StaticHostQuota enables a simpler per-host quota model, where the quota is
-// only based on disk capacity (partition size). When the flag is disabled, the
-// quota computation takes into account free disk space, in addition to the
-// disk's total capacity.
-const base::Feature kStaticHostQuota{"StaticHostQuota",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
-
-// QuotaUnlimitedPoolSize removes limitations around disk space consumption with
-// respect to client-side storage web platform APIs. When enabled, quota will
-// set no limit on how much space a single origin can consume, as well as
-// removing limits on how much disk space the temporary pool can consume.
-const base::Feature kQuotaUnlimitedPoolSize{"QuotaUnlimitedPoolSize",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
 }  // namespace features
 }  // namespace storage

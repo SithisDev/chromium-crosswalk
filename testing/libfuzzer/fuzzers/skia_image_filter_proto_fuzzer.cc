@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "third_party/libprotobuf-mutator/src/src/libfuzzer/libfuzzer_macro.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 
 protobuf_mutator::protobuf::LogSilencer log_silencer;
@@ -38,8 +39,7 @@ struct Environment {
 };
 
 DEFINE_PROTO_FUZZER(const Input& input) {
-  static Environment environment = Environment();
-  ALLOW_UNUSED_LOCAL(environment);
+  [[maybe_unused]] static Environment environment = Environment();
 
   static Converter converter = Converter();
   std::string ipc_filter_message = converter.Convert(input);
@@ -66,6 +66,6 @@ DEFINE_PROTO_FUZZER(const Input& input) {
   canvas.save();
   canvas.clipRect(SkRect::MakeXYWH(0, 0, SkIntToScalar(kBitmapSize),
                                    SkIntToScalar(kBitmapSize)));
-  canvas.drawBitmap(bitmap, 0, 0, &paint);
+  canvas.drawImage(bitmap.asImage(), 0, 0, SkSamplingOptions(), &paint);
   canvas.restore();
 }

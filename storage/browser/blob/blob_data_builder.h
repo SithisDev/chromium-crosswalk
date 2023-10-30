@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,20 +13,21 @@
 
 #include "base/component_export.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/checked_math.h"
+#include "components/services/storage/public/mojom/blob_storage_context.mojom.h"
 #include "storage/browser/blob/blob_data_item.h"
 #include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/blob/blob_entry.h"
 #include "storage/browser/blob/shareable_blob_data_item.h"
 #include "storage/browser/blob/shareable_file_reference.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 
 namespace storage {
 class BlobSliceTest;
 class BlobStorageContext;
 class BlobStorageRegistry;
+class FileSystemURL;
 
 // This class is used to build blobs. It also facilitates the operation of
 // 'pending' data, where the user knows the size and existence of a file or
@@ -39,23 +40,31 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
   using ItemCopyEntry = BlobEntry::ItemCopyEntry;
 
   explicit BlobDataBuilder(const std::string& uuid);
+
+  BlobDataBuilder(const BlobDataBuilder&) = delete;
+  BlobDataBuilder& operator=(const BlobDataBuilder&) = delete;
+
   ~BlobDataBuilder();
 
   const std::string& uuid() const { return uuid_; }
 
   // Copies the given data into the blob.
   void AppendData(const std::string& data) {
-    AppendData(data.c_str(), data.size());
+    AppendData(base::as_bytes(base::make_span(data.c_str(), data.size())));
   }
 
   // Copies the given data into the blob.
-  void AppendData(const char* data, size_t length);
+  void AppendData(base::span<const uint8_t> data);
 
   // Represents a piece of unpopulated data.
   class COMPONENT_EXPORT(STORAGE_BROWSER) FutureData {
    public:
     FutureData(FutureData&&);
     FutureData& operator=(FutureData&&);
+
+    FutureData(const FutureData&) = delete;
+    FutureData& operator=(const FutureData&) = delete;
+
     ~FutureData();
 
     // Populates a part of an item previously allocated with AppendFutureData.
@@ -64,21 +73,20 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
     // Returns true if:
     // * The offset and length are valid, and
     // * data is a valid pointer.
-    bool Populate(base::span<const char> data, size_t offset = 0) const;
+    bool Populate(base::span<const uint8_t> data, size_t offset = 0) const;
 
     // Same as Populate, but rather than passing in the data to be
     // copied, this method returns a pointer where the caller can copy |length|
     // bytes of data to.
     // Returns nullptr if:
     // * The offset and length are not valid.
-    base::span<char> GetDataToPopulate(size_t offset, size_t length) const;
+    base::span<uint8_t> GetDataToPopulate(size_t offset, size_t length) const;
 
    private:
     friend class BlobDataBuilder;
     FutureData(scoped_refptr<BlobDataItem>);
 
     scoped_refptr<BlobDataItem> item_;
-    DISALLOW_COPY_AND_ASSIGN(FutureData);
   };
 
   // Adds an item that is flagged for future data population. The memory is not
@@ -91,6 +99,10 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
    public:
     FutureFile(FutureFile&&);
     FutureFile& operator=(FutureFile&&);
+
+    FutureFile(const FutureFile&) = delete;
+    FutureFile& operator=(const FutureFile&) = delete;
+
     ~FutureFile();
 
     // Populates a part of an item previously allocated with AppendFutureFile.
@@ -104,7 +116,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
     FutureFile(scoped_refptr<BlobDataItem>);
 
     scoped_refptr<BlobDataItem> item_;
-    DISALLOW_COPY_AND_ASSIGN(FutureFile);
   };
 
   // Adds an item that is flagged for future data population. Use
@@ -135,13 +146,20 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
                   const BlobStorageRegistry& blob_registry);
 
   void AppendFileSystemFile(
-      const GURL& url,
+      const FileSystemURL& url,
       uint64_t offset,
       uint64_t length,
       const base::Time& expected_modification_time,
       scoped_refptr<FileSystemContext> file_system_context);
 
-  void AppendReadableDataHandle(scoped_refptr<DataHandle> data_handle);
+  void AppendReadableDataHandle(scoped_refptr<DataHandle> data_handle) {
+    auto length = data_handle->GetSize();
+    AppendReadableDataHandle(std::move(data_handle), 0u, length);
+  }
+  void AppendReadableDataHandle(scoped_refptr<DataHandle> data_handle,
+                                uint64_t offset,
+                                uint64_t length);
+  void AppendMojoDataItem(mojom::BlobDataItemPtr item);
 
   void set_content_type(const std::string& content_type) {
     content_type_ = content_type;
@@ -232,8 +250,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobDataBuilder {
   std::vector<scoped_refptr<ShareableBlobDataItem>> pending_transport_items_;
   std::set<std::string> dependent_blob_uuids_;
   std::vector<ItemCopyEntry> copies_;
-
-  DISALLOW_COPY_AND_ASSIGN(BlobDataBuilder);
 };
 
 #if defined(UNIT_TEST)

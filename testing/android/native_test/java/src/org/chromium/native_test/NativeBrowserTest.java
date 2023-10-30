@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,8 @@ public class NativeBrowserTest {
     // Set the command line flags to be passed to the C++ main() method. Each
     // browser tests Activity should ensure these are included.
     public static final String BROWSER_TESTS_FLAGS[] = {
-            // content::kSingleProcessTestsFlag
-            "--single_process",
-
-            // switches::kUseFakeDeviceForMediaStream
-            "--use-fake-device-for-media-stream"};
+            // switches::kSingleProcessTests
+            "--single-process-tests"};
 
     /**
      * Deletes a file or directory along with any of its children.

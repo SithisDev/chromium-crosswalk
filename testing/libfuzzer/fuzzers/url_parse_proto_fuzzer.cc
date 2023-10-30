@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 // function.
 #include "third_party/libprotobuf-mutator/src/src/libfuzzer/libfuzzer_macro.h"
 // Header information about the Protocol Buffer Url class.
-#include "testing/libfuzzer/fuzzers/url.pb.h"
+#include "testing/libfuzzer/proto/url.pb.h"
 
 // The code using TestCase is copied from url_parse_fuzzer.cc
 struct TestCase {
@@ -33,14 +33,12 @@ TestCase* test_case = new TestCase();
 // Silence logging from the protobuf library.
 protobuf_mutator::protobuf::LogSilencer log_silencer;
 
-using namespace url_parse_proto_fuzzer;
-
 std::string Slash_to_string(int slash) {
-  if (slash == Url::NONE)
+  if (slash == url_proto::Url::NONE)
     return "";
-  if (slash == Url::FORWARD)
+  if (slash == url_proto::Url::FORWARD)
     return "/";
-  if (slash == Url::BACKWARD) {
+  if (slash == url_proto::Url::BACKWARD) {
     return "\\";
   }
   assert(false && "Received unexpected value for slash");
@@ -52,7 +50,7 @@ std::string Slash_to_string(int slash) {
 // Since protobuf is a relatively simple format, fuzzing targets that do not
 // accept protobufs (such as this one) will require code to convert from
 // protobuf to the accepted format (string in this case).
-std::string protobuf_to_string(const Url& url) {
+std::string protobuf_to_string(const url_proto::Url& url) {
   // Build url_string piece by piece from url and then return it.
   std::string url_string = std::string("");
 
@@ -128,7 +126,7 @@ std::string protobuf_to_string(const Url& url) {
 // typical libFuzzer based fuzzers. It is passed our Url protobuf object that
 // was mutated by libFuzzer, converts it to a string and then feeds it to url()
 // for fuzzing.
-DEFINE_BINARY_PROTO_FUZZER(const Url& url_protobuf) {
+DEFINE_BINARY_PROTO_FUZZER(const url_proto::Url& url_protobuf) {
   std::string url_string = protobuf_to_string(url_protobuf);
 
   // Allow native input to be retrieved easily.

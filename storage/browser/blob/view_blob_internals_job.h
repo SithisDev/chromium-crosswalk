@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,7 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "net/base/completion_once_callback.h"
-#include "net/url_request/url_request_simple_job.h"
-
-namespace net {
-class URLRequest;
-}  // namespace net
 
 namespace storage {
 
@@ -24,38 +17,19 @@ class BlobStorageContext;
 
 // A job subclass that implements a protocol to inspect the internal
 // state of blob registry.
-class COMPONENT_EXPORT(STORAGE_BROWSER) ViewBlobInternalsJob
-    : public net::URLRequestSimpleJob {
+class COMPONENT_EXPORT(STORAGE_BROWSER) ViewBlobInternalsJob {
  public:
-  ViewBlobInternalsJob(net::URLRequest* request,
-                       net::NetworkDelegate* network_delegate,
-                       BlobStorageContext* blob_storage_context);
-
-  void Start() override;
-  int GetData(std::string* mime_type,
-              std::string* charset,
-              std::string* data,
-              net::CompletionOnceCallback callback) const override;
-  bool IsRedirectResponse(GURL* location,
-                          int* http_status_code,
-                          bool* insecure_scheme_was_upgraded) override;
-  void Kill() override;
+  ViewBlobInternalsJob(const ViewBlobInternalsJob&) = delete;
+  ViewBlobInternalsJob& operator=(const ViewBlobInternalsJob&) = delete;
 
   static std::string GenerateHTML(BlobStorageContext* blob_storage_context);
 
  private:
-  ~ViewBlobInternalsJob() override;
-
   static void GenerateHTMLForBlobData(const BlobEntry& blob_data,
                                       const std::string& content_type,
                                       const std::string& content_disposition,
                                       size_t refcount,
                                       std::string* out);
-
-  BlobStorageContext* blob_storage_context_;
-  base::WeakPtrFactory<ViewBlobInternalsJob> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ViewBlobInternalsJob);
 };
 
 }  // namespace storage

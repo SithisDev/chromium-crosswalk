@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "third_party/protobuf/src/google/protobuf/descriptor.h"
 #include "third_party/protobuf/src/google/protobuf/message.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
@@ -124,11 +125,10 @@ enum LightType {
 };
 
 // Copied from SkVertices.cpp.
-enum VerticesConstants {
-  kMode_Mask = 0x0FF,
-  kHasTexs_Mask = 0x100,
-  kHasColors_Mask = 0x200,
-};
+using VerticesConstants = int;
+constexpr VerticesConstants kMode_Mask = 0x0FF;
+constexpr VerticesConstants kHasTexs_Mask = 0x100;
+constexpr VerticesConstants kHasColors_Mask = 0x200;
 
 // Copied from SerializationOffsets in SkPath.h. Named PathSerializationOffsets
 // to avoid conflicting with PathRefSerializationOffsets. Both enums were named
@@ -948,8 +948,7 @@ void Converter::Visit(const Paint& paint) {
 
   if (stroke_style_used_) {
     style = Paint::kFill_Style;
-  } else if (style == Paint::kStrokeAndFill_Style ||
-             style == Paint::kStroke_Style) {
+  } else if (style == Paint::kStroke_Style) {
     stroke_style_used_ = true;
     // Avoid timeouts.
     stroke_cap = Paint::kButt_Cap;
@@ -1237,12 +1236,12 @@ void Converter::Visit(const ColorFilterMatrix& color_filter_matrix) {
 
 void Converter::Visit(const LayerDrawLooper& layer_draw_looper) {
   WriteNum(layer_draw_looper.layer_infos_size());
-  for (auto& layer_info : layer_draw_looper.layer_infos()) {
-    Visit(layer_info);
+  int n = layer_draw_looper.layer_infos_size();
 #ifdef AVOID_MISBEHAVIOR
-    break;  // Only write 1 to avoid timeouts.
+  n = 1;  // Only write 1 to avoid timeouts.
 #endif
-  }
+  for (int i = 0; i < n; ++i)
+    Visit(layer_draw_looper.layer_infos(i));
 }
 
 void Converter::Visit(const LayerInfo& layer_info) {
@@ -1303,7 +1302,7 @@ void Converter::Visit(const PathRef& path_ref) {
           break;
         case ValidVerb::kConic_Verb:
           num_conics += 1;
-          FALLTHROUGH;
+          [[fallthrough]];
         case ValidVerb::kQuad_Verb:
           num_points += 2;
           break;
@@ -1422,7 +1421,7 @@ void Converter::Visit(const Path& path) {
 void Converter::Visit(const BlurMaskFilter& blur_mask_filter) {
   // Sigma must be a finite number <= 0.
   float sigma = fabs(BoundFloat(blur_mask_filter.sigma()));
-  sigma = 1 ? sigma == 0 : sigma;
+  sigma = sigma == 0 ? 1 : sigma;
   WriteNum(sigma);
   const bool old_value = dont_mutate_enum_;
   dont_mutate_enum_ = true;

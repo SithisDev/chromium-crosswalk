@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,22 +14,28 @@
 #include <signal.h>
 #include <string.h>
 
+#include <iterator>
+
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/at_exit.h"
 #include "base/base_switches.h"
+#include "base/clang_profiling_buildflags.h"
 #include "base/command_line.h"
+#include "base/debug/debugger.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/test/test_support_android.h"
 #include "base/threading/thread_restrictions.h"
 #include "gtest/gtest.h"
 #include "testing/android/native_test/main_runner.h"
 #include "testing/android/native_test/native_test_jni_headers/NativeTest_jni.h"
 #include "testing/android/native_test/native_test_util.h"
+
+#if BUILDFLAG(CLANG_PROFILING)
+#include "base/test/clang_profiling.h"
+#endif
 
 using base::android::JavaParamRef;
 
@@ -81,7 +87,7 @@ static void JNI_NativeTest_RunTests(
 
   // Command line initialized basically, will be fully initialized later.
   static const char* const kInitialArgv[] = { "ChromeTestActivity" };
-  base::CommandLine::Init(base::size(kInitialArgv), kInitialArgv);
+  base::CommandLine::Init(std::size(kInitialArgv), kInitialArgv);
 
   std::vector<std::string> args;
 
@@ -133,6 +139,11 @@ static void JNI_NativeTest_RunTests(
 
   ScopedMainEntryLogger scoped_main_entry_logger;
   main(argc, &argv[0]);
+
+// Explicitly write profiling data to LLVM profile file.
+#if BUILDFLAG(CLANG_PROFILING)
+  base::WriteClangProfilingProfile();
+#endif
 }
 
 // TODO(nileshagrawal): now that we're using FIFO, test scripts can detect EOF.

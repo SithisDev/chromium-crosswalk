@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include <stdint.h>
 
-#include "base/logging.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -18,7 +17,7 @@
 #include "third_party/skia/include/core/SkPixelRef.h"
 
 // Native drawing context is only used/supported on Windows.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 namespace skia {
 
@@ -76,7 +75,7 @@ bool VerifyRect(const SkCanvas& canvas,
   return true;
 }
 
-#if !defined(USE_AURA) && !defined(OS_MACOSX)
+#if !defined(USE_AURA) && !BUILDFLAG(IS_MAC)
 // Return true if canvas has something that passes for a rounded-corner
 // rectangle. Basically, we're just checking to make sure that the pixels in the
 // middle are of rect_color and pixels in the corners are of canvas_color.
@@ -134,8 +133,8 @@ void DrawNativeRect(SkCanvas& canvas, int x, int y, int w, int h) {
 // intersected with any existing clip.
 void AddClip(SkCanvas& canvas, int x, int y, int w, int h) {
   SkRect rect;
-  rect.set(SkIntToScalar(x), SkIntToScalar(y),
-           SkIntToScalar(x + w), SkIntToScalar(y + h));
+  rect.setXYWH(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(w),
+               SkIntToScalar(h));
   canvas.clipRect(rect);
 }
 
@@ -148,8 +147,8 @@ class LayerSaver {
         w_(w),
         h_(h) {
     SkRect bounds;
-    bounds.set(SkIntToScalar(x_), SkIntToScalar(y_),
-               SkIntToScalar(right()), SkIntToScalar(bottom()));
+    bounds.setLTRB(SkIntToScalar(x_), SkIntToScalar(y_), SkIntToScalar(right()),
+                   SkIntToScalar(bottom()));
     canvas_.saveLayer(&bounds, NULL);
     canvas.clear(SkColorSetARGB(0, 0, 0, 0));
   }
@@ -368,4 +367,4 @@ TEST(PlatformCanvas, TranslateLayer) {
 
 }  // namespace skia
 
-#endif // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)

@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,6 +15,7 @@ import collections
 import glob
 import json
 import os
+import six
 import subprocess
 import sys
 
@@ -52,7 +53,6 @@ SKIP = {
   'WebKit Mac10.11',
   'WebKit Mac10.12',
   'WebKit Mac10.11 (dbg)',
-  'WebKit Mac10.13 (retina)',
   'Chromium Mac10.10 Tests',
   'Chromium Mac10.11 Tests',
 
@@ -65,128 +65,137 @@ SKIP = {
 
 
 SKIP_GN_ISOLATE_MAP_TARGETS = {
-  # This target is magic and not present in gn_isolate_map.pyl.
-  'all',
-  'remoting/client:client',
-  'remoting/host:host',
+    # This target is magic and not present in gn_isolate_map.pyl.
+    'all',
+    'remoting/client:client',
+    'remoting/host:host',
 
-  # These targets are listed only in build-side recipes.
-  'All_syzygy',
-  'blink_tests',
-  'captured_sites_interactive_tests',
-  'cast_shell',
-  'cast_shell_apk',
-  'chrome_official_builder',
-  'chrome_official_builder_no_unittests',
-  'chrome_sandbox',
-  'chromium_builder_asan',
-  'chromium_builder_perf',
-  'chromiumos_preflight',
-  'linux_symbols',
-  'mini_installer',
-  'previous_version_mini_installer',
-  'symupload',
+    # These targets are listed only in build-side recipes.
+    'All_syzygy',
+    'blink_tests',
+    'captured_sites_interactive_tests',
+    'cast_shell',
+    'cast_shell_apk',
+    'chrome_official_builder',
+    'chrome_official_builder_no_unittests',
+    'chrome_sandbox',
+    'chromium_builder_asan',
+    'chromium_builder_perf',
+    'chromiumos_preflight',
+    'linux_symbols',
+    'mini_installer',
+    'previous_version_mini_installer',
+    'symupload',
 
-  # iOS tests are listed in //ios/build/bots.
-  'cronet_test',
-  'cronet_unittests_ios',
-  'ios_chrome_bookmarks_egtests',
-  'ios_chrome_integration_egtests',
-  'ios_chrome_reading_list_egtests',
-  'ios_chrome_settings_egtests',
-  'ios_chrome_smoke_egtests',
-  'ios_chrome_translate_egtests',
-  'ios_chrome_ui_egtests',
-  'ios_chrome_unittests',
-  'ios_chrome_web_egtests',
-  'ios_chrome_smoke_eg2tests_module',
-  'ios_chrome_ui_eg2tests_module',
-  'ios_chrome_web_eg2tests_module',
-  'ios_web_shell_eg2tests_module',
-  'ios_components_unittests',
-  'ios_net_unittests',
-  "ios_remoting_unittests",
-  'ios_showcase_egtests',
-  'ios_web_inttests',
-  'ios_web_shell_egtests',
-  'ios_web_unittests',
-  'ios_web_view_inttests',
-  'ios_web_view_unittests',
-  'ocmock_support_unittests',
+    # iOS tests are listed in //ios/build/bots.
+    'cronet_test',
+    'cronet_unittests_ios',
+    'ios_chrome_bookmarks_eg2tests_module',
+    'ios_chrome_bookmarks_egtests',
+    'ios_chrome_integration_eg2tests_module',
+    'ios_chrome_integration_egtests',
+    'ios_chrome_reading_list_egtests',
+    'ios_chrome_settings_eg2tests_module',
+    'ios_chrome_settings_egtests',
+    'ios_chrome_signin_eg2tests_module',
+    'ios_chrome_signin_egtests',
+    'ios_chrome_smoke_eg2tests_module',
+    'ios_chrome_smoke_egtests',
+    'ios_chrome_translate_egtests',
+    'ios_chrome_ui_eg2tests_module',
+    'ios_chrome_ui_egtests',
+    'ios_chrome_unittests',
+    'ios_chrome_web_eg2tests_module',
+    'ios_chrome_web_egtests',
+    'ios_components_unittests',
+    'ios_crash_xcuitests_module',
+    'ios_net_unittests',
+    'ios_remoting_unittests',
+    'ios_showcase_eg2tests_module',
+    'ios_showcase_egtests',
+    'ios_testing_unittests',
+    'ios_web_inttests',
+    'ios_web_shell_eg2tests_module',
+    'ios_web_shell_egtests',
+    'ios_web_unittests',
+    'ios_web_view_inttests',
+    'ios_web_view_unittests',
 
-  # These are listed in Builders that are skipped for other reasons.
-  'chrome_junit_tests',
-  'components_background_task_scheduler_junit_tests',
-  'components_gcm_driver_junit_tests',
-  'components_invalidation_impl_junit_tests',
-  'components_policy_junit_tests',
-  'components_variations_junit_tests',
-  'content_junit_tests',
-  'content_junit_tests',
-  'device_junit_tests',
-  'junit_unit_tests',
-  'keyboard_accessory_junit_tests',
-  'media_router_e2e_tests',
-  'media_router_junit_tests',
-  'media_router_perf_tests',
-  'motopho_latency_test',
-  'net_junit_tests',
-  'net_junit_tests',
-  'service_junit_tests',
-  'shipped_binaries',
-  'system_webview_apk',
-  'ui_junit_tests',
-  'vr_common_perftests',
-  'vr_perf_tests',
-  'vrcore_fps_test',
-  'webapk_client_junit_tests',
-  'webapk_shell_apk_h2o_junit_tests',
-  'webapk_shell_apk_junit_tests',
+    # These are listed in Builders that are skipped for other reasons.
+    'chrome_junit_tests',
+    'components_background_task_scheduler_junit_tests',
+    'components_embedder_support_junit_tests',
+    'components_gcm_driver_junit_tests',
+    'components_permissions_junit_tests',
+    'components_policy_junit_tests',
+    'components_variations_junit_tests',
+    'content_junit_tests',
+    'content_junit_tests',
+    'device_junit_tests',
+    'junit_unit_tests',
+    'keyboard_accessory_junit_tests',
+    'media_router_e2e_tests',
+    'media_router_perf_tests',
+    'net_junit_tests',
+    'net_junit_tests',
+    'password_check_junit_tests',
+    'password_manager_junit_tests',
+    'services_junit_tests',
+    'system_webview_apk',
+    'touch_to_fill_junit_tests',
+    'traffic_annotation_auditor_dependencies',
+    'ui_junit_tests',
+    'vr_common_perftests',
+    'vr_perf_tests',
+    'vrcore_fps_test',
+    'webapk_client_junit_tests',
+    'webapk_shell_apk_h2o_junit_tests',
+    'webapk_shell_apk_junit_tests',
 
-  # These tests are only run on WebRTC CI.
-  'AppRTCMobileTest',
-  'android_junit_tests',
-  'audio_decoder_unittests',
-  'common_audio_unittests',
-  'common_video_unittests',
-  'frame_analyzer',
-  'libjingle_peerconnection_android_unittest',
-  'modules_tests',
-  'modules_unittests',
-  'peerconnection_unittests',
-  'rtc_media_unittests',
-  'rtc_pc_unittests',
-  'rtc_stats_unittests',
-  'rtc_unittests',
-  'system_wrappers_unittests',
-  'test_support_unittests',
-  'tools_unittests',
-  'video_engine_tests',
-  'voice_engine_unittests',
-  'webrtc_nonparallel_tests',
-  'xmllite_xmpp_unittests',
+    # These tests are only run on WebRTC CI.
+    'AppRTCMobileTest',
+    'android_examples_junit_tests',
+    'android_sdk_junit_tests',
+    'audio_decoder_unittests',
+    'common_audio_unittests',
+    'common_video_unittests',
+    'dcsctp_unittests',
+    'libjingle_peerconnection_android_unittest',
+    'modules_tests',
+    'modules_unittests',
+    'peerconnection_unittests',
+    'rtc_media_unittests',
+    'rtc_pc_unittests',
+    'rtc_stats_unittests',
+    'rtc_unittests',
+    'system_wrappers_unittests',
+    'test_support_unittests',
+    'tools_unittests',
+    'video_engine_tests',
+    'voice_engine_unittests',
+    'voip_unittests',
+    'webrtc_nonparallel_tests',
+    'xmllite_xmpp_unittests',
 
-  # isolate is currently too slow for this target.
-  # http://crbug.com/524758
-  'webkit_layout_tests',
-  'webkit_layout_tests_exparchive',
+    # These are only run on V8 CI.
+    'pdfium_test',
+    'postmortem-metadata',
 
-  # These are only run on V8 CI.
-  'pdfium_test',
-  'postmortem-metadata',
+    # These are only for developer convenience and not on any bots.
+    'telemetry_gpu_integration_test_scripts_only',
 
-  # These are only for developer convenience and not on any bots.
-  'telemetry_gpu_integration_test_scripts_only',
+    # These are defined by an android internal gn_isolate_map.pyl file.
+    'resource_sizes_chrome_modern_minimal_apks',
+    'resource_sizes_monochrome_minimal_apks',
+    'resource_sizes_trichrome_google',
+    'resource_sizes_system_webview_google_bundle',
 
-  # These are defined by an android internal gn_isolate_map.pyl file.
-  'chrome_apk',
-  'resource_sizes_chrome_apk',
-  'resource_sizes_chrome_modern_minimal_apks',
-  'resource_sizes_monochrome_minimal_apks',
-  'resource_sizes_system_webview_google_apk',
+    # These are only used by perf bots.
+    'chrome_apk',
+    'system_webview_google_apk',
 
-  # These are used by https://www.chromium.org/developers/cluster-telemetry.
-  'ct_telemetry_perf_tests_without_chrome',
+    # These are used by https://www.chromium.org/developers/cluster-telemetry.
+    'ct_telemetry_perf_tests_without_chrome',
 }
 
 
@@ -246,9 +255,10 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
   try:
     config = json.loads(content)
   except ValueError as e:
-    raise Error('Exception raised while checking %s: %s' % (filepath, e))
+    six.raise_from(
+        Error('Exception raised while checking %s: %s' % (filepath, e)), e)
 
-  for builder, data in sorted(config.iteritems()):
+  for builder, data in sorted(config.items()):
     if builder in SKIP:
       # Oddities.
       continue
@@ -266,7 +276,7 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
           test not in SKIP_GN_ISOLATE_MAP_TARGETS):
         raise Error('%s: %s / %s is not listed in gn_isolate_map.pyl' %
                     (filename, builder, test))
-      elif test in ninja_targets:
+      if test in ninja_targets:
         ninja_targets_seen.add(test)
 
     for target in data.get('additional_compile_targets', []):
@@ -274,7 +284,7 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
           target not in SKIP_GN_ISOLATE_MAP_TARGETS):
         raise Error('%s: %s / %s is not listed in gn_isolate_map.pyl' %
                     (filename, builder, target))
-      elif target in ninja_targets:
+      if target in ninja_targets:
         ninja_targets_seen.add(target)
 
     gtest_tests = data.get('gtest_tests', [])
@@ -292,7 +302,7 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
           test not in SKIP_GN_ISOLATE_MAP_TARGETS):
         raise Error('%s: %s / %s is not listed in gn_isolate_map.pyl.' %
                     (filename, builder, test))
-      elif test in ninja_targets:
+      if test in ninja_targets:
         ninja_targets_seen.add(test)
 
       name = d.get('name', d['test'])
@@ -313,7 +323,7 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
           name not in SKIP_GN_ISOLATE_MAP_TARGETS):
         raise Error('%s: %s / %s is not listed in gn_isolate_map.pyl.' %
                     (filename, builder, name))
-      elif name in ninja_targets:
+      if name in ninja_targets:
         ninja_targets_seen.add(name)
 
     for d in data.get('instrumentation_tests', []):
@@ -322,7 +332,7 @@ def process_file(mode, test_name, tests_location, filepath, ninja_targets,
           name not in SKIP_GN_ISOLATE_MAP_TARGETS):
         raise Error('%s: %s / %s is not listed in gn_isolate_map.pyl.' %
                     (filename, builder, name))
-      elif name in ninja_targets:
+      if name in ninja_targets:
         ninja_targets_seen.add(name)
 
     # The trick here is that process_builder_remaining() is called before
@@ -356,9 +366,9 @@ def print_convert(test_name, tests_location):
   print('')
   print('%d configs already ran on Swarming' % data['count_run_on_swarming'])
   print('%d used to run locally and were converted:' % data['count_run_local'])
-  for master, builders in sorted(data['local_configs'].iteritems()):
+  for builder_group, builders in sorted(data['local_configs'].items()):
     for builder in builders:
-      print('- %s: %s' % (master, builder))
+      print('- %s: %s' % (builder_group, builder))
   print('')
   print('Ran:')
   print('  ./manage.py --convert %s' % test_name)
@@ -375,7 +385,7 @@ def print_remaining(test_name, tests_location):
     if test_name not in tests_location:
       raise Error('Unknown test %s' % test_name)
     for config, builders in sorted(
-        tests_location[test_name]['local_configs'].iteritems()):
+        tests_location[test_name]['local_configs'].items()):
       print('%s:' % config)
       for builder in sorted(builders):
         print('  %s' % builder)
@@ -388,7 +398,7 @@ def print_remaining(test_name, tests_location):
         colorama.Fore.MAGENTA))
   total_local = 0
   total_swarming = 0
-  for name, location in sorted(tests_location.iteritems()):
+  for name, location in sorted(tests_location.items()):
     if not location['count_run_on_swarming']:
       c = colorama.Fore.RED
     elif location['count_run_local']:
@@ -407,10 +417,12 @@ def print_remaining(test_name, tests_location):
   total = total_local + total_swarming
   p_local = 100. * total_local / total
   p_swarming = 100. * total_swarming / total
+  # pylint: disable=bad-string-format-type
   print('%s%-*s %4d (%4.1f%%)   %4d (%4.1f%%)' %
       (colorama.Fore.WHITE, l, 'Total:', total_local, p_local,
         total_swarming, p_swarming))
   print('%-*s                %4d' % (l, 'Total executions:', total))
+  #pylint: enable=bad-string-format-type
 
 
 def main():

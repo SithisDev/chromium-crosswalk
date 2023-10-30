@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,19 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
-using storage::DatabaseUtil;
 
-static void TestVfsFilePath(bool expected_result,
-                            const char* vfs_file_name,
-                            const char* expected_origin_identifier = "",
-                            const char* expected_database_name = "",
-                            const char* expected_sqlite_suffix = "") {
+namespace storage {
+
+namespace {
+
+void TestVfsFilePath(bool expected_result,
+                     const char* vfs_file_name,
+                     const char* expected_origin_identifier = "",
+                     const char* expected_database_name = "",
+                     const char* expected_sqlite_suffix = "") {
   std::string origin_identifier;
-  base::string16 database_name;
-  base::string16 sqlite_suffix;
+  std::u16string database_name;
+  std::u16string sqlite_suffix;
   EXPECT_EQ(expected_result,
             DatabaseUtil::CrackVfsFileName(ASCIIToUTF16(vfs_file_name),
                                            &origin_identifier, &database_name,
@@ -28,7 +31,7 @@ static void TestVfsFilePath(bool expected_result,
   EXPECT_EQ(ASCIIToUTF16(expected_sqlite_suffix), sqlite_suffix);
 }
 
-namespace content {
+}  // namespace
 
 // Test DatabaseUtil::CrackVfsFilePath on various inputs.
 TEST(DatabaseUtilTest, CrackVfsFilePathTest) {
@@ -46,4 +49,4 @@ TEST(DatabaseUtilTest, CrackVfsFilePathTest) {
   TestVfsFilePath(false, "/db_name#suffix");
 }
 
-}  // namespace content
+}  // namespace storage

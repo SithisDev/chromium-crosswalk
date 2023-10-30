@@ -1,4 +1,5 @@
-jbudorick@chromium.org
-kbr@chromium.org
-martiniss@chromium.org
-maruel@chromium.org
+# Intended to be those familiar with the Chromium recipe. Namely:
+# https://source.chromium.org/chromium/chromium/tools/build/+/main:recipes/recipes/chromium/OWNERS
+bpastene@chromium.org
+gbeaty@chromium.org
+kimstephanie@chromium.org

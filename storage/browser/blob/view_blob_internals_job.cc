@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,25 +14,24 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/time_formatting.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/notreached.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "net/url_request/url_request.h"
 #include "storage/browser/blob/blob_data_item.h"
 #include "storage/browser/blob/blob_entry.h"
+#include "storage/browser/blob/blob_storage_constants.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_storage_registry.h"
 #include "storage/browser/blob/shareable_blob_data_item.h"
-#include "storage/common/blob_storage/blob_storage_constants.h"
+
+namespace storage {
 
 namespace {
-using storage::BlobStatus;
 
 const char kEmptyBlobStorageMessage[] = "No available blob data.";
 const char kContentType[] = "Content Type: ";
@@ -45,7 +44,6 @@ const char kURL[] = "URL: ";
 const char kModificationTime[] = "Modification Time: ";
 const char kOffset[] = "Offset: ";
 const char kLength[] = "Length: ";
-const char kUUID[] = "Uuid: ";
 const char kRefcount[] = "Refcount: ";
 const char kStatus[] = "Status: ";
 
@@ -112,7 +110,7 @@ void EndHTML(std::string* out) {
 
 void AddHTMLBoldText(const std::string& text, std::string* out) {
   out->append("<b>");
-  out->append(net::EscapeForHTML(text));
+  out->append(base::EscapeForHTML(text));
   out->append("</b>");
 }
 
@@ -130,66 +128,11 @@ void AddHTMLListItem(const std::string& element_title,
   out->append("<li>");
   // No need to escape element_title since constant string is passed.
   out->append(element_title);
-  out->append(net::EscapeForHTML(element_data));
+  out->append(base::EscapeForHTML(element_data));
   out->append("</li>\n");
 }
 
-void AddHorizontalRule(std::string* out) {
-  out->append("\n<hr>\n");
-}
-
 }  // namespace
-
-namespace storage {
-
-ViewBlobInternalsJob::ViewBlobInternalsJob(
-    net::URLRequest* request,
-    net::NetworkDelegate* network_delegate,
-    BlobStorageContext* blob_storage_context)
-    : net::URLRequestSimpleJob(request, network_delegate),
-      blob_storage_context_(blob_storage_context),
-      weak_factory_(this) {
-}
-
-ViewBlobInternalsJob::~ViewBlobInternalsJob() = default;
-
-void ViewBlobInternalsJob::Start() {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&ViewBlobInternalsJob::StartAsync,
-                                weak_factory_.GetWeakPtr()));
-}
-
-bool ViewBlobInternalsJob::IsRedirectResponse(
-    GURL* location,
-    int* http_status_code,
-    bool* insecure_scheme_was_upgraded) {
-  if (request_->url().has_query()) {
-    // Strip the query parameters.
-    GURL::Replacements replacements;
-    replacements.ClearQuery();
-    *insecure_scheme_was_upgraded = false;
-    *location = request_->url().ReplaceComponents(replacements);
-    *http_status_code = 307;
-    return true;
-  }
-  return false;
-}
-
-void ViewBlobInternalsJob::Kill() {
-  net::URLRequestSimpleJob::Kill();
-  weak_factory_.InvalidateWeakPtrs();
-}
-
-int ViewBlobInternalsJob::GetData(std::string* mime_type,
-                                  std::string* charset,
-                                  std::string* data,
-                                  net::CompletionOnceCallback callback) const {
-  mime_type->assign("text/html");
-  charset->assign("UTF-8");
-
-  *data = GenerateHTML(blob_storage_context_);
-  return net::OK;
-}
 
 std::string ViewBlobInternalsJob::GenerateHTML(
     BlobStorageContext* blob_storage_context) {
@@ -206,16 +149,7 @@ std::string ViewBlobInternalsJob::GenerateHTML(
                               entry->content_disposition(), entry->refcount(),
                               &out);
     }
-    if (!blob_storage_context->registry().url_to_uuid_.empty()) {
-      AddHorizontalRule(&out);
-      for (const auto& url_uuid_pair :
-           blob_storage_context->registry().url_to_uuid_) {
-        AddHTMLBoldText(url_uuid_pair.first.spec(), &out);
-        StartHTMLList(&out);
-        AddHTMLListItem(kUUID, url_uuid_pair.second, &out);
-        EndHTMLList(&out);
-      }
-    }
+    // TODO(https://crbug.com/1112483): Bring back information about blob URLs.
   }
   EndHTML(&out);
   return out;
@@ -255,9 +189,8 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
         break;
       case BlobDataItem::Type::kFile:
         AddHTMLListItem(kType, "file", out);
-        AddHTMLListItem(kPath,
-                 net::EscapeForHTML(item.path().AsUTF8Unsafe()),
-                 out);
+        AddHTMLListItem(kPath, base::EscapeForHTML(item.path().AsUTF8Unsafe()),
+                        out);
         if (!item.expected_modification_time().is_null()) {
           AddHTMLListItem(kModificationTime, base::UTF16ToUTF8(
               TimeFormatFriendlyDateAndTime(item.expected_modification_time())),
@@ -266,7 +199,7 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
         break;
       case BlobDataItem::Type::kFileFilesystem:
         AddHTMLListItem(kType, "filesystem", out);
-        AddHTMLListItem(kURL, item.filesystem_url().spec(), out);
+        AddHTMLListItem(kURL, item.filesystem_url().DebugString(), out);
         if (!item.expected_modification_time().is_null()) {
           AddHTMLListItem(kModificationTime, base::UTF16ToUTF8(
               TimeFormatFriendlyDateAndTime(item.expected_modification_time())),

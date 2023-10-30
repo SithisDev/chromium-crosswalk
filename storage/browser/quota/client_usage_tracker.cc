@@ -1,72 +1,42 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "storage/browser/quota/client_usage_tracker.h"
 
 #include <stdint.h>
+#include <iterator>
 
+#include "base/barrier_closure.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/stl_util.h"
-#include "net/base/url_util.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
+#include "base/metrics/histogram_functions.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace storage {
 
 namespace {
 
-using OriginSetByHost = ClientUsageTracker::OriginSetByHost;
-
-void DidGetHostUsage(UsageCallback callback,
-                     int64_t limited_usage,
-                     int64_t unlimited_usage) {
-  DCHECK_GE(limited_usage, 0);
-  DCHECK_GE(unlimited_usage, 0);
-  std::move(callback).Run(limited_usage + unlimited_usage);
-}
-
-bool EraseOriginFromOriginSet(OriginSetByHost* origins_by_host,
-                              const std::string& host,
-                              const url::Origin& origin) {
-  auto found = origins_by_host->find(host);
-  if (found == origins_by_host->end())
-    return false;
-
-  if (!found->second.erase(origin))
-    return false;
-
-  if (found->second.empty())
-    origins_by_host->erase(host);
-  return true;
-}
-
-bool OriginSetContainsOrigin(const OriginSetByHost& origins,
-                             const std::string& host,
-                             const url::Origin& origin) {
-  auto itr = origins.find(host);
-  return itr != origins.end() && base::Contains(itr->second, origin);
-}
-
-void DidGetGlobalClientUsageForLimitedGlobalClientUsage(
-    UsageCallback callback,
-    int64_t total_global_usage,
-    int64_t global_unlimited_usage) {
-  std::move(callback).Run(total_global_usage - global_unlimited_usage);
+void RecordSkippedOriginHistogram(const InvalidOriginReason reason) {
+  base::UmaHistogramEnumeration("Quota.SkippedInvalidOriginUsage", reason);
 }
 
 }  // namespace
 
+struct ClientUsageTracker::AccumulateInfo {
+  int64_t limited_usage = 0;
+  int64_t unlimited_usage = 0;
+};
+
 ClientUsageTracker::ClientUsageTracker(
     UsageTracker* tracker,
-    QuotaClient* client,
+    mojom::QuotaClient* client,
     blink::mojom::StorageType type,
-    SpecialStoragePolicy* special_storage_policy)
+    scoped_refptr<SpecialStoragePolicy> special_storage_policy)
     : client_(client),
       type_(type),
-      global_limited_usage_(0),
-      global_unlimited_usage_(0),
-      global_usage_retrieved_(false),
-      special_storage_policy_(special_storage_policy) {
+      special_storage_policy_(std::move(special_storage_policy)) {
   DCHECK(client_);
   if (special_storage_policy_.get())
     special_storage_policy_->AddObserver(this);
@@ -78,435 +48,259 @@ ClientUsageTracker::~ClientUsageTracker() {
     special_storage_policy_->RemoveObserver(this);
 }
 
-void ClientUsageTracker::GetGlobalLimitedUsage(UsageCallback callback) {
+void ClientUsageTracker::GetBucketsUsage(const std::set<BucketLocator>& buckets,
+                                         UsageCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!global_usage_retrieved_) {
-    GetGlobalUsage(
-        base::BindOnce(&DidGetGlobalClientUsageForLimitedGlobalClientUsage,
-                       std::move(callback)));
-    return;
+  DCHECK_GT(buckets.size(), 0u);
+
+  auto info = std::make_unique<AccumulateInfo>();
+  auto* info_ptr = info.get();
+  base::RepeatingClosure barrier = base::BarrierClosure(
+      buckets.size(),
+      base::BindOnce(&ClientUsageTracker::FinallySendBucketsUsage,
+                     weak_factory_.GetWeakPtr(), std::move(callback),
+                     std::move(info)));
+
+  for (const auto& bucket : buckets) {
+    // TODO(https://crbug.com/941480): `storage_key` should not be opaque or
+    // have an empty url, but sometimes it is.
+    if (bucket.storage_key.origin().opaque()) {
+      DVLOG(1) << "GetBucketsUsage for opaque storage_key!";
+      RecordSkippedOriginHistogram(InvalidOriginReason::kIsOpaque);
+      barrier.Run();
+      continue;
+    }
+
+    if (bucket.storage_key.origin().GetURL().is_empty()) {
+      DVLOG(1) << "GetBucketsUsage for storage_key with empty url!";
+      RecordSkippedOriginHistogram(InvalidOriginReason::kIsEmpty);
+      barrier.Run();
+      continue;
+    }
+
+    // Use a cached usage value, if we have one.
+    int64_t cached_usage = GetCachedBucketUsage(bucket);
+    if (cached_usage != -1) {
+      AccumulateBucketsUsage(barrier, bucket, info_ptr, cached_usage);
+      continue;
+    }
+
+    client_->GetBucketUsage(
+        bucket,
+        // base::Unretained usage is safe here because barrier holds the
+        // std::unque_ptr that keeps AccumulateInfo alive, and the barrier
+        // will outlive all the AccumulateClientGlobalUsage closures.
+        base::BindOnce(&ClientUsageTracker::AccumulateBucketsUsage,
+                       weak_factory_.GetWeakPtr(), barrier, bucket,
+                       base::Unretained(info_ptr)));
   }
-
-  if (non_cached_limited_origins_by_host_.empty()) {
-    std::move(callback).Run(global_limited_usage_);
-    return;
-  }
-
-  AccumulateInfo* info = new AccumulateInfo;
-  info->pending_jobs = non_cached_limited_origins_by_host_.size() + 1;
-  auto accumulator = base::BindRepeating(
-      &ClientUsageTracker::AccumulateLimitedOriginUsage, AsWeakPtr(),
-      base::Owned(info), AdaptCallbackForRepeating(std::move(callback)));
-
-  for (const auto& host_and_origins : non_cached_limited_origins_by_host_) {
-    for (const auto& origin : host_and_origins.second)
-      client_->GetOriginUsage(origin, type_, accumulator);
-  }
-
-  accumulator.Run(global_limited_usage_);
 }
 
-void ClientUsageTracker::GetGlobalUsage(GlobalUsageCallback callback) {
+void ClientUsageTracker::UpdateBucketUsageCache(const BucketLocator& bucket,
+                                                int64_t delta) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (global_usage_retrieved_ &&
-      non_cached_limited_origins_by_host_.empty() &&
-      non_cached_unlimited_origins_by_host_.empty()) {
-    std::move(callback).Run(global_limited_usage_ + global_unlimited_usage_,
-                            global_unlimited_usage_);
+  if (!IsUsageCacheEnabledForStorageKey(bucket.storage_key))
+    return;
+
+  auto bucket_it = cached_bucket_usage_.find(bucket);
+  if (bucket_it != cached_bucket_usage_.end()) {
+    // Constrain `delta` to avoid negative usage values.
+    // TODO(crbug.com/463729): At least one storage API sends deltas that
+    // result in negative total usage. The line below works around this bug.
+    // Fix the bug, and remove the workaround.
+    delta = std::max(delta, -bucket_it->second);
+    bucket_it->second += delta;
     return;
   }
-
-  client_->GetOriginsForType(
-      type_, base::BindOnce(&ClientUsageTracker::DidGetOriginsForGlobalUsage,
-                            AsWeakPtr(), std::move(callback)));
+  // Retrieve bucket usage and update cache.
+  GetBucketUsage(bucket, base::DoNothing());
 }
 
-void ClientUsageTracker::GetHostUsage(const std::string& host,
-                                      UsageCallback callback) {
+void ClientUsageTracker::DeleteBucketCache(const BucketLocator& bucket) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (base::Contains(cached_hosts_, host) &&
-      !base::Contains(non_cached_limited_origins_by_host_, host) &&
-      !base::Contains(non_cached_unlimited_origins_by_host_, host)) {
-    // TODO(kinuko): Drop host_usage_map_ cache periodically.
-    std::move(callback).Run(GetCachedHostUsage(host));
-    return;
-  }
-
-  if (!host_usage_accumulators_.Add(
-          host, base::BindOnce(&DidGetHostUsage, std::move(callback))))
-    return;
-  client_->GetOriginsForHost(
-      type_, host,
-      base::BindOnce(&ClientUsageTracker::DidGetOriginsForHostUsage,
-                     AsWeakPtr(), host));
-}
-
-void ClientUsageTracker::UpdateUsageCache(const url::Origin& origin,
-                                          int64_t delta) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  std::string host = net::GetHostOrSpecFromURL(origin.GetURL());
-  if (base::Contains(cached_hosts_, host)) {
-    if (!IsUsageCacheEnabledForOrigin(origin))
-      return;
-
-    // Constrain |delta| to avoid negative usage values.
-    // TODO(michaeln): crbug/463729
-    delta = std::max(delta, -cached_usage_by_host_[host][origin]);
-    cached_usage_by_host_[host][origin] += delta;
-    UpdateGlobalUsageValue(IsStorageUnlimited(origin) ? &global_unlimited_usage_
-                                                      : &global_limited_usage_,
-                           delta);
-
-    return;
-  }
-
-  // We call GetHostUsage() so that the cache still updates, but we don't need
-  // to do anything else with the usage so we do not pass a callback.
-  GetHostUsage(host, base::DoNothing());
+  cached_bucket_usage_.erase(bucket);
 }
 
 int64_t ClientUsageTracker::GetCachedUsage() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   int64_t usage = 0;
-  for (const auto& host_and_usage_map : cached_usage_by_host_) {
-    for (const auto& origin_and_usage : host_and_usage_map.second)
-      usage += origin_and_usage.second;
-  }
+  for (const auto& bucket_and_usage : cached_bucket_usage_)
+    usage += bucket_and_usage.second;
   return usage;
 }
 
-void ClientUsageTracker::GetCachedHostsUsage(
-    std::map<std::string, int64_t>* host_usage) const {
+std::map<std::string, int64_t> ClientUsageTracker::GetCachedHostsUsage() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(host_usage);
-  for (const auto& host_and_usage_map : cached_usage_by_host_) {
-    const std::string& host = host_and_usage_map.first;
-    (*host_usage)[host] += GetCachedHostUsage(host);
+  std::map<std::string, int64_t> host_usage;
+  for (const auto& bucket_and_usage : cached_bucket_usage_) {
+    const std::string& host =
+        bucket_and_usage.first.storage_key.origin().host();
+    host_usage[host] += bucket_and_usage.second;
   }
+  return host_usage;
 }
 
-void ClientUsageTracker::GetCachedOriginsUsage(
-    std::map<url::Origin, int64_t>* origin_usage) const {
+std::map<blink::StorageKey, int64_t>
+ClientUsageTracker::GetCachedStorageKeysUsage() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(origin_usage);
-  for (const auto& host_and_usage_map : cached_usage_by_host_) {
-    for (const auto& origin_and_usage : host_and_usage_map.second)
-      (*origin_usage)[origin_and_usage.first] += origin_and_usage.second;
+  std::map<blink::StorageKey, int64_t> storage_key_usage;
+  for (const auto& bucket_and_usage : cached_bucket_usage_) {
+    const blink::StorageKey& storage_key = bucket_and_usage.first.storage_key;
+    storage_key_usage[storage_key] += bucket_and_usage.second;
   }
+  return storage_key_usage;
 }
 
-void ClientUsageTracker::GetCachedOrigins(
-    std::set<url::Origin>* origins) const {
+void ClientUsageTracker::SetUsageCacheEnabled(
+    const blink::StorageKey& storage_key,
+    bool enabled) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(origins);
-  for (const auto& host_and_usage_map : cached_usage_by_host_) {
-    for (const auto& origin_and_usage : host_and_usage_map.second)
-      origins->insert(origin_and_usage.first);
+  if (enabled) {
+    non_cached_limited_storage_keys_.erase(storage_key);
+    non_cached_unlimited_storage_keys_.erase(storage_key);
+    return;
   }
-}
 
-void ClientUsageTracker::SetUsageCacheEnabled(const url::Origin& origin,
-                                              bool enabled) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  std::string host = net::GetHostOrSpecFromURL(origin.GetURL());
-  if (!enabled) {
-    // Erase |origin| from cache and subtract its usage.
-    auto found_host = cached_usage_by_host_.find(host);
-    if (found_host != cached_usage_by_host_.end()) {
-      UsageMap& cached_usage_for_host = found_host->second;
-
-      auto found = cached_usage_for_host.find(origin);
-      if (found != cached_usage_for_host.end()) {
-        int64_t usage = found->second;
-        UpdateUsageCache(origin, -usage);
-        cached_usage_for_host.erase(found);
-        if (cached_usage_for_host.empty()) {
-          cached_usage_by_host_.erase(found_host);
-          cached_hosts_.erase(host);
-        }
-      }
+  // Find all buckets for `storage_key` in `cached_bucket_usage_`
+  // and remove them from the cache. Erases cached bucket usage while iterating.
+  for (auto it = cached_bucket_usage_.cbegin();
+       it != cached_bucket_usage_.cend();) {
+    if (it->first.storage_key == storage_key) {
+      // Calling erase() while iterating is safe because (1) std::map::erase()
+      // only invalidates the iterator pointing to the erased element, and (2)
+      // `it` is advanced off of the erased element before erase() is called.
+      cached_bucket_usage_.erase(it++);
+    } else {
+      ++it;
     }
+  }
 
-    if (IsStorageUnlimited(origin))
-      non_cached_unlimited_origins_by_host_[host].insert(origin);
-    else
-      non_cached_limited_origins_by_host_[host].insert(origin);
+  // Add to `non_cached_*_storage_keys_` to exclude `storage_key` from quota
+  // restrictions.
+  if (IsStorageUnlimited(storage_key)) {
+    non_cached_unlimited_storage_keys_.insert(storage_key);
   } else {
-    // Erase |origin| from |non_cached_origins_| and invalidate the usage cache
-    // for the host.
-    if (EraseOriginFromOriginSet(&non_cached_limited_origins_by_host_,
-                                 host, origin) ||
-        EraseOriginFromOriginSet(&non_cached_unlimited_origins_by_host_,
-                                 host, origin)) {
-      cached_hosts_.erase(host);
-      global_usage_retrieved_ = false;
-    }
+    non_cached_limited_storage_keys_.insert(storage_key);
   }
 }
 
-void ClientUsageTracker::AccumulateLimitedOriginUsage(AccumulateInfo* info,
-                                                      UsageCallback callback,
-                                                      int64_t usage) {
-  DCHECK_GT(info->pending_jobs, 0U);
+bool ClientUsageTracker::IsUsageCacheEnabledForStorageKey(
+    const blink::StorageKey& storage_key) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  info->limited_usage += usage;
-  if (--info->pending_jobs)
-    return;
-
-  std::move(callback).Run(info->limited_usage);
+  return !base::Contains(non_cached_limited_storage_keys_, storage_key) &&
+         !base::Contains(non_cached_unlimited_storage_keys_, storage_key);
 }
 
-void ClientUsageTracker::DidGetOriginsForGlobalUsage(
-    GlobalUsageCallback callback,
-    const std::set<url::Origin>& origins) {
+void ClientUsageTracker::AccumulateBucketsUsage(
+    base::OnceClosure barrier_callback,
+    const BucketLocator& bucket,
+    AccumulateInfo* info,
+    int64_t usage) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  OriginSetByHost origins_by_host;
-  for (const auto& origin : origins) {
-    GURL origin_url = origin.GetURL();
-    origins_by_host[net::GetHostOrSpecFromURL(origin_url)].insert(origin);
+  // Defend against confusing inputs from clients.
+  // TODO(crbug.com/1292210): Remove this check after fixing QuotaClients.
+  if (usage < 0)
+    usage = 0;
+
+  if (IsStorageUnlimited(bucket.storage_key)) {
+    info->unlimited_usage += usage;
+  } else {
+    info->limited_usage += usage;
   }
 
-  AccumulateInfo* info = new AccumulateInfo;
-  // Getting host usage may synchronously return the result if the usage is
-  // cached, which may in turn dispatch the completion callback before we finish
-  // looping over all hosts (because info->pending_jobs may reach 0 during the
-  // loop).  To avoid this, we add one more pending host as a sentinel and
-  // fire the sentinel callback at the end.
-  info->pending_jobs = origins_by_host.size() + 1;
-  auto accumulator = base::BindRepeating(
-      &ClientUsageTracker::AccumulateHostUsage, AsWeakPtr(), base::Owned(info),
-      base::AdaptCallbackForRepeating(std::move(callback)));
-
-  for (const auto& host_and_origins : origins_by_host) {
-    const std::string& host = host_and_origins.first;
-    const std::set<url::Origin>& origins = host_and_origins.second;
-    if (host_usage_accumulators_.Add(host, accumulator))
-      GetUsageForOrigins(host, origins);
-  }
-
-  // Fire the sentinel as we've now called GetUsageForOrigins for all clients.
-  accumulator.Run(0, 0);
+  if (IsUsageCacheEnabledForStorageKey(bucket.storage_key))
+    CacheBucketUsage(bucket, usage);
+  std::move(barrier_callback).Run();
 }
 
-void ClientUsageTracker::AccumulateHostUsage(AccumulateInfo* info,
-                                             GlobalUsageCallback callback,
-                                             int64_t limited_usage,
-                                             int64_t unlimited_usage) {
-  DCHECK_GT(info->pending_jobs, 0U);
+void ClientUsageTracker::FinallySendBucketsUsage(
+    UsageCallback callback,
+    std::unique_ptr<AccumulateInfo> info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  info->limited_usage += limited_usage;
-  info->unlimited_usage += unlimited_usage;
-  if (--info->pending_jobs)
-    return;
-
   DCHECK_GE(info->limited_usage, 0);
   DCHECK_GE(info->unlimited_usage, 0);
 
-  global_usage_retrieved_ = true;
   std::move(callback).Run(info->limited_usage + info->unlimited_usage,
                           info->unlimited_usage);
 }
 
-void ClientUsageTracker::DidGetOriginsForHostUsage(
-    const std::string& host,
-    const std::set<url::Origin>& origins) {
+void ClientUsageTracker::CacheBucketUsage(const BucketLocator& bucket,
+                                          int64_t new_usage) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  GetUsageForOrigins(host, origins);
+  DCHECK(IsUsageCacheEnabledForStorageKey(bucket.storage_key));
+  cached_bucket_usage_[bucket] = new_usage;
 }
 
-void ClientUsageTracker::GetUsageForOrigins(
-    const std::string& host,
-    const std::set<url::Origin>& origins) {
+int64_t ClientUsageTracker::GetCachedBucketUsage(
+    const BucketLocator& bucket) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  AccumulateInfo* info = new AccumulateInfo;
-  // Getting origin usage may synchronously return the result if the usage is
-  // cached, which may in turn dispatch the completion callback before we finish
-  // looping over all origins (because info->pending_jobs may reach 0 during the
-  // loop).  To avoid this, we add one more pending origin as a sentinel and
-  // fire the sentinel callback at the end.
-  info->pending_jobs = origins.size() + 1;
-  auto accumulator =
-      base::BindRepeating(&ClientUsageTracker::AccumulateOriginUsage,
-                          AsWeakPtr(), base::Owned(info), host);
-
-  for (const auto& origin : origins) {
-    DCHECK_EQ(host, net::GetHostOrSpecFromURL(origin.GetURL()));
-
-    int64_t origin_usage = 0;
-    if (GetCachedOriginUsage(origin, &origin_usage)) {
-      accumulator.Run(origin, origin_usage);
-    } else {
-      client_->GetOriginUsage(origin, type_,
-                              base::BindOnce(accumulator, origin));
-    }
-  }
-
-  // Fire the sentinel as we've now called GetOriginUsage for all clients.
-  accumulator.Run(base::nullopt, 0);
+  auto bucket_it = cached_bucket_usage_.find(bucket);
+  if (bucket_it == cached_bucket_usage_.end())
+    return -1;
+  return bucket_it->second;
 }
 
-void ClientUsageTracker::AccumulateOriginUsage(
-    AccumulateInfo* info,
-    const std::string& host,
-    const base::Optional<url::Origin>& origin,
-    int64_t usage) {
-  DCHECK_GT(info->pending_jobs, 0U);
+void ClientUsageTracker::GetBucketUsage(const BucketLocator& bucket,
+                                        UsageCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (origin.has_value()) {
-    DCHECK(!origin->GetURL().is_empty());
-    if (usage < 0)
-      usage = 0;
-
-    if (IsStorageUnlimited(*origin))
-      info->unlimited_usage += usage;
-    else
-      info->limited_usage += usage;
-    if (IsUsageCacheEnabledForOrigin(*origin))
-      AddCachedOrigin(*origin, usage);
-  }
-  if (--info->pending_jobs)
-    return;
-
-  AddCachedHost(host);
-  host_usage_accumulators_.Run(
-      host, info->limited_usage, info->unlimited_usage);
+  client_->GetBucketUsage(
+      bucket,
+      base::BindOnce(&ClientUsageTracker::DidGetBucketUsage,
+                     weak_factory_.GetWeakPtr(), bucket, std::move(callback)));
+  return;
 }
 
-void ClientUsageTracker::AddCachedOrigin(const url::Origin& origin,
-                                         int64_t new_usage) {
+void ClientUsageTracker::DidGetBucketUsage(const BucketLocator& bucket,
+                                           UsageCallback callback,
+                                           int64_t usage) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(IsUsageCacheEnabledForOrigin(origin));
+  if (IsUsageCacheEnabledForStorageKey(bucket.storage_key))
+    CacheBucketUsage(bucket, usage);
 
-  std::string host = net::GetHostOrSpecFromURL(origin.GetURL());
-  int64_t* usage = &cached_usage_by_host_[host][origin];
-  int64_t delta = new_usage - *usage;
-  *usage = new_usage;
-  if (delta) {
-    UpdateGlobalUsageValue(IsStorageUnlimited(origin) ? &global_unlimited_usage_
-                                                      : &global_limited_usage_,
-                           delta);
-  }
+  int64_t unlimited_usage = IsStorageUnlimited(bucket.storage_key) ? usage : 0;
+  std::move(callback).Run(usage, unlimited_usage);
 }
 
-void ClientUsageTracker::AddCachedHost(const std::string& host) {
+void ClientUsageTracker::OnGranted(const url::Origin& origin_url,
+                                   int change_flags) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  cached_hosts_.insert(host);
-}
-
-int64_t ClientUsageTracker::GetCachedHostUsage(const std::string& host) const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  auto found = cached_usage_by_host_.find(host);
-  if (found == cached_usage_by_host_.end())
-    return 0;
-
-  int64_t usage = 0;
-  const UsageMap& usage_map = found->second;
-  for (const auto& origin_and_usage : usage_map)
-    usage += origin_and_usage.second;
-  return usage;
-}
-
-bool ClientUsageTracker::GetCachedOriginUsage(const url::Origin& origin,
-                                              int64_t* usage) const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  std::string host = net::GetHostOrSpecFromURL(origin.GetURL());
-  auto found_host = cached_usage_by_host_.find(host);
-  if (found_host == cached_usage_by_host_.end())
-    return false;
-
-  auto found = found_host->second.find(origin);
-  if (found == found_host->second.end())
-    return false;
-
-  DCHECK(IsUsageCacheEnabledForOrigin(origin));
-  *usage = found->second;
-  return true;
-}
-
-bool ClientUsageTracker::IsUsageCacheEnabledForOrigin(
-    const url::Origin& origin) const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  std::string host = net::GetHostOrSpecFromURL(origin.GetURL());
-  return !OriginSetContainsOrigin(non_cached_limited_origins_by_host_,
-                                  host, origin) &&
-      !OriginSetContainsOrigin(non_cached_unlimited_origins_by_host_,
-                               host, origin);
-}
-
-void ClientUsageTracker::OnGranted(const GURL& origin_url, int change_flags) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // TODO(crbug.com/1215208): Remove this conversion once the storage policy
+  // APIs are converted to use StorageKey instead of Origin.
+  const blink::StorageKey storage_key(origin_url);
   if (change_flags & SpecialStoragePolicy::STORAGE_UNLIMITED) {
-    url::Origin origin = url::Origin::Create(origin_url);
-    int64_t usage = 0;
-    if (GetCachedOriginUsage(origin, &usage)) {
-      global_unlimited_usage_ += usage;
-      global_limited_usage_ -= usage;
-    }
-
-    std::string host = net::GetHostOrSpecFromURL(origin_url);
-    if (EraseOriginFromOriginSet(&non_cached_limited_origins_by_host_,
-                                 host, origin))
-      non_cached_unlimited_origins_by_host_[host].insert(origin);
+    if (non_cached_limited_storage_keys_.erase(storage_key))
+      non_cached_unlimited_storage_keys_.insert(storage_key);
   }
 }
 
-void ClientUsageTracker::OnRevoked(const GURL& origin_url, int change_flags) {
+void ClientUsageTracker::OnRevoked(const url::Origin& origin_url,
+                                   int change_flags) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // TODO(crbug.com/1215208): Remove this conversion once the storage policy
+  // APIs are converted to use StorageKey instead of Origin.
+  const blink::StorageKey storage_key(origin_url);
   if (change_flags & SpecialStoragePolicy::STORAGE_UNLIMITED) {
-    url::Origin origin = url::Origin::Create(origin_url);
-    int64_t usage = 0;
-    if (GetCachedOriginUsage(origin, &usage)) {
-      global_unlimited_usage_ -= usage;
-      global_limited_usage_ += usage;
-    }
-
-    std::string host = net::GetHostOrSpecFromURL(origin_url);
-    if (EraseOriginFromOriginSet(&non_cached_unlimited_origins_by_host_,
-                                 host, origin))
-      non_cached_limited_origins_by_host_[host].insert(origin);
+    if (non_cached_unlimited_storage_keys_.erase(storage_key))
+      non_cached_limited_storage_keys_.insert(storage_key);
   }
 }
 
 void ClientUsageTracker::OnCleared() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  global_limited_usage_ += global_unlimited_usage_;
-  global_unlimited_usage_ = 0;
-
-  for (const auto& host_and_origins : non_cached_unlimited_origins_by_host_) {
-    const auto& host = host_and_origins.first;
-    for (const auto& origin : host_and_origins.second)
-      non_cached_limited_origins_by_host_[host].insert(origin);
-  }
-  non_cached_unlimited_origins_by_host_.clear();
+  non_cached_limited_storage_keys_.insert(
+      std::make_move_iterator(non_cached_unlimited_storage_keys_.begin()),
+      std::make_move_iterator(non_cached_unlimited_storage_keys_.end()));
+  non_cached_unlimited_storage_keys_.clear();
 }
 
-void ClientUsageTracker::UpdateGlobalUsageValue(int64_t* usage_value,
-                                                int64_t delta) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  *usage_value += delta;
-  if (*usage_value >= 0)
-    return;
-
-  // If we have a negative global usage value, recalculate them.
-  // TODO(michaeln): There are book keeping bugs, crbug/463729
-  global_limited_usage_ = 0;
-  global_unlimited_usage_ = 0;
-  for (const auto& host_and_usage_map : cached_usage_by_host_) {
-    for (const auto& origin_and_usage : host_and_usage_map.second) {
-      if (IsStorageUnlimited(origin_and_usage.first))
-        global_unlimited_usage_ += origin_and_usage.second;
-      else
-        global_limited_usage_ += origin_and_usage.second;
-    }
-  }
-}
-
-bool ClientUsageTracker::IsStorageUnlimited(const url::Origin& origin) const {
+bool ClientUsageTracker::IsStorageUnlimited(
+    const blink::StorageKey& storage_key) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (type_ == blink::mojom::StorageType::kSyncable)
     return false;
   return special_storage_policy_.get() &&
-         special_storage_policy_->IsStorageUnlimited(origin.GetURL());
+         special_storage_policy_->IsStorageUnlimited(
+             storage_key.origin().GetURL());
 }
 
 }  // namespace storage

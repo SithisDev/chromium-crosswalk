@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsobject.h"
@@ -26,7 +26,7 @@ SkBitmap NSImageOrNSImageRepToSkBitmapWithColorSpace(
     bool is_opaque,
     CGColorSpaceRef color_space) {
   // Only image or image_rep should be provided, not both.
-  DCHECK((image != 0) ^ (image_rep != 0));
+  DCHECK((image != nullptr) ^ (image_rep != nullptr));
 
   SkBitmap bitmap;
   if (!bitmap.tryAllocN32Pixels(size.width, size.height, is_opaque))
@@ -42,13 +42,8 @@ SkBitmap NSImageOrNSImageRepToSkBitmapWithColorSpace(
              && SK_G32_SHIFT == (g) && SK_B32_SHIFT == (b))
 #if defined(SK_CPU_LENDIAN) && HAS_ARGB_SHIFTS(24, 16, 8, 0)
   base::ScopedCFTypeRef<CGContextRef> context(CGBitmapContextCreate(
-      data,
-      size.width,
-      size.height,
-      8,
-      size.width * 4,
-      color_space,
-      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host));
+      data, size.width, size.height, 8, size.width * 4, color_space,
+      uint32_t{kCGImageAlphaPremultipliedFirst} | kCGBitmapByteOrder32Host));
 #else
 #error We require that Skia's and CoreGraphics's recommended \
        image memory layout match.
@@ -68,12 +63,12 @@ SkBitmap NSImageOrNSImageRepToSkBitmapWithColorSpace(
   if (image) {
     [image drawInRect:drawRect
              fromRect:NSZeroRect
-            operation:NSCompositeCopy
+            operation:NSCompositingOperationCopy
              fraction:1.0];
   } else {
     [image_rep drawInRect:drawRect
                  fromRect:NSZeroRect
-                operation:NSCompositeCopy
+                operation:NSCompositingOperationCopy
                  fraction:1.0
            respectFlipped:NO
                     hints:nil];
@@ -126,24 +121,52 @@ CGRect SkRectToCGRect(const SkRect& rect) {
   return cg_rect;
 }
 
-SkColor CGColorRefToSkColor(CGColorRef color) {
-  // TODO(ccameron): This assumes that |color| is already in sRGB. Ideally we'd
-  // use something like CGColorCreateCopyByMatchingToColorSpace, but that's
-  // only available in macOS 10.11.
-  DCHECK(CGColorGetNumberOfComponents(color) == 4);
-  const CGFloat* components = CGColorGetComponents(color);
-  return SkColorSetARGB(SkScalarRoundToInt(255.0 * components[3]), // alpha
-                        SkScalarRoundToInt(255.0 * components[0]), // red
-                        SkScalarRoundToInt(255.0 * components[1]), // green
-                        SkScalarRoundToInt(255.0 * components[2])); // blue
+SkColor NSSystemColorToSkColor(NSColor* color) {
+  // System colors use the an NSNamedColorSpace called "System", so first step
+  // is to convert the color into something that can be worked with.
+  NSColor* device_color =
+      [color colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]];
+  if (device_color)
+    return NSDeviceColorToSkColor(device_color);
+
+  // Sometimes the conversion is not possible, but we can get an approximation
+  // by going through a CGColorRef. Note that simply using NSColor methods for
+  // accessing components for system colors results in exceptions like
+  // "-numberOfComponents not valid for the NSColor NSNamedColorSpace System
+  // windowBackgroundColor; need to first convert colorspace." Hence the
+  // conversion first to CGColor.
+  CGColorRef cg_color = [color CGColor];
+  const size_t component_count = CGColorGetNumberOfComponents(cg_color);
+  if (component_count == 4)
+    return CGColorRefToSkColor(cg_color);
+
+  CHECK(component_count == 1 || component_count == 2);
+  // 1-2 components means a grayscale channel and maybe an alpha channel, which
+  // CGColorRefToSkColor will not like. But RGB is additive, so the conversion
+  // is easy (RGB to grayscale is less easy).
+  const CGFloat* components = CGColorGetComponents(cg_color);
+  CGFloat alpha = component_count == 2 ? components[1] : 1.0f;
+  return SkColor4f{components[0], components[0], components[0], alpha}
+      .toSkColor();
 }
 
-CGColorRef CGColorCreateFromSkColor(SkColor color) {
-  double components[] = {SkColorGetR(color) / 255.0,
-                         SkColorGetG(color) / 255.0,
-                         SkColorGetB(color) / 255.0,
-                         SkColorGetA(color) / 255.0};
-  return CGColorCreate(base::mac::GetSRGBColorSpace(), components);
+SkColor CGColorRefToSkColor(CGColorRef color) {
+  base::ScopedCFTypeRef<CGColorRef> cg_color(
+      CGColorCreateCopyByMatchingToColorSpace(base::mac::GetSRGBColorSpace(),
+                                              kCGRenderingIntentDefault, color,
+                                              nullptr));
+  DCHECK(CGColorGetNumberOfComponents(color) == 4);
+  const CGFloat* components = CGColorGetComponents(cg_color);
+  return SkColor4f{components[0], components[1], components[2], components[3]}
+      .toSkColor();
+}
+
+base::ScopedCFTypeRef<CGColorRef> CGColorCreateFromSkColor(SkColor color) {
+  CGFloat components[] = {
+      SkColorGetR(color) / 255.0f, SkColorGetG(color) / 255.0f,
+      SkColorGetB(color) / 255.0f, SkColorGetA(color) / 255.0f};
+  return base::ScopedCFTypeRef<CGColorRef>(
+      CGColorCreate(base::mac::GetSRGBColorSpace(), components));
 }
 
 // Converts NSColor to ARGB
@@ -153,34 +176,28 @@ SkColor NSDeviceColorToSkColor(NSColor* color) {
   CGFloat red, green, blue, alpha;
   color = [color colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]];
   [color getRed:&red green:&green blue:&blue alpha:&alpha];
-  return SkColorSetARGB(SkScalarRoundToInt(255.0 * alpha),
-                        SkScalarRoundToInt(255.0 * red),
-                        SkScalarRoundToInt(255.0 * green),
-                        SkScalarRoundToInt(255.0 * blue));
+  return SkColor4f{red, green, blue, alpha}.toSkColor();
 }
 
 // Converts ARGB to NSColor.
 NSColor* SkColorToCalibratedNSColor(SkColor color) {
-  return [NSColor colorWithCalibratedRed:SkColorGetR(color) / 255.0
-                                   green:SkColorGetG(color) / 255.0
-                                    blue:SkColorGetB(color) / 255.0
-                                   alpha:SkColorGetA(color) / 255.0];
+  return [NSColor colorWithCalibratedRed:SkColorGetR(color) / 255.0f
+                                   green:SkColorGetG(color) / 255.0f
+                                    blue:SkColorGetB(color) / 255.0f
+                                   alpha:SkColorGetA(color) / 255.0f];
 }
 
 NSColor* SkColorToDeviceNSColor(SkColor color) {
-  return [NSColor colorWithDeviceRed:SkColorGetR(color) / 255.0
-                               green:SkColorGetG(color) / 255.0
-                                blue:SkColorGetB(color) / 255.0
-                               alpha:SkColorGetA(color) / 255.0];
+  return [NSColor colorWithDeviceRed:SkColorGetR(color) / 255.0f
+                               green:SkColorGetG(color) / 255.0f
+                                blue:SkColorGetB(color) / 255.0f
+                               alpha:SkColorGetA(color) / 255.0f];
 }
 
 NSColor* SkColorToSRGBNSColor(SkColor color) {
   const CGFloat components[] = {
-    SkColorGetR(color) / 255.0,
-    SkColorGetG(color) / 255.0,
-    SkColorGetB(color) / 255.0,
-    SkColorGetA(color) / 255.0
-  };
+      SkColorGetR(color) / 255.0f, SkColorGetG(color) / 255.0f,
+      SkColorGetB(color) / 255.0f, SkColorGetA(color) / 255.0f};
   return [NSColor colorWithColorSpace:[NSColorSpace sRGBColorSpace]
                            components:components
                                 count:4];
@@ -205,12 +222,6 @@ SkBitmap NSImageRepToSkBitmapWithColorSpace(NSImageRep* image_rep,
                                             CGColorSpaceRef color_space) {
   return NSImageOrNSImageRepToSkBitmapWithColorSpace(
       nil, image_rep, size, is_opaque, color_space);
-}
-
-NSBitmapImageRep* SkBitmapToNSBitmapImageRep(const SkBitmap& skiaBitmap) {
-  base::ScopedCFTypeRef<CGColorSpaceRef> color_space(
-      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
-  return SkBitmapToNSBitmapImageRepWithColorSpace(skiaBitmap, color_space);
 }
 
 NSBitmapImageRep* SkBitmapToNSBitmapImageRepWithColorSpace(
@@ -241,12 +252,6 @@ NSImage* SkBitmapToNSImageWithColorSpace(const SkBitmap& skiaBitmap,
   [image addRepresentation:imageRep];
   [image setSize:NSMakeSize(skiaBitmap.width(), skiaBitmap.height())];
   return [image.release() autorelease];
-}
-
-NSImage* SkBitmapToNSImage(const SkBitmap& skiaBitmap) {
-  base::ScopedCFTypeRef<CGColorSpaceRef> colorSpace(
-      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
-  return SkBitmapToNSImageWithColorSpace(skiaBitmap, colorSpace.get());
 }
 
 }  // namespace skia

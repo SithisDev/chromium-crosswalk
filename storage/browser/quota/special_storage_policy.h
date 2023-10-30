@@ -1,19 +1,20 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef STORAGE_BROWSER_QUOTA_SPECIAL_STORAGE_POLICY_H_
 #define STORAGE_BROWSER_QUOTA_SPECIAL_STORAGE_POLICY_H_
 
-#include <string>
-
-#include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "services/network/session_cleanup_cookie_store.h"
+#include "base/sequence_checker.h"
 
 class GURL;
+
+namespace url {
+class Origin;
+}
 
 namespace storage {
 
@@ -26,6 +27,8 @@ namespace storage {
 class COMPONENT_EXPORT(STORAGE_BROWSER) SpecialStoragePolicy
     : public base::RefCountedThreadSafe<SpecialStoragePolicy> {
  public:
+  REQUIRE_ADOPTION_FOR_REFCOUNTED_TYPE();
+
   using StoragePolicy = int;
   enum ChangeFlags {
     STORAGE_PROTECTED = 1 << 0,
@@ -34,9 +37,22 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SpecialStoragePolicy
 
   class COMPONENT_EXPORT(STORAGE_BROWSER) Observer {
    public:
-    virtual void OnGranted(const GURL& origin, int change_flags) = 0;
-    virtual void OnRevoked(const GURL& origin, int change_flags) = 0;
-    virtual void OnCleared() = 0;
+    // Called when one or more features corresponding to |change_flags| have
+    // been granted for |origin| storage.
+    virtual void OnGranted(const url::Origin& origin, int change_flags) {}
+
+    // Called when one or more features corresponding to |change_flags| have
+    // been revoked for |origin| storage.
+    virtual void OnRevoked(const url::Origin& origin, int change_flags) {}
+
+    // Called when all features corresponding to ChangeFlags have been revoked
+    // for all origins.
+    virtual void OnCleared() {}
+
+    // Called any time the policy changes in any meaningful way, i.e., the
+    // public Is/Has querying methods may return different values from before
+    // this notification.
+    virtual void OnPolicyChanged() {}
 
    protected:
     virtual ~Observer();
@@ -63,16 +79,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SpecialStoragePolicy
   // Returns true if some origins are only allowed session-only storage.
   virtual bool HasSessionOnlyOrigins() = 0;
 
-  // Returns a predicate that takes the domain of a cookie and a bool whether
-  // the cookie is secure and returns true if the cookie should be deleted on
-  // exit.
-  // If |HasSessionOnlyOrigins()| is true a non-null callback is returned.
-  // It uses domain matching as described in section 5.1.3 of RFC 6265 to
-  // identify content setting rules that could have influenced the cookie
-  // when it was created.
-  virtual network::SessionCleanupCookieStore::DeleteCookiePredicate
-  CreateDeleteCookieOnExitPredicate() = 0;
-
   // Adds/removes an observer, the policy does not take
   // ownership of the observer. Should only be called on the IO thread.
   void AddObserver(Observer* observer);
@@ -81,11 +87,20 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) SpecialStoragePolicy
  protected:
   friend class base::RefCountedThreadSafe<SpecialStoragePolicy>;
   virtual ~SpecialStoragePolicy();
-  void NotifyGranted(const GURL& origin, int change_flags);
-  void NotifyRevoked(const GURL& origin, int change_flags);
+
+  // Notify observes of specific policy changes. Note that all of these also
+  // implicitly invoke |NotifyPolicyChanged()|.
+  void NotifyGranted(const url::Origin& origin, int change_flags);
+  void NotifyRevoked(const url::Origin& origin, int change_flags);
   void NotifyCleared();
 
-  base::ObserverList<Observer>::Unchecked observers_;
+  // Subclasses can call this for any policy changes which don't fit any of the
+  // above notifications.
+  void NotifyPolicyChanged();
+
+  base::ObserverList<Observer>::Unchecked observers_
+      GUARDED_BY_CONTEXT(sequence_checker_);
+  SEQUENCE_CHECKER(sequence_checker_);
 };
 
 }  // namespace storage

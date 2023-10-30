@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,11 @@
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/common/file_system/file_system_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 
-using storage::FilePathToString;
-
-namespace content {
+namespace storage {
 
 void CorruptDatabase(const base::FilePath& db_path,
                      leveldb::FileType type,
@@ -88,10 +86,10 @@ void DeleteDatabaseFile(const base::FilePath& db_path,
     EXPECT_TRUE(leveldb_chrome::ParseFileName(
         FilePathToString(file_path.BaseName()), &number, &file_type));
     if (file_type == type) {
-      base::DeleteFile(file_path, false);
+      base::DeleteFile(file_path);
       // We may have multiple files for the same type, so don't break here.
     }
   }
 }
 
-}  // namespace content
+}  // namespace storage

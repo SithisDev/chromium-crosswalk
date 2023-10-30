@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,10 +7,12 @@ import json
 import multiprocessing
 import os
 import platform
-import subprocess
 import sys
 
-import common
+# Add src/testing/ into sys.path for importing common without pylint errors.
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+from scripts import common
 
 
 def is_linux():
@@ -68,7 +70,7 @@ def get_device_info(args, failures):
                      'tools',
                      'device_status.py'),
         '--json-output', tempfile_path,
-        '--blacklist-file', os.path.join(
+        '--denylist-file', os.path.join(
               args.paths['checkout'], 'out', 'bad_devices.json')
     ]
     if args.args:
@@ -86,10 +88,10 @@ def get_device_info(args, failures):
   results['devices'] = sorted(v['serial'] for v in device_info)
 
   details = [
-      v['ro.build.fingerprint'] for v in device_info if not v['blacklisted']]
+      v['ro.build.fingerprint'] for v in device_info if not v['denylisted']]
 
   def unique_build_details(index):
-    return sorted(list(set([v.split(':')[index] for v in details])))
+    return sorted(list({v.split(':')[index] for v in details}))
 
   parsed_details = {
     'device_names': unique_build_details(0),
@@ -97,7 +99,7 @@ def get_device_info(args, failures):
     'build_types': unique_build_details(2),
   }
 
-  for k, v in parsed_details.iteritems():
+  for k, v in parsed_details.items():
     if len(v) == 1:
       results[k] = v[0]
     else:
@@ -106,8 +108,8 @@ def get_device_info(args, failures):
       failures.append(k)
 
   for v in device_info:
-    if v['blacklisted']:
-      failures.append('Device %s blacklisted' % v['serial'])
+    if v['denylisted']:
+      failures.append('Device %s denylisted' % v['serial'])
 
   return results
 

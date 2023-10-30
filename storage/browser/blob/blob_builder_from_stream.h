@@ -1,9 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H
-#define STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H
+#ifndef STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H_
+#define STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H_
 
 #include "base/component_export.h"
 #include "base/containers/queue.h"
@@ -62,7 +62,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
   // the disk space.
   void Start(uint64_t length_hint,
              mojo::ScopedDataPipeConsumerHandle data,
-             blink::mojom::ProgressClientAssociatedPtrInfo progress_client);
+             mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+                 progress_client);
 
   void Abort();
 
@@ -72,11 +73,13 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
 
   void AllocateMoreMemorySpace(
       uint64_t length_hint,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       mojo::ScopedDataPipeConsumerHandle pipe);
   void MemoryQuotaAllocated(
       mojo::ScopedDataPipeConsumerHandle pipe,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       std::vector<scoped_refptr<ShareableBlobDataItem>> chunk_items,
       size_t item_to_populate,
       bool success);
@@ -85,15 +88,18 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
       size_t populated_item_index,
       uint64_t bytes_written,
       mojo::ScopedDataPipeConsumerHandle pipe,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client);
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client);
 
   void AllocateMoreFileSpace(
       uint64_t length_hint,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       mojo::ScopedDataPipeConsumerHandle pipe);
   void FileQuotaAllocated(
       mojo::ScopedDataPipeConsumerHandle pipe,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       std::vector<scoped_refptr<ShareableBlobDataItem>> chunk_items,
       size_t item_to_populate,
       std::vector<BlobMemoryController::FileCreationInfo> info,
@@ -105,7 +111,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
       bool success,
       uint64_t bytes_written,
       mojo::ScopedDataPipeConsumerHandle pipe,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       const base::Time& modification_time);
   void DidWriteToExtendedFile(
       scoped_refptr<ShareableFileReference> file_reference,
@@ -113,7 +120,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
       bool success,
       uint64_t bytes_written,
       mojo::ScopedDataPipeConsumerHandle pipe,
-      blink::mojom::ProgressClientAssociatedPtrInfo progress_client,
+      mojo::PendingAssociatedRemote<blink::mojom::ProgressClient>
+          progress_client,
       const base::Time& modification_time);
 
   // These values are persisted to logs. Entries should not be renumbered and
@@ -129,7 +137,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
 
   void OnError(Result result);
   void OnSuccess();
-  void RecordResult(Result result);
 
   bool ShouldStoreNextBlockOnDisk(uint64_t length_hint);
 
@@ -155,9 +162,9 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) BlobBuilderFromStream {
   std::vector<scoped_refptr<ShareableBlobDataItem>> items_;
   uint64_t current_total_size_ = 0;
   base::WeakPtr<BlobMemoryController::QuotaAllocationTask> pending_quota_task_;
-  base::WeakPtrFactory<BlobBuilderFromStream> weak_factory_;
+  base::WeakPtrFactory<BlobBuilderFromStream> weak_factory_{this};
 };
 
 }  // namespace storage
 
-#endif  // STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H
+#endif  // STORAGE_BROWSER_BLOB_BLOB_BUILDER_FROM_STREAM_H_

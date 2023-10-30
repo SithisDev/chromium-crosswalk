@@ -1,18 +1,14 @@
-#!/usr/bin/env vpython
-# Copyright 2019 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import copy
 import json
 import os
 import subprocess
 import sys
 import unittest
-
-THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(
-    0, os.path.abspath(os.path.join(THIS_DIR, os.pardir, os.pardir, os.pardir,
-                                    'third_party', 'pymock')))
 
 import mock
 
@@ -23,9 +19,11 @@ import merge_lib as merger
 
 class MergeProfilesTest(unittest.TestCase):
 
+  # pylint: disable=super-with-arguments
   def __init__(self, *args, **kwargs):
     super(MergeProfilesTest, self).__init__(*args, **kwargs)
     self.maxDiff = None
+  # pylint: enable=super-with-arguments
 
   def test_merge_script_api_parameters(self):
     """Test the step-level merge front-end."""
@@ -39,21 +37,23 @@ class MergeProfilesTest(unittest.TestCase):
     })
     task_output_dir = 'some/task/output/dir'
     profdata_dir = '/some/different/path/to/profdata/default.profdata'
-    profdata_file = os.path.join(profdata_dir, 'default.profdata')
+    profdata_file = os.path.join(profdata_dir, 'base_unittests.profdata')
     args = [
         'script_name', '--output-json', 'output.json', '--build-properties',
         build_properties, '--summary-json', 'summary.json', '--task-output-dir',
         task_output_dir, '--profdata-dir', profdata_dir, '--llvm-profdata',
-        'llvm-profdata', 'a.json', 'b.json', 'c.json'
+        'llvm-profdata', 'a.json', 'b.json', 'c.json', '--test-target-name',
+        'base_unittests', '--sparse'
     ]
     with mock.patch.object(merger, 'merge_profiles') as mock_merge:
-      mock_merge.return_value = None
+      mock_merge.return_value = None, None
       with mock.patch.object(sys, 'argv', args):
         merge_results.main()
         self.assertEqual(
             mock_merge.call_args,
             mock.call(task_output_dir, profdata_file, '.profraw',
-                      'llvm-profdata'))
+                      'llvm-profdata', sparse=True,
+                      skip_validation=False), None)
 
   def test_merge_steps_parameters(self):
     """Test the build-level merge front-end."""
@@ -67,6 +67,8 @@ class MergeProfilesTest(unittest.TestCase):
         output_file,
         '--llvm-profdata',
         'llvm-profdata',
+        '--profdata-filename-pattern',
+        '.*'
     ]
     with mock.patch.object(merger, 'merge_profiles') as mock_merge:
       mock_merge.return_value = None
@@ -74,7 +76,8 @@ class MergeProfilesTest(unittest.TestCase):
         merge_steps.main()
         self.assertEqual(
             mock_merge.call_args,
-            mock.call(input_dir, output_file, '.profdata', 'llvm-profdata'))
+            mock.call(input_dir, output_file, '.profdata', 'llvm-profdata',
+                '.*', sparse=False))
 
   @mock.patch.object(merger, '_validate_and_convert_profraws')
   def test_merge_profraw(self, mock_validate_and_convert_profraws):
@@ -92,12 +95,14 @@ class MergeProfilesTest(unittest.TestCase):
     ], [
         '/b/some/path/0/default-2.profraw',
         '/b/some/path/1/default-1.profraw',
+    ], [
+        '/b/some/path/1/default-1.profraw',
     ]
 
     with mock.patch.object(os, 'walk') as mock_walk:
       with mock.patch.object(os, 'remove'):
         mock_walk.return_value = mock_input_dir_walk
-        with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
+        with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
           merger.merge_profiles('/b/some/path', 'output/dir/default.profdata',
                                 '.profraw', 'llvm-profdata')
           self.assertEqual(
@@ -107,7 +112,6 @@ class MergeProfilesTest(unittest.TestCase):
                       'merge',
                       '-o',
                       'output/dir/default.profdata',
-                      '-sparse=true',
                       '/b/some/path/0/default-1.profdata',
                       '/b/some/path/1/default-2.profdata',
                   ],
@@ -115,6 +119,44 @@ class MergeProfilesTest(unittest.TestCase):
               ), mock_exec_cmd.call_args)
 
     self.assertTrue(mock_validate_and_convert_profraws.called)
+
+  @mock.patch.object(merger, '_validate_and_convert_profraws')
+  def test_profraw_skip_validation(self, mock_validate_and_convert_profraws):
+    mock_input_dir_walk = [
+        ('/b/some/path', ['0', '1', '2', '3'], ['summary.json']),
+        ('/b/some/path/0', [],
+         ['output.json', 'default-1.profraw', 'default-2.profraw']),
+        ('/b/some/path/1', [],
+         ['output.json', 'default-1.profraw', 'default-2.profraw']),
+    ]
+
+    with mock.patch.object(os, 'walk') as mock_walk:
+      with mock.patch.object(os, 'remove'):
+        mock_walk.return_value = mock_input_dir_walk
+        with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
+          merger.merge_profiles('/b/some/path',
+                                'output/dir/default.profdata',
+                                '.profraw',
+                                'llvm-profdata',
+                                skip_validation=True)
+          self.assertEqual(
+              mock.call(
+                  [
+                      'llvm-profdata',
+                      'merge',
+                      '-o',
+                      'output/dir/default.profdata',
+                      '/b/some/path/0/default-1.profraw',
+                      '/b/some/path/0/default-2.profraw',
+                      '/b/some/path/1/default-1.profraw',
+                      '/b/some/path/1/default-2.profraw'
+                  ],
+                  stderr=-2,
+              ), mock_exec_cmd.call_args)
+
+    # Skip validation should've passed all profraw files directly, and
+    # this validate call should not have been invoked.
+    self.assertFalse(mock_validate_and_convert_profraws.called)
 
 
   def test_merge_profraw_skip_if_there_is_no_file(self):
@@ -124,7 +166,7 @@ class MergeProfilesTest(unittest.TestCase):
 
     with mock.patch.object(os, 'walk') as mock_walk:
       mock_walk.return_value = mock_input_dir_walk
-      with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
+      with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
         merger.merge_profiles('/b/some/path', 'output/dir/default.profdata',
                               '.profraw', 'llvm-profdata')
         self.assertFalse(mock_exec_cmd.called)
@@ -141,7 +183,7 @@ class MergeProfilesTest(unittest.TestCase):
     with mock.patch.object(os, 'walk') as mock_walk:
       with mock.patch.object(os, 'remove'):
         mock_walk.return_value = mock_input_dir_walk
-        with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
+        with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
           merger.merge_profiles('/b/some/path', 'output/dir/default.profdata',
                                 '.profdata', 'llvm-profdata')
           self.assertEqual(
@@ -151,7 +193,6 @@ class MergeProfilesTest(unittest.TestCase):
                       'merge',
                       '-o',
                       'output/dir/default.profdata',
-                      '-sparse=true',
                       '/b/some/path/base_unittests/default.profdata',
                       '/b/some/path/url_unittests/default.profdata',
                   ],
@@ -161,36 +202,27 @@ class MergeProfilesTest(unittest.TestCase):
     # The mock method should only apply when merging .profraw files.
     self.assertFalse(mock_validate_and_convert_profraws.called)
 
-  def test_retry_profdata_merge_failures(self):
+  @mock.patch.object(merger, '_validate_and_convert_profraws')
+  def test_merge_profdata_pattern(self, mock_validate_and_convert_profraws):
     mock_input_dir_walk = [
-        ('/b/some/path', ['0', '1'], ['summary.json']),
-        ('/b/some/path/0', [],
-         ['output.json', 'default-1.profdata', 'default-2.profdata']),
-        ('/b/some/path/1', [],
-         ['output.json', 'default-1.profdata', 'default-2.profdata']),
+        ('/b/some/path', ['base_unittests', 'url_unittests'], ['summary.json']),
+        ('/b/some/path/base_unittests', [], ['output.json',
+                                             'base_unittests.profdata']),
+        ('/b/some/path/url_unittests', [], ['output.json',
+                                            'url_unittests.profdata'],),
+        ('/b/some/path/ios_chrome_smoke_eg2tests',
+            [], ['output.json','ios_chrome_smoke_eg2tests.profdata'],),
     ]
     with mock.patch.object(os, 'walk') as mock_walk:
       with mock.patch.object(os, 'remove'):
         mock_walk.return_value = mock_input_dir_walk
-        with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
-          invalid_profiles_msg = (
-              'error: /b/some/path/0/default-1.profdata: Malformed '
-              'instrumentation profile data.')
-
-          # Failed on the first merge, but succeed on the second attempt.
-          mock_exec_cmd.side_effect = [
-              subprocess.CalledProcessError(
-                  returncode=1, cmd='dummy cmd', output=invalid_profiles_msg),
-              None
-          ]
-
-          merger.merge_profiles('/b/some/path', 'output/dir/default.profdata',
-                                '.profdata', 'llvm-profdata')
-
-          self.assertEqual(2, mock_exec_cmd.call_count)
-
-          # Note that in the second call, /b/some/path/0/default-1.profdata is
-          # excluded!
+        with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
+          input_profdata_filename_pattern = '.+_unittests\.profdata'
+          merger.merge_profiles('/b/some/path',
+                                'output/dir/default.profdata',
+                                '.profdata',
+                                'llvm-profdata',
+                                input_profdata_filename_pattern)
           self.assertEqual(
               mock.call(
                   [
@@ -198,75 +230,16 @@ class MergeProfilesTest(unittest.TestCase):
                       'merge',
                       '-o',
                       'output/dir/default.profdata',
-                      '-sparse=true',
-                      '/b/some/path/0/default-2.profdata',
-                      '/b/some/path/1/default-1.profdata',
-                      '/b/some/path/1/default-2.profdata',
+                      '/b/some/path/base_unittests/base_unittests.profdata',
+                      '/b/some/path/url_unittests/url_unittests.profdata',
                   ],
                   stderr=-2,
               ), mock_exec_cmd.call_args)
 
-  @mock.patch('__builtin__.open',
-              new_callable=mock.mock_open,
-              read_data=json.dumps(
-                  {'shards': [{'task_id': '1234567890abcdeff'}]}))
-  def test_mark_invalid_shards(self, mo):
-    mock_result = mock.mock_open()
-    mock_write = mock.MagicMock()
-    mock_result.return_value.write = mock_write
-    mo.side_effect = (
-        mo.return_value,
-        mock.mock_open(read_data='{}').return_value,
-        mock_result.return_value,
-    )
-    merge_results.mark_invalid_shards(['1234567890abcdeff'], 'dummy.json',
-                                      'o.json')
-    written = json.loads(''.join(c[0][0] for c in mock_write.call_args_list))
-    self.assertIn('missing_shards', written)
-    self.assertEqual(written['missing_shards'], [0])
+    # The mock method should only apply when merging .profraw files.
+    self.assertFalse(mock_validate_and_convert_profraws.called)
 
-  @mock.patch('__builtin__.open',
-              new_callable=mock.mock_open,
-              read_data='invalid data')
-  def test_mark_invalid_shards_bad_summary(self, _mo):
-    # Should not raise an exception.
-    raised_exception = False
-    try:
-      merge_results.mark_invalid_shards(['1234567890abcdeff'], 'dummy.json',
-                                        'o.json')
-    except:  # pylint: disable=bare-except
-      raised_exception = True
-    self.assertFalse(raised_exception, 'unexpected exception')
-
-  @mock.patch('__builtin__.open',
-              new_callable=mock.mock_open,
-              read_data=json.dumps(
-                  {'shards': [{'task_id': '1234567890abcdeff'}]}))
-  def test_mark_invalid_shards_bad_output(self, mo):
-    mock_result = mock.mock_open()
-    mock_write = mock.MagicMock()
-    mock_result.return_value.write = mock_write
-    mo.side_effect = (
-        mo.return_value,
-        mock.mock_open(read_data='invalid_data').return_value,
-        mock_result.return_value,
-    )
-    # Should succeed anyway.
-    merge_results.mark_invalid_shards(['1234567890abcdeff'], 'dummy.json',
-                                      'o.json')
-    written = json.loads(''.join(c[0][0] for c in mock_write.call_args_list))
-    self.assertIn('missing_shards', written)
-    self.assertEqual(written['missing_shards'], [0])
-
-  def test_get_shards_to_retry(self):
-    bad_profiles = [
-        '/b/s/w/ir/tmp/t/tmpSvBRii/44b643576cf39f10/profraw/default-1.profraw',
-        '/b/s/w/ir/tmp/t/tmpAbCDEf/44b1234567890123/profraw/default-1.profraw',
-        '/b/s/w/ir/tmp/t/tmpAbCDEf/44b1234567890123/profraw/default-2.profraw',
-    ]
-    self.assertEqual(set(['44b643576cf39f10', '44b1234567890123']),
-                     merger.get_shards_to_retry(bad_profiles))
-
+  @mock.patch('merge_lib._JAVA_PATH', 'java')
   def test_merge_java_exec_files(self):
     mock_input_dir_walk = [
         ('/b/some/path', ['0', '1', '2', '3'], ['summary.json']),
@@ -278,7 +251,7 @@ class MergeProfilesTest(unittest.TestCase):
 
     with mock.patch.object(os, 'walk') as mock_walk:
       mock_walk.return_value = mock_input_dir_walk
-      with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
+      with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
         merger.merge_java_exec_files(
             '/b/some/path', 'output/path', 'path/to/jacococli.jar')
         self.assertEqual(
@@ -305,10 +278,91 @@ class MergeProfilesTest(unittest.TestCase):
 
     with mock.patch.object(os, 'walk') as mock_walk:
       mock_walk.return_value = mock_input_dir_walk
-      with mock.patch.object(subprocess, 'check_output') as mock_exec_cmd:
+      with mock.patch.object(subprocess, 'check_call') as mock_exec_cmd:
         merger.merge_java_exec_files(
             '/b/some/path', 'output/path', 'path/to/jacococli.jar')
         self.assertFalse(mock_exec_cmd.called)
+
+  def test_calls_merge_js_results_script(self):
+    task_output_dir = 'some/task/output/dir'
+    profdata_dir = '/some/different/path/to/profdata/default.profdata'
+
+    args = [
+        'script_name', '--output-json', 'output.json', '--task-output-dir',
+        task_output_dir, '--profdata-dir', profdata_dir, '--llvm-profdata',
+        'llvm-profdata', 'a.json', 'b.json', 'c.json', '--test-target-name',
+        'v8_unittests', '--sparse',
+        '--javascript-coverage-dir', 'output/dir/devtools_code_coverage',
+        '--merged-js-cov-filename', 'path/js/cov/filename'
+    ]
+    with mock.patch.object(merger, 'merge_profiles') as mock_merge:
+      mock_merge.return_value = None, None
+      with mock.patch.object(sys, 'argv', args):
+        with mock.patch.object(subprocess, 'call') as mock_exec_cmd:
+          with mock.patch.object(os.path, 'join') as mock_os_path_join:
+            mock_merge_js_results_path = 'path/to/js/merge_js_results.py'
+            mock_os_path_join.return_value = mock_merge_js_results_path
+            python_exec = sys.executable
+            merge_results.main()
+
+            mock_exec_cmd.assert_called_with(
+                [python_exec, mock_merge_js_results_path, '--task-output-dir',
+                 task_output_dir, '--javascript-coverage-dir',
+                 'output/dir/devtools_code_coverage',
+                 '--merged-js-cov-filename', 'path/js/cov/filename'])
+
+  def test_argparse_sparse(self):
+    """Ensure that sparse flag defaults to true, and is set to correct value"""
+    # Basic required args
+    build_properties = json.dumps({
+        'some': {
+            'complicated': ['nested', {
+                'json': None,
+                'object': 'thing',
+            }]
+        }
+    })
+    task_output_dir = 'some/task/output/dir'
+    profdata_dir = '/some/different/path/to/profdata/default.profdata'
+    profdata_file = os.path.join(profdata_dir, 'base_unittests.profdata')
+    args = [
+        'script_name', '--output-json', 'output.json', '--build-properties',
+        build_properties, '--summary-json', 'summary.json', '--task-output-dir',
+        task_output_dir, '--profdata-dir', profdata_dir, '--llvm-profdata',
+        'llvm-profdata', 'a.json', 'b.json', 'c.json', '--test-target-name',
+        'base_unittests'
+    ]
+
+    test_scenarios = [
+      {
+        # Base set of args should set --sparse to false by default
+        'args': None,
+        'expected_outcome': False,
+      },
+      {
+        # Sparse should parse True when only --sparse is specified
+        'args': ['--sparse'],
+        'expected_outcome': True,
+      }
+    ]
+
+    for scenario in test_scenarios:
+      args = copy.deepcopy(args)
+      additional_args = scenario['args']
+      if additional_args:
+        args.extend(additional_args)
+      expected_outcome = scenario['expected_outcome']
+
+      with mock.patch.object(merger, 'merge_profiles') as mock_merge:
+        mock_merge.return_value = None, None
+        with mock.patch.object(sys, 'argv', args):
+          merge_results.main()
+          self.assertEqual(
+              mock_merge.call_args,
+              mock.call(task_output_dir, profdata_file, '.profraw',
+                        'llvm-profdata', sparse=expected_outcome,
+                        skip_validation=False), None)
+
 
 if __name__ == '__main__':
   unittest.main()

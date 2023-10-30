@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,9 @@ std::string protobuf_to_string(
 // Explicitly specify some attributes to avoid issues with the linker dead-
 // stripping the following function on macOS, as it is not called directly
 // by fuzz target. LibFuzzer runtime uses dlsym() to resolve that function.
-#if V8_OS_MACOSX
+#if V8_OS_MACOS
 __attribute__((used)) __attribute__((visibility("default")))
-#endif  // V8_OS_MACOSX
+#endif  // V8_OS_MACOS
 extern "C" int
 LLVMFuzzerInitialize(int* argc, char*** argv) {
   v8::V8::InitializeICUDefaultLocation((*argv)[0]);
@@ -78,11 +78,8 @@ DEFINE_BINARY_PROTO_FUZZER(
                                   v8::NewStringType::kNormal)
               .ToLocalChecked();
 
-      v8::ScriptOrigin origin(
-          name, v8::Local<v8::Integer>(), v8::Local<v8::Integer>(),
-          v8::Local<v8::Boolean>(), v8::Local<v8::Integer>(),
-          v8::Local<v8::Value>(), v8::Local<v8::Boolean>(),
-          v8::Local<v8::Boolean>(), v8::True(isolate));
+      v8::ScriptOrigin origin(isolate, name, 0, 0, false, -1,
+                              v8::Local<v8::Value>(), false, false, true);
       v8::ScriptCompiler::Source source(source_v8_string, origin);
       v8::MaybeLocal<v8::Module> module =
           v8::ScriptCompiler::CompileModule(isolate, &source);

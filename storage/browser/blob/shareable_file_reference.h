@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define STORAGE_BROWSER_BLOB_SHAREABLE_FILE_REFERENCE_H_
 
 #include "base/component_export.h"
-#include "base/macros.h"
-#include "storage/browser/blob/blob_data_item.h"
 #include "storage/browser/blob/scoped_file.h"
 
 namespace storage {
@@ -17,7 +15,7 @@ namespace storage {
 // This class is non-thread-safe and all methods must be called on a single
 // thread.
 class COMPONENT_EXPORT(STORAGE_BROWSER) ShareableFileReference
-    : public BlobDataItem::DataHandle {
+    : public base::RefCounted<ShareableFileReference> {
  public:
   using FinalReleaseCallback = ScopedFile::ScopeOutCallback;
 
@@ -51,6 +49,9 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ShareableFileReference
   static scoped_refptr<ShareableFileReference> GetOrCreate(
       ScopedFile scoped_file);
 
+  ShareableFileReference(const ShareableFileReference&) = delete;
+  ShareableFileReference& operator=(const ShareableFileReference&) = delete;
+
   // The full file path.
   const base::FilePath& path() const { return scoped_file_.path(); }
 
@@ -64,12 +65,12 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ShareableFileReference
   void AddFinalReleaseCallback(FinalReleaseCallback callback);
 
  private:
+  friend class base::RefCounted<ShareableFileReference>;
+
   ShareableFileReference(ScopedFile scoped_file);
-  ~ShareableFileReference() override;
+  ~ShareableFileReference();
 
   ScopedFile scoped_file_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShareableFileReference);
 };
 
 }  // namespace storage

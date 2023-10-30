@@ -1,11 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <vector>
 
 #include "base/android/jni_array.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "testing/android/native_test/native_test_jni_headers/MainRunner_jni.h"
 #include "testing/android/native_test/native_test_util.h"
 

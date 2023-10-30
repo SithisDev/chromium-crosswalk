@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
+#include "base/memory/raw_ptr.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom.h"
@@ -26,13 +27,12 @@ class NoneNeededTransportStrategy : public BlobTransportStrategy {
                               ResultCallback result_callback)
       : BlobTransportStrategy(builder, std::move(result_callback)) {}
 
-  void AddBytesElement(blink::mojom::DataElementBytes* bytes,
-                       const blink::mojom::BytesProviderPtr& data) override {
+  void AddBytesElement(
+      blink::mojom::DataElementBytes* bytes,
+      const mojo::Remote<blink::mojom::BytesProvider>& data) override {
     DCHECK(bytes->embedded_data);
     DCHECK_EQ(bytes->length, bytes->embedded_data->size());
-    builder_->AppendData(
-        reinterpret_cast<const char*>(bytes->embedded_data->data()),
-        bytes->length);
+    builder_->AppendData(base::make_span(*bytes->embedded_data));
   }
 
   void BeginTransport(
@@ -48,8 +48,9 @@ class ReplyTransportStrategy : public BlobTransportStrategy {
                          ResultCallback result_callback)
       : BlobTransportStrategy(builder, std::move(result_callback)) {}
 
-  void AddBytesElement(blink::mojom::DataElementBytes* bytes,
-                       const blink::mojom::BytesProviderPtr& data) override {
+  void AddBytesElement(
+      blink::mojom::DataElementBytes* bytes,
+      const mojo::Remote<blink::mojom::BytesProvider>& data) override {
     BlobDataBuilder::FutureData future_data =
         builder_->AppendFutureData(bytes->length);
     // base::Unretained is safe because |this| is guaranteed (by the contract
@@ -83,10 +84,7 @@ class ReplyTransportStrategy : public BlobTransportStrategy {
           .Run(BlobStatus::ERR_INVALID_CONSTRUCTION_ARGUMENTS);
       return;
     }
-    bool populate_result = future_data.Populate(
-        base::make_span(reinterpret_cast<const char*>(data.data()),
-                        data.size()),
-        0);
+    bool populate_result = future_data.Populate(base::make_span(data), 0);
     DCHECK(populate_result);
 
     if (++num_resolved_requests_ == requests_.size())
@@ -109,8 +107,9 @@ class DataPipeTransportStrategy : public BlobTransportStrategy {
                  mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC,
                  base::SequencedTaskRunnerHandle::Get()) {}
 
-  void AddBytesElement(blink::mojom::DataElementBytes* bytes,
-                       const blink::mojom::BytesProviderPtr& data) override {
+  void AddBytesElement(
+      blink::mojom::DataElementBytes* bytes,
+      const mojo::Remote<blink::mojom::BytesProvider>& data) override {
     // Split up the data in |max_bytes_data_item_size| sized chunks.
     std::vector<BlobDataBuilder::FutureData> future_data;
     for (uint64_t source_offset = 0; source_offset < bytes->length;
@@ -156,7 +155,7 @@ class DataPipeTransportStrategy : public BlobTransportStrategy {
     options.capacity_num_bytes =
         std::min(expected_source_size, limits_.max_shared_memory_size);
     MojoResult result =
-        CreateDataPipe(&options, &producer_handle, &consumer_handle_);
+        CreateDataPipe(&options, producer_handle, consumer_handle_);
     if (result != MOJO_RESULT_OK) {
       DVLOG(1) << "Unable to create data pipe for blob transfer.";
       std::move(result_callback_).Run(BlobStatus::ERR_OUT_OF_MEMORY);
@@ -213,7 +212,7 @@ class DataPipeTransportStrategy : public BlobTransportStrategy {
       num_bytes =
           std::min<uint32_t>(num_bytes, limits_.max_bytes_data_item_size -
                                             offset_in_builder_element);
-      base::span<char> output_buffer =
+      base::span<uint8_t> output_buffer =
           future_data[relative_element_index].GetDataToPopulate(
               offset_in_builder_element, num_bytes);
       DCHECK(output_buffer.data());
@@ -241,7 +240,7 @@ class DataPipeTransportStrategy : public BlobTransportStrategy {
     }
   }
 
-  const BlobStorageLimits& limits_;
+  const BlobStorageLimits limits_;
   base::circular_deque<base::OnceClosure> requests_;
 
   mojo::ScopedDataPipeConsumerHandle consumer_handle_;
@@ -260,8 +259,9 @@ class FileTransportStrategy : public BlobTransportStrategy {
       : BlobTransportStrategy(builder, std::move(result_callback)),
         limits_(limits) {}
 
-  void AddBytesElement(blink::mojom::DataElementBytes* bytes,
-                       const blink::mojom::BytesProviderPtr& data) override {
+  void AddBytesElement(
+      blink::mojom::DataElementBytes* bytes,
+      const mojo::Remote<blink::mojom::BytesProvider>& data) override {
     uint64_t source_offset = 0;
     while (source_offset < bytes->length) {
       if (current_file_size_ >= limits_.max_file_size ||
@@ -322,7 +322,7 @@ class FileTransportStrategy : public BlobTransportStrategy {
  private:
   void OnReply(BlobDataBuilder::FutureFile future_file,
                scoped_refptr<ShareableFileReference> file_reference,
-               base::Optional<base::Time> time_file_modified) {
+               absl::optional<base::Time> time_file_modified) {
     if (!time_file_modified) {
       // Writing to the file failed in the renderer.
       std::move(result_callback_).Run(BlobStatus::ERR_FILE_WRITE_FAILED);
@@ -337,7 +337,7 @@ class FileTransportStrategy : public BlobTransportStrategy {
       std::move(result_callback_).Run(BlobStatus::DONE);
   }
 
-  const BlobStorageLimits& limits_;
+  const BlobStorageLimits limits_;
 
   // State used to assign bytes elements to individual files.
   // The index of the first file that still has available space.
@@ -347,7 +347,7 @@ class FileTransportStrategy : public BlobTransportStrategy {
 
   struct Request {
     // The BytesProvider to request this particular bit of data from.
-    blink::mojom::BytesProvider* provider;
+    raw_ptr<blink::mojom::BytesProvider> provider;
     // Offset into the BytesProvider of the data to request.
     uint64_t source_offset;
     // Size of the bytes to request.

@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "testing/libfuzzer/proto/json_proto_converter.h"
 
-using namespace json_proto;
+namespace json_proto {
 
 void JsonProtoConverter::AppendArray(const ArrayValue& array_value) {
   data_ << '[';
@@ -40,8 +40,16 @@ void JsonProtoConverter::AppendNumber(const NumberValue& number_value) {
 }
 
 void JsonProtoConverter::AppendObject(const JsonObject& json_object) {
-  data_ << '{' << '"' << json_object.name() << '"' << ':';
-  AppendValue(json_object.value());
+  data_ << '{';
+  bool leading_comma = false;
+  for (const auto& field : json_object.field()) {
+    if (leading_comma) {
+      data_ << ",";
+    }
+    leading_comma = true;
+    data_ << '"' << field.name() << '"' << ':';
+    AppendValue(field.value());
+  }
   data_ << '}';
 }
 
@@ -61,7 +69,20 @@ void JsonProtoConverter::AppendValue(const JsonValue& json_value) {
   }
 }
 
+std::string JsonProtoConverter::Convert(const JsonValue& json_value) {
+  AppendValue(json_value);
+  return data_.str();
+}
+
 std::string JsonProtoConverter::Convert(const JsonObject& json_object) {
   AppendObject(json_object);
   return data_.str();
 }
+
+std::string JsonProtoConverter::Convert(
+    const json_proto::ArrayValue& json_array) {
+  AppendArray(json_array);
+  return data_.str();
+}
+
+}  // namespace json_proto

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "base/callback_helpers.h"
 #include "base/memory/discardable_memory.h"
 #include "base/memory/discardable_memory_allocator.h"
 
@@ -37,7 +38,10 @@ SkDiscardableMemoryChrome::CreateMemoryAllocatorDump(
 }
 
 SkDiscardableMemory* SkDiscardableMemory::Create(size_t bytes) {
-  return new SkDiscardableMemoryChrome(
-      base::DiscardableMemoryAllocator::GetInstance()
-          ->AllocateLockedDiscardableMemory(bytes));
+  // TODO(crbug.com/1034271): Make the caller handle a nullptr return value,
+  // and do not die when the allocation fails.
+  auto discardable = base::DiscardableMemoryAllocator::GetInstance()
+                         ->AllocateLockedDiscardableMemoryWithRetryOrDie(
+                             bytes, base::DoNothing());
+  return new SkDiscardableMemoryChrome(std::move(discardable));
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ public class JunitTestArgParser {
     private final Set<String> mPackageFilters;
     private final Set<Class<?>> mRunnerFilters;
     private final Set<String> mGtestFilters;
+    private boolean mListTests;
     private File mJsonOutput;
     private String[] mTestJars;
 
@@ -35,7 +36,10 @@ public class JunitTestArgParser {
                     argName = args[i].substring(1, args[i].length());
                 }
                 try {
-                    if ("package-filter".equals(argName)) {
+                    if ("list-tests".equals(argName)) {
+                        // Read the command line argument after the flag.
+                        parsed.mListTests = true;
+                    } else if ("package-filter".equals(argName)) {
                         // Read the command line argument after the flag.
                         parsed.addPackageFilter(args[++i]);
                     } else if ("runner-filter".equals(argName)) {
@@ -47,9 +51,6 @@ public class JunitTestArgParser {
                     } else if ("json-results-file".equals(argName)) {
                         // Read the command line argument after the flag.
                         parsed.setJsonOutputFile(args[++i]);
-                    } else if ("test-jars".equals(argName)) {
-                        // Read the command line argument after the flag.
-                        parsed.setTestJars(args[++i]);
                     } else {
                         System.out.println("Ignoring flag: \"" + argName + "\"");
                     }
@@ -75,6 +76,10 @@ public class JunitTestArgParser {
         mJsonOutput = null;
     }
 
+    public boolean isListTests() {
+        return mListTests;
+    }
+
     public Set<String> getPackageFilters() {
         return mPackageFilters;
     }
@@ -91,10 +96,6 @@ public class JunitTestArgParser {
         return mJsonOutput;
     }
 
-    public String[] getTestJars() {
-        return mTestJars;
-    }
-
     private void addPackageFilter(String packageFilter) {
         mPackageFilters.add(packageFilter);
     }
@@ -109,9 +110,5 @@ public class JunitTestArgParser {
 
     private void setJsonOutputFile(String path) {
         mJsonOutput = new File(path);
-    }
-
-    private void setTestJars(String jars) {
-        mTestJars = COLON.split(jars);
     }
 }
