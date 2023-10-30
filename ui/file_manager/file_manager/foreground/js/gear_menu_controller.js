@@ -1,11 +1,24 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-class GearMenuController {
+import {getDriveQuotaMetadata, getSizeStats} from '../../common/js/api.js';
+import {str, strf, util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {DirectoryChangeEvent} from '../../externs/directory_change_event.js';
+
+import {DirectoryModel} from './directory_model.js';
+import {CommandHandler} from './file_manager_commands.js';
+import {ProvidersModel} from './providers_model.js';
+import {GearMenu} from './ui/gear_menu.js';
+import {MultiMenuButton} from './ui/multi_menu_button.js';
+import {ProvidersMenu} from './ui/providers_menu.js';
+
+
+export class GearMenuController {
   /**
-   * @param {!cr.ui.MultiMenuButton} gearButton
-   * @param {!FilesToggleRipple} toggleRipple
+   * @param {!MultiMenuButton} gearButton
+   * @param {!FilesToggleRippleElement} toggleRipple
    * @param {!GearMenu} gearMenu
    * @param {!ProvidersMenu} providersMenu
    * @param {!DirectoryModel} directoryModel
@@ -15,7 +28,10 @@ class GearMenuController {
   constructor(
       gearButton, toggleRipple, gearMenu, providersMenu, directoryModel,
       commandHandler, providersModel) {
-    /** @private @const {!FilesToggleRipple} */
+    /** @private @const {!MultiMenuButton} */
+    this.gearButton_ = gearButton;
+
+    /** @private @const {!FilesToggleRippleElement} */
     this.toggleRipple_ = toggleRipple;
 
     /** @private @const {!GearMenu} */
@@ -48,34 +64,14 @@ class GearMenuController {
   onShowGearMenu_() {
     this.toggleRipple_.activated = true;
     this.refreshRemainingSpace_(false); /* Without loading caption. */
-    this.updateNewServiceItem();
-  }
 
-  /**
-   * Update "New service" menu item to either directly show the Webstore dialog
-   * when there isn't any service/FSP extension installed, or display the
-   * providers menu with the currently installed extensions and also install new
-   * service.
-   *
-   * @private
-   */
-  updateNewServiceItem() {
     this.providersModel_.getMountableProviders().then(providers => {
-      // Go straight to webstore to install the first provider.
-      let desiredMenu = '#install-new-extension';
-      let label = str('INSTALL_NEW_EXTENSION_LABEL');
-
-      const shouldDisplayProvidersMenu = providers.length > 0;
-      if (shouldDisplayProvidersMenu) {
-        // Open the providers menu with an installed provider and an install new
-        // provider option.
-        desiredMenu = '#new-service';
-        label = str('ADD_NEW_SERVICES_BUTTON_LABEL');
+      const shouldHide = providers.length == 0;
+      if (!shouldHide) {
         // Trigger an update of the providers submenu.
         this.providersMenu_.updateSubMenu();
       }
-
-      this.gearMenu_.setNewServiceCommand(desiredMenu, label);
+      this.gearMenu_.updateShowProviders(shouldHide);
     });
   }
 
@@ -95,6 +91,10 @@ class GearMenuController {
     if (event.volumeChanged) {
       this.refreshRemainingSpace_(true);
     }  // Show loading caption.
+
+    if (this.gearButton_.isMenuShown()) {
+      this.gearButton_.menu.updateCommands(this.gearButton_);
+    }
   }
 
   /**
@@ -116,25 +116,36 @@ class GearMenuController {
 
     // TODO(mtomasz): Add support for remaining space indication for provided
     // file systems.
-    // TODO(fukino): Add support for remaining space indication for documents
-    // provider roots. crbug.com/953657.
     if (currentVolumeInfo.volumeType ==
             VolumeManagerCommon.VolumeType.PROVIDED ||
         currentVolumeInfo.volumeType ==
             VolumeManagerCommon.VolumeType.MEDIA_VIEW ||
-        currentVolumeInfo.volumeType ==
-            VolumeManagerCommon.VolumeType.DOCUMENTS_PROVIDER ||
         currentVolumeInfo.volumeType ==
             VolumeManagerCommon.VolumeType.ARCHIVE) {
       this.gearMenu_.setSpaceInfo(null, false);
       return;
     }
 
+    if (currentVolumeInfo.volumeType == VolumeManagerCommon.VolumeType.DRIVE) {
+      this.gearMenu_.setSpaceInfo(
+          getDriveQuotaMetadata().then(
+              quota /* chrome.fileManagerPrivate.DriveQuotaMetadata */ => ({
+                totalSize: quota.totalUserBytes,
+                usedSize: quota.usedUserBytes,
+                warningMessage: quota.organizationLimitExceeded ?
+                    strf('DRIVE_ORGANIZATION_STORAGE_FULL') :
+                    null,
+              })),
+          true);
+      return;
+    }
+
     this.gearMenu_.setSpaceInfo(
-        new Promise(fulfill => {
-          chrome.fileManagerPrivate.getSizeStats(
-              currentVolumeInfo.volumeId, fulfill);
-        }),
+        getSizeStats(currentVolumeInfo.volumeId)
+            .then(size /* chrome.fileManagerPrivate.MountPointSizeStats */ => ({
+                    totalSize: size.totalSize,
+                    usedSize: size.totalSize - size.remainingSize,
+                  })),
         true);
   }
 

@@ -1,13 +1,34 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert, assertInstanceof} from 'chrome://resources/js/assert.m.js';
+import {dispatchSimpleEvent} from 'chrome://resources/js/cr.m.js';
+
+import {AsyncUtil} from '../../../common/js/async_util.js';
+import {FileType} from '../../../common/js/file_type.js';
+import {str, strf, util} from '../../../common/js/util.js';
+import {FilesAppEntry} from '../../../externs/files_app_entry_interfaces.js';
+import {VolumeManager} from '../../../externs/volume_manager.js';
+import {FilesTooltip} from '../../elements/files_tooltip.js';
+import {FileListModel, GROUP_BY_FIELD_MODIFICATION_TIME} from '../file_list_model.js';
+import {ListThumbnailLoader} from '../list_thumbnail_loader.js';
+import {MetadataModel} from '../metadata/metadata_model.js';
+
+import {A11yAnnounce} from './a11y_announce.js';
+import {DragSelector} from './drag_selector.js';
+import {FileMetadataFormatter} from './file_metadata_formatter.js';
+import {filelist, FileTableList} from './file_table_list.js';
+import {Table} from './table/table.js';
+import {TableColumn} from './table/table_column.js';
+import {TableColumnModel} from './table/table_column_model.js';
 
 /**
  * Custom column model for advanced auto-resizing.
  */
-class FileTableColumnModel extends cr.ui.table.TableColumnModel {
+export class FileTableColumnModel extends TableColumnModel {
   /**
-   * @param {!Array<cr.ui.table.TableColumn>} tableColumns Table columns.
+   * @param {!Array<TableColumn>} tableColumns Table columns.
    */
   constructor(tableColumns) {
     super(tableColumns);
@@ -118,7 +139,7 @@ class FileTableColumnModel extends cr.ui.table.TableColumnModel {
     this.applyColumnPositions_(this.snapshot_.newPos);
 
     // Notify about resizing
-    cr.dispatchSimpleEvent(this, 'resize');
+    dispatchSimpleEvent(this, 'resize');
   }
 
   /**
@@ -128,7 +149,8 @@ class FileTableColumnModel extends cr.ui.table.TableColumnModel {
    *     hitPosition where the horizontal position is hit in the column.
    */
   getHitColumn(x) {
-    for (var i = 0; x >= this.columns_[i].width; i++) {
+    let i = 0;
+    for (; x >= this.columns_[i].width; i++) {
       x -= this.columns_[i].width;
     }
     if (i >= this.columns_.length) {
@@ -181,7 +203,7 @@ class FileTableColumnModel extends cr.ui.table.TableColumnModel {
     const config = {};
     for (let i = 0; i < this.columns_.length; i++) {
       config[this.columns_[i].id] = {
-        width: snapshot.newPos[i + 1] - snapshot.newPos[i]
+        width: snapshot.newPos[i + 1] - snapshot.newPos[i],
       };
     }
     return config;
@@ -238,26 +260,45 @@ class FileTableColumnModel extends cr.ui.table.TableColumnModel {
  * Customize the column header to decorate with a11y attributes that announces
  * the sorting used when clicked.
  *
- * @this {cr.ui.table.TableColumn} Bound by cr.ui.table.TableHeader before
+ * @this {TableColumn} Bound by TableHeader before
  * calling.
  * @param {Element} table Table being rendered.
  * @return {Element}
  */
-function renderHeader_(table) {
-  const column = /** @type {cr.ui.table.TableColumn} */ (this);
+export function renderHeader_(table) {
+  const column = /** @type {TableColumn} */ (this);
+  const container = table.ownerDocument.createElement('div');
+  container.classList.add('table-label-container');
+
   const textElement = table.ownerDocument.createElement('span');
   textElement.textContent = column.name;
   const dm = table.dataModel;
 
   let sortOrder = column.defaultOrder;
+  let isSorted = false;
   if (dm && dm.sortStatus.field === column.id) {
+    isSorted = true;
     // Here we have to flip, because clicking will perform the opposite sorting.
     sortOrder = dm.sortStatus.direction === 'desc' ? 'asc' : 'desc';
   }
 
   textElement.setAttribute('aria-describedby', 'sort-column-' + sortOrder);
   textElement.setAttribute('role', 'button');
-  return textElement;
+  container.appendChild(textElement);
+
+  const icon = document.createElement('cr-icon-button');
+  const iconName = sortOrder === 'desc' ? 'up' : 'down';
+  icon.setAttribute('iron-icon', `files16:arrow_${iconName}_small`);
+  icon.setAttribute('tabindex', '-1');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.classList.add('sort-icon', 'no-overlap');
+
+  container.classList.toggle('not-sorted', !isSorted);
+  container.classList.toggle('sorted', isSorted);
+
+  container.appendChild(icon);
+
+  return container;
 }
 
 /**
@@ -265,14 +306,14 @@ function renderHeader_(table) {
  * unit tests.
  * @const {number}
  */
-FileTableColumnModel.MIN_WIDTH_ = 10;
+FileTableColumnModel.MIN_WIDTH_ = 40;
 
 /**
  * A helper class for performing resizing of columns.
  */
 FileTableColumnModel.ColumnSnapshot = class {
   /**
-   * @param {!Array<!cr.ui.table.TableColumn>} columns
+   * @param {!Array<!TableColumn>} columns
    */
   constructor(columns) {
     /** @private {!Array<number>} */
@@ -324,45 +365,9 @@ FileTableColumnModel.ColumnSnapshot = class {
 };
 
 /**
- * Custom splitter that resizes column with retaining the sum of all the column
- * width.
- */
-const FileTableSplitter = cr.ui.define('div');
-
-/**
- * Inherits from cr.ui.TableSplitter.
- */
-FileTableSplitter.prototype.__proto__ = cr.ui.TableSplitter.prototype;
-
-/**
- * Handles the drag start event.
- */
-FileTableSplitter.prototype.handleSplitterDragStart = function() {
-  cr.ui.TableSplitter.prototype.handleSplitterDragStart.call(this);
-  this.table_.columnModel.handleSplitterDragStart();
-};
-
-/**
- * Handles the drag move event.
- * @param {number} deltaX Horizontal mouse move offset.
- */
-FileTableSplitter.prototype.handleSplitterDragMove = function(deltaX) {
-  this.table_.columnModel.setWidthAndKeepTotal(
-      this.columnIndex, this.columnWidth_ + deltaX, true);
-};
-
-/**
- * Handles the drag end event.
- */
-FileTableSplitter.prototype.handleSplitterDragEnd = function() {
-  cr.ui.TableSplitter.prototype.handleSplitterDragEnd.call(this);
-  this.table_.columnModel.handleSplitterDragEnd();
-};
-
-/**
  * File list Table View.
  */
-class FileTable extends cr.ui.Table {
+export class FileTable extends Table {
   constructor() {
     super();
 
@@ -381,20 +386,11 @@ class FileTable extends cr.ui.Table {
     /** @private {?MetadataModel} */
     this.metadataModel_ = null;
 
-    /** @private {?cr.ui.table.TableList} */
-    this.list_ = null;
-
     /** @private {?FileMetadataFormatter} */
     this.formatter_ = null;
 
     /** @private {boolean} */
     this.useModificationByMeTime_ = false;
-
-    /** @private {?importer.HistoryLoader} */
-    this.historyLoader_ = null;
-
-    /** @private {boolean} */
-    this.importStatusVisible_ = false;
 
     /** @private {?VolumeManager} */
     this.volumeManager_ = null;
@@ -416,25 +412,24 @@ class FileTable extends cr.ui.Table {
    * @param {!Element} self Table to decorate.
    * @param {!MetadataModel} metadataModel To retrieve metadata.
    * @param {!VolumeManager} volumeManager To retrieve volume info.
-   * @param {!importer.HistoryLoader} historyLoader
    * @param {!A11yAnnounce} a11y FileManagerUI to be able to announce a11y
    *     messages.
    * @param {boolean} fullPage True if it's full page File Manager, False if a
    *    file open/save dialog.
+   * @suppress {checkPrototypalTypes} Closure was failing because the signature
+   * of this decorate() doesn't match the base class.
    */
-  static decorate(
-      self, metadataModel, volumeManager, historyLoader, a11y, fullPage) {
-    cr.ui.Table.decorate(self);
+  static decorate(self, metadataModel, volumeManager, a11y, fullPage) {
+    Table.decorate(self);
     self.__proto__ = FileTable.prototype;
     FileTableList.decorate(self.list);
     self.list.setOnMergeItems(self.updateHighPriorityRange_.bind(self));
     self.metadataModel_ = metadataModel;
     self.volumeManager_ = volumeManager;
-    self.historyLoader_ = historyLoader;
     self.a11y = a11y;
 
     // Force the list's ending spacer to be tall enough to allow overscroll.
-    let endSpacer = self.querySelector('.spacer:last-child');
+    const endSpacer = self.querySelector('.spacer:last-child');
     if (endSpacer) {
       endSpacer.classList.add('signals-overscroll');
     }
@@ -451,52 +446,32 @@ class FileTable extends cr.ui.Table {
     /** @private {function(!Event)} */
     self.onThumbnailLoadedBound_ = self.onThumbnailLoaded_.bind(self);
 
-    /**
-     * Reflects the visibility of import status in the UI.  Assumption: import
-     * status is only enabled in import-eligible locations.  See
-     * ImportController#onDirectoryChanged.  For this reason, the code in this
-     * class checks if import status is visible, and if so, assumes that all
-     * the files are in an import-eligible location.
-     * TODO(kenobi): Clean this up once import status is queryable from
-     * metadata.
-     *
-     * @private {boolean}
-     */
-    self.importStatusVisible_ = true;
-
     /** @private {boolean} */
     self.useModificationByMeTime_ = false;
 
-    const nameColumn = new cr.ui.table.TableColumn(
-        'name', str('NAME_COLUMN_LABEL'), fullPage ? 386 : 324);
+    const nameColumn =
+        new TableColumn('name', str('NAME_COLUMN_LABEL'), fullPage ? 386 : 324);
     nameColumn.renderFunction = self.renderName_.bind(self);
     nameColumn.headerRenderFunction = renderHeader_;
 
-    const sizeColumn = new cr.ui.table.TableColumn(
-        'size', str('SIZE_COLUMN_LABEL'), 110, true);
+    const sizeColumn =
+        new TableColumn('size', str('SIZE_COLUMN_LABEL'), 110, true);
     sizeColumn.renderFunction = self.renderSize_.bind(self);
     sizeColumn.defaultOrder = 'desc';
     sizeColumn.headerRenderFunction = renderHeader_;
 
-    const statusColumn = new cr.ui.table.TableColumn(
-        'status', str('STATUS_COLUMN_LABEL'), 60, true);
-    statusColumn.renderFunction = self.renderStatus_.bind(self);
-    statusColumn.visible = self.importStatusVisible_;
-    statusColumn.headerRenderFunction = renderHeader_;
-
-    const typeColumn = new cr.ui.table.TableColumn(
-        'type', str('TYPE_COLUMN_LABEL'), fullPage ? 110 : 110);
+    const typeColumn =
+        new TableColumn('type', str('TYPE_COLUMN_LABEL'), fullPage ? 110 : 110);
     typeColumn.renderFunction = self.renderType_.bind(self);
     typeColumn.headerRenderFunction = renderHeader_;
 
-    const modTimeColumn = new cr.ui.table.TableColumn(
+    const modTimeColumn = new TableColumn(
         'modificationTime', str('DATE_COLUMN_LABEL'), fullPage ? 150 : 210);
     modTimeColumn.renderFunction = self.renderDate_.bind(self);
     modTimeColumn.defaultOrder = 'desc';
     modTimeColumn.headerRenderFunction = renderHeader_;
 
-    const columns =
-        [nameColumn, sizeColumn, statusColumn, typeColumn, modTimeColumn];
+    const columns = [nameColumn, sizeColumn, typeColumn, modTimeColumn];
 
     const columnModel = new FileTableColumnModel(columns);
 
@@ -504,7 +479,7 @@ class FileTable extends cr.ui.Table {
 
     self.formatter_ = new FileMetadataFormatter();
 
-    const selfAsTable = /** @type {!cr.ui.Table} */ (self);
+    const selfAsTable = /** @type {!Table} */ (self);
     selfAsTable.setRenderFunction(
         self.renderTableRow_.bind(self, selfAsTable.getRenderFunction()));
 
@@ -517,20 +492,6 @@ class FileTable extends cr.ui.Table {
     self.relayoutRateLimiter_ =
         new AsyncUtil.RateLimiter(self.relayoutImmediately_.bind(self));
 
-    // Override header#redraw to use FileTableSplitter.
-    /** @this {cr.ui.table.TableHeader} */
-    selfAsTable.header.redraw = function() {
-      this.__proto__.redraw.call(this);
-      // Extend table splitters
-      const splitters = this.querySelectorAll('.table-header-splitter');
-      for (let i = 0; i < splitters.length; i++) {
-        if (splitters[i] instanceof FileTableSplitter) {
-          continue;
-        }
-        FileTableSplitter.decorate(splitters[i]);
-      }
-    };
-
     // Save the last selection. This is used by shouldStartDragSelection.
     self.list.addEventListener('mousedown', function(e) {
       this.lastSelection_ = this.selectionModel.selectedIndexes;
@@ -540,31 +501,6 @@ class FileTable extends cr.ui.Table {
     }.bind(self), true);
     self.list.shouldStartDragSelection =
         self.shouldStartDragSelection_.bind(self);
-    self.list.hasDragHitElement = self.hasDragHitElement_.bind(self);
-
-    /**
-     * Obtains the index list of elements that are hit by the point or the
-     * rectangle.
-     *
-     * @param {number} x X coordinate value.
-     * @param {number} y Y coordinate value.
-     * @param {number=} opt_width Width of the coordinate.
-     * @param {number=} opt_height Height of the coordinate.
-     * @return {Array<number>} Index list of hit elements.
-     * @this {cr.ui.List}
-     */
-    self.list.getHitElements = function(x, y, opt_width, opt_height) {
-      const currentSelection = [];
-      const bottom = y + (opt_height || 0);
-      for (let i = 0; i < this.selectionModel_.length; i++) {
-        const itemMetrics = this.getHeightsForIndex(i);
-        if (itemMetrics.top < bottom &&
-            itemMetrics.top + itemMetrics.height >= y) {
-          currentSelection.push(i);
-        }
-      }
-      return currentSelection;
-    };
   }
 
   /**
@@ -595,6 +531,21 @@ class FileTable extends cr.ui.Table {
     // Delegate to parent to sort.
     super.sort(index);
     this.a11y.speakA11yMessage(msg);
+  }
+
+  /**
+   * @override
+   */
+  onDataModelSorted() {
+    const fileListModel = /** @type {FileListModel} */ (this.dataModel);
+    const hasGroupHeadingAfterSort = fileListModel.shouldShowGroupHeading();
+    // Sort doesn't trigger redraw sometimes, e.g. if we sort by Name for now,
+    // then we sort by time, if the list order doesn't change, no permuted event
+    // is triggered, thus no redraw is triggered. In this scenario, we need to
+    // manually trigger a redraw to remove/add the group heading.
+    if (hasGroupHeadingAfterSort !== fileListModel.hasGroupHeadingBeforeSort) {
+      this.list.redraw();
+    }
   }
 
   /**
@@ -667,11 +618,12 @@ class FileTable extends cr.ui.Table {
       if (box) {
         if (event.dataUrl) {
           this.setThumbnailImage_(
-              assertInstanceof(box, HTMLDivElement), event.dataUrl,
-              true /* with animation */);
+              assertInstanceof(box, HTMLDivElement), event.dataUrl);
         } else {
           this.clearThumbnailImage_(assertInstanceof(box, HTMLDivElement));
         }
+        const icon = listItem.querySelector('.detail-icon');
+        icon.classList.toggle('has-thumbnail', !!event.dataUrl);
       }
     }
   }
@@ -717,18 +669,6 @@ class FileTable extends cr.ui.Table {
   }
 
   /**
-   * Sets the visibility of the cloud import status column.
-   * @param {boolean} visible
-   */
-  setImportStatusVisible(visible) {
-    if (this.importStatusVisible_ != visible) {
-      this.importStatusVisible_ = visible;
-      this.columnModel.setVisible(this.columnModel.indexOf('status'), visible);
-      this.relayout();
-    }
-  }
-
-  /**
    * Sets date and time format.
    * @param {boolean} use12hourClock True if 12 hours clock, False if 24 hours.
    */
@@ -742,19 +682,6 @@ class FileTable extends cr.ui.Table {
    */
   setUseModificationByMeTime(useModificationByMeTime) {
     this.useModificationByMeTime_ = useModificationByMeTime;
-  }
-
-  /**
-   * Returns whether the drag event is inside a file entry in the list (and not
-   * the background padding area).
-   * @param {MouseEvent} event Drag start event.
-   * @return {boolean} True if the mouse is over an element in the list, False
-   *     if
-   *                   it is in the background.
-   */
-  hasDragHitElement_(event) {
-    const pos = DragSelector.getScrolledPosition(this.list, event);
-    return this.list.getHitElements(pos.x, pos.y).length !== 0;
   }
 
   /**
@@ -833,11 +760,11 @@ class FileTable extends cr.ui.Table {
   /**
    * Render the Name column of the detail table.
    *
-   * Invoked by cr.ui.Table when a file needs to be rendered.
+   * Invoked by Table when a file needs to be rendered.
    *
    * @param {!Entry} entry The Entry object to render.
    * @param {string} columnId The id of the column to be rendered.
-   * @param {cr.ui.Table} table The table doing the rendering.
+   * @param {Table} table The table doing the rendering.
    * @return {!HTMLDivElement} Created element.
    * @private
    */
@@ -845,16 +772,16 @@ class FileTable extends cr.ui.Table {
     const label = /** @type {!HTMLDivElement} */
         (this.ownerDocument.createElement('div'));
 
-    const mimeType =
-        this.metadataModel_.getCache([entry], ['contentMimeType'])[0]
-            .contentMimeType;
+    const metadata = this.metadataModel_.getCache(
+        [entry], ['contentMimeType', 'isDlpRestricted'])[0];
+    const mimeType = metadata.contentMimeType;
     const locationInfo = this.volumeManager_.getLocationInfo(entry);
     const icon = filelist.renderFileTypeIcon(
         this.ownerDocument, entry, locationInfo, mimeType);
     if (FileType.isImage(entry, mimeType) ||
         FileType.isVideo(entry, mimeType) ||
         FileType.isAudio(entry, mimeType) || FileType.isRaw(entry, mimeType)) {
-      icon.appendChild(this.renderThumbnail_(entry));
+      icon.appendChild(this.renderThumbnail_(entry, icon));
     }
     icon.appendChild(this.renderCheckmark_());
     label.appendChild(icon);
@@ -863,6 +790,13 @@ class FileTable extends cr.ui.Table {
     label.className = 'detail-name';
     label.appendChild(
         filelist.renderFileNameLabel(this.ownerDocument, entry, locationInfo));
+    if (locationInfo && locationInfo.isDriveBased) {
+      label.appendChild(filelist.renderPinned(this.ownerDocument));
+    }
+    const isDlpRestricted = !!metadata.isDlpRestricted;
+    if (isDlpRestricted) {
+      label.appendChild(this.renderDlpManagedIcon_());
+    }
     return label;
   }
 
@@ -890,7 +824,7 @@ class FileTable extends cr.ui.Table {
    *
    * @param {Entry} entry The Entry object to render.
    * @param {string} columnId The id of the column to be rendered.
-   * @param {cr.ui.Table} table The table doing the rendering.
+   * @param {Table} table The table doing the rendering.
    * @return {!HTMLDivElement} Created element.
    * @private
    */
@@ -919,88 +853,11 @@ class FileTable extends cr.ui.Table {
   }
 
   /**
-   * Render the Status column of the detail table.
-   *
-   * @param {Entry} entry The Entry object to render.
-   * @param {string} columnId The id of the column to be rendered.
-   * @param {cr.ui.Table} table The table doing the rendering.
-   * @return {!HTMLDivElement} Created element.
-   * @private
-   */
-  renderStatus_(entry, columnId, table) {
-    const div =
-        /** @type {!HTMLDivElement} */ (
-            this.ownerDocument.createElement('div'));
-    div.className = 'status status-icon';
-    if (entry) {
-      this.updateStatus_(div, entry);
-    }
-
-    return div;
-  }
-
-  /**
-   * Returns the status of the entry w.r.t. the given import destination.
-   * @param {Entry} entry
-   * @param {!importer.Destination} destination
-   * @return {!Promise<string>} The import status - will be 'imported',
-   *     'copied', or 'unknown'.
-   */
-  getImportStatus_(entry, destination) {
-    // If import status is not visible, early out because there's no point
-    // retrieving it.
-    if (!this.importStatusVisible_ || !importer.isEligibleType(entry)) {
-      // Our import history doesn't deal with directories.
-      // TODO(kenobi): May need to revisit this if the above assumption changes.
-      return Promise.resolve('unknown');
-    }
-    // For the compiler.
-    const fileEntry = /** @type {!FileEntry} */ (entry);
-
-    return this.historyLoader_.getHistory()
-        .then(
-            /** @param {!importer.ImportHistory} history */
-            history => {
-              return Promise.all([
-                history.wasImported(fileEntry, destination),
-                history.wasCopied(fileEntry, destination)
-              ]);
-            })
-        .then(
-            /** @param {!Array<boolean>} status */
-            status => {
-              if (status[0]) {
-                return 'imported';
-              } else if (status[1]) {
-                return 'copied';
-              } else {
-                return 'unknown';
-              }
-            });
-  }
-
-  /**
-   * Render the status icon of the detail table.
-   *
-   * @param {HTMLDivElement} div
-   * @param {Entry} entry The Entry object to render.
-   * @private
-   */
-  updateStatus_(div, entry) {
-    this.getImportStatus_(entry, importer.Destination.GOOGLE_DRIVE)
-        .then(
-            /** @param {string} status */
-            status => {
-              div.setAttribute('file-status-icon', status);
-            });
-  }
-
-  /**
    * Render the Type column of the detail table.
    *
    * @param {Entry} entry The Entry object to render.
    * @param {string} columnId The id of the column to be rendered.
-   * @param {cr.ui.Table} table The table doing the rendering.
+   * @param {Table} table The table doing the rendering.
    * @return {!HTMLDivElement} Created element.
    * @private
    */
@@ -1014,12 +871,6 @@ class FileTable extends cr.ui.Table {
             .contentMimeType;
     div.textContent =
         FileListModel.getFileTypeString(FileType.getType(entry, mimeType));
-
-    // For removable partitions, display file system type.
-    if (!mimeType && entry.volumeInfo && entry.volumeInfo.diskFileSystemType) {
-      div.textContent = entry.volumeInfo.diskFileSystemType;
-    }
-
     return div;
   }
 
@@ -1028,7 +879,7 @@ class FileTable extends cr.ui.Table {
    *
    * @param {Entry} entry The Entry object to render.
    * @param {string} columnId The id of the column to be rendered.
-   * @param {cr.ui.Table} table The table doing the rendering.
+   * @param {Table} table The table doing the rendering.
    * @return {HTMLDivElement} Created element.
    * @private
    */
@@ -1052,10 +903,19 @@ class FileTable extends cr.ui.Table {
     const item = this.metadataModel_.getCache(
         [entry], ['modificationTime', 'modificationByMeTime'])[0];
     const modTime = this.useModificationByMeTime_ ?
-        item.modificationByMeTime || item.modificationTime || null :
-        item.modificationTime || null;
+        item.modificationByMeTime || item.modificationTime :
+        item.modificationTime;
 
     div.textContent = this.formatter_.formatModDate(modTime);
+  }
+
+  updateGroupHeading_() {
+    const fileListModel = /** @type {FileListModel} */ (this.dataModel);
+    if (fileListModel &&
+        fileListModel.groupByField === GROUP_BY_FIELD_MODIFICATION_TIME) {
+      // TODO(crbug.com/1353650): find a way to update heading instead of redraw
+      this.redraw();
+    }
   }
 
   /**
@@ -1069,8 +929,6 @@ class FileTable extends cr.ui.Table {
         /** @type {!HTMLDivElement} */ (item.querySelector('.date')), entry);
     this.updateSize_(
         /** @type {!HTMLDivElement} */ (item.querySelector('.size')), entry);
-    this.updateStatus_(
-        /** @type {!HTMLDivElement} */ (item.querySelector('.status')), entry);
   }
 
   /**
@@ -1098,6 +956,7 @@ class FileTable extends cr.ui.Table {
       forEachCell('.table-row-cell > .size', function(item, entry, unused) {
         this.updateSize_(item, entry);
       });
+      this.updateGroupHeading_();
     } else if (type === 'external') {
       // The cell name does not matter as the entire list item is needed.
       forEachCell('.table-row-cell > .date', function(item, entry, listItem) {
@@ -1106,21 +965,22 @@ class FileTable extends cr.ui.Table {
             this.metadataModel_.getCache(
                 [entry],
                 [
-                  'availableOffline', 'customIconUrl', 'shared',
-                  'isMachineRoot', 'isExternalMedia', 'hosted'
+                  'availableOffline',
+                  'customIconUrl',
+                  'shared',
+                  'isMachineRoot',
+                  'isExternalMedia',
+                  'hosted',
+                  'pinned',
                 ])[0],
             util.isTeamDriveRoot(entry));
-      });
-    } else if (type === 'import-history') {
-      forEachCell('.table-row-cell > .status', function(item, entry, unused) {
-        this.updateStatus_(item, entry);
       });
     }
   }
 
   /**
    * Renders table row.
-   * @param {function(Entry, cr.ui.Table)} baseRenderFunction Base renderer.
+   * @param {function(Entry, Table)} baseRenderFunction Base renderer.
    * @param {Entry} entry Corresponding entry.
    * @return {HTMLLIElement} Created element.
    * @private
@@ -1130,22 +990,32 @@ class FileTable extends cr.ui.Table {
     const nameId = item.id + '-entry-name';
     const sizeId = item.id + '-size';
     const dateId = item.id + '-date';
+    const dlpId = item.id + '-dlp-managed-icon';
     filelist.decorateListItem(item, entry, assert(this.metadataModel_));
     item.setAttribute('file-name', entry.name);
-    item.querySelector('.entry-name').setAttribute('id', nameId);
+    item.querySelector('.detail-name').setAttribute('id', nameId);
     item.querySelector('.size').setAttribute('id', sizeId);
     item.querySelector('.date').setAttribute('id', dateId);
-    item.setAttribute('aria-labelledby', nameId + ' ' + sizeId + ' ' + dateId);
+    const dlpManagedIcon = item.querySelector('.dlp-managed-icon');
+    if (dlpManagedIcon) {
+      dlpManagedIcon.setAttribute('id', dlpId);
+      /** @type {!FilesTooltip} */ (
+          this.ownerDocument.querySelector('files-tooltip'))
+          .addTargets(item.querySelectorAll('.dlp-managed-icon'));
+    }
+
+    item.setAttribute('aria-labelledby', nameId);
     return item;
   }
 
   /**
    * Renders the file thumbnail in the detail table.
    * @param {Entry} entry The Entry object to render.
+   * @param {HTMLDivElement} parent The parent DOM element.
    * @return {!HTMLDivElement} Created element.
    * @private
    */
-  renderThumbnail_(entry) {
+  renderThumbnail_(entry, parent) {
     const box = /** @type {!HTMLDivElement} */
         (this.ownerDocument.createElement('div'));
     box.className = 'detail-thumbnail';
@@ -1155,8 +1025,8 @@ class FileTable extends cr.ui.Table {
         this.listThumbnailLoader_.getThumbnailFromCache(entry) :
         null;
     if (thumbnailData && thumbnailData.dataUrl) {
-      this.setThumbnailImage_(
-          box, thumbnailData.dataUrl, false /* without animation */);
+      this.setThumbnailImage_(box, thumbnailData.dataUrl);
+      parent.classList.add('has-thumbnail');
     }
 
     return box;
@@ -1166,30 +1036,16 @@ class FileTable extends cr.ui.Table {
    * Sets thumbnail image to the box.
    * @param {!HTMLDivElement} box Detail thumbnail div element.
    * @param {string} dataUrl Data url of thumbnail.
-   * @param {boolean} shouldAnimate Whether the thumbnail is shown with
-   *     animation or not.
    * @private
    */
-  setThumbnailImage_(box, dataUrl, shouldAnimate) {
-    const oldThumbnails = box.querySelectorAll('.thumbnail');
-
+  setThumbnailImage_(box, dataUrl) {
     const thumbnail = box.ownerDocument.createElement('div');
     thumbnail.classList.add('thumbnail');
     thumbnail.style.backgroundImage = 'url(' + dataUrl + ')';
-    thumbnail.addEventListener('animationend', () => {
-      // Remove animation css once animation is completed in order not to
-      // animate again when an item is attached to the dom again.
-      thumbnail.classList.remove('animate');
+    const oldThumbnails = box.querySelectorAll('.thumbnail');
 
-      for (let i = 0; i < oldThumbnails.length; i++) {
-        if (box.contains(oldThumbnails[i])) {
-          box.removeChild(oldThumbnails[i]);
-        }
-      }
-    });
-
-    if (shouldAnimate) {
-      thumbnail.classList.add('animate');
+    for (let i = 0; i < oldThumbnails.length; i++) {
+      box.removeChild(oldThumbnails[i]);
     }
 
     box.appendChild(thumbnail);
@@ -1221,6 +1077,26 @@ class FileTable extends cr.ui.Table {
   }
 
   /**
+   * Renders the DLP managed icon in the detail table.
+   * @return {!HTMLDivElement} Created element.
+   * @private
+   */
+  renderDlpManagedIcon_() {
+    const icon = /** @type {!HTMLDivElement} */
+        (this.ownerDocument.createElement('div'));
+    icon.className = 'dlp-managed-icon';
+    icon.toggleAttribute('has-tooltip');
+    icon.setAttribute(
+        'aria-label',
+        strf(
+            'DLP_MANAGED_ICON_TOOLTIP',
+            'https://support.google.com/chrome/a/?p=chromeos_datacontrols'));
+    icon.toggleAttribute('show-link-tooltip');
+    icon.toggleAttribute('show-card-tooltip');
+    return icon;
+  }
+
+  /**
    * Redraws the UI. Skips multiple consecutive calls.
    */
   relayout() {
@@ -1236,11 +1112,11 @@ class FileTable extends cr.ui.Table {
       this.normalizeColumns();
     }
     this.redraw();
-    cr.dispatchSimpleEvent(this.list, 'relayout');
+    dispatchSimpleEvent(this.list, 'relayout');
   }
 }
 
 /**
- * Inherits from cr.ui.Table.
+ * Inherits from Table.
  */
-FileTable.prototype.__proto__ = cr.ui.Table.prototype;
+FileTable.prototype.__proto__ = Table.prototype;

@@ -1,14 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
+#include "ui/base/ui_base_types.h"
+#include "ui/events/test/event_generator.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d.h"
+#include "ui/views/controls/scrollbar/base_scroll_bar_thumb.h"
 #include "ui/views/controls/scrollbar/scroll_bar.h"
 #include "ui/views/controls/scrollbar/scroll_bar_views.h"
+#include "ui/views/test/view_metadata_test_utils.h"
 #include "ui/views/test/views_test_base.h"
+#include "ui/views/widget/unique_widget_ptr.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_utils.h"
 
 namespace {
 
@@ -37,10 +47,24 @@ class TestScrollBarController : public views::ScrollBarController {
 
   // We save the last values in order to assert the correctness of the scroll
   // operation.
-  views::ScrollBar* last_source;
+  raw_ptr<views::ScrollBar> last_source;
   bool last_is_positive;
   bool last_is_page;
   int last_position;
+};
+
+// This container is used to forward gesture events to the scrollbar for
+// testing fling and other gestures.
+class TestScrollbarContainer : public views::View {
+ public:
+  TestScrollbarContainer() = default;
+  ~TestScrollbarContainer() override = default;
+  TestScrollbarContainer(const TestScrollbarContainer&) = delete;
+  TestScrollbarContainer& operator=(const TestScrollbarContainer&) = delete;
+
+  void OnGestureEvent(ui::GestureEvent* event) override {
+    children()[0]->OnGestureEvent(event);
+  }
 };
 
 }  // namespace
@@ -55,32 +79,32 @@ class ScrollBarViewsTest : public ViewsTestBase {
     ViewsTestBase::SetUp();
     controller_ = std::make_unique<TestScrollBarController>();
 
-    widget_ = new Widget;
+    widget_ = std::make_unique<Widget>();
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
-    params.bounds = gfx::Rect(0, 0, 100, 100);
-    widget_->Init(params);
-    View* container = new View();
-    widget_->SetContentsView(container);
+    params.bounds = gfx::Rect(0, 0, 100, 300);
+    widget_->Init(std::move(params));
+    widget_->Show();
+    auto* container =
+        widget_->SetContentsView(std::make_unique<TestScrollbarContainer>());
 
-    scrollbar_ = new ScrollBarViews(true);
+    scrollbar_ = container->AddChildView(std::make_unique<ScrollBarViews>());
     scrollbar_->SetBounds(0, 0, 100, 100);
     scrollbar_->Update(100, 1000, 0);
     scrollbar_->set_controller(controller_.get());
-    container->AddChildView(scrollbar_);
 
     track_size_ = scrollbar_->GetTrackBounds().width();
   }
 
   void TearDown() override {
-    widget_->Close();
+    widget_.reset();
     ViewsTestBase::TearDown();
   }
 
  protected:
-  Widget* widget_ = nullptr;
+  UniqueWidgetPtr widget_;
 
   // This is the Views scrollbar.
-  ScrollBar* scrollbar_ = nullptr;
+  raw_ptr<ScrollBar> scrollbar_ = nullptr;
 
   // Keep track of the size of the track. This is how we can tell when we
   // scroll to the middle.
@@ -88,6 +112,11 @@ class ScrollBarViewsTest : public ViewsTestBase {
 
   std::unique_ptr<TestScrollBarController> controller_;
 };
+
+// Verify properties are accessible via metadata.
+TEST_F(ScrollBarViewsTest, MetaDataTest) {
+  test::TestViewMetadata(scrollbar_);
+}
 
 TEST_F(ScrollBarViewsTest, Scrolling) {
   EXPECT_EQ(0, scrollbar_->GetPosition());
@@ -136,14 +165,14 @@ TEST_F(ScrollBarViewsTest, ScrollBarFitsToBottom) {
   // Scroll to the midpoint of the document.
   scrollbar_->Update(100, 1999, 950);
   EXPECT_EQ((scrollbar_->GetTrackBounds().width() -
-             scrollbar_->GetThumbSizeForTesting()) /
+             scrollbar_->GetThumbLengthForTesting()) /
                 2,
             scrollbar_->GetPosition());
 
   // Scroll to the end of the document.
   scrollbar_->Update(100, 1999, 1899);
   EXPECT_EQ(scrollbar_->GetTrackBounds().width() -
-                scrollbar_->GetThumbSizeForTesting(),
+                scrollbar_->GetThumbLengthForTesting(),
             scrollbar_->GetPosition());
 }
 
@@ -162,7 +191,7 @@ TEST_F(ScrollBarViewsTest, ThumbFullLengthOfTrack) {
   // Shrink content so that it fits within the viewport.
   scrollbar_->Update(100, 10, 0);
   EXPECT_EQ(scrollbar_->GetTrackBounds().width(),
-            scrollbar_->GetThumbSizeForTesting());
+            scrollbar_->GetThumbLengthForTesting());
   // Emulate a click on the full size scroll bar.
   scrollbar_->ScrollToThumbPosition(0, false);
   EXPECT_EQ(0, scrollbar_->GetPosition());
@@ -173,7 +202,7 @@ TEST_F(ScrollBarViewsTest, ThumbFullLengthOfTrack) {
   // Expand content so that it fits *exactly* within the viewport.
   scrollbar_->Update(100, 100, 0);
   EXPECT_EQ(scrollbar_->GetTrackBounds().width(),
-            scrollbar_->GetThumbSizeForTesting());
+            scrollbar_->GetThumbLengthForTesting());
   // Emulate a click on the full size scroll bar.
   scrollbar_->ScrollToThumbPosition(0, false);
   EXPECT_EQ(0, scrollbar_->GetPosition());
@@ -181,5 +210,80 @@ TEST_F(ScrollBarViewsTest, ThumbFullLengthOfTrack) {
   scrollbar_->ScrollByAmount(ScrollBar::ScrollAmount::kNextLine);
   EXPECT_EQ(0, scrollbar_->GetPosition());
 }
+
+#if !BUILDFLAG(IS_MAC)
+TEST_F(ScrollBarViewsTest, RightClickOpensMenu) {
+  EXPECT_EQ(nullptr, scrollbar_->menu_model_);
+  EXPECT_EQ(nullptr, scrollbar_->menu_runner_);
+  scrollbar_->set_context_menu_controller(scrollbar_);
+  // Disabled on Mac because Mac's native menu is synchronous.
+  scrollbar_->ShowContextMenu(scrollbar_->GetBoundsInScreen().CenterPoint(),
+                              ui::MENU_SOURCE_MOUSE);
+  EXPECT_NE(nullptr, scrollbar_->menu_model_);
+  EXPECT_NE(nullptr, scrollbar_->menu_runner_);
+}
+
+TEST_F(ScrollBarViewsTest, TestPageScrollingByPress) {
+  ui::test::EventGenerator generator(GetRootWindow(widget_.get()));
+  EXPECT_EQ(0, scrollbar_->GetPosition());
+  generator.MoveMouseTo(
+      scrollbar_->GetThumb()->GetBoundsInScreen().right_center() +
+      gfx::Vector2d(4, 0));
+  generator.ClickLeftButton();
+  generator.ClickLeftButton();
+  EXPECT_GT(scrollbar_->GetPosition(), 0);
+}
+
+TEST_F(ScrollBarViewsTest, DragThumbScrollsContent) {
+  ui::test::EventGenerator generator(GetRootWindow(widget_.get()));
+  EXPECT_EQ(0, scrollbar_->GetPosition());
+  generator.MoveMouseTo(
+      scrollbar_->GetThumb()->GetBoundsInScreen().CenterPoint());
+  generator.PressLeftButton();
+  generator.MoveMouseBy(15, 0);
+  EXPECT_GE(scrollbar_->GetPosition(), 10);
+
+  // Dragging the mouse somewhat outside the thumb maintains scroll.
+  generator.MoveMouseBy(0, 100);
+  EXPECT_GE(scrollbar_->GetPosition(), 10);
+
+  // Dragging the mouse far outside the thumb snaps back to the initial
+  // scroll position.
+  generator.MoveMouseBy(0, 100);
+  EXPECT_EQ(0, scrollbar_->GetPosition());
+}
+
+TEST_F(ScrollBarViewsTest, DragThumbScrollsContentWhenSnapBackDisabled) {
+  scrollbar_->GetThumb()->SetSnapBackOnDragOutside(false);
+  ui::test::EventGenerator generator(GetRootWindow(widget_.get()));
+  EXPECT_EQ(0, scrollbar_->GetPosition());
+  generator.MoveMouseTo(
+      scrollbar_->GetThumb()->GetBoundsInScreen().CenterPoint());
+  generator.PressLeftButton();
+  generator.MoveMouseBy(10, 0);
+  EXPECT_GT(scrollbar_->GetPosition(), 0);
+  // Move the mouse far down, outside the thumb.
+  generator.MoveMouseBy(0, 200);
+  // Position does not snap back to zero.
+  EXPECT_GT(scrollbar_->GetPosition(), 0);
+}
+
+TEST_F(ScrollBarViewsTest, FlingGestureScrollsView) {
+  constexpr int kNumScrollSteps = 100;
+  constexpr int kScrollVelocity = 10;
+  ui::test::EventGenerator generator(GetRootWindow(widget_.get()));
+  EXPECT_EQ(0, scrollbar_->GetPosition());
+  const gfx::Point start_pos =
+      widget_->GetContentsView()->GetBoundsInScreen().CenterPoint();
+  const gfx::Point end_pos = start_pos + gfx::Vector2d(-100, 0);
+  generator.GestureScrollSequence(
+      start_pos, end_pos,
+      generator.CalculateScrollDurationForFlingVelocity(
+          start_pos, end_pos, kScrollVelocity, kNumScrollSteps),
+      kNumScrollSteps);
+  // Just make sure the view scrolled
+  EXPECT_GT(scrollbar_->GetPosition(), 0);
+}
+#endif
 
 }  // namespace views

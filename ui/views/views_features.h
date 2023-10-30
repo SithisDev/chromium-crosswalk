@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,9 @@ namespace views {
 namespace features {
 
 // Please keep alphabetized.
-#if defined(OS_WIN)
-VIEWS_EXPORT extern const base::Feature kEnableAuraTooltipsOnWindows;
-#endif  // OS_WIN
-
-VIEWS_EXPORT extern const base::Feature kEnableMDRoundedCornersOnDialogs;
+VIEWS_EXPORT extern const base::Feature kEnablePlatformHighContrastInkDrop;
+VIEWS_EXPORT extern const base::Feature kEnableViewPaintOptimization;
+VIEWS_EXPORT extern const base::Feature kWidgetLayering;
 
 }  // namespace features
 }  // namespace views

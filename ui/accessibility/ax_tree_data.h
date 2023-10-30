@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,18 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
+#include "ui/accessibility/ax_action_handler_registry.h"
+#include "ui/accessibility/ax_base_export.h"
 #include "ui/accessibility/ax_enums.mojom-forward.h"
-#include "ui/accessibility/ax_export.h"
-#include "ui/accessibility/ax_tree_id_registry.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 
 // The data associated with an accessibility tree that's global to the
 // tree and not associated with any particular node in the tree.
-struct AX_EXPORT AXTreeData {
+struct AX_BASE_EXPORT AXTreeData {
   AXTreeData();
   AXTreeData(const AXTreeData& other);
   virtual ~AXTreeData();
@@ -46,14 +46,14 @@ struct AX_EXPORT AXTreeData {
   // Attributes specific to trees that are web frames.
   std::string doctype;
   bool loaded = false;
-  float loading_progress = 0.0;
+  float loading_progress = 0.0f;
   std::string mimetype;
   std::string title;
   std::string url;
 
-  // The node with keyboard focus within this tree, if any, or -1 if no node
-  // in this tree has focus.
-  int32_t focus_id = -1;
+  // The node with keyboard focus within this tree, if any, or
+  // kInvalidAXNodeID if no node in this tree has focus.
+  AXNodeID focus_id = kInvalidAXNodeID;
 
   // The current text selection within this tree, if any, expressed as the
   // node ID and character offset of the anchor (selection start) and focus
@@ -62,18 +62,26 @@ struct AX_EXPORT AXTreeData {
   // line, otherwise it's on the second line.
   // Most use cases will want to use ui::OwnerTree::GetUnignoredSelection.
   bool sel_is_backward = false;
-  int32_t sel_anchor_object_id = -1;
+  AXNodeID sel_anchor_object_id = kInvalidAXNodeID;
   int32_t sel_anchor_offset = -1;
-  ax::mojom::TextAffinity sel_anchor_affinity =
-      ax::mojom::TextAffinity::kUpstream;
-  int32_t sel_focus_object_id = -1;
+  ax::mojom::TextAffinity sel_anchor_affinity;
+  AXNodeID sel_focus_object_id = kInvalidAXNodeID;
   int32_t sel_focus_offset = -1;
-  ax::mojom::TextAffinity sel_focus_affinity =
-      ax::mojom::TextAffinity::kDownstream;
+  ax::mojom::TextAffinity sel_focus_affinity;
+
+  // The node that's used as the root scroller. On some platforms
+  // like Android we need to ignore accessibility scroll offsets for
+  // that node and get them from the viewport instead.
+  AXNodeID root_scroller_id = kInvalidAXNodeID;
+
+  // Metadata from an HTML HEAD, such as <meta> tags. Stored here
+  // unparsed because the only applications that need these just want
+  // raw strings. Only included if the kHTMLMetadata AXMode is enabled.
+  std::vector<std::string> metadata;
 };
 
-AX_EXPORT bool operator==(const AXTreeData& lhs, const AXTreeData& rhs);
-AX_EXPORT bool operator!=(const AXTreeData& lhs, const AXTreeData& rhs);
+AX_BASE_EXPORT bool operator==(const AXTreeData& lhs, const AXTreeData& rhs);
+AX_BASE_EXPORT bool operator!=(const AXTreeData& lhs, const AXTreeData& rhs);
 
 }  // namespace ui
 

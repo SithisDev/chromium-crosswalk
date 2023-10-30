@@ -1,6 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertEquals} from 'chrome://webui-test/chai_assert.js';
+
+import {installMockChrome} from '../../../common/js/mock_chrome.js';
+import {reportPromise} from '../../../common/js/test_error_reporting.js';
+
+import {ExternalMetadataProvider} from './external_metadata_provider.js';
+import {MetadataRequest} from './metadata_request.js';
 
 /** @const {!Entry} */
 const entryA = /** @type {!Entry} */ ({
@@ -24,7 +32,7 @@ const entryB = /** @type {!Entry} */ ({
  */
 let mockChrome;
 
-function testExternalMetadataProviderBasic(callback) {
+export function testExternalMetadataProviderBasic(callback) {
   // Setup mock chrome APIs.
   mockChrome = {
     fileManagerPrivate: {
@@ -49,9 +57,9 @@ function testExternalMetadataProviderBasic(callback) {
             isMachineRoot: false,
             isExternalMedia: false,
             isArbitrarySyncFolder: false,
-          }
+          },
         ]);
-      }
+      },
     },
     runtime: {
       lastError: null,

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <memory>
 #include <set>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "cc/animation/keyframe_model.h"
@@ -18,20 +17,15 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/compositor_export.h"
 #include "ui/gfx/animation/tween.h"
+#include "ui/gfx/geometry/linear_gradient.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace ui {
 
 class InterpolatedTransform;
 class LayerAnimationDelegate;
-
-class AnimationMetricsReporter {
- public:
-  virtual ~AnimationMetricsReporter() {}
-  virtual void Report(int value) = 0;
-};
 
 // LayerAnimationElements represent one segment of an animation between two
 // keyframes. They know how to update a LayerAnimationDelegate given a value
@@ -49,10 +43,11 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
     COLOR = (1 << 6),
     CLIP = (1 << 7),
     ROUNDED_CORNERS = (1 << 8),
+    GRADIENT_MASK = (1 << 9),
 
     // Used when iterating over properties.
     FIRST_PROPERTY = TRANSFORM,
-    SENTINEL = (1 << 9)
+    SENTINEL = (1 << 10)
   };
 
   static AnimatableProperty ToAnimatableProperty(
@@ -72,12 +67,15 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
     SkColor color;
     gfx::Rect clip_rect;
     gfx::RoundedCornersF rounded_corners;
+    gfx::LinearGradient gradient_mask;
   };
 
   typedef uint32_t AnimatableProperties;
 
   LayerAnimationElement(AnimatableProperties properties,
                         base::TimeDelta duration);
+
+  LayerAnimationElement& operator=(const LayerAnimationElement&) = delete;
 
   virtual ~LayerAnimationElement();
 
@@ -156,6 +154,12 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
       const gfx::RoundedCornersF& rounded_corners,
       base::TimeDelta duration);
 
+  // Creates an element that transitions the gradient mask to the
+  // given one. The caller owns the return value.
+  static std::unique_ptr<LayerAnimationElement> CreateGradientMaskElement(
+      const gfx::LinearGradient& gradient_mask,
+      base::TimeDelta duration);
+
   // Sets the start time for the animation. This must be called before the first
   // call to {Start, IsFinished}. Once the animation is finished, this must
   // be called again in order to restart the animation.
@@ -209,10 +213,6 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   gfx::Tween::Type tween_type() const { return tween_type_; }
   void set_tween_type(gfx::Tween::Type tween_type) { tween_type_ = tween_type; }
 
-  void set_animation_metrics_reporter(AnimationMetricsReporter* reporter) {
-    animation_metrics_reporter_ = reporter;
-  }
-
   // Each LayerAnimationElement has a unique keyframe_model_id. Elements
   // belonging to sequences that are supposed to start together have the same
   // animation_group_id.
@@ -229,6 +229,7 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   std::string ToString() const;
 
  protected:
+  void UpdateKeyframeModelId();
   virtual std::string DebugName() const;
 
   // Called once each time the animation element is run before any call to
@@ -258,19 +259,12 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   const base::TimeDelta duration_;
   gfx::Tween::Type tween_type_;
 
-  const int keyframe_model_id_;
+  int keyframe_model_id_;
   int animation_group_id_;
 
   double last_progressed_fraction_;
 
-  // To obtain metrics of animation performance tag animation elements and
-  // keep track of sequential compositor frame number.
-  AnimationMetricsReporter* animation_metrics_reporter_;
-  int start_frame_number_;
-
   base::WeakPtrFactory<LayerAnimationElement> weak_ptr_factory_{this};
-
-  DISALLOW_ASSIGN(LayerAnimationElement);
 };
 
 }  // namespace ui

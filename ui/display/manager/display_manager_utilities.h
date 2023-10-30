@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,16 +50,27 @@ CreateUnifiedManagedDisplayModeList(
 // internal display.
 bool ForceFirstDisplayInternal();
 
-// Computes the bounds that defines the bounds between two displays.
-// Returns false if two displays do not intersect.
-DISPLAY_MANAGER_EXPORT bool ComputeBoundary(
-    const Display& primary_display,
-    const Display& secondary_display,
-    gfx::Rect* primary_edge_in_screen,
-    gfx::Rect* secondary_edge_in_screen);
+// If |a_bounds| and |b_bounds| share an edge, the shared edges are computed and
+// filled in |a_edge| and |b_edge|, and true is returned. Otherwise, it returns
+// false.
+DISPLAY_MANAGER_EXPORT bool ComputeBoundary(const gfx::Rect& a_bounds,
+                                            const gfx::Rect& b_bounds,
+                                            gfx::Rect* a_edge,
+                                            gfx::Rect* b_edge);
 
-// Sorts id list using |CompareDisplayIds| below.
+// If |display_a| and |display_b| share an edge, the shared edges are computed
+// and filled in |a_edge_in_screen| and |b_edge_in_screen|, and true is
+// returned. Otherwise, it returns false.
+DISPLAY_MANAGER_EXPORT bool ComputeBoundary(const Display& display_a,
+                                            const Display& display_b,
+                                            gfx::Rect* a_edge_in_screen,
+                                            gfx::Rect* b_edge_in_screen);
+
+// Sorts id list using `CompareDisplayIds()` in display.h.
 DISPLAY_MANAGER_EXPORT void SortDisplayIdList(DisplayIdList* list);
+
+// Check if the list is sorted using `CompareDisplayIds()` in display.h.
+DISPLAY_MANAGER_EXPORT bool IsDisplayIdListSorted(const DisplayIdList& list);
 
 // Default id generator.
 class DefaultDisplayIdGenerator {
@@ -73,16 +84,15 @@ DisplayIdList GenerateDisplayIdList(ForwardIterator first,
                                     ForwardIterator last,
                                     Generator generator = Generator()) {
   DisplayIdList list;
-  while (first != last) {
-    list.push_back(generator(*first));
-    ++first;
-  }
+  std::transform(first, last, std::back_inserter(list), generator);
   SortDisplayIdList(&list);
   return list;
 }
 
 // Creates sorted DisplayIdList.
 DISPLAY_MANAGER_EXPORT DisplayIdList CreateDisplayIdList(const Displays& list);
+DISPLAY_MANAGER_EXPORT DisplayIdList
+CreateDisplayIdList(const DisplayInfoList& updated_displays);
 
 DISPLAY_MANAGER_EXPORT std::string DisplayIdListToString(
     const DisplayIdList& list);
@@ -109,7 +119,10 @@ struct DISPLAY_MANAGER_EXPORT MixedMirrorModeParams {
 // Defines mirror modes used to change the display mode.
 enum class MirrorMode {
   kOff = 0,
+  // Normal mode, with one display mirrored to all other connected displays.
   kNormal,
+  // Mixed mode, with one display mirrored to one or more other displays, and
+  // the rest of the displays are in EXTENDED mode.
   kMixed,
 };
 

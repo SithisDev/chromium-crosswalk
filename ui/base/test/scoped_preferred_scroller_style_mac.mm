@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #import <AppKit/AppKit.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
 
 using base::mac::ScopedObjCClassSwizzler;
@@ -67,8 +67,8 @@ ScopedPreferredScrollerStyle::ScopedPreferredScrollerStyle(bool overlay)
 
   DCHECK(!g_swizzling);
   g_swizzling = true;
-  swizzler_.reset(new ScopedObjCClassSwizzler(
-      [NSScroller class], style_class, @selector(preferredScrollerStyle)));
+  swizzler_ = std::make_unique<ScopedObjCClassSwizzler>(
+      [NSScroller class], style_class, @selector(preferredScrollerStyle));
 
   if (previous_style != GetScrollerStyle(overlay_))
     NotifyStyleChanged();

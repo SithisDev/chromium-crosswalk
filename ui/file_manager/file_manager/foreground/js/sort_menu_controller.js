@@ -1,15 +1,22 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-class SortMenuController {
+import '../elements/files_toggle_ripple.js';
+
+import {util} from '../../common/js/util.js';
+
+import {FileListModel} from './file_list_model.js';
+import {MultiMenuButton} from './ui/multi_menu_button.js';
+
+export class SortMenuController {
   /**
-   * @param {!cr.ui.MenuButton} sortButton
-   * @param {!FilesToggleRipple} toggleRipple
+   * @param {!MultiMenuButton} sortButton
+   * @param {!FilesToggleRippleElement} toggleRipple
    * @param {!FileListModel} fileListModel
    */
   constructor(sortButton, toggleRipple, fileListModel) {
-    /** @private @const {!FilesToggleRipple} */
+    /** @private @const {!FilesToggleRippleElement} */
     this.toggleRipple_ = toggleRipple;
 
     /** @private @const {!FileListModel} */
@@ -17,16 +24,16 @@ class SortMenuController {
 
     /** @private @const {!HTMLElement} */
     this.sortByNameButton_ =
-        queryRequiredElement('#sort-menu-sort-by-name', sortButton.menu);
+        util.queryRequiredElement('#sort-menu-sort-by-name', sortButton.menu);
     /** @private @const {!HTMLElement} */
     this.sortBySizeButton_ =
-        queryRequiredElement('#sort-menu-sort-by-size', sortButton.menu);
+        util.queryRequiredElement('#sort-menu-sort-by-size', sortButton.menu);
     /** @private @const {!HTMLElement} */
     this.sortByTypeButton_ =
-        queryRequiredElement('#sort-menu-sort-by-type', sortButton.menu);
+        util.queryRequiredElement('#sort-menu-sort-by-type', sortButton.menu);
     /** @private @const {!HTMLElement} */
     this.sortByDateButton_ =
-        queryRequiredElement('#sort-menu-sort-by-date', sortButton.menu);
+        util.queryRequiredElement('#sort-menu-sort-by-date', sortButton.menu);
 
     sortButton.addEventListener('menushow', this.updateCheckmark_.bind(this));
     sortButton.addEventListener('menuhide', this.onHideSortMenu_.bind(this));

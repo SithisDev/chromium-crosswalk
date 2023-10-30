@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,9 @@
 
 #include <atk/atk.h>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "ui/accessibility/ax_export.h"
-
-#if defined(USE_X11)
-#include "ui/gfx/x/x11.h"
-#endif
+#include "ui/accessibility/platform/ax_platform_node_auralinux.h"
 
 namespace ui {
 
@@ -43,14 +39,22 @@ class AX_EXPORT AtkUtilAuraLinux {
 
   AtkUtilAuraLinux() = default;
 
+  AtkUtilAuraLinux(const AtkUtilAuraLinux&) = delete;
+  AtkUtilAuraLinux& operator=(const AtkUtilAuraLinux&) = delete;
+
   void InitializeAsync();
   void InitializeForTesting();
 
-  static DiscardAtkKeyEvent HandleAtkKeyEvent(AtkKeyEventStruct* key_event);
+  bool IsAtSpiReady();
+  void SetAtSpiReady(bool ready);
 
-#if defined(USE_X11)
-  static DiscardAtkKeyEvent HandleKeyEvent(XEvent* xevent);
-#endif
+  // Nodes with postponed events will get the function RunPostponedEvents()
+  // called as soon as AT-SPI is detected to be ready
+  void PostponeEventsFor(AXPlatformNodeAuraLinux* node);
+
+  void CancelPostponedEventsFor(AXPlatformNodeAuraLinux* node);
+
+  static DiscardAtkKeyEvent HandleAtkKeyEvent(AtkKeyEventStruct* key_event);
 
  private:
   friend struct base::DefaultSingletonTraits<AtkUtilAuraLinux>;
@@ -59,7 +63,7 @@ class AX_EXPORT AtkUtilAuraLinux {
 
   void PlatformInitializeAsync();
 
-  DISALLOW_COPY_AND_ASSIGN(AtkUtilAuraLinux);
+  bool at_spi_ready_ = false;
 };
 
 }  // namespace ui

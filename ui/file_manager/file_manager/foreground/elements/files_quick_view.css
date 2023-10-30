@@ -1,4 +1,4 @@
-/* Copyright 2016 The Chromium Authors. All rights reserved.
+/* Copyright 2016 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
@@ -13,7 +13,11 @@ dialog {
   font-size: 100%;
   height: 100%;
   margin: 0;
+  max-height: initial;
+  max-width: initial;
   opacity: 0;
+  outline: none;
+  overflow: hidden;
   padding: 0;
   width: 100%;
 }
@@ -27,9 +31,8 @@ dialog:focus {
   outline: none;
 }
 
-dialog::backdrop {
-  background-color: #000;
-  opacity: 0.6;
+dialog#delete-confirm-dialog::backdrop {
+  background-color: transparent;
 }
 
 .thumbnail {
@@ -41,11 +44,6 @@ dialog::backdrop {
 #video-poster {
   max-height: 100%;
   max-width: 100%;
-}
-
-cr-button:focus:not(:active) {
-  box-shadow: 0 0 0 1px rgba(66, 133, 244, 0.5);
-  font-weight: bold;
 }
 
 #audio-artwork {
@@ -60,7 +58,9 @@ cr-button:focus:not(:active) {
   margin: 0;
   padding: 0;
   position: absolute;
-  top: 48px;
+  /* The top value here should be the total height of the #toolbar including
+  the height and the border-width */
+  top: 57px;
   width: 100%;
 }
 
@@ -73,25 +73,17 @@ cr-button:focus:not(:active) {
 }
 
 #contentPanel[metadata-box-active] {
-  margin-right: 320px;
+  margin-inline-end: 320px;
 }
 
 :host-context(html[dir='rtl']) #contentPanel[metadata-box-active] {
-  margin-left: 320px;
-  margin-right: auto;
-}
-
-#metadata-button {
-  background: -webkit-image-set(
-      url(../images/files/ui/quick_view/info_outline.png) 1x,
-      url(../images/files/ui/quick_view/2x/info_outline.png) 2x)
-    center
-    no-repeat;
+  margin-inline-end: 320px;
+  margin-inline-start: auto;
 }
 
 #innerContentPanel {
-  background-color: transparent;
-  color: white;
+  background-color: var(--cros-app-shield-80);
+  color: var(--cros-text-color-primary);
   display: flex;
   flex-direction: column;
   height: calc(100% - 64px);
@@ -115,24 +107,27 @@ cr-button:focus:not(:active) {
 }
 
 .text-content {
-  background-color: white;
+  background-color: var(--cros-bg-color);
 }
 
 #toolbar {
   align-items: center;
-  background-color: rgb(40, 42, 45);
-  color: white;
+  background-color: var(--cros-bg-color);
+  border-bottom: 1px solid var(--cros-separator-color);
+  color: var(--cros-text-color-primary);
   display: flex;
-  font-size: 108%;
-  height: 48px;
+  font-family: 'Roboto Medium';
+  font-size: 14px;
+  height: 56px;
   margin: 0;
-  opacity: 0.9;
+  opacity: 1;
   padding: 0;
   z-index: 1;
 }
 
 #file-path {
   flex: 1;
+  margin-inline-start: 8px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -142,22 +137,44 @@ cr-button:focus:not(:active) {
   display: flex;
 }
 
-#metadata-button {
-  --files-toggle-ripple-bg-color: white;
-  --files-toggle-ripple-activated-opacity: 0.3;
+cr-button {
+  --hover-bg-color:var(--cros-ripple-color);
+  --ink-color: var(--cros-ripple-color);
+  --ripple-opacity: 100%;
+  --text-color: var(--cros-icon-color-primary);
+  border: 2px solid transparent;
+  border-radius: 50%;
+  box-shadow: none;
+  box-sizing: border-box;
+  height: 36px;
+  margin: 0 6px;
+  min-width: 36px;
+  padding: calc(6px - 2px);
+  width: 36px;
 }
 
-cr-button,
-files-icon-button {
-  --ink-color: currentColor;
-  border: none;
-  border-radius: 2px;
-  color: currentColor;
-  height: 32px;
-  margin: 0 8px;
-  min-width: 32px;
-  padding: 0;
-  text-transform: uppercase;
+:host-context(html.pointer-active) cr-button:not(:active):hover {
+  --hover-bg-color: none;
+  cursor: unset;
+}
+
+cr-button::after {
+  content: '';
+  height: 48px;
+  position: absolute;
+  width: 48px;
+}
+
+#back-button > .icon,
+#open-button > .icon,
+#delete-button > .icon,
+#info-button > .icon {
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  background-color: currentColor;
+  background-image: none;
+  height: 36px;
+  width: 36px;
 }
 
 iron-icon {
@@ -165,12 +182,42 @@ iron-icon {
   width: 16px;
 }
 
+#back-button > iron-icon {
+  display: none;
+}
+
+#back-button > .icon {
+  -webkit-mask-image: url(../images/files/ui/back.svg);
+}
+
+#open-button > .icon {
+  -webkit-mask-image: url(../images/files/ui/external_link.svg);
+}
+
+#delete-button > .icon {
+  -webkit-mask-image: url(../images/files/ui/delete_ng.svg);
+  height: 16px;
+  width: 16px;
+}
+
+#info-button[aria-pressed=true] {
+  background-color: var(--cros-ripple-color);
+}
+
+#info-button > .icon {
+  -webkit-mask-image: url(../images/files/ui/info.svg);
+}
+
+:host-context(html.focus-outline-visible) cr-button:not(:active):focus {
+  border: 2px solid var(--cros-focus-ring-color);
+}
+
 #metadata-box {
-  background-color: rgba(20, 22, 24, 0.8);
+  background-color: var(--cros-bg-color-dropped-elevation-1);
   bottom: 0;
   height: 100%;
   margin: 0;
-  opacity: 0.8;
+  opacity: 1;
   overflow-y: auto;
   position: absolute;
   right: 0;
@@ -182,12 +229,13 @@ iron-icon {
 }
 
 ::-webkit-scrollbar {
+  background-color: var(--cros-app-scrollbar-color);
   width: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
   background-clip: content-box;
-  background-color: rgb(118, 118, 121);
+  background-color: var(--cros-app-scrollbar-color-hover);
   border: 2.5px solid transparent;
   width: 5px;
 }
@@ -202,46 +250,47 @@ iron-icon {
 
 @media only screen and (max-width: 720px) {
   #contentPanel[metadata-box-active] #innerContentPanel {
-    padding-left: 4px;
-    padding-right: 4px;
+    padding-inline-end: 4px;
+    padding-inline-start: 4px;
   }
   #contentPanel[metadata-box-active] {
-    margin-right: 250px;
+    margin-inline-end: 250px;
   }
 }
 
 /* Large generic thumbnails, used when a file does not have a thumbnail. */
 [generic-thumbnail] {
-  background: -webkit-image-set(
-      url(../images/files/ui/quick_view/filetype_generic.png) 1x,
-      url(../images/files/ui/quick_view/2x/filetype_generic.png) 2x)
-    center
-    no-repeat;
+  -webkit-mask-image: url(../images/filetype/filetype_generic.svg);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: auto 88px;
+  background-color: currentColor;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: auto 88px;
   height: 88px;
 }
 
 [generic-thumbnail='.folder'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/quick_view/filetype_folder.png) 1x,
-      url(../images/files/ui/quick_view/2x/filetype_folder.png) 2x);
-  height: 72px;
+  -webkit-mask-image: url(../images/filetype/filetype_folder.svg);
+  -webkit-mask-size: auto 72px;
 }
 
 [generic-thumbnail='audio'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/quick_view/filetype_audio.png) 1x,
-      url(../images/files/ui/quick_view/2x/filetype_audio.png) 2x);
+  -webkit-mask-image: none;
+  background-color: transparent;
+  background-image: url(../images/filetype/filetype_audio.svg);
 }
 
 [generic-thumbnail='image'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/quick_view/filetype_image.png) 1x,
-      url(../images/files/ui/quick_view/2x/filetype_image.png) 2x);
+  -webkit-mask-image: none;
+  background-color: transparent;
+  background-image: url(../images/filetype/filetype_image.svg);
 }
 
 [generic-thumbnail='video'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/quick_view/filetype_video.png) 1x,
-      url(../images/files/ui/quick_view/2x/filetype_video.png) 2x);
-  height: 72px;
+  -webkit-mask-image: none;
+  background-color: transparent;
+  background-image: url(../images/filetype/filetype_video.svg);
+  background-size: auto 72px;
 }

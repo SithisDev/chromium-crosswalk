@@ -1,13 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_OZONE_PLATFORM_DRM_HOST_HOST_CURSOR_PROXY_H_
 #define UI_OZONE_PLATFORM_DRM_HOST_HOST_CURSOR_PROXY_H_
 
+#include "base/task/single_thread_task_runner.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/platform/drm/host/drm_cursor.h"
-#include "ui/ozone/public/interfaces/device_cursor.mojom.h"
+#include "ui/ozone/platform/drm/mojom/device_cursor.mojom.h"
 
 namespace ui {
 
@@ -18,8 +21,14 @@ namespace ui {
 // priviledged process.
 class HostCursorProxy : public DrmCursorProxy {
  public:
-  HostCursorProxy(ui::ozone::mojom::DeviceCursorAssociatedPtr main_cursor_ptr,
-                  ui::ozone::mojom::DeviceCursorAssociatedPtr evdev_cursor_ptr);
+  HostCursorProxy(
+      mojo::PendingAssociatedRemote<ui::ozone::mojom::DeviceCursor> main_cursor,
+      mojo::PendingAssociatedRemote<ui::ozone::mojom::DeviceCursor>
+          evdev_cursor);
+
+  HostCursorProxy(const HostCursorProxy&) = delete;
+  HostCursorProxy& operator=(const HostCursorProxy&) = delete;
+
   ~HostCursorProxy() override;
 
  private:
@@ -27,18 +36,20 @@ class HostCursorProxy : public DrmCursorProxy {
   void CursorSet(gfx::AcceleratedWidget window,
                  const std::vector<SkBitmap>& bitmaps,
                  const gfx::Point& point,
-                 int frame_delay_ms) override;
+                 base::TimeDelta frame_delay) override;
   void Move(gfx::AcceleratedWidget window, const gfx::Point& point) override;
   void InitializeOnEvdevIfNecessary() override;
 
-  // Mojo implementation of the DrmCursorProxy.
-  ui::ozone::mojom::DeviceCursorAssociatedPtr main_cursor_ptr_ = nullptr;
-  ui::ozone::mojom::DeviceCursorAssociatedPtr evdev_cursor_ptr_ = nullptr;
+  // Accessed from UI thread only.
+  mojo::AssociatedRemote<ui::ozone::mojom::DeviceCursor> main_cursor_;
+
+  // Accessed from evdev thread only.
+  mojo::AssociatedRemote<ui::ozone::mojom::DeviceCursor> evdev_cursor_;
+  mojo::PendingAssociatedRemote<ui::ozone::mojom::DeviceCursor>
+      evdev_cursor_pending_remote_;
 
   base::PlatformThreadRef ui_thread_ref_;
-  bool evdev_bound_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(HostCursorProxy);
+  scoped_refptr<base::SingleThreadTaskRunner> evdev_task_runner_;
 };
 
 }  // namespace ui

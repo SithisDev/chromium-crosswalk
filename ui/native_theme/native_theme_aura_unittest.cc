@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,19 +28,19 @@ void VerifyTriangle(SkPath actualPath, SkPoint p0, SkPoint p1, SkPoint p2) {
 
 class NativeThemeAuraTest : public testing::Test {
  protected:
-  NativeThemeAuraTest() : theme_(NativeThemeAura::instance()) {}
+  NativeThemeAuraTest() = default;
 
   SkPath PathForArrow(const gfx::Rect& rect,
                       NativeTheme::Part direction) const {
-    return theme_->PathForArrow(rect, direction);
+    return theme_.PathForArrow(BoundingRectForArrow(rect), direction);
   }
 
   gfx::Rect BoundingRectForArrow(const gfx::Rect& rect) const {
-    return theme_->BoundingRectForArrow(rect);
+    return theme_.BoundingRectForArrow(rect);
   }
 
  private:
-  NativeThemeAura* theme_;
+  NativeThemeAura theme_{false, false};
 };
 
 TEST_F(NativeThemeAuraTest, VerticalArrows) {

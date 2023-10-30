@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,11 @@
 #include <vector>
 
 #include "base/time/time.h"
+#include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/touch_evdev_types.h"
 #include "ui/events/ozone/evdev/touch_filter/palm_detection_filter.h"
 #include "ui/events/ozone/evdev/touch_filter/shared_palm_detection_filter_state.h"
+
 namespace ui {
 
 // A heuristic implementation of PalmDetectionFilter.
@@ -26,7 +28,12 @@ namespace ui {
 // this are held for the stroke count (as above). If they're cancelled
 // externally, we never report them. If they terminate before the count, we
 // output all items.
-class EVENTS_OZONE_EVDEV_EXPORT HeuristicStylusPalmDetectionFilter
+//
+// NOTE: This filter is only intended for certain boards of hardware that have
+// poor interaction between a mutually exclusive stylus and finger input:
+// Turning it on for devices where is not intended will probably degrade
+// performance and create a poor UX.
+class COMPONENT_EXPORT(EVDEV) HeuristicStylusPalmDetectionFilter
     : public PalmDetectionFilter {
  public:
   HeuristicStylusPalmDetectionFilter(
@@ -34,11 +41,27 @@ class EVENTS_OZONE_EVDEV_EXPORT HeuristicStylusPalmDetectionFilter
       int hold_stroke_count,
       base::TimeDelta hold,
       base::TimeDelta cancel);
+
+  HeuristicStylusPalmDetectionFilter(
+      const HeuristicStylusPalmDetectionFilter&) = delete;
+  HeuristicStylusPalmDetectionFilter& operator=(
+      const HeuristicStylusPalmDetectionFilter&) = delete;
+
   ~HeuristicStylusPalmDetectionFilter() override;
+
   void Filter(const std::vector<InProgressTouchEvdev>& touches,
               base::TimeTicks time,
               std::bitset<kNumTouchEvdevSlots>* slots_to_hold,
               std::bitset<kNumTouchEvdevSlots>* slots_to_suppress) override;
+
+  static const char kFilterName[];
+  std::string FilterNameForTesting() const override;
+
+  base::TimeDelta HoldTime() const;
+  base::TimeDelta CancelTime() const;
+
+  static bool CompatibleWithHeuristicStylusPalmDetectionFilter(
+      const EventDeviceInfo& device_info);
 
  private:
   const int hold_stroke_count_;
@@ -46,10 +69,11 @@ class EVENTS_OZONE_EVDEV_EXPORT HeuristicStylusPalmDetectionFilter
   const base::TimeDelta time_after_stylus_to_cancel_;
 
   std::vector<base::TimeTicks> touch_started_time_;
+
   // How many items have we seen in this stroke so far?
   std::vector<int> stroke_length_;
-  DISALLOW_COPY_AND_ASSIGN(HeuristicStylusPalmDetectionFilter);
 };
+
 }  // namespace ui
 
 #endif  // UI_EVENTS_OZONE_EVDEV_TOUCH_FILTER_HEURISTIC_STYLUS_PALM_DETECTION_FILTER_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,20 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/gpu_timing.h"
+
+#if BUILDFLAG(IS_APPLE)
+#include "base/mac/mac_util.h"
+#endif
 
 namespace gl {
 
@@ -37,8 +43,6 @@ base::LazyInstance<base::ThreadLocalPointer<GLContext>>::Leaky
 base::subtle::Atomic32 GLContext::total_gl_contexts_ = 0;
 // static
 bool GLContext::switchable_gpus_supported_ = false;
-// static
-GpuPreference GLContext::forced_gpu_preference_ = GpuPreference::kDefault;
 
 GLContext::ScopedReleaseCurrent::ScopedReleaseCurrent() : canceled_(false) {}
 
@@ -52,6 +56,16 @@ void GLContext::ScopedReleaseCurrent::Cancel() {
   canceled_ = true;
 }
 
+GLContextAttribs::GLContextAttribs() = default;
+GLContextAttribs::GLContextAttribs(const GLContextAttribs& other) = default;
+GLContextAttribs::GLContextAttribs(GLContextAttribs&& other) = default;
+GLContextAttribs::~GLContextAttribs() = default;
+
+GLContextAttribs& GLContextAttribs::operator=(const GLContextAttribs& other) =
+    default;
+GLContextAttribs& GLContextAttribs::operator=(GLContextAttribs&& other) =
+    default;
+
 GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
   if (!share_group_.get())
     share_group_ = new gl::GLShareGroup();
@@ -60,6 +74,9 @@ GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
 }
 
 GLContext::~GLContext() {
+#if BUILDFLAG(IS_APPLE)
+  DCHECK(!HasBackpressureFences());
+#endif
   share_group_->RemoveContext(this);
   if (GetCurrent() == this) {
     SetCurrent(nullptr);
@@ -87,24 +104,12 @@ void GLContext::SetSwitchableGPUsSupported() {
   switchable_gpus_supported_ = true;
 }
 
-// static
-void GLContext::SetForcedGpuPreference(GpuPreference gpu_preference) {
-  DCHECK_EQ(GpuPreference::kDefault, forced_gpu_preference_);
-  forced_gpu_preference_ = gpu_preference;
-}
-
-// static
-GpuPreference GLContext::AdjustGpuPreference(GpuPreference gpu_preference) {
-  switch (forced_gpu_preference_) {
-    case GpuPreference::kDefault:
-      return gpu_preference;
-    case GpuPreference::kLowPower:
-    case GpuPreference::kHighPerformance:
-      return forced_gpu_preference_;
-    default:
-      NOTREACHED();
-      return GpuPreference::kDefault;
+bool GLContext::MakeCurrent(GLSurface* surface) {
+  if (context_lost_) {
+    LOG(ERROR) << "Failed to make current since context is marked as lost";
+    return false;
   }
+  return MakeCurrentImpl(surface);
 }
 
 GLApi* GLContext::CreateGLApi(DriverGL* driver) {
@@ -128,17 +133,17 @@ void GLContext::SetUnbindFboOnMakeCurrent() {
 
 std::string GLContext::GetGLVersion() {
   DCHECK(IsCurrent(nullptr));
-  DCHECK(gl_api_ != nullptr);
-  const char* version =
-      reinterpret_cast<const char*>(gl_api_->glGetStringFn(GL_VERSION));
+  DCHECK(gl_api_wrapper_);
+  const char* version = reinterpret_cast<const char*>(
+      gl_api_wrapper_->api()->glGetStringFn(GL_VERSION));
   return std::string(version ? version : "");
 }
 
 std::string GLContext::GetGLRenderer() {
   DCHECK(IsCurrent(nullptr));
-  DCHECK(gl_api_ != nullptr);
-  const char* renderer =
-      reinterpret_cast<const char*>(gl_api_->glGetStringFn(GL_RENDERER));
+  DCHECK(gl_api_wrapper_);
+  const char* renderer = reinterpret_cast<const char*>(
+      gl_api_wrapper_->api()->glGetStringFn(GL_RENDERER));
   return std::string(renderer ? renderer : "");
 }
 
@@ -149,26 +154,16 @@ YUVToRGBConverter* GLContext::GetYUVToRGBConverter(
 
 CurrentGL* GLContext::GetCurrentGL() {
   if (!static_bindings_initialized_) {
-    driver_gl_.reset(new DriverGL);
+    driver_gl_ = std::make_unique<DriverGL>();
     driver_gl_->InitializeStaticBindings();
 
-    gl_api_.reset(CreateGLApi(driver_gl_.get()));
-    GLApi* final_api = gl_api_.get();
+    auto gl_api = base::WrapUnique<GLApi>(CreateGLApi(driver_gl_.get()));
+    gl_api_wrapper_ =
+        std::make_unique<GL_IMPL_WRAPPER_TYPE(GL)>(std::move(gl_api));
 
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableGPUServiceTracing)) {
-      trace_gl_api_.reset(new TraceGLApi(final_api));
-      final_api = trace_gl_api_.get();
-    }
-
-    if (GetDebugGLBindingsInitializedGL()) {
-      debug_gl_api_.reset(new DebugGLApi(final_api));
-      final_api = debug_gl_api_.get();
-    }
-
-    current_gl_.reset(new CurrentGL);
+    current_gl_ = std::make_unique<CurrentGL>();
     current_gl_->Driver = driver_gl_.get();
-    current_gl_->Api = final_api;
+    current_gl_->Api = gl_api_wrapper_->api();
     current_gl_->Version = version_info_.get();
 
     static_bindings_initialized_ = true;
@@ -192,14 +187,94 @@ void GLContext::DirtyVirtualContextState() {
   current_virtual_context_ = nullptr;
 }
 
-#if defined(OS_MACOSX)
+#if defined(USE_EGL)
+GLDisplayEGL* GLContext::GetGLDisplayEGL() {
+  return nullptr;
+}
+#endif  // USE_EGL
+
+#if BUILDFLAG(IS_APPLE)
+constexpr uint64_t kInvalidFenceId = 0;
+
 uint64_t GLContext::BackpressureFenceCreate() {
-  return 0;
+  TRACE_EVENT0("gpu", "GLContext::BackpressureFenceCreate");
+
+  // This flush will trigger a crash if FlushForDriverCrashWorkaround is not
+  // called sufficiently frequently.
+  glFlush();
+
+  if (gl::GLFence::IsSupported()) {
+    next_backpressure_fence_ += 1;
+    backpressure_fences_[next_backpressure_fence_] = GLFence::Create();
+    return next_backpressure_fence_;
+  }
+  glFinish();
+  return kInvalidFenceId;
 }
 
-void GLContext::BackpressureFenceWait(uint64_t fence) {}
+void GLContext::BackpressureFenceWait(uint64_t fence_id) {
+  TRACE_EVENT0("gpu", "GLContext::BackpressureFenceWait");
+  if (fence_id == kInvalidFenceId) {
+    return;
+  }
 
-void GLContext::FlushForDriverCrashWorkaround() {}
+  // If a fence is not found, then it has already been waited on.
+  auto found = backpressure_fences_.find(fence_id);
+  if (found == backpressure_fences_.end())
+    return;
+  std::unique_ptr<GLFence> fence = std::move(found->second);
+  backpressure_fences_.erase(found);
+
+  // While we could call GLFence::ClientWait, this performs a busy wait on
+  // Mac, leading to high CPU usage. Instead we poll with a 1ms delay. This
+  // should have minimal impact, as we will only hit this path when we are
+  // more than one frame (16ms) behind.
+  //
+  // Note that on some platforms (10.9), fences appear to sometimes get
+  // lost and will never pass. Add a 32ms timeout to prevent these
+  // situations from causing a GPU process hang.
+  // https://crbug.com/618075
+  bool fence_completed = false;
+  for (int poll_iter = 0; !fence_completed && poll_iter < 32; ++poll_iter) {
+    if (poll_iter > 0) {
+      base::PlatformThread::Sleep(base::Milliseconds(1));
+    }
+    {
+      TRACE_EVENT0("gpu", "GLFence::HasCompleted");
+      fence_completed = fence->HasCompleted();
+    }
+  }
+  if (!fence_completed) {
+    TRACE_EVENT0("gpu", "Finish");
+    // We timed out waiting for the above fence, just issue a glFinish.
+    glFinish();
+  }
+  fence.reset();
+
+  // Waiting on |fence_id| has implicitly waited on all previous fences, so
+  // remove them.
+  while (backpressure_fences_.begin()->first < fence_id)
+    backpressure_fences_.erase(backpressure_fences_.begin());
+}
+
+bool GLContext::HasBackpressureFences() const {
+  return !backpressure_fences_.empty();
+}
+
+void GLContext::DestroyBackpressureFences() {
+  backpressure_fences_.clear();
+}
+
+void GLContext::FlushForDriverCrashWorkaround() {
+  // If running on Apple silicon, regardless of the architecture, disable this
+  // workaround.  See https://crbug.com/1131312.
+  static const bool needs_flush =
+      base::mac::GetCPUType() == base::mac::CPUType::kIntel;
+  if (!needs_flush || !IsCurrent(nullptr))
+    return;
+  TRACE_EVENT0("gpu", "GLContext::FlushForDriverCrashWorkaround");
+  glFlush();
+}
 #endif
 
 bool GLContext::HasExtension(const char* name) {
@@ -228,10 +303,7 @@ bool GLContext::LosesAllContextsOnContextLost() {
       return false;
     case kGLImplementationEGLGLES2:
     case kGLImplementationEGLANGLE:
-    case kGLImplementationSwiftShaderGL:
       return true;
-    case kGLImplementationAppleGL:
-      return false;
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
       return false;
@@ -256,7 +328,12 @@ std::unique_ptr<gl::GLVersionInfo> GLContext::GenerateGLVersionInfo() {
 
 void GLContext::SetCurrent(GLSurface* surface) {
   current_context_.Pointer()->Set(surface ? this : nullptr);
-  GLSurface::SetCurrent(surface);
+  if (surface) {
+    surface->SetCurrent();
+  } else {
+    GLSurface::ClearCurrent();
+  }
+
   // Leave the real GL api current so that unit tests work correctly.
   // TODO(sievers): Remove this, but needs all gpu_unittest classes
   // to create and make current a context.
@@ -285,6 +362,13 @@ void GLContext::SetGLStateRestorer(GLStateRestorer* state_restorer) {
 }
 
 GLenum GLContext::CheckStickyGraphicsResetStatus() {
+  GLenum status = CheckStickyGraphicsResetStatusImpl();
+  if (status != GL_NO_ERROR)
+    context_lost_ = true;
+  return status;
+}
+
+GLenum GLContext::CheckStickyGraphicsResetStatusImpl() {
   DCHECK(IsCurrent(nullptr));
   return GL_NO_ERROR;
 }
@@ -312,15 +396,19 @@ bool GLContext::MakeVirtuallyCurrent(
     GLContext* virtual_context, GLSurface* surface) {
   if (!ForceGpuSwitchIfNeeded())
     return false;
+  if (context_lost_)
+    return false;
+
   bool switched_real_contexts = GLContext::GetRealCurrent() != this;
-  GLSurface* current_surface = GLSurface::GetCurrent();
-  if (switched_real_contexts || surface != current_surface) {
+  if (switched_real_contexts || !surface->IsCurrent()) {
+    GLSurface* current_surface = GLSurface::GetCurrent();
     // MakeCurrent 'lite' path that avoids potentially expensive MakeCurrent()
     // calls if the GLSurface uses the same underlying surface or renders to
     // an FBO.
     if (switched_real_contexts || !current_surface ||
         !virtual_context->IsCurrent(surface)) {
       if (!MakeCurrent(surface)) {
+        context_lost_ = true;
         return false;
       }
     }
@@ -361,6 +449,7 @@ bool GLContext::MakeVirtuallyCurrent(
   virtual_context->SetCurrent(surface);
   if (!surface->OnMakeCurrent(virtual_context)) {
     LOG(ERROR) << "Could not make GLSurface current.";
+    context_lost_ = true;
     return false;
   }
   return true;

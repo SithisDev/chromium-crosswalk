@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,116 +8,98 @@
 #include <stdint.h>
 
 #include <memory>
-#include <random>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/auto_reset.h"
+#include "base/callback.h"
+#include "base/memory/raw_ptr.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/events/events_export.h"
-#include "ui/gfx/x/x11_types.h"
-
-using Time = unsigned long;
-using XEvent = union _XEvent;
-using XID = unsigned long;
-using XWindow = unsigned long;
+#include "ui/events/platform/platform_event_source.h"
+#include "ui/gfx/x/connection.h"
+#include "ui/gfx/x/event.h"
 
 namespace gfx {
 class Point;
 }
 
+namespace x11 {
+class XScopedEventSelector;
+}
+
 namespace ui {
 
 class X11HotplugEventHandler;
-class XScopedEventSelector;
 
-// Responsible for notifying X11EventSource when new XEvents are available and
-// processing/dispatching XEvents. Implementations will likely be a
-// PlatformEventSource.
-class X11EventSourceDelegate {
+// Responsible for notifying X11EventSource when new x11::Events are available
+// to be processed/dispatched.
+class X11EventWatcher {
  public:
-  X11EventSourceDelegate() = default;
+  X11EventWatcher() = default;
 
-  // Processes (if necessary) and handles dispatching XEvents.
-  virtual void ProcessXEvent(XEvent* xevent) = 0;
+  X11EventWatcher(const X11EventWatcher&) = delete;
+  X11EventWatcher& operator=(const X11EventWatcher&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(X11EventSourceDelegate);
+  virtual ~X11EventWatcher() = default;
+
+  // Starts watching for X Events and feeding them into X11EventSource to be
+  // processed, through XEventSource::ProcessXEvent(), as they come in.
+  virtual void StartWatching() = 0;
+
+  // Stops watching for X Events.
+  virtual void StopWatching() = 0;
 };
 
-// Receives X11 events and sends them to X11EventSourceDelegate. Handles
-// receiving, pre-process and post-processing XEvents.
-class EVENTS_EXPORT X11EventSource {
+// PlatformEventSource implementation for X11, both Ozone and non-Ozone.
+// Receives X11 events from X11EventWatcher and sends them to registered
+// PlatformEventDispatchers/x11::EventObservers. Handles receiving, pre-process,
+// translation and post-processing of x11::Events.
+class EVENTS_EXPORT X11EventSource : public PlatformEventSource,
+                                     x11::EventObserver {
  public:
-  X11EventSource(X11EventSourceDelegate* delegate, XDisplay* display);
-  ~X11EventSource();
+  explicit X11EventSource(x11::Connection* connection);
+
+  X11EventSource(const X11EventSource&) = delete;
+  X11EventSource& operator=(const X11EventSource&) = delete;
+
+  ~X11EventSource() override;
 
   static bool HasInstance();
-
   static X11EventSource* GetInstance();
 
-  // Called when there is a new XEvent available. Processes all (if any)
-  // available X events.
-  void DispatchXEvents();
-
-  // Dispatches a given event immediately. This is to facilitate sequential
-  // interaction between the gtk event loop (used for IME) and the
-  // main X11 event loop.
-  void DispatchXEventNow(XEvent* event);
-
-  XDisplay* display() { return display_; }
+  x11::Connection* connection() { return connection_; }
 
   // Returns the timestamp of the event currently being dispatched.  Falls back
   // on GetCurrentServerTime() if there's no event being dispatched, or if the
   // current event does not have a timestamp.
-  Time GetTimestamp();
+  x11::Time GetTimestamp();
 
   // Returns the root pointer location only if there is an event being
   // dispatched that contains that information.
-  base::Optional<gfx::Point> GetRootCursorLocationFromCurrentEvent() const;
-
-  void StopCurrentEventStream();
-  void OnDispatcherListChanged();
+  absl::optional<gfx::Point> GetRootCursorLocationFromCurrentEvent() const;
 
   // Explicitly asks the X11 server for the current timestamp, and updates
   // |last_seen_server_time_| with this value.
-  Time GetCurrentServerTime();
-
- protected:
-  // Extracts cookie data from |xevent| if it's of GenericType, and dispatches
-  // the event. This function also frees up the cookie data after dispatch is
-  // complete.
-  void ExtractCookieDataDispatchEvent(XEvent* xevent);
-
-  // Handles updates after event has been dispatched.
-  void PostDispatchEvent(XEvent* xevent);
+  x11::Time GetCurrentServerTime();
 
  private:
-  static X11EventSource* instance_;
+  // x11::EventObserver:
+  void OnEvent(const x11::Event& event) override;
 
-  X11EventSourceDelegate* delegate_;
+  // PlatformEventSource:
+  void OnDispatcherListChanged() override;
+
+  std::unique_ptr<X11EventWatcher> watcher_;
 
   // The connection to the X11 server used to receive the events.
-  XDisplay* display_;
-
-  // Event currently being dispatched.
-  XEvent* dispatching_event_;
+  raw_ptr<x11::Connection> connection_;
 
   // State necessary for UpdateLastSeenServerTime
   bool dummy_initialized_;
-  XWindow dummy_window_;
-  XAtom dummy_atom_;
-  std::unique_ptr<XScopedEventSelector> dummy_window_events_;
-
-  // Keeps track of whether this source should continue to dispatch all the
-  // available events.
-  bool continue_stream_ = true;
+  x11::Window dummy_window_;
+  x11::Atom dummy_atom_;
+  std::unique_ptr<x11::XScopedEventSelector> dummy_window_events_;
 
   std::unique_ptr<X11HotplugEventHandler> hotplug_event_handler_;
-
-  // Used to sample RTT measurements, with frequency 1/1000.
-  std::default_random_engine generator_;
-  std::uniform_int_distribution<int> distribution_;
-
-  DISALLOW_COPY_AND_ASSIGN(X11EventSource);
 };
 
 }  // namespace ui

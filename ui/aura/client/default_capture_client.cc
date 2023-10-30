@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/aura/client/default_capture_client.h"
 
+#include "base/observer_list.h"
 #include "ui/aura/client/capture_client_observer.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -21,15 +22,14 @@ Window* global_capture_window_ = nullptr;
 
 DefaultCaptureClient::DefaultCaptureClient(Window* root_window)
     : root_window_(root_window), capture_window_(nullptr) {
-  if (root_window_)
-    SetCaptureClient(root_window_, this);
+  DCHECK(root_window_);
+  SetCaptureClient(root_window_, this);
 }
 
 DefaultCaptureClient::~DefaultCaptureClient() {
   if (global_capture_window_ == capture_window_)
     global_capture_window_ = nullptr;
-  if (root_window_)
-    SetCaptureClient(root_window_, nullptr);
+  SetCaptureClient(root_window_, nullptr);
 }
 
 void DefaultCaptureClient::SetCapture(Window* window) {

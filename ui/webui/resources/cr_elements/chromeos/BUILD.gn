@@ -1,15 +1,18 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/closure_compiler/compile_js.gni")
+import("//build/config/chromeos/ui_mode.gni")
+import("//tools/polymer/polymer.gni")
 
 assert(is_chromeos, "Only ChromeOS components belong here.")
 
-group("closure_compile") {
-  deps = [
-    "cr_picture:closure_compile",
-    "fingerprint:closure_compile",
-    "network:closure_compile",
-  ]
+group("polymer3_elements") {
+  public_deps = [ ":cros_color_overrides_module" ]
+}
+
+polymer_modulizer("cros_color_overrides") {
+  js_file = "cros_color_overrides.m.js"
+  html_file = "cros_color_overrides.html"
+  html_type = "style-module"
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,6 @@
 #include "build/build_config.h"
 
 namespace switches {
-
-// Shows additional checkboxes in Settings to enable Chrome OS accessibility
-// features that haven't launched yet.
-const char kEnableExperimentalAccessibilityFeatures[] =
-    "enable-experimental-accessibility-features";
 
 // Shows additional automatic click features that haven't launched yet.
 const char kEnableExperimentalAccessibilityAutoclick[] =
@@ -24,34 +19,31 @@ const char kEnableExperimentalAccessibilityLabelsDebugging[] =
     "enable-experimental-accessibility-labels-debugging";
 
 // Enables language detection on in-page text content which is then exposed to
-// accessibility technology such as screen readers.
+// assistive technology such as screen readers.
 const char kEnableExperimentalAccessibilityLanguageDetection[] =
     "enable-experimental-accessibility-language-detection";
 
-// Shows setting to enable Switch Access before it has launched.
-const char kEnableExperimentalAccessibilitySwitchAccess[] =
-    "enable-experimental-accessibility-switch-access";
+// Enables language detection for dynamic content which is then exposed to
+// assistive technology such as screen readers.
+const char kEnableExperimentalAccessibilityLanguageDetectionDynamic[] =
+    "enable-experimental-accessibility-language-detection-dynamic";
 
 // Enables in progress Switch Access features for text input.
 const char kEnableExperimentalAccessibilitySwitchAccessText[] =
     "enable-experimental-accessibility-switch-access-text";
 
-// Enables language switching feature that hasn't launched yet.
-const char kEnableExperimentalAccessibilityChromeVoxLanguageSwitching[] =
-    "enable-experimental-accessibility-chromevox-language-switching";
-
-// Enables automatic rich text indication in ChromeVox that hasn't launched yet.
-const char kEnableExperimentalAccessibilityChromeVoxRichTextIndication[] =
-    "enable-experimental-accessibility-chromevox-rich-text-indication";
-
-bool AreExperimentalAccessibilityFeaturesEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      ::switches::kEnableExperimentalAccessibilityFeatures);
-}
+// Enables debug feature for drawing rectangle around magnified region, without
+// zooming in.
+const char kEnableMagnifierDebugDrawRect[] = "enable-magnifier-debug-draw-rect";
 
 bool IsExperimentalAccessibilityLanguageDetectionEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       ::switches::kEnableExperimentalAccessibilityLanguageDetection);
+}
+
+bool IsExperimentalAccessibilityLanguageDetectionDynamicEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      ::switches::kEnableExperimentalAccessibilityLanguageDetectionDynamic);
 }
 
 bool IsExperimentalAccessibilitySwitchAccessTextEnabled() {
@@ -59,19 +51,31 @@ bool IsExperimentalAccessibilitySwitchAccessTextEnabled() {
       ::switches::kEnableExperimentalAccessibilitySwitchAccessText);
 }
 
-#if defined(OS_WIN)
-// Toggles between IAccessible and UI Automation platform API.
+bool IsMagnifierDebugDrawRectEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      ::switches::kEnableMagnifierDebugDrawRect);
+}
+
+#if BUILDFLAG(IS_WIN)
+// Enables UI Automation platform API in addition to the IAccessible API.
 const char kEnableExperimentalUIAutomation[] =
     "enable-experimental-ui-automation";
 #endif
 
 bool IsExperimentalAccessibilityPlatformUIAEnabled() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       ::switches::kEnableExperimentalUIAutomation);
 #else
   return false;
 #endif
 }
+
+// Optionally disable AXMenuList, which makes the internal pop-up menu
+// UI for a select element directly accessible.
+const char kDisableAXMenuList[] = "disable-ax-menu-list";
+
+const char kGenerateAccessibilityTestExpectations[] =
+    "generate-accessibility-test-expectations";
 
 }  // namespace switches

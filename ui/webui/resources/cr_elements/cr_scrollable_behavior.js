@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
  * Any containers with the 'scrollable' attribute set will have the following
  * classes toggled appropriately: can-scroll, is-scrolled, scrolled-to-bottom.
  * These classes are used to style the container div and list elements
- * appropriately, see shared_style_css.html.
+ * appropriately, see cr_shared_style.css.
  *
  * The associated HTML should look something like:
  *   <div id="container" scrollable>
@@ -32,36 +32,38 @@
  * NOTE: If 'container' is not fixed size, it is important to call
  * updateScrollableContents() when [[items]] changes, otherwise the container
  * will not be sized correctly.
+ *
+ * NOTE: This file is deprecated in favor of cr_scrollable_mixin.ts. Don't use
+ * it in new code.
  */
 
+// clang-format off
+import {beforeNextRender, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
+// clang-format on
+
 /** @polymerBehavior */
-const CrScrollableBehavior = {
+export const CrScrollableBehavior = {
 
   /** @private {number|null} */
   intervalId_: null,
 
-  ready: function() {
-    const readyAsync = () => {
+  ready() {
+    beforeNextRender(this, () => {
       this.requestUpdateScroll();
 
       // Listen to the 'scroll' event for each scrollable container.
-      const scrollableElements = this.root.querySelectorAll('[scrollable]');
+      const scrollableElements =
+          this.shadowRoot.querySelectorAll('[scrollable]');
       for (let i = 0; i < scrollableElements.length; i++) {
         scrollableElements[i].addEventListener(
             'scroll', this.updateScrollEvent_.bind(this));
       }
-    };
-
-    // TODO(dpapad): Remove Polymer 1 codepath when Polymer 2 migration has
-    // completed.
-    if (Polymer.DomIf) {
-      Polymer.RenderStatus.beforeNextRender(this, readyAsync);
-      return;
-    }
-    readyAsync();
+    });
   },
 
-  detached: function() {
+  detached() {
     if (this.intervalId_ !== null) {
       clearInterval(this.intervalId_);
     }
@@ -72,14 +74,14 @@ const CrScrollableBehavior = {
    * This ensures that the <iron-list> contents of dynamically sized
    * containers are resized correctly.
    */
-  updateScrollableContents: function() {
+  updateScrollableContents() {
     if (this.intervalId_ !== null) {
       return;
     }  // notifyResize is already in progress.
 
     this.requestUpdateScroll();
 
-    const nodeList = this.root.querySelectorAll('[scrollable] iron-list');
+    const nodeList = this.shadowRoot.querySelectorAll('[scrollable] iron-list');
     if (!nodeList.length) {
       return;
     }
@@ -101,18 +103,21 @@ const CrScrollableBehavior = {
         // |scrollHeight| is updated to be greater than 1px, another resize is
         // needed to correctly calculate the number of physical iron-list items
         // to render.
-        if (scrollHeight != lastScrollHeight) {
+        if (scrollHeight !== lastScrollHeight) {
           const ironList = /** @type {!IronListElement} */ (node);
           ironList.notifyResize();
         }
-        if (scrollHeight <= 1) {
+
+        // TODO(crbug.com/1121679): Add UI Test for this behavior.
+        if (scrollHeight <= 1 &&
+            window.getComputedStyle(node.parentNode).display !== 'none') {
           checkAgain.push({
             node: node,
             lastScrollHeight: scrollHeight,
           });
         }
       });
-      if (checkAgain.length == 0) {
+      if (checkAgain.length === 0) {
         window.clearInterval(this.intervalId_);
         this.intervalId_ = null;
       } else {
@@ -126,9 +131,10 @@ const CrScrollableBehavior = {
    * Called from ready() and updateScrollableContents(). May also be called
    * directly when the contents change (e.g. when not using iron-list).
    */
-  requestUpdateScroll: function() {
+  requestUpdateScroll() {
     requestAnimationFrame(function() {
-      const scrollableElements = this.root.querySelectorAll('[scrollable]');
+      const scrollableElements =
+          this.shadowRoot.querySelectorAll('[scrollable]');
       for (let i = 0; i < scrollableElements.length; i++) {
         this.updateScroll_(/** @type {!HTMLElement} */ (scrollableElements[i]));
       }
@@ -136,7 +142,7 @@ const CrScrollableBehavior = {
   },
 
   /** @param {!IronListElement} list */
-  saveScroll: function(list) {
+  saveScroll(list) {
     // Store a FIFO of saved scroll positions so that multiple updates in a
     // frame are applied correctly. Specifically we need to track when '0' is
     // saved (but not apply it), and still handle patterns like [30, 0, 32].
@@ -145,12 +151,12 @@ const CrScrollableBehavior = {
   },
 
   /** @param {!IronListElement} list */
-  restoreScroll: function(list) {
+  restoreScroll(list) {
     this.async(function() {
       const scrollTop = list.savedScrollTops.shift();
       // Ignore scrollTop of 0 in case it was intermittent (we do not need to
       // explicitly scroll to 0).
-      if (scrollTop != 0) {
+      if (scrollTop !== 0) {
         list.scroll(0, scrollTop);
       }
     });
@@ -161,7 +167,7 @@ const CrScrollableBehavior = {
    * @param {!Event} event
    * @private
    */
-  updateScrollEvent_: function(event) {
+  updateScrollEvent_(event) {
     const scrollable = /** @type {!HTMLElement} */ (event.target);
     this.updateScroll_(scrollable);
   },
@@ -172,7 +178,7 @@ const CrScrollableBehavior = {
    * @param {!HTMLElement} scrollable
    * @private
    */
-  updateScroll_: function(scrollable) {
+  updateScroll_(scrollable) {
     scrollable.classList.toggle(
         'can-scroll', scrollable.clientHeight < scrollable.scrollHeight);
     scrollable.classList.toggle('is-scrolled', scrollable.scrollTop > 0);
@@ -182,3 +188,8 @@ const CrScrollableBehavior = {
             scrollable.scrollHeight);
   },
 };
+
+export class CrScrollableBehaviorInterface {
+  updateScrollableContents() {}
+  requestUpdateScroll() {}
+}

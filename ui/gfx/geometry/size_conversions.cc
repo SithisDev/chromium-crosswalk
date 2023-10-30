@@ -1,29 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/geometry/size_conversions.h"
 
-#include "ui/gfx/geometry/safe_integer_conversions.h"
+#include "base/numerics/safe_conversions.h"
 
 namespace gfx {
 
 Size ToFlooredSize(const SizeF& size) {
-  int w = ToFlooredInt(size.width());
-  int h = ToFlooredInt(size.height());
-  return Size(w, h);
+  return Size(base::ClampFloor(size.width()), base::ClampFloor(size.height()));
 }
 
 Size ToCeiledSize(const SizeF& size) {
-  int w = ToCeiledInt(size.width());
-  int h = ToCeiledInt(size.height());
-  return Size(w, h);
+  return Size(base::ClampCeil(size.width()), base::ClampCeil(size.height()));
 }
 
 Size ToRoundedSize(const SizeF& size) {
-  int w = ToRoundedInt(size.width());
-  int h = ToRoundedInt(size.height());
-  return Size(w, h);
+  return Size(base::ClampRound(size.width()), base::ClampRound(size.height()));
 }
 
 }  // namespace gfx

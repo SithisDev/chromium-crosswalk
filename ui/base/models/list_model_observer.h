@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 
 #include <stddef.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
-class UI_BASE_EXPORT ListModelObserver {
+class COMPONENT_EXPORT(UI_BASE) ListModelObserver {
  public:
   // Invoked after items has been added to the model.
   virtual void ListItemsAdded(size_t start, size_t count) = 0;

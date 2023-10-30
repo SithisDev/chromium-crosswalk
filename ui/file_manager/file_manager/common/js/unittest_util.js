@@ -1,6 +1,8 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
 /**
  * Asserts that two lists contain the same set of Entries.  Entries are deemed
@@ -9,7 +11,7 @@
  * @param {!Array<!FileEntry>} expected
  * @param {!Array<!FileEntry>} actual
  */
-function assertFileEntryListEquals(expected, actual) {
+export function assertFileEntryListEquals(expected, actual) {
   const entryToPath = entry => {
     assertTrue(entry.isFile);
     return entry.fullPath;
@@ -24,7 +26,7 @@ function assertFileEntryListEquals(expected, actual) {
  * @param {!Array<string>} expectedPaths
  * @param {!Array<!FileEntry>} fileEntries
  */
-function assertFileEntryPathsEqual(expectedPaths, fileEntries) {
+export function assertFileEntryPathsEqual(expectedPaths, fileEntries) {
   assertEquals(expectedPaths.length, fileEntries.length);
 
   const entryToPath = entry => {
@@ -53,7 +55,7 @@ function assertFileEntryPathsEqual(expectedPaths, fileEntries) {
  *   assertEquals(recorder.getListCall()[0], 'hammy');
  * </pre>
  */
-class TestCallRecorder {
+export class TestCallRecorder {
   constructor() {
     /** @private {!Array<!Arguments>} */
     this.calls_ = [];

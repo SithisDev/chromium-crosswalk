@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,19 +29,19 @@ void GrabWindowSnapshotAndScaleAsync(
     const gfx::Rect& snapshot_bounds,
     const gfx::Size& target_size,
     GrabWindowSnapshotAsyncCallback callback) {
-  callback.Run(gfx::Image());
+  std::move(callback).Run(gfx::Image());
 }
 
 void GrabViewSnapshotAsync(gfx::NativeView view,
                            const gfx::Rect& source_rect,
-                           const GrabWindowSnapshotAsyncCallback& callback) {
-  callback.Run(gfx::Image());
+                           GrabWindowSnapshotAsyncCallback callback) {
+  std::move(callback).Run(gfx::Image());
 }
 
 void GrabWindowSnapshotAsync(gfx::NativeWindow window,
                              const gfx::Rect& source_rect,
-                             const GrabWindowSnapshotAsyncCallback& callback) {
-  callback.Run(gfx::Image());
+                             GrabWindowSnapshotAsyncCallback callback) {
+  std::move(callback).Run(gfx::Image());
 }
 
 }  // namespace ui

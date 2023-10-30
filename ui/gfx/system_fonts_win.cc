@@ -1,17 +1,20 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/system_fonts_win.h"
 
+#include <windows.h>
+
 #include "base/containers/flat_map.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
-#include "base/win/win_client_metrics.h"
 #include "ui/gfx/platform_font.h"
 
 namespace gfx {
@@ -35,6 +38,9 @@ class SystemFonts {
     static base::NoDestructor<SystemFonts> instance;
     return instance.get();
   }
+
+  SystemFonts(const SystemFonts&) = delete;
+  SystemFonts& operator=(const SystemFonts&) = delete;
 
   void ResetForTesting() {
     SystemFonts::is_initialized_ = false;
@@ -67,7 +73,7 @@ class SystemFonts {
                             LOGFONT* logfont) {
     DCHECK_GT(font_adjustment.font_scale, 0.0);
     LONG new_height =
-        LONG{std::round(logfont->lfHeight * font_adjustment.font_scale)};
+        base::ClampRound<LONG>(logfont->lfHeight * font_adjustment.font_scale);
     if (logfont->lfHeight && !new_height)
       new_height = logfont->lfHeight > 0 ? 1 : -1;
     logfont->lfHeight = new_height;
@@ -80,15 +86,15 @@ class SystemFonts {
     }
   }
 
-  static Font GetFontFromLOGFONT(const LOGFONT* logfont) {
+  static Font GetFontFromLOGFONT(const LOGFONT& logfont) {
     // Finds a matching font by triggering font mapping. The font mapper finds
     // the closest physical font for a given logical font.
-    base::win::ScopedHFONT font(::CreateFontIndirect(logfont));
+    base::win::ScopedHFONT font(::CreateFontIndirect(&logfont));
     base::win::ScopedGetDC screen_dc(NULL);
     base::win::ScopedSelectObject scoped_font(screen_dc, font.get());
 
     DCHECK(font.get()) << "Font for '"
-                       << base::SysWideToUTF8(logfont->lfFaceName)
+                       << base::SysWideToUTF8(logfont.lfFaceName)
                        << "' has an invalid handle.";
 
     // Retrieve the name and height of the mapped font (physical font).
@@ -102,7 +108,20 @@ class SystemFonts {
         std::max<int>(1, mapped_font_metrics.tmHeight -
                              mapped_font_metrics.tmInternalLeading);
 
-    return Font(PlatformFont::CreateFromNameAndSize(font_name, font_size));
+    Font system_font =
+        Font(PlatformFont::CreateFromNameAndSize(font_name, font_size));
+
+    // System fonts may have different styles when they are manually changed by
+    // the users (see crbug.com/989476).
+    Font::FontStyle style = logfont.lfItalic == 0 ? Font::FontStyle::NORMAL
+                                                  : Font::FontStyle::ITALIC;
+    Font::Weight weight = logfont.lfWeight == 0
+                              ? Font::Weight::NORMAL
+                              : static_cast<Font::Weight>(logfont.lfWeight);
+    if (style != Font::FontStyle::NORMAL || weight != Font::Weight::NORMAL)
+      system_font = system_font.Derive(0, style, weight);
+
+    return system_font;
   }
 
   static void SetGetMinimumFontSizeCallback(
@@ -124,8 +143,11 @@ class SystemFonts {
   void Initialize() {
     TRACE_EVENT0("fonts", "gfx::SystemFonts::Initialize");
 
-    NONCLIENTMETRICS_XP metrics;
-    base::win::GetNonClientMetrics(&metrics);
+    NONCLIENTMETRICS metrics = {};
+    metrics.cbSize = sizeof(metrics);
+    const bool success = !!SystemParametersInfo(SPI_GETNONCLIENTMETRICS,
+                                                metrics.cbSize, &metrics, 0);
+    DCHECK(success);
 
     // NOTE(dfried): When rendering Chrome, we do all of our own font scaling
     // based on a number of factors, but what Windows reports to us has some
@@ -190,7 +212,7 @@ class SystemFonts {
     // Cap at minimum font size.
     logfont->lfHeight = AdjustFontSize(logfont->lfHeight, 0);
 
-    system_fonts_.emplace(system_font, GetFontFromLOGFONT(logfont));
+    system_fonts_.emplace(system_font, GetFontFromLOGFONT(*logfont));
   }
 
   // Returns the system DPI scale (standard DPI being 1.0).
@@ -213,8 +235,6 @@ class SystemFonts {
 
   // Minimum size callback.
   static GetMinimumFontSizeCallback get_minimum_font_size_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemFonts);
 };
 
 // static
@@ -237,13 +257,19 @@ void SetAdjustFontCallback(AdjustFontCallback callback) {
   SystemFonts::SetAdjustFontCallback(callback);
 }
 
+const Font& GetDefaultSystemFont() {
+  // The message font is the closest font for a default system font from the
+  // structure NONCLIENTMETRICS. The lfMessageFont field contains information
+  // about the logical font used to display text in message boxes.
+  return GetSystemFont(SystemFont::kMessage);
+}
+
 const Font& GetSystemFont(SystemFont system_font) {
   return SystemFonts::Instance()->GetFont(system_font);
 }
 
-GFX_EXPORT NativeFont
-AdjustExistingSystemFont(NativeFont existing_font,
-                         const FontAdjustment& font_adjustment) {
+NativeFont AdjustExistingSystemFont(NativeFont existing_font,
+                                    const FontAdjustment& font_adjustment) {
   LOGFONT logfont;
   auto result = GetObject(existing_font, sizeof(logfont), &logfont);
   DCHECK(result);
@@ -267,7 +293,12 @@ void AdjustLOGFONTForTesting(const FontAdjustment& font_adjustment,
   SystemFonts::AdjustLOGFONT(font_adjustment, logfont);
 }
 
-GFX_EXPORT void ResetSystemFontsForTesting() {
+// Retrieve a FONT from a LOGFONT structure.
+Font GetFontFromLOGFONTForTesting(const LOGFONT& logfont) {
+  return SystemFonts::GetFontFromLOGFONT(logfont);
+}
+
+void ResetSystemFontsForTesting() {
   SystemFonts::Instance()->ResetForTesting();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 #include <set>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
+#include "base/notreached.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -25,6 +27,10 @@ namespace {
 class TestEventRewriteSink : public EventSink {
  public:
   TestEventRewriteSink() {}
+
+  TestEventRewriteSink(const TestEventRewriteSink&) = delete;
+  TestEventRewriteSink& operator=(const TestEventRewriteSink&) = delete;
+
   ~TestEventRewriteSink() override { CheckAllReceived(); }
 
   void AddExpectedEvent(EventType type) { expected_events_.push_back(type); }
@@ -41,7 +47,6 @@ class TestEventRewriteSink : public EventSink {
 
  private:
   std::list<EventType> expected_events_;
-  DISALLOW_COPY_AND_ASSIGN(TestEventRewriteSink);
 };
 
 std::unique_ptr<Event> CreateEventForType(EventType type) {
@@ -109,15 +114,15 @@ class TestConstantEventRewriterOld : public EventRewriter {
 // EVENT_REWRITE_DISPATCH_ANOTHER.
 class TestStateMachineEventRewriterOld : public EventRewriter {
  public:
-  TestStateMachineEventRewriterOld() : last_rewritten_event_(0), state_(0) {}
+  TestStateMachineEventRewriterOld()
+      : last_rewritten_event_(nullptr), state_(0) {}
   void AddRule(int from_state,
                EventType from_type,
                int to_state,
                EventType to_type,
                EventRewriteStatus to_status) {
     RewriteResult r = {to_state, to_type, to_status};
-    rules_.insert(std::pair<RewriteCase, RewriteResult>(
-        RewriteCase(from_state, from_type), r));
+    rules_.emplace(RewriteCase(from_state, from_type), r);
   }
   EventRewriteStatus RewriteEvent(
       const Event& event,
@@ -153,7 +158,7 @@ class TestStateMachineEventRewriterOld : public EventRewriter {
   };
   typedef std::map<RewriteCase, RewriteResult> RewriteRules;
   RewriteRules rules_;
-  Event* last_rewritten_event_;
+  raw_ptr<Event> last_rewritten_event_;
   int state_;
 };
 

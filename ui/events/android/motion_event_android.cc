@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include <cmath>
 
 #include "base/android/jni_android.h"
+#include "base/notreached.h"
+#include "base/numerics/math_constants.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
@@ -51,7 +53,7 @@ MotionEventAndroid::Action FromAndroidAction(int android_action) {
     ACTION_CASE(BUTTON_RELEASE);
     default:
       NOTREACHED() << "Invalid Android MotionEvent action: " << android_action;
-  };
+  }
   return MotionEventAndroid::Action::CANCEL;
 }
 
@@ -70,7 +72,7 @@ int ToAndroidAction(MotionEventAndroid::Action action) {
     ACTION_REVERSE_CASE(BUTTON_RELEASE);
     default:
       NOTREACHED() << "Invalid MotionEvent action: " << action;
-  };
+  }
   return JNI_MotionEvent::ACTION_CANCEL;
 }
 
@@ -84,7 +86,7 @@ MotionEventAndroid::ToolType FromAndroidToolType(int android_tool_type) {
     default:
       NOTREACHED() << "Invalid Android MotionEvent tool type: "
                    << android_tool_type;
-  };
+  }
   return MotionEventAndroid::ToolType::UNKNOWN;
 }
 
@@ -97,7 +99,7 @@ int ToAndroidToolType(MotionEventAndroid::ToolType tool_type) {
     TOOL_TYPE_REVERSE_CASE(ERASER);
     default:
       NOTREACHED() << "Invalid MotionEvent tool type: " << tool_type;
-  };
+  }
   return JNI_MotionEvent::TOOL_TYPE_UNKNOWN;
 }
 
@@ -158,8 +160,7 @@ int ToEventFlags(int meta_state, int button_state) {
 }
 
 base::TimeTicks FromAndroidTime(int64_t time_ms) {
-  base::TimeTicks timestamp =
-      base::TimeTicks() + base::TimeDelta::FromMilliseconds(time_ms);
+  base::TimeTicks timestamp = base::TimeTicks() + base::Milliseconds(time_ms);
   ValidateEventTimeClock(&timestamp);
   return timestamp;
 }
@@ -194,10 +195,10 @@ void ConvertTiltOrientationToTiltXY(float tilt_rad,
                                     float orientation_rad,
                                     float* tilt_x,
                                     float* tilt_y) {
-  float r = sin(tilt_rad);
-  float z = cos(tilt_rad);
-  *tilt_x = atan2(sin(-orientation_rad) * r, z) * 180.f / M_PI;
-  *tilt_y = atan2(cos(-orientation_rad) * r, z) * 180.f / M_PI;
+  float r = sinf(tilt_rad);
+  float z = cosf(tilt_rad);
+  *tilt_x = atan2f(sinf(-orientation_rad) * r, z) * 180.f / base::kPiFloat;
+  *tilt_y = atan2f(cosf(-orientation_rad) * r, z) * 180.f / base::kPiFloat;
 }
 
 }  // namespace
@@ -241,6 +242,7 @@ MotionEventAndroid::MotionEventAndroid(JNIEnv* env,
                                        jint history_size,
                                        jint action_index,
                                        jint android_action_button,
+                                       jint android_gesture_classification,
                                        jint android_button_state,
                                        jint android_meta_state,
                                        jfloat raw_offset_x_pixels,
@@ -260,6 +262,7 @@ MotionEventAndroid::MotionEventAndroid(JNIEnv* env,
       cached_history_size_(ToValidHistorySize(history_size, cached_action_)),
       cached_action_index_(action_index),
       cached_action_button_(android_action_button),
+      cached_gesture_classification_(android_gesture_classification),
       cached_button_state_(FromAndroidButtonState(android_button_state)),
       cached_flags_(ToEventFlags(android_meta_state, android_button_state)),
       cached_raw_position_offset_(ToDips(raw_offset_x_pixels),
@@ -291,6 +294,7 @@ MotionEventAndroid::MotionEventAndroid(const MotionEventAndroid& e)
       cached_history_size_(e.cached_history_size_),
       cached_action_index_(e.cached_action_index_),
       cached_action_button_(e.cached_action_button_),
+      cached_gesture_classification_(e.cached_gesture_classification_),
       cached_button_state_(e.cached_button_state_),
       cached_flags_(e.cached_flags_),
       cached_raw_position_offset_(e.cached_raw_position_offset_),
@@ -335,6 +339,11 @@ MotionEventAndroid::Action MotionEventAndroid::GetAction() const {
 
 int MotionEventAndroid::GetActionButton() const {
   return cached_action_button_;
+}
+
+MotionEvent::Classification MotionEventAndroid::GetClassification() const {
+  return static_cast<MotionEvent::Classification>(
+      cached_gesture_classification_);
 }
 
 float MotionEventAndroid::GetTickMultiplier() const {

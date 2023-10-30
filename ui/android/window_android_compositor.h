@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,7 @@
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "ui/android/ui_android_export.h"
 #include "ui/compositor/compositor_lock.h"
-
-namespace cc {
-class Layer;
-}
+#include "ui/gfx/presentation_feedback.h"
 
 namespace ui {
 
@@ -25,7 +22,19 @@ class UI_ANDROID_EXPORT WindowAndroidCompositor {
  public:
   virtual ~WindowAndroidCompositor() {}
 
-  virtual void AttachLayerForReadback(scoped_refptr<cc::Layer> layer) = 0;
+  // Ref must be destroyed on same thread as WindowAndroidCompositor.
+  class ReadbackRef {
+   public:
+    virtual ~ReadbackRef() = default;
+
+   protected:
+    ReadbackRef() = default;
+  };
+
+  // While there are outstanding ReadbackRefs, Compositor will attempt to
+  // ensure any pending viz::CopyOutputRequest in any part of the compositor
+  // surface tree are fulfilled in a timely manner.
+  virtual std::unique_ptr<ReadbackRef> TakeReadbackRef() = 0;
   virtual void RequestCopyOfOutputOnRootLayer(
       std::unique_ptr<viz::CopyOutputRequest> request) = 0;
   virtual void SetNeedsAnimate() = 0;
@@ -38,6 +47,18 @@ class UI_ANDROID_EXPORT WindowAndroidCompositor {
   virtual void OnUpdateRefreshRate(float refresh_rate) = 0;
   virtual void OnUpdateSupportedRefreshRates(
       const std::vector<float>& supported_refresh_rates) = 0;
+  virtual std::unique_ptr<ui::CompositorLock> GetCompositorLock(
+      base::TimeDelta timeout) = 0;
+  virtual void OnUpdateOverlayTransform() = 0;
+  // This parallels ui::Compositor::RequestPresentationTimeForNextFrame, which
+  // while defined in ui is only implemented within
+  // content/browser/renderer_host which is not visible to other ui code. The
+  // majority of ui abstracts away ui::Compositor under
+  // ui::WindowAndroidCompositor.
+  using PresentationTimeCallback =
+      base::OnceCallback<void(const gfx::PresentationFeedback&)>;
+  virtual void PostRequestPresentationTimeForNextFrame(
+      PresentationTimeCallback callback) = 0;
 };
 
 }  // namespace ui

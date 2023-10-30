@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 namespace ui {
 
-int ui::DragDropTypes::DropEffectToDragOperation(uint32_t effect) {
+int DragDropTypes::DropEffectToDragOperation(uint32_t effect) {
   int drag_operation = DRAG_NONE;
   if (effect & DROPEFFECT_LINK)
     drag_operation |= DRAG_LINK;
@@ -20,7 +20,7 @@ int ui::DragDropTypes::DropEffectToDragOperation(uint32_t effect) {
   return drag_operation;
 }
 
-uint32_t ui::DragDropTypes::DragOperationToDropEffect(int drag_operation) {
+uint32_t DragDropTypes::DragOperationToDropEffect(int drag_operation) {
   uint32_t drop_effect = DROPEFFECT_NONE;
   if (drag_operation & DRAG_LINK)
     drop_effect |= DROPEFFECT_LINK;

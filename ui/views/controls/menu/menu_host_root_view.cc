@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/menu/menu_host_root_view.h"
 
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
@@ -94,4 +95,6 @@ MenuController* MenuHostRootView::GetMenuControllerForInputEvents() {
              : nullptr;
 }
 
+BEGIN_METADATA(MenuHostRootView, internal::RootView)
+END_METADATA
 }  // namespace views

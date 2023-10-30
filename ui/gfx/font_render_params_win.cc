@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/win/registry.h"
-#include "ui/gfx/win/direct_write.h"
 #include "ui/gfx/win/singleton_hwnd_observer.h"
 
 namespace gfx {
@@ -30,20 +28,34 @@ FontRenderParams::SubpixelRendering GetSubpixelRenderingGeometry() {
           HKEY_LOCAL_MACHINE,
           (L"SOFTWARE\\Microsoft\\Avalon.Graphics\\" + trimmed.value()).c_str(),
           KEY_READ);
-      DWORD pixel_structure;
-      if (key.ReadValueDW(L"PixelStructure", &pixel_structure) ==
-          ERROR_SUCCESS) {
-        if (pixel_structure == 1)
-          return FontRenderParams::SUBPIXEL_RENDERING_RGB;
-        if (pixel_structure == 2)
-          return FontRenderParams::SUBPIXEL_RENDERING_BGR;
+      DWORD structure;
+      if (key.ReadValueDW(L"PixelStructure", &structure) == ERROR_SUCCESS) {
+        switch (structure) {
+          case 0:
+            return FontRenderParams::SUBPIXEL_RENDERING_NONE;
+          case 1:
+            return FontRenderParams::SUBPIXEL_RENDERING_RGB;
+          case 2:
+            return FontRenderParams::SUBPIXEL_RENDERING_BGR;
+        }
+        return FontRenderParams::SUBPIXEL_RENDERING_NONE;
       }
       break;
     }
   }
 
-  // No explicit ClearType settings, default to RGB.
-  return FontRenderParams::SUBPIXEL_RENDERING_RGB;
+  UINT structure = 0;
+  if (SystemParametersInfo(SPI_GETFONTSMOOTHINGORIENTATION, 0, &structure, 0)) {
+    switch (structure) {
+      case FE_FONTSMOOTHINGORIENTATIONRGB:
+        return FontRenderParams::SUBPIXEL_RENDERING_RGB;
+      case FE_FONTSMOOTHINGORIENTATIONBGR:
+        return FontRenderParams::SUBPIXEL_RENDERING_BGR;
+    }
+  }
+
+  // No explicit ClearType settings, default to none.
+  return FontRenderParams::SUBPIXEL_RENDERING_NONE;
 }
 
 // Caches font render params and updates them on system notifications.
@@ -53,11 +65,14 @@ class CachedFontRenderParams {
     return base::Singleton<CachedFontRenderParams>::get();
   }
 
+  CachedFontRenderParams(const CachedFontRenderParams&) = delete;
+  CachedFontRenderParams& operator=(const CachedFontRenderParams&) = delete;
+
   const FontRenderParams& GetParams() {
     if (params_)
       return *params_;
 
-    params_.reset(new FontRenderParams());
+    params_ = std::make_unique<FontRenderParams>();
     params_->antialiasing = false;
     params_->subpixel_positioning = false;
     params_->autohinter = false;
@@ -76,9 +91,9 @@ class CachedFontRenderParams {
         params_->subpixel_rendering = GetSubpixelRenderingGeometry();
       }
     }
-    singleton_hwnd_observer_.reset(new SingletonHwndObserver(
-        base::Bind(&CachedFontRenderParams::OnWndProc,
-                   base::Unretained(this))));
+    singleton_hwnd_observer_ =
+        std::make_unique<SingletonHwndObserver>(base::BindRepeating(
+            &CachedFontRenderParams::OnWndProc, base::Unretained(this)));
     return *params_;
   }
 
@@ -99,8 +114,6 @@ class CachedFontRenderParams {
 
   std::unique_ptr<FontRenderParams> params_;
   std::unique_ptr<SingletonHwndObserver> singleton_hwnd_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(CachedFontRenderParams);
 };
 
 }  // namespace

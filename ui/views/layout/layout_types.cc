@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,57 +6,56 @@
 
 #include <algorithm>
 
-#include "base/strings/stringprintf.h"
-#include "ui/gfx/geometry/size.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 
 namespace views {
 
-namespace {
+// SizeBound -------------------------------------------------------------------
 
-std::string OptionalToString(const base::Optional<int>& opt) {
-  if (!opt.has_value())
-    return "_";
-  return base::StringPrintf("%d", opt.value());
+void SizeBound::operator+=(const SizeBound& rhs) {
+  if (!rhs.is_bounded())
+    bound_.reset();
+  else if (is_bounded())
+    *bound_ += rhs.value();
 }
 
-}  // namespace
+void SizeBound::operator-=(const SizeBound& rhs) {
+  if (!rhs.is_bounded())
+    bound_ = 0;
+  else if (is_bounded())
+    *bound_ -= rhs.value();
+}
+
+std::string SizeBound::ToString() const {
+  return is_bounded() ? base::NumberToString(*bound_) : "_";
+}
+
+SizeBound operator+(const SizeBound& lhs, const SizeBound& rhs) {
+  SizeBound result = lhs;
+  result += rhs;
+  return result;
+}
+
+SizeBound operator-(const SizeBound& lhs, const SizeBound& rhs) {
+  SizeBound result = lhs;
+  result -= rhs;
+  return result;
+}
 
 // SizeBounds ------------------------------------------------------------------
 
-SizeBounds::SizeBounds() = default;
-
-SizeBounds::SizeBounds(const base::Optional<int>& width,
-                       const base::Optional<int>& height)
-    : width_(width), height_(height) {}
-
-SizeBounds::SizeBounds(const SizeBounds& other)
-    : width_(other.width()), height_(other.height()) {}
-
-SizeBounds::SizeBounds(const gfx::Size& other)
-    : width_(other.width()), height_(other.height()) {}
-
 void SizeBounds::Enlarge(int width, int height) {
-  if (width_)
-    width_ = std::max(0, *width_ + width);
-  if (height_)
-    height_ = std::max(0, *height_ + height);
-}
-
-bool SizeBounds::operator==(const SizeBounds& other) const {
-  return width_ == other.width_ && height_ == other.height_;
-}
-
-bool SizeBounds::operator!=(const SizeBounds& other) const {
-  return !(*this == other);
-}
-
-bool SizeBounds::operator<(const SizeBounds& other) const {
-  return std::tie(height_, width_) < std::tie(other.height_, other.width_);
+  width_ = std::max<SizeBound>(0, width_ + width);
+  height_ = std::max<SizeBound>(0, height_ + height);
 }
 
 std::string SizeBounds::ToString() const {
-  return base::StringPrintf("%s x %s", OptionalToString(width()).c_str(),
-                            OptionalToString(height()).c_str());
+  return base::StrCat({width_.ToString(), " x ", height_.ToString()});
+}
+
+bool CanFitInBounds(const gfx::Size& size, const SizeBounds& bounds) {
+  return bounds.width() >= size.width() && bounds.height() >= size.height();
 }
 
 }  // namespace views

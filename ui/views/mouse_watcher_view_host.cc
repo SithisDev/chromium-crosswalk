@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,7 @@ namespace views {
 
 MouseWatcherViewHost::MouseWatcherViewHost(View* view,
                                            const gfx::Insets& hot_zone_insets)
-    : view_(view),
-      hot_zone_insets_(hot_zone_insets) {
-}
+    : view_(view), hot_zone_insets_(hot_zone_insets) {}
 
 MouseWatcherViewHost::~MouseWatcherViewHost() = default;
 

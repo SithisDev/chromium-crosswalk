@@ -1,8 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/menu/menu_pre_target_handler_aura.h"
+
+#include <memory>
 
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"

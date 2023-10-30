@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ bool DesktopFocusRules::IsWindowConsideredVisibleForActivation(
   // |content_window_| is initially hidden and made visible from Show(). Even in
   // this state we still want it to be activatable.
   return BaseFocusRules::IsWindowConsideredVisibleForActivation(window) ||
-      (window == content_window_);
+         (window == content_window_);
 }
 
 const aura::Window* DesktopFocusRules::GetToplevelWindow(

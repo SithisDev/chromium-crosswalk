@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/web_dialogs/test/test_web_dialog_delegate.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/utf_string_conversions.h"
 
 using content::WebContents;
@@ -14,8 +14,10 @@ namespace ui {
 namespace test {
 
 TestWebDialogDelegate::TestWebDialogDelegate(const GURL& url)
-    : url_(url), size_(400, 400), did_delete_(nullptr) {
-}
+    : url_(url),
+      size_(400, 400),
+      did_delete_(nullptr),
+      close_on_escape_(true) {}
 
 TestWebDialogDelegate::~TestWebDialogDelegate() {
   if (did_delete_) {
@@ -30,12 +32,16 @@ void TestWebDialogDelegate::SetDeleteOnClosedAndObserve(
   did_delete_ = destroy_observer;
 }
 
+void TestWebDialogDelegate::SetCloseOnEscape(bool enabled) {
+  close_on_escape_ = enabled;
+}
+
 ModalType TestWebDialogDelegate::GetDialogModalType() const {
   return MODAL_TYPE_WINDOW;
 }
 
-base::string16 TestWebDialogDelegate::GetDialogTitle() const {
-  return base::UTF8ToUTF16("Test");
+std::u16string TestWebDialogDelegate::GetDialogTitle() const {
+  return u"Test";
 }
 
 GURL TestWebDialogDelegate::GetDialogContentURL() const {
@@ -66,6 +72,10 @@ void TestWebDialogDelegate::OnCloseContents(WebContents* source,
 
 bool TestWebDialogDelegate::ShouldShowDialogTitle() const {
   return true;
+}
+
+bool TestWebDialogDelegate::ShouldCloseDialogOnEscape() const {
+  return close_on_escape_;
 }
 
 }  // namespace test

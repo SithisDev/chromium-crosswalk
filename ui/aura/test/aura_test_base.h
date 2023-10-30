@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,16 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/aura_test_helper.h"
+#include "ui/aura/window_tree_host.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/scoped_com_initializer.h"
 #endif
-
-namespace ui {
-class TestContextFactories;
-}
 
 namespace aura {
 class Window;
@@ -33,13 +28,15 @@ class FocusClient;
 
 namespace test {
 
-class AuraTestContextFactory;
-
 // A base class for aura unit tests.
 // TODO(beng): Instances of this test will create and own a RootWindow.
 class AuraTestBase : public testing::Test {
  public:
   AuraTestBase();
+
+  AuraTestBase(const AuraTestBase&) = delete;
+  AuraTestBase& operator=(const AuraTestBase&) = delete;
+
   ~AuraTestBase() override;
 
   // testing::Test:
@@ -59,26 +56,22 @@ class AuraTestBase : public testing::Test {
   // Returns whether |event| was handled.
   bool DispatchEventUsingWindowDispatcher(ui::Event* event);
 
-  Window* root_window() { return helper_->root_window(); }
-  WindowTreeHost* host() { return helper_->host(); }
-  ui::EventSink* event_sink() { return helper_->event_sink(); }
-  TestScreen* test_screen() { return helper_->test_screen(); }
-  client::FocusClient* focus_client() { return helper_->focus_client(); }
+  Window* root_window() { return helper_->GetContext(); }
+  WindowTreeHost* host() { return helper_->GetHost(); }
+  ui::EventSink* GetEventSink() { return host()->GetEventSink(); }
+  TestScreen* test_screen() { return helper_->GetTestScreen(); }
+  client::FocusClient* focus_client() { return helper_->GetFocusClient(); }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::win::ScopedCOMInitializer com_initializer_;
 #endif
 
   bool setup_called_ = false;
   bool teardown_called_ = false;
-  std::unique_ptr<ui::TestContextFactories> context_factories_;
   std::unique_ptr<AuraTestHelper> helper_;
-  std::unique_ptr<AuraTestContextFactory> mus_context_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(AuraTestBase);
 };
 
 }  // namespace test

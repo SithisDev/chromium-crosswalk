@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #import <AVFoundation/AVFoundation.h>
 
+#include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/trace_event/trace_event.h"
-#include "ui/accelerated_widget_mac/availability_macros.h"
 #include "ui/base/cocoa/animation_utils.h"
 
 namespace ui {
@@ -36,13 +36,12 @@ void CALayerTreeCoordinator::Resize(const gfx::Size& pixel_size,
 
 CARendererLayerTree* CALayerTreeCoordinator::GetPendingCARendererLayerTree() {
   if (!pending_ca_renderer_layer_tree_)
-    pending_ca_renderer_layer_tree_.reset(new CARendererLayerTree(
-        allow_av_sample_buffer_display_layer_, false));
+    pending_ca_renderer_layer_tree_ = std::make_unique<CARendererLayerTree>(
+        allow_av_sample_buffer_display_layer_, false);
   return pending_ca_renderer_layer_tree_.get();
 }
 
-void CALayerTreeCoordinator::CommitPendingTreesToCA(
-    const gfx::Rect& pixel_damage_rect) {
+void CALayerTreeCoordinator::CommitPendingTreesToCA() {
   // Update the CALayer hierarchy.
   ScopedCAActionDisabler disabler;
   if (pending_ca_renderer_layer_tree_) {

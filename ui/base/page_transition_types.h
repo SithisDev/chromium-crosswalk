@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
@@ -22,9 +22,11 @@ namespace ui {
 // A type is made of a core value and a set of qualifiers. A type has one
 // core value and 0 or or more qualifiers.
 //
-// A Java counterpart will be generated for this enum.
+// A Java counterpart will be generated for this enum.  This is why the enum
+// uses int32_t and not uint32_t as the underlying type (jint cannot
+// represent uint32_t).
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.ui.base
-enum PageTransition {
+enum PageTransition : int32_t {
   PAGE_TRANSITION_FIRST = 0,
 
   // User got to this page by clicking a link on another page.
@@ -45,7 +47,10 @@ enum PageTransition {
   // loaded in a non-toplevel frame. For example, if a page consists of
   // several frames containing ads, those ad URLs will have this transition
   // type. The user may not even realize the content in these pages is a
-  // separate frame, so may not care about the URL (see MANUAL below).
+  // separate frame, so may not care about the URL (see MANUAL below). All
+  // Fenced Frame navigations will be of this type because they are considered
+  // a non-toplevel navigation that does not generate new navigation entries
+  // in the back/forward list.
   PAGE_TRANSITION_AUTO_SUBFRAME = 3,
 
   // For subframe navigations that are explicitly requested by the user and
@@ -111,6 +116,12 @@ enum PageTransition {
   // Any of the core values above can be augmented by one or more qualifiers.
   // These qualifiers further define the transition.
 
+  // The values 0x00200000 (PAGE_TRANSITION_FROM_API_3) and 0x00400000
+  // (PAGE_TRANSITION_FROM_API_2) were used for experiments and were removed
+  // around 6/2021. The experiments ended well before 6/2021, but it's possible
+  // some databases still have the values. See https://crbug.com/1141501 for
+  // more.
+
   // A managed user attempted to visit a URL but was blocked.
   PAGE_TRANSITION_BLOCKED = 0x00800000,
 
@@ -139,54 +150,60 @@ enum PageTransition {
   // Redirects sent from the server by HTTP headers. It might be nice to
   // break this out into 2 types in the future, permanent or temporary, if we
   // can get that information from WebKit.
-  PAGE_TRANSITION_SERVER_REDIRECT = 0x80000000,
+  // TODO(https://crbug.com/1291237): Remove this as it's inaccurate.
+  // NavigationHandle::WasServerRedirect() should be used instead.
+  PAGE_TRANSITION_SERVER_REDIRECT = -2147483648,  // 0x80000000
 
   // Used to test whether a transition involves a redirect.
-  PAGE_TRANSITION_IS_REDIRECT_MASK = 0xC0000000,
+  PAGE_TRANSITION_IS_REDIRECT_MASK = -1073741824,  // 0xC0000000
 
   // General mask defining the bits used for the qualifiers.
-  PAGE_TRANSITION_QUALIFIER_MASK = 0xFFFFFF00,
+  PAGE_TRANSITION_QUALIFIER_MASK = -256,  // 0xFFFFFF00
 };
 
 // Compares two PageTransition types ignoring qualifiers. |rhs| is taken to
 // be a compile time constant, and hence must not contain any qualifiers.
-UI_BASE_EXPORT bool PageTransitionCoreTypeIs(PageTransition lhs,
-                                             PageTransition rhs);
+COMPONENT_EXPORT(UI_BASE)
+bool PageTransitionCoreTypeIs(PageTransition lhs, PageTransition rhs);
 
 // Compares two PageTransition types including qualifiers. Rarely useful,
 // PageTransitionCoreTypeIs() is more likely what you need.
-UI_BASE_EXPORT bool PageTransitionTypeIncludingQualifiersIs(PageTransition lhs,
-                                                            PageTransition rhs);
+COMPONENT_EXPORT(UI_BASE)
+bool PageTransitionTypeIncludingQualifiersIs(PageTransition lhs,
+                                             PageTransition rhs);
 
 // Simplifies the provided transition by removing any qualifier
-UI_BASE_EXPORT PageTransition PageTransitionStripQualifier(
-    PageTransition type);
+COMPONENT_EXPORT(UI_BASE)
+PageTransition PageTransitionStripQualifier(PageTransition type);
 
-UI_BASE_EXPORT bool PageTransitionIsValidType(int32_t type);
+COMPONENT_EXPORT(UI_BASE) bool IsValidPageTransitionType(int32_t type);
 
-UI_BASE_EXPORT PageTransition PageTransitionFromInt(int32_t type);
+COMPONENT_EXPORT(UI_BASE) PageTransition PageTransitionFromInt(int32_t type);
 
 // Returns true if the given transition is a top-level frame transition, or
 // false if the transition was for a subframe.
-UI_BASE_EXPORT bool PageTransitionIsMainFrame(PageTransition type);
+COMPONENT_EXPORT(UI_BASE) bool PageTransitionIsMainFrame(PageTransition type);
 
 // Returns whether a transition involves a redirection
-UI_BASE_EXPORT bool PageTransitionIsRedirect(PageTransition type);
+COMPONENT_EXPORT(UI_BASE) bool PageTransitionIsRedirect(PageTransition type);
 
 // Returns whether a transition is a new navigation (rather than a return
 // to a previously committed navigation).
-UI_BASE_EXPORT bool PageTransitionIsNewNavigation(PageTransition type);
+COMPONENT_EXPORT(UI_BASE)
+bool PageTransitionIsNewNavigation(PageTransition type);
 
 // Return the qualifier
-UI_BASE_EXPORT int32_t PageTransitionGetQualifier(PageTransition type);
+COMPONENT_EXPORT(UI_BASE)
+PageTransition PageTransitionGetQualifier(PageTransition type);
 
 // Returns true if the transition can be triggered by the web instead of
 // through UI or similar.
-UI_BASE_EXPORT bool PageTransitionIsWebTriggerable(PageTransition type);
+COMPONENT_EXPORT(UI_BASE)
+bool PageTransitionIsWebTriggerable(PageTransition type);
 
 // Return a string version of the core type values.
-UI_BASE_EXPORT const char* PageTransitionGetCoreTransitionString(
-    PageTransition type);
+COMPONENT_EXPORT(UI_BASE)
+const char* PageTransitionGetCoreTransitionString(PageTransition type);
 
 // Declare a dummy class that is intentionally never defined.
 class DontUseOperatorEquals;
@@ -195,11 +212,11 @@ class DontUseOperatorEquals;
 // qualifiers. Use PageTransitionCoreTypeIs() instead or, in rare cases,
 // PageTransitionTypeIncludingQualifiersIs().
 DontUseOperatorEquals operator==(PageTransition, PageTransition);
-DontUseOperatorEquals operator==(PageTransition, int);
-DontUseOperatorEquals operator==(int, PageTransition);
+DontUseOperatorEquals operator==(PageTransition, int32_t);
+DontUseOperatorEquals operator==(int32_t, PageTransition);
 DontUseOperatorEquals operator!=(PageTransition, PageTransition);
-DontUseOperatorEquals operator!=(PageTransition, int);
-DontUseOperatorEquals operator!=(int, PageTransition);
+DontUseOperatorEquals operator!=(PageTransition, int32_t);
+DontUseOperatorEquals operator!=(int32_t, PageTransition);
 
 }  // namespace ui
 

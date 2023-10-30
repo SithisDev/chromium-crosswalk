@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 
 #include <cmath>
 
-
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/numerics/safe_conversions.h"
 #include "ui/gfx/animation/tween.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
 
 namespace {
 
@@ -30,32 +29,24 @@ bool MassageRotationIfMultipleOfNinetyDegrees(gfx::Transform* rotation,
   if (!IsMultipleOfNinetyDegrees(degrees) || !rotation)
     return false;
 
-  gfx::Transform transform;
-  SkMatrix44& m = transform.matrix();
   float degrees_by_ninety = degrees / 90.0f;
 
-  int n = gfx::ToRoundedInt(degrees_by_ninety);
+  int n = base::ClampRound(degrees_by_ninety);
 
   n %= 4;
   if (n < 0)
     n += 4;
 
   // n should now be in the range [0, 3]
-  if (n == 1) {
-    m.set3x3( 0,  1,  0,
-             -1,  0,  0,
-              0,  0,  1);
+  if (n == 0) {
+    rotation->MakeIdentity();
+  } else if (n == 1) {
+    *rotation = gfx::Transform::RotationAboutZAxisSinCos(1, 0);
   } else if (n == 2) {
-    m.set3x3(-1,  0,  0,
-              0, -1,  0,
-              0,  0,  1);
+    *rotation = gfx::Transform::RotationAboutZAxisSinCos(0, -1);
   } else if (n == 3) {
-    m.set3x3( 0, -1,  0,
-              1,  0,  0,
-              0,  0,  1);
+    *rotation = gfx::Transform::RotationAboutZAxisSinCos(-1, 0);
   }
-
-  *rotation = transform;
   return true;
 }
 
@@ -325,8 +316,8 @@ void InterpolatedTransformAboutPivot::Init(
     std::unique_ptr<InterpolatedTransform> xform) {
   gfx::Transform to_pivot;
   gfx::Transform from_pivot;
-  to_pivot.Translate(SkIntToMScalar(-pivot.x()), SkIntToMScalar(-pivot.y()));
-  from_pivot.Translate(SkIntToMScalar(pivot.x()), SkIntToMScalar(pivot.y()));
+  to_pivot.Translate(SkIntToScalar(-pivot.x()), SkIntToScalar(-pivot.y()));
+  from_pivot.Translate(SkIntToScalar(pivot.x()), SkIntToScalar(pivot.y()));
 
   std::unique_ptr<InterpolatedTransform> pre_transform =
       std::make_unique<InterpolatedConstantTransform>(to_pivot);

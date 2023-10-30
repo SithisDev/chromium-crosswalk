@@ -1,33 +1,37 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/touch_selection/touch_handle.h"
-#include "base/metrics/histogram_macros.h"
 
 #include <algorithm>
 #include <cmath>
+
+#include "base/check_op.h"
+#include "base/cxx17_backports.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 
 namespace ui {
 
 namespace {
 
 // Maximum duration of a fade sequence.
-const double kFadeDurationMs = 200;
+constexpr auto kFadeDuration = base::Milliseconds(200);
 
 // Maximum amount of travel for a fade sequence. This avoids handle "ghosting"
 // when the handle is moving rapidly while the fade is active.
-const double kFadeDistanceSquared = 20.f * 20.f;
+constexpr double kFadeDistanceSquared = 20.0f * 20.0f;
 
 // Avoid using an empty touch rect, as it may fail the intersection test event
 // if it lies within the other rect's bounds.
-const float kMinTouchMajorForHitTesting = 1.f;
+constexpr float kMinTouchMajorForHitTesting = 1.0f;
 
 // The maximum touch size to use when computing whether a touch point is
 // targetting a touch handle. This is necessary for devices that misreport
 // touch radii, preventing inappropriately largely touch sizes from completely
 // breaking handle dragging behavior.
-const float kMaxTouchMajorForHitTesting = 36.f;
+constexpr float kMaxTouchMajorForHitTesting = 36.0f;
 
 // Note that the intersection region is boundary *exclusive*.
 bool RectIntersectsCircle(const gfx::RectF& rect,
@@ -173,9 +177,10 @@ bool TouchHandle::WillHandleTouchEvent(const MotionEvent& event) {
       if (!is_visible_)
         return false;
       const gfx::PointF touch_point(event.GetX(), event.GetY());
-      const float touch_radius = std::max(
-          kMinTouchMajorForHitTesting,
-          std::min(kMaxTouchMajorForHitTesting, event.GetTouchMajor())) * 0.5f;
+      const float touch_radius =
+          base::clamp(event.GetTouchMajor(), kMinTouchMajorForHitTesting,
+                      kMaxTouchMajorForHitTesting) *
+          0.5f;
       const gfx::RectF drawable_bounds = drawable_->GetVisibleBounds();
       // Only use the touch radius for targetting if the touch is at or below
       // the drawable area. This makes it easier to interact with the line of
@@ -231,19 +236,17 @@ bool TouchHandle::Animate(base::TimeTicks frame_time) {
 
   DCHECK(enabled_);
 
-  float time_u =
-      1.f - (fade_end_time_ - frame_time).InMillisecondsF() / kFadeDurationMs;
-  float position_u = (focus_bottom_ - fade_start_position_).LengthSquared() /
-                     kFadeDistanceSquared;
-  float u = std::max(time_u, position_u);
-  SetAlpha(is_visible_ ? u : 1.f - u);
+  const float time_u = 1.0f - (fade_end_time_ - frame_time) / kFadeDuration;
+  const float position_u =
+      (focus_bottom_ - fade_start_position_).LengthSquared() /
+      kFadeDistanceSquared;
+  const float u = std::max(time_u, position_u);
+  SetAlpha(is_visible_ ? u : 1.0f - u);
 
-  if (u >= 1.f) {
+  if (u >= 1)
     EndFade();
-    return false;
-  }
 
-  return true;
+  return u < 1;
 }
 
 gfx::RectF TouchHandle::GetVisibleBounds() const {
@@ -414,9 +417,8 @@ void TouchHandle::BeginFade() {
     return;
   }
 
-  fade_end_time_ = base::TimeTicks::Now() +
-                   base::TimeDelta::FromMillisecondsD(
-                       kFadeDurationMs * std::abs(target_alpha - alpha_));
+  fade_end_time_ =
+      base::TimeTicks::Now() + kFadeDuration * std::abs(target_alpha - alpha_);
   fade_start_position_ = focus_bottom_;
   client_->SetNeedsAnimate();
 }
@@ -429,7 +431,7 @@ void TouchHandle::EndFade() {
 }
 
 void TouchHandle::SetAlpha(float alpha) {
-  alpha = std::max(0.f, std::min(1.f, alpha));
+  alpha = base::clamp(alpha, 0.0f, 1.0f);
   if (alpha_ == alpha)
     return;
   alpha_ = alpha;

@@ -1,8 +1,26 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {MockVolumeManager} from '../../background/js/mock_volume_manager.js';
+import {VolumeInfoImpl} from '../../background/js/volume_info_impl.js';
+import {DialogType} from '../../common/js/dialog_type.js';
+import {EntryList, FakeEntryImpl} from '../../common/js/files_app_entry_types.js';
+import {MockCommandLinePrivate} from '../../common/js/mock_chrome.js';
+import {MockFileEntry, MockFileSystem} from '../../common/js/mock_entry.js';
+import {reportPromise, waitUntil} from '../../common/js/test_error_reporting.js';
+import {util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {FilesAppEntry} from '../../externs/files_app_entry_interfaces.js';
+
+import {AndroidAppListModel} from './android_app_list_model.js';
+import {DirectoryModel} from './directory_model.js';
+import {createFakeAndroidAppListModel} from './fake_android_app_list_model.js';
+import {createFakeDirectoryModel} from './mock_directory_model.js';
+import {MockFolderShortcutDataModel} from './mock_folder_shortcut_data_model.js';
+import {NavigationListModel, NavigationModelAndroidAppItem, NavigationModelFakeItem, NavigationModelItemType, NavigationModelShortcutItem, NavigationModelVolumeItem, NavigationSection} from './navigation_list_model.js';
 
 /**
  * Mock Recent fake entry.
@@ -36,20 +54,37 @@ let drive;
 let hoge;
 
 // Setup the test components.
-function setUp() {
+export function setUp() {
   // Mock LoadTimeData strings.
-  window.loadTimeData.data = {
-    MY_FILES_VOLUME_ENABLED: false,
+  window.loadTimeData.resetForTesting({
     MY_FILES_ROOT_LABEL: 'My files',
     DOWNLOADS_DIRECTORY_LABEL: 'Downloads',
     DRIVE_DIRECTORY_LABEL: 'My Drive',
-  };
+    FILES_SINGLE_PARTITION_FORMAT_ENABLED: false,
+    FILES_TRASH_ENABLED: false,
+    UNIFIED_MEDIA_VIEW_ENABLED: false,
+    GUEST_OS: false,
+  });
   window.loadTimeData.getString = id => {
     return window.loadTimeData.data_[id] || id;
   };
 
   // Mock chrome APIs.
   new MockCommandLinePrivate();
+
+  // Mock out chrome.fileManagerPrivate *after* MockCommandLinePrivate
+  // which will create the mock chrome object for us. We only need an
+  // enum for this test (used by unified media views).
+  /** @suppress {const|checkTypes} */
+  chrome.fileManagerPrivate = {};
+
+  /** @suppress {const|checkTypes} */
+  chrome.fileManagerPrivate.RecentFileType = {
+    ALL: 'all',
+    AUDIO: 'audio',
+    IMAGE: 'image',
+    VIDEO: 'video',
+  };
 
   // Override VolumeInfo.prototype.resolveDisplayRoot to be sync.
   VolumeInfoImpl.prototype.resolveDisplayRoot = function(successCallback) {
@@ -68,27 +103,28 @@ function setUp() {
 /**
  * Tests model.
  */
-function testModel() {
+export function testModel() {
   const volumeManager = new MockVolumeManager();
 
   const shortcutListModel = new MockFolderShortcutDataModel(
-      [new MockFileEntry(drive, '/root/shortcut')]);
+      [MockFileEntry.create(drive, '/root/shortcut')]);
   const recentItem = new NavigationModelFakeItem(
       'recent-label', NavigationModelItemType.RECENT, recentFakeEntry);
 
   const crostiniFakeItem = new NavigationModelFakeItem(
       'linux-files-label', NavigationModelItemType.CROSTINI,
-      new FakeEntry(
+      new FakeEntryImpl(
           'linux-files-label', VolumeManagerCommon.RootType.CROSTINI));
 
   const androidAppListModelWithApps =
       createFakeAndroidAppListModel(['android:app1', 'android:app2']);
 
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModelWithApps);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModelWithApps, DialogType.FULL_PAGE);
   model.linuxFilesItem = crostiniFakeItem;
 
+  // Expect 6 items.
   assertEquals(6, model.length);
   assertEquals(
       'fake-entry://recent', /** @type {!NavigationModelFakeItem} */
@@ -110,24 +146,31 @@ function testModel() {
   // Downloads and Crostini are displayed within My files.
   const myFilesItem = /** @type NavigationModelFakeItem */ (model.item(2));
   const myFilesEntryList = /** @type {!EntryList} */ (myFilesItem.entry);
-  assertEquals(2, myFilesEntryList.getUIChildren().length);
-  assertEquals('Downloads', myFilesEntryList.getUIChildren()[0].name);
-  assertEquals('linux-files-label', myFilesEntryList.getUIChildren()[1].name);
+  assertEquals(1, myFilesEntryList.getUIChildren().length);
+  assertEquals('linux-files-label', myFilesEntryList.getUIChildren()[0].name);
+
+  // Trash is displayed as a root when feature is enabled.
+  window.loadTimeData.data_['FILES_TRASH_ENABLED'] = true;
+  model.reorderNavigationItems_();
+  assertEquals(7, model.length);
+  assertEquals(
+      'fake-entry://trash', /** @type {!NavigationModelFakeItem} */
+      (model.item(4)).entry.toURL());
 }
 
 /**
  * Tests model with no Recents, Linux files, Play files.
  */
-function testNoRecentOrLinuxFiles() {
+export function testNoRecentOrLinuxFiles() {
   const volumeManager = new MockVolumeManager();
 
   const shortcutListModel = new MockFolderShortcutDataModel(
-      [new MockFileEntry(drive, '/root/shortcut')]);
+      [MockFileEntry.create(drive, '/root/shortcut')]);
   const recentItem = null;
 
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModel);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModel, DialogType.FULL_PAGE);
 
   assertEquals(3, model.length);
   assertEquals(
@@ -142,21 +185,21 @@ function testNoRecentOrLinuxFiles() {
 /**
  * Tests adding and removing shortcuts.
  */
-function testAddAndRemoveShortcuts() {
+export function testAddAndRemoveShortcuts() {
   const volumeManager = new MockVolumeManager();
 
   const shortcutListModel = new MockFolderShortcutDataModel(
-      [new MockFileEntry(drive, '/root/shortcut')]);
+      [MockFileEntry.create(drive, '/root/shortcut')]);
   const recentItem = null;
 
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModel);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModel, DialogType.FULL_PAGE);
 
   assertEquals(3, model.length);
 
   // Add a shortcut at the tail, shortcuts are sorted by their label.
-  const addShortcut = new MockFileEntry(drive, '/root/shortcut2');
+  const addShortcut = MockFileEntry.create(drive, '/root/shortcut2');
   shortcutListModel.splice(1, 0, addShortcut);
 
   assertEquals(4, model.length);
@@ -168,7 +211,7 @@ function testAddAndRemoveShortcuts() {
       (model.item(1)).label);
 
   // Add a shortcut at the head.
-  const headShortcut = new MockFileEntry(drive, '/root/head');
+  const headShortcut = MockFileEntry.create(drive, '/root/head');
   shortcutListModel.splice(0, 0, headShortcut);
 
   assertEquals(5, model.length);
@@ -203,18 +246,26 @@ function testAddAndRemoveShortcuts() {
 }
 
 /**
+ * Tests testAddAndRemoveVolumes test with SinglePartitionFormat flag is on.
+ */
+export function testAddAndRemoveVolumesWhenSinglePartitionOn() {
+  window.loadTimeData.data_['FILES_SINGLE_PARTITION_FORMAT_ENABLED'] = true;
+  testAddAndRemoveVolumes();
+}
+
+/**
  * Tests adding and removing volumes.
  */
-function testAddAndRemoveVolumes() {
+export function testAddAndRemoveVolumes() {
   const volumeManager = new MockVolumeManager();
 
   const shortcutListModel = new MockFolderShortcutDataModel(
-      [new MockFileEntry(drive, '/root/shortcut')]);
+      [MockFileEntry.create(drive, '/root/shortcut')]);
   const recentItem = null;
 
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModel);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModel, DialogType.FULL_PAGE);
 
   assertEquals(3, model.length);
 
@@ -231,9 +282,17 @@ function testAddAndRemoveVolumes() {
   assertEquals(
       'drive', /** @type {!NavigationModelVolumeItem} */
       (model.item(2)).volumeInfo.volumeId);
-  assertEquals(
-      'removable:hoge', /** @type {!NavigationModelVolumeItem} */
-      (model.item(3)).volumeInfo.volumeId);
+  if (util.isSinglePartitionFormatEnabled()) {
+    const drive = model.item(3);
+    assertEquals('External Drive', drive.label);
+    assertEquals(
+        'removable:hoge', /** @type {!NavigationModelFakeItem} */
+        (drive).entry.getUIChildren()[0].volumeInfo.volumeId);
+  } else {
+    assertEquals(
+        'removable:hoge', /** @type {!NavigationModelVolumeItem} */
+        (model.item(3)).volumeInfo.volumeId);
+  }
 
   // Mount removable volume 'fuga'. Not a partition, so set a different device
   // path to 'hoge'.
@@ -249,15 +308,28 @@ function testAddAndRemoveVolumes() {
   assertEquals(
       'drive', /** @type {!NavigationModelVolumeItem} */
       (model.item(2)).volumeInfo.volumeId);
-  assertEquals(
-      'removable:hoge', /** @type {!NavigationModelVolumeItem} */
-      (model.item(3)).volumeInfo.volumeId);
-  assertEquals(
-      'removable:fuga', /** @type {!NavigationModelVolumeItem} */
-      (model.item(4)).volumeInfo.volumeId);
+  if (util.isSinglePartitionFormatEnabled()) {
+    const drive1 = model.item(3);
+    const drive2 = model.item(4);
+    assertEquals('External Drive', drive1.label);
+    assertEquals('External Drive', drive2.label);
+    assertEquals(
+        'removable:hoge', /** @type {!NavigationModelFakeItem} */
+        (drive1).entry.getUIChildren()[0].volumeInfo.volumeId);
+    assertEquals(
+        'removable:fuga', /** @type {!NavigationModelFakeItem} */
+        (drive2).entry.getUIChildren()[0].volumeInfo.volumeId);
+  } else {
+    assertEquals(
+        'removable:hoge', /** @type {!NavigationModelVolumeItem} */
+        (model.item(3)).volumeInfo.volumeId);
+    assertEquals(
+        'removable:fuga', /** @type {!NavigationModelVolumeItem} */
+        (model.item(4)).volumeInfo.volumeId);
+  }
 
   // Create a shortcut on the 'hoge' volume.
-  shortcutListModel.splice(1, 0, new MockFileEntry(hoge, '/shortcut2'));
+  shortcutListModel.splice(1, 0, MockFileEntry.create(hoge, '/shortcut2'));
 
   assertEquals(6, model.length);
   assertEquals(
@@ -270,12 +342,25 @@ function testAddAndRemoveVolumes() {
   assertEquals(
       'drive', /** @type {!NavigationModelVolumeItem} */
       (model.item(3)).volumeInfo.volumeId);
-  assertEquals(
-      'removable:hoge', /** @type {!NavigationModelVolumeItem} */
-      (model.item(4)).volumeInfo.volumeId);
-  assertEquals(
-      'removable:fuga', /** @type {!NavigationModelVolumeItem} */
-      (model.item(5)).volumeInfo.volumeId);
+  if (util.isSinglePartitionFormatEnabled()) {
+    assertEquals('External Drive', model.item(4).label);
+    assertEquals('External Drive', model.item(5).label);
+  } else {
+    assertEquals(
+        'removable:hoge', /** @type {!NavigationModelVolumeItem} */
+        (model.item(4)).volumeInfo.volumeId);
+    assertEquals(
+        'removable:fuga', /** @type {!NavigationModelVolumeItem} */
+        (model.item(5)).volumeInfo.volumeId);
+  }
+}
+
+/**
+ * Tests testOrderAndNestItems test with SinglePartitionFormat flag is on.
+ */
+export function testOrderAndNestItemsWhenSinglePartitionOn() {
+  window.loadTimeData.data_['FILES_SINGLE_PARTITION_FORMAT_ENABLED'] = true;
+  testOrderAndNestItems();
 }
 
 /**
@@ -284,15 +369,12 @@ function testAddAndRemoveVolumes() {
  * 2. manages NavigationSection for the relevant volumes.
  * 3. keeps MTP/Archive/Removable volumes on the original order.
  */
-function testOrderAndNestItems() {
-  // Enable My files.
-  loadTimeData.data_['MY_FILES_VOLUME_ENABLED'] = true;
-
+export function testOrderAndNestItems() {
   const volumeManager = new MockVolumeManager();
 
   const shortcutListModel = new MockFolderShortcutDataModel([
-    new MockFileEntry(drive, '/root/shortcut'),
-    new MockFileEntry(drive, '/root/shortcut2')
+    MockFileEntry.create(drive, '/root/shortcut'),
+    MockFileEntry.create(drive, '/root/shortcut2'),
   ]);
 
   const recentItem = new NavigationModelFakeItem(
@@ -318,138 +400,115 @@ function testOrderAndNestItems() {
   volumeManager.volumeInfoList.add(MockVolumeManager.createMockVolumeInfo(
       VolumeManagerCommon.VolumeType.ANDROID_FILES, 'android_files:droid'));
   volumeManager.volumeInfoList.add(MockVolumeManager.createMockVolumeInfo(
-      VolumeManagerCommon.VolumeType.MEDIA_VIEW, 'media_view:images_root'));
-  volumeManager.volumeInfoList.add(MockVolumeManager.createMockVolumeInfo(
-      VolumeManagerCommon.VolumeType.MEDIA_VIEW, 'media_view:videos_root'));
-  volumeManager.volumeInfoList.add(MockVolumeManager.createMockVolumeInfo(
-      VolumeManagerCommon.VolumeType.MEDIA_VIEW, 'media_view:audio_root'));
-
-  // ZipArchiver mounts zip files as a PROVIDED volume type.
-  const zipVolumeId = 'provided:dmboannefpncccogfdikhmhpmdnddgoe:' +
-      '~%2FDownloads%2Fazip_file%2Ezip:' +
-      '096eaa592ea7e8ffb9a27435e50dabd6c809c125';
-  volumeManager.volumeInfoList.add(MockVolumeManager.createMockVolumeInfo(
-      VolumeManagerCommon.VolumeType.PROVIDED, zipVolumeId));
+      VolumeManagerCommon.VolumeType.SMB, 'smb:file-share'));
 
   const androidAppListModelWithApps =
       createFakeAndroidAppListModel(['android:app1', 'android:app2']);
 
   // Navigation items built above:
   //  1.  fake-entry://recent
-  //  2.  media_view:images_root
-  //  3.  media_view:videos_root
-  //  4.  media_view:audio_root
-  //  5.  /root/shortcut
-  //  6.  /root/shortcut2
-  //  7.  My files
+  //  2.  /root/shortcut
+  //  3.  /root/shortcut2
+  //  4.  My files
   //        -> Downloads
   //        -> Play files
   //        -> Linux files
-  //  8.  Drive  - from setup()
-  //  9.  provided:prov1
-  // 10.  provided:prov2
+  //  5.  Drive  - from setup()
+  //  6.  smb:file-share
+  //  7.  provided:prov1
+  //  8.  provided:prov2
   //
-  // 11.  removable:hoge
-  // 12.  removable:fuga
-  // 13.  archive:a-rar  - mounted as archive
-  // 14.  mtp:a-phone
-  // 15.  provided:"zip" - mounted as provided: $zipVolumeId
+  //  9.  removable:hoge
+  // 10.  removable:fuga
+  // 11.  archive:a-rar  - mounted as archive
+  // 12.  mtp:a-phone
   //
-  // 16.  android:app1
-  // 17.  android:app2
+  // 13.  android:app1
+  // 14.  android:app2
 
   // Constructor already calls orderAndNestItems_.
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModelWithApps);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModelWithApps, DialogType.FULL_PAGE);
 
   // Check items order and that MTP/Archive/Removable respect the original
   // order.
-  assertEquals(17, model.length);
+  assertEquals(14, model.length);
   assertEquals('recent-label', model.item(0).label);
 
-  assertEquals('media_view:images_root', model.item(1).label);
-  assertEquals('media_view:videos_root', model.item(2).label);
-  assertEquals('media_view:audio_root', model.item(3).label);
+  assertEquals('shortcut', model.item(1).label);
+  assertEquals('shortcut2', model.item(2).label);
+  assertEquals('My files', model.item(3).label);
 
-  assertEquals('shortcut', model.item(4).label);
-  assertEquals('shortcut2', model.item(5).label);
-  assertEquals('My files', model.item(6).label);
+  assertEquals('My Drive', model.item(4).label);
+  assertEquals('smb:file-share', model.item(5).label);
+  assertEquals('provided:prov1', model.item(6).label);
+  assertEquals('provided:prov2', model.item(7).label);
 
-  assertEquals('My Drive', model.item(7).label);
-  assertEquals('provided:prov1', model.item(8).label);
-  assertEquals('provided:prov2', model.item(9).label);
+  if (util.isSinglePartitionFormatEnabled()) {
+    assertEquals('External Drive', model.item(8).label);
+    assertEquals('External Drive', model.item(9).label);
+  } else {
+    assertEquals('removable:hoge', model.item(8).label);
+    assertEquals('removable:fuga', model.item(9).label);
+  }
 
-  assertEquals('removable:hoge', model.item(10).label);
-  assertEquals('removable:fuga', model.item(11).label);
+  assertEquals('archive:a-rar', model.item(10).label);
+  assertEquals('mtp:a-phone', model.item(11).label);
 
-  assertEquals('archive:a-rar', model.item(12).label);
-  assertEquals('mtp:a-phone', model.item(13).label);
-  assertEquals(zipVolumeId, model.item(14).label);
-
-  assertEquals('android:app1', model.item(15).label);
-  assertEquals('android:app2', model.item(16).label);
+  assertEquals('android:app1', model.item(12).label);
+  assertEquals('android:app2', model.item(13).label);
 
   // Check NavigationSection, which defaults to TOP.
   // recent-label.
   assertEquals(NavigationSection.TOP, model.item(0).section);
-  // Media View.
-  // Images.
-  assertEquals(NavigationSection.TOP, model.item(1).section);
-  // Videos.
-  assertEquals(NavigationSection.TOP, model.item(2).section);
-  // Audio.
-  assertEquals(NavigationSection.TOP, model.item(3).section);
   // shortcut.
-  assertEquals(NavigationSection.TOP, model.item(4).section);
+  assertEquals(NavigationSection.TOP, model.item(1).section);
   // shortcut2.
-  assertEquals(NavigationSection.TOP, model.item(5).section);
+  assertEquals(NavigationSection.TOP, model.item(2).section);
 
   // My Files.
-  assertEquals(NavigationSection.MY_FILES, model.item(6).section);
+  assertEquals(NavigationSection.MY_FILES, model.item(3).section);
 
-  // Drive and FSP are grouped together.
+  // Drive, FSP, and SMB are grouped together.
   // My Drive.
-  assertEquals(NavigationSection.CLOUD, model.item(7).section);
+  assertEquals(NavigationSection.CLOUD, model.item(4).section);
+  // smb:file-share.
+  assertEquals(NavigationSection.CLOUD, model.item(5).section);
   // provided:prov1.
-  assertEquals(NavigationSection.CLOUD, model.item(8).section);
+  assertEquals(NavigationSection.CLOUD, model.item(6).section);
   // provided:prov2.
-  assertEquals(NavigationSection.CLOUD, model.item(9).section);
+  assertEquals(NavigationSection.CLOUD, model.item(7).section);
 
   // MTP/Archive/Removable are grouped together.
   // removable:hoge.
-  assertEquals(NavigationSection.REMOVABLE, model.item(10).section);
+  assertEquals(NavigationSection.REMOVABLE, model.item(8).section);
   // removable:fuga.
-  assertEquals(NavigationSection.REMOVABLE, model.item(11).section);
+  assertEquals(NavigationSection.REMOVABLE, model.item(9).section);
   // archive:a-rar.
-  assertEquals(NavigationSection.REMOVABLE, model.item(12).section);
+  assertEquals(NavigationSection.REMOVABLE, model.item(10).section);
   // mtp:a-phone.
-  assertEquals(NavigationSection.REMOVABLE, model.item(13).section);
-  // archive:"zip" - $zipVolumeId
-  assertEquals(NavigationSection.REMOVABLE, model.item(14).section);
+  assertEquals(NavigationSection.REMOVABLE, model.item(11).section);
 
   // android:app1
-  assertEquals(NavigationSection.ANDROID_APPS, model.item(15).section);
+  assertEquals(NavigationSection.ANDROID_APPS, model.item(12).section);
   // android:app2
-  assertEquals(NavigationSection.ANDROID_APPS, model.item(16).section);
+  assertEquals(NavigationSection.ANDROID_APPS, model.item(13).section);
 
-  const myFilesModel = model.item(6);
+  const myFilesModel = model.item(3);
   // Re-order again: cast to allow calling this private model function.
   /** @type {!Object} */ (model).orderAndNestItems_();
   // Check if My Files is still in the same position.
-  assertEquals(NavigationSection.MY_FILES, model.item(6).section);
+  assertEquals(NavigationSection.MY_FILES, model.item(3).section);
   // Check if My Files model is still the same instance, because DirectoryTree
   // expects it to be the same instance to be able to find it on the tree.
-  assertEquals(myFilesModel, model.item(6));
+  assertEquals(myFilesModel, model.item(3));
 }
 
 /**
  * Tests model with My files enabled.
  */
-function testMyFilesVolumeEnabled(callback) {
-  // Enable My files.
-  loadTimeData.data_['MY_FILES_VOLUME_ENABLED'] = true;
-
+export function testMyFilesVolumeEnabled(callback) {
   const volumeManager = new MockVolumeManager();
   // Item 1 of the volume info list should have Downloads volume type.
   assertEquals(
@@ -458,7 +517,7 @@ function testMyFilesVolumeEnabled(callback) {
   // Create a downloads folder inside the item.
   const downloadsVolume = volumeManager.volumeInfoList.item(1);
   /** @type {!MockFileSystem} */ (downloadsVolume.fileSystem).populate([
-    '/Downloads/'
+    '/Downloads/',
   ]);
 
   const shortcutListModel = new MockFolderShortcutDataModel([]);
@@ -470,7 +529,7 @@ function testMyFilesVolumeEnabled(callback) {
 
   const crostiniFakeItem = new NavigationModelFakeItem(
       'linux-files-label', NavigationModelItemType.CROSTINI,
-      new FakeEntry(
+      new FakeEntryImpl(
           'linux-files-label', VolumeManagerCommon.RootType.CROSTINI));
 
   // Navigation items built above:
@@ -481,8 +540,8 @@ function testMyFilesVolumeEnabled(callback) {
 
   // Constructor already calls orderAndNestItems_.
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModel);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModel, DialogType.FULL_PAGE);
   model.linuxFilesItem = crostiniFakeItem;
 
   assertEquals(2, model.length);
@@ -521,7 +580,7 @@ function testMyFilesVolumeEnabled(callback) {
  * Tests that adding a new partition to the same grouped USB will add the
  * partition to the grouping.
  */
-function testMultipleUsbPartitionsGrouping() {
+export function testMultipleUsbPartitionsGrouping() {
   const shortcutListModel = new MockFolderShortcutDataModel([]);
   const recentItem = null;
   const volumeManager = new MockVolumeManager();
@@ -538,8 +597,8 @@ function testMultipleUsbPartitionsGrouping() {
       'partition3', 'device/path/1'));
 
   const model = new NavigationListModel(
-      volumeManager, shortcutListModel, recentItem, directoryModel,
-      androidAppListModel);
+      volumeManager, shortcutListModel.asFolderShortcutsDataModel(), recentItem,
+      directoryModel, androidAppListModel, DialogType.FULL_PAGE);
 
   // Check that the common root shows 3 partitions.
   let groupedUsbs = /** @type NavigationModelFakeItem */ (model.item(2));

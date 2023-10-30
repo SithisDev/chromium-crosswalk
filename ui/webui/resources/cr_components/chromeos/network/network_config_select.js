@@ -1,16 +1,32 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 /**
  * @fileoverview Polymer element for network configuration selection menus.
  */
+import '//resources/cr_elements/md_select.css.js';
+import '//resources/cr_elements/policy/cr_tooltip_icon.js';
+import '//resources/cr_elements/cr_shared_vars.css.js';
+import '//resources/cr_elements/cr_shared_style.css.js';
+import './cr_policy_network_indicator_mojo.js';
+import './network_shared_css.js';
+
+import {assertNotReached} from '//resources/js/assert.m.js';
+import {I18nBehavior} from '//resources/cr_elements/i18n_behavior.js';
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {CrPolicyNetworkBehaviorMojo} from './cr_policy_network_behavior_mojo.js';
+import {NetworkConfigElementBehavior} from './network_config_element_behavior.js';
+import {OncMojo} from './onc_mojo.js';
+
 Polymer({
+  _template: html`{__html_template__}`,
   is: 'network-config-select',
 
   behaviors: [
     I18nBehavior,
-    CrPolicyNetworkBehavior,
+    CrPolicyNetworkBehaviorMojo,
     NetworkConfigElementBehavior,
   ],
 
@@ -29,9 +45,12 @@ Polymer({
 
     /**
      * Array of item values to select from.
-     * @type {!Array<string>}
+     * @type {!Array<string|number>}
      */
     items: Array,
+
+    /** Select item key, used for converting enums to strings */
+    key: String,
 
     /** Prefix used to look up ONC property names. */
     oncPrefix: {
@@ -39,16 +58,19 @@ Polymer({
       value: '',
     },
 
-    /** Select item value */
+    /**
+     * Select item value
+     * @type {string|number}
+     */
     value: {
-      type: String,
+      type: Object,
       notify: true,
     },
   },
 
   observers: ['updateSelected_(items, value)'],
 
-  focus: function() {
+  focus() {
     this.$$('select').focus();
   },
 
@@ -56,57 +78,75 @@ Polymer({
    * Ensure that the <select> value is updated when |items| or |value| changes.
    * @private
    */
-  updateSelected_: function() {
+  updateSelected_() {
     // Wait for the dom-repeat to populate the <option> entries.
     this.async(function() {
       const select = this.$$('select');
-      if (select.value != this.value) {
+      if (select.value !== this.value) {
         select.value = this.value;
       }
     });
   },
 
   /**
-   * @param {string|!chrome.networkingPrivate.Certificate} item
-   * @param {string} prefix
-   * @return {string} The text to display for the onc value.
-   * @private
-   */
-  getItemLabel_: function(item, prefix) {
-    if (this.certList) {
-      return this.getCertificateName_(
-          /** @type {chrome.networkingPrivate.Certificate}*/ (item));
-    }
-    const key = /** @type {string} */ (item);
-    const oncKey = 'Onc' + prefix.replace(/\./g, '-') + '_' + key;
-    if (this.i18nExists(oncKey)) {
-      return this.i18n(oncKey);
-    }
-    assertNotReached('ONC Key not found: ' + oncKey);
-    return key;
-  },
-
-  /**
-   * @param {string|!chrome.networkingPrivate.Certificate} item
+   * Returns a localized label for |item|. If |this.key| is set, |item| is
+   * expected to be an enum and the key is used to convert it to a string.
+   * @param {string|number|!chromeos.networkConfig.mojom.NetworkCertificate}
+   *     item
    * @return {string}
    * @private
    */
-  getItemValue_: function(item) {
+  getItemLabel_(item) {
     if (this.certList) {
-      return /** @type {chrome.networkingPrivate.Certificate}*/ (item).hash;
+      return this.getCertificateName_(
+          /** @type {!chromeos.networkConfig.mojom.NetworkCertificate}*/ (
+              item));
     }
-    return /** @type {string} */ (item);
+    let value;
+    if (this.key) {
+      // |item| is an enum, convert the enum to a string.
+      value = /** @type {string} */ (
+          OncMojo.getTypeString(this.key, /** @type {number} */ (item)));
+    } else {
+      value = /** @type {string} */ (item);
+    }
+    // The i18n dictonary is populated with all supported ONC values in the
+    // format Onc + prefix + value, with '-' replaceing '.' in the prefix.
+    // See network_element_localized_strings_provider.cc.
+    const oncValue = 'Onc' + this.oncPrefix.replace(/\./g, '-') + '_' + value;
+    if (this.i18nExists(oncValue)) {
+      return this.i18n(oncValue);
+    }
+    // All selectable values should be localized.
+    assertNotReached('ONC value not found: ' + oncValue);
+    return value;
   },
 
   /**
-   * @param {string|!chrome.networkingPrivate.Certificate} item
+   * @param {string|number|!chromeos.networkConfig.mojom.NetworkCertificate}
+   *     item
+   * @return {string|number}
+   * @private
+   */
+  getItemValue_(item) {
+    if (this.certList) {
+      return /** @type {chromeos.networkConfig.mojom.NetworkCertificate}*/ (
+                 item)
+          .hash;
+    }
+    return /** @type {string|number}*/ (item);
+  },
+
+  /**
+   * @param {string|!chromeos.networkConfig.mojom.NetworkCertificate} item
    * @return {boolean}
    * @private
    */
-  getItemEnabled_: function(item) {
+  getItemEnabled_(item) {
     if (this.certList) {
-      const cert = /** @type {chrome.networkingPrivate.Certificate}*/ (item);
-      if (this.deviceCertsOnly && !(cert.deviceWide || cert.isDefault)) {
+      const cert =
+          /** @type {chromeos.networkConfig.mojom.NetworkCertificate}*/ (item);
+      if (this.deviceCertsOnly && !cert.deviceWide) {
         return false;
       }
       return !!cert.hash;
@@ -115,11 +155,11 @@ Polymer({
   },
 
   /**
-   * @param {!chrome.networkingPrivate.Certificate} certificate
+   * @param {!chromeos.networkConfig.mojom.NetworkCertificate} certificate
    * @return {string}
    * @private
    */
-  getCertificateName_: function(certificate) {
+  getCertificateName_(certificate) {
     if (certificate.hardwareBacked) {
       return this.i18n(
           'networkCertificateNameHardwareBacked', certificate.issuedBy,

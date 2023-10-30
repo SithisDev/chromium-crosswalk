@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,13 @@ class GESTURE_DETECTION_EXPORT MotionEvent {
   };
 
   enum class ToolType { UNKNOWN, FINGER, STYLUS, MOUSE, ERASER, LAST = ERASER };
+
+  enum class Classification {
+    NONE,
+    AMBIGUOUS_GESTURE,
+    DEEP_PRESS,
+    LAST = DEEP_PRESS
+  };
 
   enum ButtonType {
     BUTTON_PRIMARY = 1 << 0,
@@ -77,6 +84,8 @@ class GESTURE_DETECTION_EXPORT MotionEvent {
   virtual int GetButtonState() const = 0;
   virtual int GetFlags() const = 0;
   virtual base::TimeTicks GetEventTime() const = 0;
+
+  virtual Classification GetClassification() const;
 
   // Optional historical data, default implementation provides an empty history.
   virtual size_t GetHistorySize() const;

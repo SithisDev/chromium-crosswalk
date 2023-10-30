@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gl/scoped_make_current.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_surface.h"
 
@@ -18,7 +18,7 @@ ScopedMakeCurrent::ScopedMakeCurrent(gl::GLContext* context,
       surface_(surface) {
   DCHECK(context);
   DCHECK(surface);
-  context->MakeCurrent(surface);
+  is_context_current_ = context->MakeCurrent(surface);
 }
 
 ScopedMakeCurrent::~ScopedMakeCurrent() {

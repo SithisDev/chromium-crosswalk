@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,17 @@
 
 #include <windows.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
 // Wrapper for GetTouchInputInfo, which is not defined before Win7. For
 // earlier OS's, this function returns FALSE.
-UI_BASE_EXPORT BOOL GetTouchInputInfoWrapper(HTOUCHINPUT handle,
-                                             UINT count,
-                                             PTOUCHINPUT pointer,
-                                             int size);
+COMPONENT_EXPORT(UI_BASE)
+BOOL GetTouchInputInfoWrapper(HTOUCHINPUT handle,
+                              UINT count,
+                              PTOUCHINPUT pointer,
+                              int size);
 
 }  // namespace ui
 

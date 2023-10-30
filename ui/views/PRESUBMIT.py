@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,8 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into depot_tools.
 """
 
+USE_PYTHON3 = True
+
 INCLUDE_CPP_FILES_ONLY = (
   r'.*\.(cc|h)$',
 )
@@ -16,10 +18,10 @@ INCLUDE_CPP_FILES_ONLY = (
 def CheckChangeLintsClean(input_api, output_api):
   """Makes sure that the change is cpplint clean."""
   sources = lambda x: input_api.FilterSourceFile(
-    x, white_list=INCLUDE_CPP_FILES_ONLY,
-    black_list=input_api.DEFAULT_BLACK_LIST)
+    x, files_to_check=INCLUDE_CPP_FILES_ONLY,
+    files_to_skip=input_api.DEFAULT_FILES_TO_SKIP)
   return input_api.canned_checks.CheckChangeLintsClean(
-      input_api, output_api, sources)
+      input_api, output_api, sources, lint_filters=[], verbose_level=1)
 
 
 def CheckChange(input_api, output_api):

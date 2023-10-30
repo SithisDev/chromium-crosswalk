@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">모든 이미지 애니메이션을 사용하지 않습니다.</translation>
 <translation id="1703735871906654364">캐럿 브라우징</translation>
 <translation id="1791496371305830581">모든 애니메이션 이미지를 허용합니다.</translation>
+<translation id="1974060860693918893">고급</translation>
 <translation id="1996252509865389616">사용하기</translation>
 <translation id="2079545284768500474">실행취소</translation>
 <translation id="2179565792157161713">새 탭에서 상세 설명 열기</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">이미지를 대체 텍스트로 바꿨습니다.</translation>
 <translation id="4896660567607030658">피드백 없이 커서만 표시</translation>
 <translation id="4937901943818762779">애니메이션 이미지를 한 번만 허용합니다.</translation>
+<translation id="4949131196216960195">캐럿 브라우징을 사용 설정하려면 &lt;span class='key'&gt;검색&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt;(밝기 높임 키 또는 F7) 키를 누르세요. 사용 중지하려면 다시 한번 누릅니다.</translation>
 <translation id="4954450790315188152">캐럿 브라우징이 사용 설정된 경우:</translation>
 <translation id="5041932793799765940">색상 조정</translation>
 <translation id="5094574508723441140">대비 강화</translation>
@@ -50,6 +52,7 @@
 <translation id="6170146920149900756">색상 개선 도구</translation>
 <translation id="633394792577263429">&lt;span class='key'&gt;Control&lt;/span&gt;을 눌러 단어별로 이동합니다.</translation>
 <translation id="6550675742724504774">옵션</translation>
+<translation id="6699630355767768222">3단계: 보정을 위한 색상 축을 재정의합니다</translation>
 <translation id="6838518108677880446">설정:</translation>
 <translation id="690628312087070417">캐럿이 멀리 이동하는 경우:</translation>
 <translation id="6965382102122355670">확인</translation>
@@ -60,10 +63,10 @@
 <translation id="7658239707568436148">취소</translation>
 <translation id="786423340267544509">aria-describedat 또는 longdesc 속성을 포함하는 요소에 테두리 추가</translation>
 <translation id="7942349550061667556">빨간색</translation>
-<translation id="8254860724243898966">&lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt;(밝기 높임 키 또는 F7)를 눌러 캐럿 브라우징을 사용 설정합니다. 사용 중지하려면 다시 누릅니다.</translation>
 <translation id="8260673944985561857">캐럿 브라우징 옵션</translation>
 <translation id="8321034316479930120">애니메이션 정책</translation>
 <translation id="8480209185614411573">고대비</translation>
 <translation id="8609925175482059018">&lt;span class='key'&gt;F7&lt;/span&gt;을 눌러 캐럿 브라우징을 사용 설정합니다. 사용 중지하려면 F7을 다시 누르세요.</translation>
+<translation id="8798099450830957504">기본값</translation>
 <translation id="894241283505723656">컨텍스트 메뉴의 상세 설명</translation>
 </translationbundle>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include <map>
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "ui/gfx/animation/animation_container.h"
@@ -38,9 +37,19 @@ class View;
 // You can attach an AnimationDelegate to the individual animation for a view
 // by way of SetAnimationDelegate. Additionally you can attach an observer to
 // the BoundsAnimator that is notified when all animations are complete.
+//
+// There is an option to apply transforms on the view instead of repainting and
+// relayouting each animation tick. This should be used if the size of the view
+// is not changing. It can be considered, but may have funny looking visuals for
+// other cases, depending on the content. If layers are not present, they are
+// created and destroyed as necessary.
 class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
  public:
-  explicit BoundsAnimator(View* view);
+  explicit BoundsAnimator(View* view, bool use_transforms = false);
+
+  BoundsAnimator(const BoundsAnimator&) = delete;
+  BoundsAnimator& operator=(const BoundsAnimator&) = delete;
+
   ~BoundsAnimator() override;
 
   // Starts animating |view| from its current bounds to |target|. If there is
@@ -61,10 +70,6 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
   // animating its current bounds is returned.
   gfx::Rect GetTargetBounds(const View* view) const;
 
-  // Sets the animation for the specified view.
-  void SetAnimationForView(View* view,
-                           std::unique_ptr<gfx::SlideAnimation> animation);
-
   // Returns the animation for the specified view. BoundsAnimator owns the
   // returned Animation.
   const gfx::SlideAnimation* GetAnimationForView(View* view);
@@ -82,16 +87,19 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
   // Returns true if BoundsAnimator is animating any view.
   bool IsAnimating() const;
 
+  // Finishes all animations, teleporting the views to their target bounds. Any
+  // views marked for deletion are deleted.
+  void Complete();
+
   // Cancels all animations, leaving the views at their current location and
   // size. Any views marked for deletion are deleted.
   void Cancel();
 
-  // Overrides default animation duration. |duration_ms| is the new duration in
-  // milliseconds.
-  void SetAnimationDuration(int duration_ms);
+  // Overrides default animation duration.
+  void SetAnimationDuration(base::TimeDelta duration);
 
   // Gets the currently used animation duration.
-  int GetAnimationDuration() const { return animation_duration_ms_; }
+  base::TimeDelta GetAnimationDuration() const { return animation_duration_; }
 
   // Sets the tween type for new animations. Default is EASE_OUT.
   void set_tween_type(gfx::Tween::Type type) { tween_type_ = type; }
@@ -124,17 +132,17 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
 
     // Delegate for the animation, may be nullptr.
     std::unique_ptr<gfx::AnimationDelegate> delegate;
+
+    // Will only exist if |use_transforms_| is true.
+    absl::optional<gfx::Transform> target_transform;
   };
 
   // Used by AnimationEndedOrCanceled.
-  enum AnimationEndType {
-    ANIMATION_ENDED,
-    ANIMATION_CANCELED
-  };
+  enum class AnimationEndType { kEnded, kCanceled };
 
-  typedef std::map<const View*, Data> ViewToDataMap;
+  using ViewToDataMap = std::map<const View*, Data>;
 
-  typedef std::map<const gfx::Animation*, View*> AnimationToViewMap;
+  using AnimationToViewMap = std::map<const gfx::Animation*, View*>;
 
   // Removes references to |view| and its animation. Returns the data for the
   // caller to handle cleanup.
@@ -160,9 +168,21 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
   void AnimationContainerProgressed(
       gfx::AnimationContainer* container) override;
   void AnimationContainerEmpty(gfx::AnimationContainer* container) override;
+  void OnChildViewRemoved(views::View* observed_view,
+                          views::View* child) override;
+  base::TimeDelta GetAnimationDurationForReporting() const override;
 
   // Parent of all views being animated.
-  View* parent_;
+  raw_ptr<View> parent_;
+
+  // A more performant version of the bounds animations which updates the
+  // transform of the views and therefore skips repainting and relayouting until
+  // the end of the animation. Note that this may not look as good as the
+  // regular version, depending on the content and the source and destination
+  // bounds. In the case the provided source bounds is empty, we cannot derive a
+  // transform so that particular view will still use a bounds animation, even
+  // with this flag on.
+  const bool use_transforms_;
 
   base::ObserverList<BoundsAnimatorObserver>::Unchecked observers_;
 
@@ -181,11 +201,9 @@ class VIEWS_EXPORT BoundsAnimator : public AnimationDelegateViews {
   // to repaint these bounds.
   gfx::Rect repaint_bounds_;
 
-  int animation_duration_ms_ = 200;
+  base::TimeDelta animation_duration_ = base::Milliseconds(200);
 
   gfx::Tween::Type tween_type_ = gfx::Tween::EASE_OUT;
-
-  DISALLOW_COPY_AND_ASSIGN(BoundsAnimator);
 };
 
 }  // namespace views

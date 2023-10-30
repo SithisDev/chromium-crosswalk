@@ -1,13 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/selection_controller.h"
-#include "base/macros.h"
+
+#include <memory>
+#include <string>
+
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/render_text.h"
 #include "ui/views/metrics.h"
 #include "ui/views/selection_controller_delegate.h"
@@ -28,6 +35,12 @@ class TestSelectionControllerDelegate : public SelectionControllerDelegate {
  public:
   explicit TestSelectionControllerDelegate(gfx::RenderText* render_text)
       : render_text_(render_text) {}
+
+  TestSelectionControllerDelegate(const TestSelectionControllerDelegate&) =
+      delete;
+  TestSelectionControllerDelegate& operator=(
+      const TestSelectionControllerDelegate&) = delete;
+
   ~TestSelectionControllerDelegate() override = default;
 
   gfx::RenderText* GetRenderTextForSelectionController() override {
@@ -52,21 +65,24 @@ class TestSelectionControllerDelegate : public SelectionControllerDelegate {
   void UpdateSelectionClipboard() override {}
 
  private:
-  gfx::RenderText* render_text_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSelectionControllerDelegate);
+  raw_ptr<gfx::RenderText> render_text_;
 };
 
 class SelectionControllerTest : public ::testing::Test {
  public:
   void SetUp() override {
-    render_text_ = gfx::RenderText::CreateHarfBuzzInstance();
+    render_text_ = gfx::RenderText::CreateRenderText();
     delegate_ =
         std::make_unique<TestSelectionControllerDelegate>(render_text_.get());
     controller_ = std::make_unique<SelectionController>(delegate_.get());
   }
 
-  SelectionControllerTest() = default;
+  SelectionControllerTest()
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
+
+  SelectionControllerTest(const SelectionControllerTest&) = delete;
+  SelectionControllerTest& operator=(const SelectionControllerTest&) = delete;
+
   ~SelectionControllerTest() override = default;
 
   void SetText(const std::string& text) {
@@ -112,14 +128,14 @@ class SelectionControllerTest : public ::testing::Test {
     mouse_location_ = location;
     // Ensure that mouse presses are spaced apart by at least the double-click
     // interval to avoid triggering a double-click.
-    last_event_time_ +=
-        base::TimeDelta::FromMilliseconds(views::GetDoubleClickInterval() + 1);
+    last_event_time_ += base::Milliseconds(views::GetDoubleClickInterval() + 1);
     controller_->OnMousePressed(
         ui::MouseEvent(ui::ET_MOUSE_PRESSED, location, location,
                        last_event_time_, mouse_flags_, button),
         false,
-        focused ? SelectionController::FOCUSED
-                : SelectionController::UNFOCUSED);
+        focused
+            ? SelectionController::InitialFocusStateOnMousePress::kFocused
+            : SelectionController::InitialFocusStateOnMousePress::kUnFocused);
   }
 
   void ReleaseMouseButton(int button) {
@@ -130,6 +146,8 @@ class SelectionControllerTest : public ::testing::Test {
                        last_event_time_, mouse_flags_, button));
   }
 
+  base::test::TaskEnvironment task_environment_;
+
   std::unique_ptr<gfx::RenderText> render_text_;
   std::unique_ptr<TestSelectionControllerDelegate> delegate_;
   std::unique_ptr<SelectionController> controller_;
@@ -137,8 +155,6 @@ class SelectionControllerTest : public ::testing::Test {
   int mouse_flags_ = 0;
   gfx::Point mouse_location_;
   base::TimeTicks last_event_time_;
-
-  DISALLOW_COPY_AND_ASSIGN(SelectionControllerTest);
 };
 
 TEST_F(SelectionControllerTest, ClickAndDragToSelect) {

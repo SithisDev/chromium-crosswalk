@@ -1,10 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/gesture_detection/motion_event.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 #include "ui/events/gesture_detection/motion_event_generic.h"
 
 namespace ui {
@@ -35,6 +37,11 @@ float MotionEvent::GetHistoricalY(size_t pointer_index,
                                   size_t historical_index) const {
   NOTIMPLEMENTED();
   return 0.f;
+}
+
+MotionEvent::Classification MotionEvent::GetClassification() const {
+  NOTIMPLEMENTED();
+  return Classification::NONE;
 }
 
 int MotionEvent::FindPointerIndexOfId(int id) const {

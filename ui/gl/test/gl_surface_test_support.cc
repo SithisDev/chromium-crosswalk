@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,41 +6,38 @@
 
 #include <vector>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "build/build_config.h"
-#include "ui/base/platform_window_defaults.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if defined(USE_OZONE)
-#include "ui/ozone/public/ozone_platform.h"
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "ui/platform_window/common/platform_window_defaults.h"  // nogncheck
 #endif
 
-#if defined(USE_X11)
-#include "ui/gfx/x/x11.h"
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
 #endif
 
 namespace gl {
 
 namespace {
-void InitializeOneOffHelper(bool init_extensions) {
-  DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
-#if defined(USE_X11)
-  XInitThreads();
-#endif
+GLDisplay* InitializeOneOffHelper(bool init_extensions) {
+  DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
 #if defined(USE_OZONE)
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   ui::test::EnableTestConfigForPlatformWindows();
+#endif
 
   bool use_software_gl = true;
 
@@ -51,90 +48,92 @@ void InitializeOneOffHelper(bool init_extensions) {
     use_software_gl = false;
   }
 
-#if defined(OS_ANDROID) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_ANDROID)
   // On Android we always use hardware GL.
-  // On Fuchsia, we always use fake GL, but we don't want any software
-  // GLs, but rather a stub implementation.
   use_software_gl = false;
 #endif
 
-  std::vector<GLImplementation> allowed_impls =
+  std::vector<GLImplementationParts> allowed_impls =
       init::GetAllowedGLImplementations();
   DCHECK(!allowed_impls.empty());
 
-  GLImplementation impl = allowed_impls[0];
-  if (use_software_gl)
+  GLImplementationParts impl = allowed_impls[0];
+  if (use_software_gl) {
     impl = gl::GetSoftwareGLImplementation();
+  }
 
   DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL))
       << "kUseGL has not effect in tests";
 
   bool fallback_to_software_gl = false;
-  bool gpu_service_logging = false;
   bool disable_gl_drawing = true;
 
-  CHECK(init::InitializeGLOneOffImplementation(
-      impl, fallback_to_software_gl, gpu_service_logging, disable_gl_drawing,
-      init_extensions));
+  CHECK(gl::init::InitializeStaticGLBindingsImplementation(
+      impl, fallback_to_software_gl));
+  GLDisplay* display = gl::init::InitializeGLOneOffPlatformImplementation(
+      fallback_to_software_gl, disable_gl_drawing, init_extensions,
+      /*system_device_id=*/0);
+  CHECK(display);
+  return display;
 }
 }  // namespace
 
 // static
-void GLSurfaceTestSupport::InitializeOneOff() {
-  InitializeOneOffHelper(true);
+GLDisplay* GLSurfaceTestSupport::InitializeOneOff() {
+  return InitializeOneOffHelper(true);
 }
 
 // static
-void GLSurfaceTestSupport::InitializeNoExtensionsOneOff() {
-  InitializeOneOffHelper(false);
+GLDisplay* GLSurfaceTestSupport::InitializeNoExtensionsOneOff() {
+  return InitializeOneOffHelper(false);
 }
 
 // static
-void GLSurfaceTestSupport::InitializeOneOffImplementation(
-    GLImplementation impl,
+GLDisplay* GLSurfaceTestSupport::InitializeOneOffImplementation(
+    GLImplementationParts impl,
     bool fallback_to_software_gl) {
   DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL))
       << "kUseGL has not effect in tests";
 
-  // This method may be called multiple times in the same process to set up
-  // bindings in different ways.
-  init::ShutdownGL(false);
-
-  bool gpu_service_logging = false;
   bool disable_gl_drawing = false;
+  bool init_extensions = true;
 
-  CHECK(init::InitializeGLOneOffImplementation(impl, fallback_to_software_gl,
-                                               gpu_service_logging,
-                                               disable_gl_drawing, true));
+  CHECK(gl::init::InitializeStaticGLBindingsImplementation(
+      impl, fallback_to_software_gl));
+  GLDisplay* display = gl::init::InitializeGLOneOffPlatformImplementation(
+      fallback_to_software_gl, disable_gl_drawing, init_extensions,
+      /*system_device_id=*/0);
+  CHECK(display);
+  return display;
 }
 
 // static
-void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
+GLDisplay* GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
 #if defined(USE_OZONE)
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
-  InitializeOneOffImplementation(kGLImplementationMockGL, false);
+  return InitializeOneOffImplementation(
+      GLImplementationParts(kGLImplementationMockGL), false);
 }
 
 // static
-void GLSurfaceTestSupport::InitializeOneOffWithStubBindings() {
+GLDisplay* GLSurfaceTestSupport::InitializeOneOffWithStubBindings() {
 #if defined(USE_OZONE)
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
-  InitializeOneOffImplementation(kGLImplementationStubGL, false);
+  return InitializeOneOffImplementation(
+      GLImplementationParts(kGLImplementationStubGL), false);
 }
 
 // static
-void GLSurfaceTestSupport::ShutdownGL() {
-  init::ShutdownGL(false);
+void GLSurfaceTestSupport::ShutdownGL(GLDisplay* display) {
+  init::ShutdownGL(display, false);
 }
 
 }  // namespace gl

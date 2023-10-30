@@ -1,16 +1,25 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
 
-source_set("platform_window") {
+component("platform_window") {
   sources = [
+    "extensions/workspace_extension.cc",
+    "extensions/workspace_extension.h",
+    "extensions/workspace_extension_delegate.h",
+    "platform_window.cc",
     "platform_window.h",
+    "platform_window_delegate.cc",
     "platform_window_delegate.h",
     "platform_window_init_properties.cc",
     "platform_window_init_properties.h",
   ]
+
+  defines = [ "IS_PLATFORM_WINDOW_IMPL" ]
+
+  public_deps = []
 
   deps = [
     "//base",
@@ -22,23 +31,42 @@ source_set("platform_window") {
     sources += [
       "fuchsia/initialize_presenter_api_view.cc",
       "fuchsia/initialize_presenter_api_view.h",
+      "fuchsia/scenic_window_delegate.h",
     ]
 
-    public_deps = [
-      "//third_party/fuchsia-sdk/sdk:scenic_cpp",
-      "//third_party/fuchsia-sdk/sdk:ui_policy",
-      "//third_party/fuchsia-sdk/sdk:ui_views",
+    public_deps += [
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.element",
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.policy",
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.views",
+      "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
+      "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
+    ]
+  }
+
+  if (is_linux || is_chromeos) {
+    sources += [
+      "extensions/desk_extension.cc",
+      "extensions/desk_extension.h",
+      "extensions/pinned_mode_extension.cc",
+      "extensions/pinned_mode_extension.h",
+      "extensions/system_modal_extension.cc",
+      "extensions/system_modal_extension.h",
+      "extensions/wayland_extension.cc",
+      "extensions/wayland_extension.h",
+    ]
+  }
+  if (is_linux || is_chromeos_ash) {
+    sources += [
+      "extensions/x11_extension.cc",
+      "extensions/x11_extension.h",
+      "extensions/x11_extension_delegate.h",
     ]
   }
 }
 
 group("platform_impls") {
-  public_deps = [
-    "//ui/platform_window/stub",
-  ]
-  if (use_x11) {
-    public_deps += [ "//ui/platform_window/x11" ]
-  } else if (is_win) {
+  public_deps = [ "//ui/platform_window/stub" ]
+  if (is_win) {
     public_deps += [ "//ui/platform_window/win" ]
   }
 }

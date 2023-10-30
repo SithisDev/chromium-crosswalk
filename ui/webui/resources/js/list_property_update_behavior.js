@@ -1,6 +1,8 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {calculateSplices} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 /**
  * @fileoverview |ListPropertyUpdateBehavior| is used to update an existing
@@ -10,25 +12,28 @@
  * re-rendered from scratch.
  *
  * The minimal splices needed to transform the original list to the edited list
- * are calculated using |Polymer.ArraySplice.calculateSplices|. All the edits
+ * are calculated using |calculateSplices|. All the edits
  * are then applied to the original list. Once completed, a single notification
  * containing information about all the edits is sent to the polyer object.
+ *
+ * NOTE: This file is deprecated in favor of list_property_update_mixin.ts.
+ * Don't use it in new code.
  */
 
 /** @polymerBehavior */
-const ListPropertyUpdateBehavior = {
+export const ListPropertyUpdateBehavior = {
   /**
    * @param {string} propertyPath
-   * @param {function(!Object): string} itemUidGetter
+   * @param {function(!Object): (!Object|string)} identityGetter
    * @param {!Array<!Object>} updatedList
-   * @param {boolean} uidBasedUpdate
-   * @returns {boolean} True if notifySplices was called.
+   * @param {boolean=} identityBasedUpdate
+   * @return {boolean} True if notifySplices was called.
    */
-  updateList: function(
-      propertyPath, itemUidGetter, updatedList, uidBasedUpdate = false) {
+  updateList(
+      propertyPath, identityGetter, updatedList, identityBasedUpdate = false) {
     const list = this.get(propertyPath);
-    const splices = Polymer.ArraySplice.calculateSplices(
-        updatedList.map(itemUidGetter), list.map(itemUidGetter));
+    const splices = calculateSplices(
+        updatedList.map(identityGetter), list.map(identityGetter));
 
     splices.forEach(splice => {
       const index = splice.index;
@@ -45,10 +50,10 @@ const ListPropertyUpdateBehavior = {
     });
 
     let updated = splices.length > 0;
-    if (!uidBasedUpdate) {
+    if (!identityBasedUpdate) {
       list.forEach((item, index) => {
         const updatedItem = updatedList[index];
-        if (JSON.stringify(item) != JSON.stringify(updatedItem)) {
+        if (JSON.stringify(item) !== JSON.stringify(updatedItem)) {
           this.set([propertyPath, index], updatedItem);
           updated = true;
         }
@@ -61,3 +66,15 @@ const ListPropertyUpdateBehavior = {
     return updated;
   },
 };
+
+export class ListPropertyUpdateBehaviorInterface {
+  /**
+   * @param {string} propertyPath
+   * @param {function(!Object): (!Object|string)} identityGetter
+   * @param {!Array<!Object>} updatedList
+   * @param {boolean=} identityBasedUpdate
+   * @return {boolean} True if notifySplices was called.
+   */
+  updateList(
+      propertyPath, identityGetter, updatedList, identityBasedUpdate = false) {}
+}

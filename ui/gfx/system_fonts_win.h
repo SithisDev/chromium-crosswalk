@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace win {
 
 // Represents an optional override of system font and scale.
 struct FontAdjustment {
-  base::string16 font_family_override;
+  std::wstring font_family_override;
   double font_scale = 1.0;
 };
 
@@ -33,6 +33,10 @@ GFX_EXPORT void SetGetMinimumFontSizeCallback(
 // |get_minimum_font_size_callback| is specified.
 typedef void (*AdjustFontCallback)(FontAdjustment* font_adjustment);
 GFX_EXPORT void SetAdjustFontCallback(AdjustFontCallback callback);
+
+// Returns the specified Windows default system font. By default, this is the
+// font used for message boxes (see struct NONCLIENTMETRICS).
+GFX_EXPORT const Font& GetDefaultSystemFont();
 
 // Returns the specified Windows system font, suitable for drawing on screen
 // elements.
@@ -54,7 +58,10 @@ GFX_EXPORT int AdjustFontSize(int lf_height, int size_delta);
 GFX_EXPORT void AdjustLOGFONTForTesting(const FontAdjustment& font_adjustment,
                                         LOGFONT* logfont);
 
-// Clear the system fonts cache. SystemFonts is keeping a global state that
+// Retrieves a FONT from a LOGFONT structure.
+GFX_EXPORT Font GetFontFromLOGFONTForTesting(const LOGFONT& logfont);
+
+// Clears the system fonts cache. SystemFonts is keeping a global state that
 // must be reset in unittests when using |GetMinimumFontSizeCallback| or
 // |SetAdjustFontCallback|.
 GFX_EXPORT void ResetSystemFontsForTesting();

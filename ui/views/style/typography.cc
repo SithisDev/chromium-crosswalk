@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/style/typography.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/typography_provider.h"
 
@@ -19,6 +19,12 @@ void ValidateContextAndStyle(int context, int style) {
 }
 
 }  // namespace
+
+ui::ResourceBundle::FontDetails GetFontDetails(int context, int style) {
+  ValidateContextAndStyle(context, style);
+  return LayoutProvider::Get()->GetTypographyProvider().GetFontDetails(context,
+                                                                       style);
+}
 
 const gfx::FontList& GetFont(int context, int style) {
   ValidateContextAndStyle(context, style);

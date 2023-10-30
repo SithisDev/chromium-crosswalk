@@ -1,8 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/gesture_event_details.h"
+
+#include <ostream>
+
+#include "base/check_op.h"
+#include "base/notreached.h"
 
 namespace ui {
 
@@ -19,11 +24,10 @@ GestureEventDetails::GestureEventDetails(ui::EventType type)
   DCHECK_LE(type, ET_GESTURE_TYPE_END);
 }
 
-GestureEventDetails::GestureEventDetails(
-    ui::EventType type,
-    float delta_x,
-    float delta_y,
-    ui::input_types::ScrollGranularity units)
+GestureEventDetails::GestureEventDetails(ui::EventType type,
+                                         float delta_x,
+                                         float delta_y,
+                                         ui::ScrollGranularity units)
     : type_(type),
       device_type_(GestureDeviceType::DEVICE_UNKNOWN),
       touch_points_(1) {
@@ -70,6 +74,7 @@ GestureEventDetails::GestureEventDetails(ui::EventType type,
       data_(other.data_),
       device_type_(other.device_type_),
       primary_pointer_type_(other.primary_pointer_type_),
+      primary_unique_touch_event_id_(other.primary_unique_touch_event_id_),
       touch_points_(other.touch_points_),
       bounding_box_(other.bounding_box_) {
   DCHECK_GE(type, ET_GESTURE_TYPE_START);
@@ -80,7 +85,7 @@ GestureEventDetails::GestureEventDetails(ui::EventType type,
       // allowed as an exception.
       if (other.type() == ui::ET_GESTURE_PINCH_BEGIN)
         break;
-      FALLTHROUGH;
+      [[fallthrough]];
     case ui::ET_GESTURE_SCROLL_UPDATE:
     case ui::ET_SCROLL_FLING_START:
     case ui::ET_GESTURE_SWIPE:

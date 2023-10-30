@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,10 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
+#include "ui/aura/env.h"
 #include "ui/aura/env_observer.h"
 #include "ui/views/views_export.h"
 
@@ -25,6 +28,8 @@ class VIEWS_EXPORT AccessibilityAlertWindow : public aura::EnvObserver {
  public:
   // |parent| is the window where a child alert window will be added.
   AccessibilityAlertWindow(aura::Window* parent, views::AXAuraObjCache* cache);
+  AccessibilityAlertWindow(const AccessibilityAlertWindow&) = delete;
+  AccessibilityAlertWindow& operator=(const AccessibilityAlertWindow&) = delete;
   ~AccessibilityAlertWindow() override;
 
   // Triggers an alert with the text |alert_string| to be sent to an
@@ -32,17 +37,19 @@ class VIEWS_EXPORT AccessibilityAlertWindow : public aura::EnvObserver {
   void HandleAlert(const std::string& alert_string);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AccessibilityAlertWindowTest, HandleAlert);
+  FRIEND_TEST_ALL_PREFIXES(AccessibilityAlertWindowTest, OnWillDestroyEnv);
+
   // aura::EnvObserver:
-  void OnWindowInitialized(aura::Window* window) override;
   void OnWillDestroyEnv() override;
 
   // The child alert window.
   std::unique_ptr<aura::Window> alert_window_;
 
   // The accessibility cache associated with |alert_window_|.
-  views::AXAuraObjCache* cache_;
+  raw_ptr<views::AXAuraObjCache> cache_;
 
-  DISALLOW_COPY_AND_ASSIGN(AccessibilityAlertWindow);
+  base::ScopedObservation<aura::Env, aura::EnvObserver> observation_{this};
 };
 
 }  // namespace views

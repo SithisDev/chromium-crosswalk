@@ -1,14 +1,89 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {createCrostiniForTest} from '../../background/js/mock_crostini.js';
+import {MockProgressCenter} from '../../background/js/mock_progress_center.js';
+import {metrics} from '../../common/js/metrics.js';
+import {installMockChrome} from '../../common/js/mock_chrome.js';
+import {MockFileEntry, MockFileSystem} from '../../common/js/mock_entry.js';
+import {ProgressItemState} from '../../common/js/progress_center_common.js';
+import {reportPromise} from '../../common/js/test_error_reporting.js';
+import {LEGACY_FILES_EXTENSION_ID} from '../../common/js/url_constants.js';
+import {util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {ProgressCenter} from '../../externs/background/progress_center.js';
+import {EntryLocation} from '../../externs/entry_location.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+import {FilesPasswordDialog} from '../elements/files_password_dialog.js';
+
+import {DirectoryModel} from './directory_model.js';
+import {FileTasks} from './file_tasks.js';
+import {FileTransferController} from './file_transfer_controller.js';
+import {MetadataModel} from './metadata/metadata_model.js';
+import {NamingController} from './naming_controller.js';
+import {TaskHistory} from './task_history.js';
+import {FileManagerUI} from './ui/file_manager_ui.js';
+
 /**
- * Mock metrics
- * @type {!Object}
+ * Utility function that appends value under a given name in the store.
+ * @param {!Map<string, !Array<string|number>>} store
+ * @param {string} name
+ * @param {!*} value
  */
-window.metrics = {
-  recordEnum: function() {},
-  recordSmallCount: function() {},
+function record(store, name, value) {
+  let recorded = store.get(name);
+  if (!recorded) {
+    recorded = [];
+    store.set(name, recorded);
+  }
+  recorded.push(value);
+}
+
+/**
+ * A map from histogram name to all enums recorded for it.
+ */
+const enumMap = new Map();
+
+/**
+ * A map from histogram name to all counts recorded for it.
+ */
+const countMap = new Map();
+
+/**
+ * A map from histogram name to all times recorded for it.
+ */
+const timeMap = new Map();
+
+/**
+ * Mock metrics.recordEnum.
+ * @param {string} name
+ * @param {*} value
+ * @param {Array<*>|number=} valid
+ */
+metrics.recordEnum = function(name, value, valid) {
+  assertTrue(valid.includes(value));
+  record(enumMap, name, value);
+};
+
+/**
+ * Mock metrics.recordSmallCount.
+ * @param {string} name Short metric name.
+ * @param {number} value Value to be recorded.
+ */
+metrics.recordSmallCount = function(name, value) {
+  record(countMap, name, value);
+};
+
+/**
+ * Mock metrics.recordTime.
+ * @param {string} name Short metric name.
+ * @param {number} time Time to be recorded in milliseconds.
+ */
+metrics.recordTime = function(name, time) {
+  record(timeMap, name, time);
 };
 
 /**
@@ -22,50 +97,99 @@ let mockChrome;
  * @type {!TaskHistory}
  */
 const mockTaskHistory = /** @type {!TaskHistory} */ ({
-  getLastExecutedTime: function(id) {
+  getLastExecutedTime: function(descriptor) {
     return 0;
   },
-  recordTaskExecuted: function(id) {},
+  recordTaskExecuted: function(descriptor) {},
 });
 
+/**
+ * Mock file transfer controller.
+ * @type {!FileTransferController}
+ */
+const mockFileTransferController = /** @type {!FileTransferController} */ ({});
+
+/**
+ * Mock directory change tracker.
+ * @type {!Object}
+ */
+const fakeTracker = {
+  hasChange: false,
+};
+
+/**
+ * Fake url for mounted ZIP file.
+ * @type {string}
+ */
+const fakeMountedZipUrl =
+    'filesystem:chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/' +
+    'external/fakePath/test.zip';
+
+/**
+ * Panel IDs for ZIP mount operations.
+ * @type {string}
+ */
+const zipMountPanelId = 'Mounting: ' + fakeMountedZipUrl;
+
+/**
+ * Panel IDs for ZIP mount errors.
+ * @type {string}
+ */
+const errorZipMountPanelId = 'Cannot mount: ' + fakeMountedZipUrl;
+
 // Set up test components.
-function setUp() {
+export function setUp() {
   // Mock LoadTimeData strings.
-  window.loadTimeData.data = {
-    DRIVE_FS_ENABLED: false,
-  };
   window.loadTimeData.getString = id => id;
+  window.loadTimeData.getBoolean = key => false;
 
   const mockTask = /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
-    taskId: 'handler-extension-id|app|any',
+    descriptor: {
+      appId: 'handler-extension-id',
+      taskType: 'app',
+      actionId: 'any',
+    },
     isDefault: false,
     isGenericFileHandler: true,
   });
 
   // Mock chome APIs.
   mockChrome = {
-    commandLinePrivate: {
-      hasSwitch: function(name, callback) {
-        callback(false);
-      },
-    },
     fileManagerPrivate: {
+      DriveConnectionStateType: {
+        ONLINE: 'ONLINE',
+        OFFLINE: 'OFFLINE',
+        METERED: 'METERED',
+      },
+      DriveOfflineReason: {
+        NOT_READY: 'NOT_READY',
+        NO_NETWORK: 'NO_NETWORK',
+        NO_SERVICE: 'NO_SERVICE',
+      },
+      Verb: {
+        SHARE_WITH: 'share_with',
+      },
+      TaskResult: {
+        MESSAGE_SENT: 'test_ms_task',
+        FAILED_PLUGIN_VM_DIRECTORY_NOT_SHARED: 'test_fpvdns_task',
+      },
       getFileTasks: function(entries, callback) {
         setTimeout(callback.bind(null, [mockTask]), 0);
       },
-      executeTask: function(taskId, entries, onViewFiles) {
+      executeTask: function(descriptor, entries, onViewFiles) {
         onViewFiles('failed');
       },
       sharePathsWithCrostini: function(vmName, entries, persist, callback) {
         callback();
       },
     },
-    runtime: {
-      id: 'test-extension-id',
-    },
+    runtime: {},
   };
 
   installMockChrome(mockChrome);
+  enumMap.clear();
+  countMap.clear();
+  timeMap.clear();
 }
 
 /**
@@ -95,7 +219,7 @@ function getMockFileManager() {
         };
       },
       getDriveConnectionState: function() {
-        return VolumeManagerCommon.DriveConnectionType.ONLINE;
+        return chrome.fileManagerPrivate.DriveConnectionStateType;
       },
       getVolumeInfo: function(entry) {
         return {
@@ -107,6 +231,7 @@ function getMockFileManager() {
       alertDialog: {
         showHtml: function(title, text, onOk, onCancel, onShow) {},
       },
+      passwordDialog: /** @type {!FilesPasswordDialog} */ ({}),
       speakA11yMessage: (text) => {},
     }),
     metadataModel: /** @type {!MetadataModel} */ ({}),
@@ -115,11 +240,13 @@ function getMockFileManager() {
       getCurrentRootType: function() {
         return null;
       },
+      changeDirectoryEntry: function(displayRoot) {},
     }),
     crostini: crostini,
+    progressCenter: /** @type {!ProgressCenter} */ (new MockProgressCenter()),
   };
 
-  fileManager.crostini.init(fileManager.volumeManager);
+  fileManager.crostini.initVolumeManager(fileManager.volumeManager);
   return fileManager;
 }
 
@@ -145,35 +272,10 @@ function showHtmlOfAlertDialogIsCalled(entries, expectedTitle, expectedText) {
     FileTasks
         .create(
             fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, entries, [null],
-            mockTaskHistory, fileManager.namingController, fileManager.crostini)
-        .then(tasks => {
-          tasks.executeDefault();
-        });
-  });
-}
-
-/**
- * Returns a promise that resolves when openSuggestAppsDialog is called.
- *
- * @param {!Array<!Entry>} entries Entries.
- * @param {!Array<?string>} mimeTypes Mime types.
- * @return {!Promise}
- */
-function openSuggestAppsDialogIsCalled(entries, mimeTypes) {
-  return new Promise((resolve, reject) => {
-    const fileManager = getMockFileManager();
-    fileManager.ui.suggestAppsDialog = {
-      showByExtensionAndMime: function(extension, mimeType, onDialogClosed) {
-        resolve();
-      },
-    };
-
-    FileTasks
-        .create(
-            fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, entries, mimeTypes,
-            mockTaskHistory, fileManager.namingController, fileManager.crostini)
+            fileManager.directoryModel, fileManager.ui,
+            mockFileTransferController, entries, [null], mockTaskHistory,
+            fileManager.namingController, fileManager.crostini,
+            fileManager.progressCenter)
         .then(tasks => {
           tasks.executeDefault();
         });
@@ -200,8 +302,38 @@ function showDefaultTaskDialogCalled(entries, mimeTypes) {
     FileTasks
         .create(
             fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, entries, mimeTypes,
-            mockTaskHistory, fileManager.namingController, fileManager.crostini)
+            fileManager.directoryModel, fileManager.ui,
+            mockFileTransferController, entries, mimeTypes, mockTaskHistory,
+            fileManager.namingController, fileManager.crostini,
+            fileManager.progressCenter)
+        .then(tasks => {
+          tasks.executeDefault();
+        });
+  });
+}
+
+/**
+ * Returns a promise that resolves when showImportCrostiniImageDialog is called.
+ *
+ * @param {!Array<!Entry>} entries Entries.
+ * @return {!Promise}
+ */
+function showImportCrostiniImageDialogIsCalled(entries) {
+  return new Promise((resolve, reject) => {
+    const fileManager = getMockFileManager();
+    fileManager.ui.importCrostiniImageDialog = {
+      showImportCrostiniImageDialog: (entry) => {
+        resolve();
+      },
+    };
+
+    FileTasks
+        .create(
+            fileManager.volumeManager, fileManager.metadataModel,
+            fileManager.directoryModel, fileManager.ui,
+            mockFileTransferController, entries, [null], mockTaskHistory,
+            fileManager.namingController, fileManager.crostini,
+            fileManager.progressCenter)
         .then(tasks => {
           tasks.executeDefault();
         });
@@ -211,9 +343,9 @@ function showDefaultTaskDialogCalled(entries, mimeTypes) {
 /**
  * Tests opening a .exe file.
  */
-function testToOpenExeFile(callback) {
+export function testToOpenExeFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.exe');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.exe');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled(
@@ -224,9 +356,9 @@ function testToOpenExeFile(callback) {
 /**
  * Tests opening a .dmg file.
  */
-function testToOpenDmgFile(callback) {
+export function testToOpenDmgFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.dmg');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.dmg');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled([mockEntry], 'test.dmg', 'NO_TASK_FOR_DMG'),
@@ -236,9 +368,9 @@ function testToOpenDmgFile(callback) {
 /**
  * Tests opening a .crx file.
  */
-function testToOpenCrxFile(callback) {
+export function testToOpenCrxFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.crx');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.crx');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled(
@@ -249,92 +381,42 @@ function testToOpenCrxFile(callback) {
 /**
  * Tests opening a .rtf file.
  */
-function testToOpenRtfFile(callback) {
+export function testToOpenRtfFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.rtf');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.rtf');
 
   reportPromise(
-      openSuggestAppsDialogIsCalled([mockEntry], ['application/rtf']),
+      showHtmlOfAlertDialogIsCalled(
+          [mockEntry], 'test.rtf', 'NO_TASK_FOR_FILE'),
       callback);
-}
-
-/**
- * Tests opening an entry that has external metadata type.
- */
-function testOpenSuggestAppsDialogWithMetadata(callback) {
-  const showByExtensionAndMimeIsCalled = new Promise((resolve, reject) => {
-    const mockFileSystem = new MockFileSystem('volumeId');
-    const mockEntry = new MockFileEntry(mockFileSystem, '/test.rtf');
-    const fileManager = getMockFileManager();
-
-    FileTasks
-        .create(
-            fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, /** @type {!FileManagerUI} */ ({
-              taskMenuButton: document.createElement('button'),
-              fileContextMenu: {
-                defaultActionMenuItem: document.createElement('div'),
-              },
-              suggestAppsDialog: {
-                showByExtensionAndMime: function(
-                    extension, mimeType, onDialogClosed) {
-                  assertEquals('.rtf', extension);
-                  assertEquals('application/rtf', mimeType);
-                  resolve();
-                },
-              },
-            }),
-            [mockEntry], ['application/rtf'], mockTaskHistory,
-            fileManager.namingController, fileManager.crostini)
-        .then(tasks => {
-          tasks.openSuggestAppsDialog(() => {}, () => {}, () => {});
-        });
-  });
-
-  reportPromise(showByExtensionAndMimeIsCalled, callback);
-}
-
-/**
- * Tests opening an entry that has no extension. Since the entry extension and
- * entry MIME type are required, the onFalure method should be called.
- */
-function testOpenSuggestAppsDialogFailure(callback) {
-  const onFailureIsCalled = new Promise((resolve, reject) => {
-    const mockFileSystem = new MockFileSystem('volumeId');
-    const mockEntry = new MockFileEntry(mockFileSystem, '/test');
-    const fileManager = getMockFileManager();
-
-    FileTasks
-        .create(
-            fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, [mockEntry], [null],
-            mockTaskHistory, fileManager.namingController, fileManager.crostini)
-        .then(tasks => {
-          tasks.openSuggestAppsDialog(() => {}, () => {}, resolve);
-        });
-  });
-
-  reportPromise(onFailureIsCalled, callback);
 }
 
 /**
  * Tests opening the task picker with an entry that does not have a default app
  * but there are multiple apps that could open it.
  */
-function testOpenTaskPicker(callback) {
+export function testOpenTaskPicker(callback) {
   window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
     setTimeout(
         callback.bind(
             null,
             [
               {
-                taskId: 'handler-extension-id1|app|any',
+                descriptor: {
+                  appId: 'handler-extension-id1',
+                  taskType: 'app',
+                  actionId: 'any',
+                },
                 isDefault: false,
                 isGenericFileHandler: false,
                 title: 'app 1',
               },
               {
-                taskId: 'handler-extension-id2|app|any',
+                descriptor: {
+                  appId: 'handler-extension-id2',
+                  taskType: 'app',
+                  actionId: 'any',
+                },
                 isDefault: false,
                 isGenericFileHandler: false,
                 title: 'app 2',
@@ -344,7 +426,7 @@ function testOpenTaskPicker(callback) {
   };
 
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.tiff');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.tiff');
 
   reportPromise(
       showDefaultTaskDialogCalled([mockEntry], ['image/tiff']), callback);
@@ -355,9 +437,17 @@ function testOpenTaskPicker(callback) {
  * but there are multiple apps that could open it. The app with the most recent
  * task execution order should execute.
  */
-function testOpenWithMostRecentlyExecuted(callback) {
-  const latestTaskId = 'handler-extension-most-recently-executed|app|any';
-  const oldTaskId = 'handler-extension-executed-before|app|any';
+export function testOpenWithMostRecentlyExecuted(callback) {
+  const latestTaskDescriptor = {
+    appId: 'handler-extension-most-recently-executed',
+    taskType: 'app',
+    actionId: 'any',
+  };
+  const oldTaskDescriptor = {
+    appId: 'handler-extension-executed-before',
+    taskType: 'app',
+    actionId: 'any',
+  };
 
   window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
     setTimeout(
@@ -366,19 +456,23 @@ function testOpenWithMostRecentlyExecuted(callback) {
             // File tasks is sorted by last executed time, latest first.
             [
               {
-                taskId: latestTaskId,
+                descriptor: latestTaskDescriptor,
                 isDefault: false,
                 isGenericFileHandler: false,
                 title: 'app 1',
               },
               {
-                taskId: oldTaskId,
+                descriptor: oldTaskDescriptor,
                 isDefault: false,
                 isGenericFileHandler: false,
                 title: 'app 2',
               },
               {
-                taskId: 'handler-extension-never-executed|app|any',
+                descriptor: {
+                  appId: 'handler-extension-never-executed',
+                  taskType: 'app',
+                  actionId: 'any',
+                },
                 isDefault: false,
                 isGenericFileHandler: false,
                 title: 'app 3',
@@ -388,27 +482,27 @@ function testOpenWithMostRecentlyExecuted(callback) {
   };
 
   const taskHistory = /** @type {!TaskHistory} */ ({
-    getLastExecutedTime: function(id) {
-      if (id == oldTaskId) {
+    getLastExecutedTime: function(descriptor) {
+      if (util.descriptorEqual(descriptor, oldTaskDescriptor)) {
         return 10000;
       }
-      if (id == latestTaskId) {
+      if (util.descriptorEqual(descriptor, latestTaskDescriptor)) {
         return 20000;
       }
       return 0;
     },
-    recordTaskExecuted: function(id) {},
+    recordTaskExecuted: function(descriptor) {},
   });
 
   let executedTask = null;
   window.chrome.fileManagerPrivate.executeTask =
-      (taskId, entries, onViewFiles) => {
-        executedTask = taskId;
+      (descriptor, entries, onViewFiles) => {
+        executedTask = descriptor;
         onViewFiles('success');
       };
 
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.tiff');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.tiff');
 
   const promise = new Promise((resolve, reject) => {
     const fileManager = getMockFileManager();
@@ -422,11 +516,13 @@ function testOpenWithMostRecentlyExecuted(callback) {
     FileTasks
         .create(
             fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, [mockEntry], [null],
-            taskHistory, fileManager.namingController, fileManager.crostini)
+            fileManager.directoryModel, fileManager.ui,
+            mockFileTransferController, [mockEntry], [null], taskHistory,
+            fileManager.namingController, fileManager.crostini,
+            fileManager.progressCenter)
         .then(tasks => {
           tasks.executeDefault();
-          assertEquals(latestTaskId, executedTask);
+          assertTrue(util.descriptorEqual(latestTaskDescriptor, executedTask));
           resolve();
         });
   });
@@ -434,120 +530,52 @@ function testOpenWithMostRecentlyExecuted(callback) {
   reportPromise(promise, callback);
 }
 
-/**
- * Tests opening a .zip file.
- */
-function testOpenZipWithZipArchiver(callback) {
-  const zipArchiverTaskId = 'dmboannefpncccogfdikhmhpmdnddgoe|app|open';
-
-  chrome.commandLinePrivate.hasSwitch = (name, callback) => {
-    if (name == 'enable-zip-archiver-unpacker') {
-      // This flag used to exist and was used to switch between the "Zip
-      // Unpacker" and "Zip Archiver" component extensions.
-      failWithMessage('run zip archiver', 'zip archiver flags checked');
-    }
-    callback(false);
+function setUpInstallLinuxPackage() {
+  const fileManager = getMockFileManager();
+  fileManager.volumeManager.getLocationInfo = entry => {
+    return /** @type {!EntryLocation} */ ({
+      rootType: VolumeManagerCommon.RootType.CROSTINI,
+    });
   };
-
-  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
-    setTimeout(
-        callback.bind(
-            null,
-            [
-              {
-                taskId: zipArchiverTaskId,
-                isDefault: false,
-                isGenericFileHandler: false,
-                title: 'Zip Archiver',
-              },
-            ]),
-        0);
-  };
-
-  // None of the tasks has ever been executed.
-  const taskHistory = /** @type {!TaskHistory} */ ({
-    getLastExecutedTime: function(id) {
-      return 0;
+  const fileTask = {
+    descriptor: {
+      appId: LEGACY_FILES_EXTENSION_ID,
+      taskType: 'app',
+      actionId: 'install-linux-package',
     },
-    recordTaskExecuted: function(id) {},
-  });
-
-  let executedTask = null;
-  window.chrome.fileManagerPrivate.executeTask =
-      (taskId, entries, onViewFiles) => {
-        executedTask = taskId;
-        onViewFiles('success');
-      };
-
-  const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.zip');
-
-  const promise = new Promise((resolve, reject) => {
-    const fileManager = getMockFileManager();
-    fileManager.ui.defaultTaskPicker = {
-      showDefaultTaskDialog: function(
-          title, message, items, defaultIdx, onSuccess) {
-        failWithMessage('run zip archiver', 'default task picker was shown');
-      },
-    };
-
-    FileTasks
-        .create(
-            fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, [mockEntry], [null],
-            taskHistory, fileManager.namingController, fileManager.crostini)
-        .then(tasks => {
-          tasks.executeDefault();
-          assertEquals(zipArchiverTaskId, executedTask);
-          resolve();
-        });
-  });
-
-  reportPromise(promise, callback);
+    isDefault: false,
+    isGenericFileHandler: false,
+    title: '__MSG_INSTALL_LINUX_PACKAGE__',
+  };
+  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
+    setTimeout(callback.bind(null, [fileTask]), 0);
+  };
+  return fileManager;
 }
 
 /**
  * Tests opening a .deb file. The crostini linux package install dialog should
  * be called.
  */
-function testOpenInstallLinuxPackageDialog(callback) {
-  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
-    setTimeout(
-        callback.bind(
-            null,
-            [
-              {
-                taskId: 'test-extension-id|app|install-linux-package',
-                isDefault: false,
-                isGenericFileHandler: false,
-                title: '__MSG_INSTALL_LINUX_PACKAGE__',
-              },
-            ]),
-        0);
-  };
-
+export function testOpenInstallLinuxPackageDialog(callback) {
+  const fileManager = setUpInstallLinuxPackage();
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.deb');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.deb');
 
   const promise = new Promise((resolve, reject) => {
-    const fileManager = getMockFileManager();
     fileManager.ui.installLinuxPackageDialog = {
       showInstallLinuxPackageDialog: function(entry) {
         resolve();
       },
     };
 
-    fileManager.volumeManager.getLocationInfo = entry => {
-      return /** @type {!EntryLocation} */ ({
-        rootType: VolumeManagerCommon.RootType.CROSTINI,
-      });
-    };
-
     FileTasks
         .create(
             fileManager.volumeManager, fileManager.metadataModel,
-            fileManager.directoryModel, fileManager.ui, [mockEntry], [null],
-            mockTaskHistory, fileManager.namingController, fileManager.crostini)
+            fileManager.directoryModel, fileManager.ui,
+            mockFileTransferController, [mockEntry], [null], mockTaskHistory,
+            fileManager.namingController, fileManager.crostini,
+            fileManager.progressCenter)
         .then(tasks => {
           tasks.executeDefault();
         });
@@ -557,135 +585,218 @@ function testOpenInstallLinuxPackageDialog(callback) {
 }
 
 /**
- * Tests that opening files within the Downloads directory using a crostini app
- * displays the sharing permission dialog, which users can use to allow or deny
- * sharing the directory with crostini.
+ * Tests opening a .tini file. The import crostini image dialog should be
+ * called.
  */
-function testMaybeShareCrostiniOrShowDialog() {
-  const volumeManagerDownloads = /** @type {!VolumeManager} */ ({
-    getLocationInfo: (entry) => {
-      return /** @type {!EntryLocation} */ ({
-        rootType: entry.filesystem.name,
-      });
-    },
-  });
+export function testToOpenTiniFileOpensImportCrostiniImageDialog(callback) {
+  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
+    setTimeout(
+        callback.bind(
+            null,
+            [
+              {
+                descriptor: {
+                  appId: LEGACY_FILES_EXTENSION_ID,
+                  taskType: 'app',
+                  actionId: 'import-crostini-image',
+                },
+                isDefault: false,
+                isGenericFileHandler: false,
+              },
+            ]),
+        0);
+  };
 
-  const mockFsDownloads = new MockFileSystem('downloads');
-  const sharedDir = new MockDirectoryEntry(mockFsDownloads, '/shared');
-  const shared = new MockFileEntry(mockFsDownloads, '/shared/file');
+  const mockEntry =
+      MockFileEntry.create(new MockFileSystem('testfilesystem'), '/test.tini');
 
-  const crostini = createCrostiniForTest();
-  crostini.init(volumeManagerDownloads);
-  crostini.setEnabled('termina', true);
-  crostini.registerSharedPath('termina', sharedDir);
-
-  const notShared1 = new MockFileEntry(mockFsDownloads, '/notShared/file1');
-  const notShared2 = new MockFileEntry(mockFsDownloads, '/notShared/file2');
-  const otherNotShared =
-      new MockFileEntry(mockFsDownloads, '/otherNotShared/file');
-  const mockFsUnsharable = new MockFileSystem('unsharable');
-  const unsharable = new MockDirectoryEntry(mockFsUnsharable, '/unsharable');
-
-  function expect(
-      comment, entries, expectSuccess, expectedDialogTitle,
-      expectedDialogMessage) {
-    let showHtmlCalled = false;
-    function showHtml(title, message) {
-      showHtmlCalled = true;
-      assertEquals(
-          expectedDialogTitle, title,
-          'crostini share dialog title: ' + comment);
-      assertEquals(
-          expectedDialogMessage, message,
-          'crostini share dialog message: ' + comment);
-    }
-
-    const fakeFilesTask = {
-      entries_: entries,
-      crostini_: crostini,
-      ui_: {
-        alertDialog: {showHtml: showHtml},
-        confirmDialog: {showHtml: showHtml},
-      },
-      volumeManager_: volumeManagerDownloads,
-    };
-
-    const crostiniTask = /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
-      taskId: '|crostini|',
-    });
-
-    let success = false;
-    let proto = /** @type {!Object} */ (FileTasks.prototype);
-    proto.maybeShareWithCrostiniOrShowDialog_.call(
-        fakeFilesTask, crostiniTask, () => {
-          success = true;
-        });
-
-    assertEquals(expectSuccess, success, 'success: ' + comment);
-    assertEquals(expectSuccess, !showHtmlCalled, 'showHtml called:' + comment);
-  }
-
-  expect('No entries', [], true, '', '');
-
-  crostini.setEnabled('termina', false);
-  expect(
-      'Single entry, crostini-files not enabled', [notShared1], false,
-      'UNABLE_TO_OPEN_CROSTINI_TITLE', 'UNABLE_TO_OPEN_CROSTINI');
-
-  crostini.setEnabled('termina', true);
-
-  expect('Single entry, not shared', [notShared1], true, '', '');
-
-  expect('Single entry, shared', [shared], true, '', '');
-
-  expect(
-      '2 entries, not shared, same dir', [notShared1, notShared2], true, '',
-      '');
-  // Non-persistent shares should not be registered.
-  assertFalse(crostini.isPathShared('termina', notShared1));
-
-  expect(
-      '2 entries, not shared, different dir', [notShared1, otherNotShared],
-      true, '', '');
-
-  expect(
-      '2 entries, 1 not shared, different dir, not shared first',
-      [notShared1, shared], true, '', '');
-
-  expect(
-      '2 entries, 1 not shared, different dir, shared first',
-      [shared, notShared1], true, '', '');
-
-  expect(
-      '3 entries, 2 not shared, different dir',
-      [shared, notShared1, notShared2], true, '', '');
-
-  expect(
-      '2 entries, 1 not sharable', [notShared1, unsharable], false,
-      'UNABLE_TO_OPEN_CROSTINI_TITLE', 'UNABLE_TO_OPEN_CROSTINI');
+  reportPromise(showImportCrostiniImageDialogIsCalled([mockEntry]), callback);
 }
 
 /**
- * Tests file tasks and crostini sharing.
+ * Checks that the function that returns a file type for file entry handles
+ * correctly identifies files with known and unknown extensions.
  */
-function testTaskRequiresCrostiniSharing() {
-  /**
-   * Returns a fileManagerPrivate.FileTask containing the given task |id|.
-   * @param {string} id
-   * @return {!chrome.fileManagerPrivate.FileTask}
-   */
-  const createTask = (id) => {
-    return /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
-      taskId: id,
+export function testGetViewFileType() {
+  const mockFileSystem = new MockFileSystem('volumeId');
+  const testData = [
+    {extension: 'log', expected: '.log'},
+    {extension: '__unknown_extension__', expected: 'other'},
+  ];
+  for (const data of testData) {
+    const mockEntry =
+        MockFileEntry.create(mockFileSystem, `/report.${data.extension}`);
+    const type = FileTasks.getViewFileType(mockEntry);
+    assertEquals(data.expected, type);
+  }
+}
+
+/**
+ * Checks that the progress center is properly updated when mounting archives
+ * successfully.
+ * @suppress {visibility}
+ */
+export async function testMountArchiveAndChangeDirectoryNotificationSuccess(
+    done) {
+  const fileManager = getMockFileManager();
+
+  // Define FileTasks instance.
+  const tasks = await FileTasks.create(
+      fileManager.volumeManager, fileManager.metadataModel,
+      fileManager.directoryModel, fileManager.ui, mockFileTransferController,
+      [], [null], mockTaskHistory, fileManager.namingController,
+      fileManager.crostini, fileManager.progressCenter);
+
+  fileManager.volumeManager.mountArchive = function(url, password) {
+    // Check: progressing state.
+    assertEquals(
+        ProgressItemState.PROGRESSING,
+        fileManager.progressCenter.getItemById(zipMountPanelId).state);
+
+    const volumeInfo = {resolveDisplayRoot: () => null};
+    return volumeInfo;
+  };
+
+  // Mount archive.
+  await tasks.mountArchiveAndChangeDirectory_(fakeTracker, fakeMountedZipUrl);
+
+  // Check: mount completed, no error.
+  assertEquals(
+      ProgressItemState.COMPLETED,
+      fileManager.progressCenter.getItemById(zipMountPanelId).state);
+  assertEquals(
+      undefined, fileManager.progressCenter.getItemById(errorZipMountPanelId));
+
+  // Check: a zip mount time UMA has been recorded.
+  assertTrue(timeMap.has('ZipMountTime.Other'));
+
+  done();
+}
+
+/**
+ * Checks that the progress center is properly updated when mounting an archive
+ * resolves with an error.
+ * @suppress {visibility}
+ */
+export async function
+testMountArchiveAndChangeDirectoryNotificationInvalidArchive(done) {
+  const fileManager = getMockFileManager();
+
+  // Define FileTasks instance.
+  const tasks = await FileTasks.create(
+      fileManager.volumeManager, fileManager.metadataModel,
+      fileManager.directoryModel, fileManager.ui, mockFileTransferController,
+      [], [null], mockTaskHistory, fileManager.namingController,
+      fileManager.crostini, fileManager.progressCenter);
+
+  fileManager.volumeManager.mountArchive = function(url, password) {
+    return Promise.reject(VolumeManagerCommon.VolumeError.INTERNAL);
+  };
+
+  // Mount archive.
+  await tasks.mountArchiveAndChangeDirectory_(fakeTracker, fakeMountedZipUrl);
+
+  // Check: mount is completed with an error.
+  assertEquals(
+      ProgressItemState.COMPLETED,
+      fileManager.progressCenter.getItemById(zipMountPanelId).state);
+  assertEquals(
+      ProgressItemState.ERROR,
+      fileManager.progressCenter.getItemById(errorZipMountPanelId).state);
+
+  // Check: no zip mount time UMA has been recorded since mounting the archive
+  // failed.
+  assertFalse(timeMap.has('ZipMountTime.Other'));
+
+  done();
+}
+
+/**
+ * Checks that the progress center is properly updated when the password prompt
+ * for an encrypted archive is canceled.
+ * @suppress {visibility}
+ */
+export async function
+testMountArchiveAndChangeDirectoryNotificationCancelPassword(done) {
+  const fileManager = getMockFileManager();
+
+  // Define FileTasks instance.
+  const tasks = await FileTasks.create(
+      fileManager.volumeManager, fileManager.metadataModel,
+      fileManager.directoryModel, fileManager.ui, mockFileTransferController,
+      [], [null], mockTaskHistory, fileManager.namingController,
+      fileManager.crostini, fileManager.progressCenter);
+
+  fileManager.volumeManager.mountArchive = function(url, password) {
+    return Promise.reject(VolumeManagerCommon.VolumeError.NEED_PASSWORD);
+  };
+
+  fileManager.ui.passwordDialog.askForPassword =
+      async function(filename, password = null) {
+    return Promise.reject(FilesPasswordDialog.USER_CANCELLED);
+  };
+
+  // Mount archive.
+  await tasks.mountArchiveAndChangeDirectory_(fakeTracker, fakeMountedZipUrl);
+
+  // Check: mount is completed, no error since the user canceled the password
+  // prompt.
+  assertEquals(
+      ProgressItemState.COMPLETED,
+      fileManager.progressCenter.getItemById(zipMountPanelId).state);
+  assertEquals(
+      undefined, fileManager.progressCenter.getItemById(errorZipMountPanelId));
+
+  // Check: no zip mount time UMA has been recorded since the mount has been
+  // cancelled.
+  assertFalse(timeMap.has('ZipMountTime.Other'));
+
+  done();
+}
+
+/**
+ * Checks that the progress center is properly updated when mounting an
+ * encrypted archive.
+ * @suppress {visibility}
+ */
+export async function
+testMountArchiveAndChangeDirectoryNotificationEncryptedArchive(done) {
+  const fileManager = getMockFileManager();
+
+  // Define FileTasks instance.
+  const tasks = await FileTasks.create(
+      fileManager.volumeManager, fileManager.metadataModel,
+      fileManager.directoryModel, fileManager.ui, mockFileTransferController,
+      [], [null], mockTaskHistory, fileManager.namingController,
+      fileManager.crostini, fileManager.progressCenter);
+
+  fileManager.volumeManager.mountArchive = function(url, password) {
+    return new Promise((resolve, reject) => {
+      if (password) {
+        assertEquals('testpassword', password);
+        const volumeInfo = {resolveDisplayRoot: () => null};
+        resolve(volumeInfo);
+      } else {
+        reject(VolumeManagerCommon.VolumeError.NEED_PASSWORD);
+      }
     });
   };
 
-  const crostiniOpenWithTask = createTask('app|crostini|open-with');
-  assertTrue(FileTasks.taskRequiresCrostiniSharing(crostiniOpenWithTask));
+  fileManager.ui.passwordDialog.askForPassword =
+      async function(filename, password = null) {
+    return Promise.resolve('testpassword');
+  };
 
-  const installLinuxPackageTask = createTask('appId|x|install-linux-package');
-  assertTrue(FileTasks.taskRequiresCrostiniSharing(installLinuxPackageTask));
+  // Mount archive.
+  await tasks.mountArchiveAndChangeDirectory_(fakeTracker, fakeMountedZipUrl);
 
-  const notRequiredOpenWithTask = createTask('appId|x|open-with');
-  assertFalse(FileTasks.taskRequiresCrostiniSharing(notRequiredOpenWithTask));
+  // Check: mount is completed, no error since the user entered a valid
+  // password.
+  assertEquals(
+      ProgressItemState.COMPLETED,
+      fileManager.progressCenter.getItemById(zipMountPanelId).state);
+  assertEquals(
+      undefined, fileManager.progressCenter.getItemById(errorZipMountPanelId));
+
+  done();
 }

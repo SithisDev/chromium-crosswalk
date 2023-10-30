@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include <utility>
 
+#include <xdg-shell-server-protocol.h>
 #include <xdg-shell-unstable-v6-server-protocol.h>
 
-#include "base/macros.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/ozone/platform/wayland/test/server_object.h"
@@ -18,6 +18,7 @@ struct wl_resource;
 
 namespace wl {
 
+extern const struct xdg_positioner_interface kTestXdgPositionerImpl;
 extern const struct zxdg_positioner_v6_interface kTestZxdgPositionerV6Impl;
 
 // A simple positioner object that provides a collection of rules of a child
@@ -33,6 +34,10 @@ class TestPositioner : public ServerObject {
   };
 
   explicit TestPositioner(wl_resource* resource);
+
+  TestPositioner(const TestPositioner&) = delete;
+  TestPositioner& operator=(const TestPositioner&) = delete;
+
   ~TestPositioner() override;
 
   PopupPosition position() { return std::move(position_); }
@@ -48,8 +53,6 @@ class TestPositioner : public ServerObject {
 
  private:
   PopupPosition position_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestPositioner);
 };
 
 }  // namespace wl

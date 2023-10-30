@@ -1,8 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var FilesMetadataBox = Polymer({
+import './files_metadata_entry.js';
+
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+Polymer({
+  _template: html`{__html_template__}`,
+
   is: 'files-metadata-box',
 
   properties: {
@@ -10,10 +16,11 @@ var FilesMetadataBox = Polymer({
     filePath: String,
     type: String,
 
-    // File size, modification time, mimeType.
+    // File size, modification time, mimeType, location.
     size: String,
     modificationTime: String,
     mediaMimeType: String,
+    fileLocation: String,
 
     // True if the size field is loading.
     isSizeLoading: Boolean,
@@ -30,6 +37,7 @@ var FilesMetadataBox = Polymer({
     mediaTitle: String,
     mediaTrack: String,
     mediaYearRecorded: String,
+    originalLocation: String,
 
     /**
      * True if the file has file-specific metadata.
@@ -53,30 +61,33 @@ var FilesMetadataBox = Polymer({
    * @param {boolean} keepSizeFields do not clear size and isSizeLoading fields.
    */
   clear: function(keepSizeFields) {
-    this.filePath = '';
-    this.metadata = '';
+    const reset = {
+      type: '',
+      filePath: '',
+      modificationTime: '',
+      hasFileSpecificMetadata_: false,
+      mediaMimeType: '',
+      fileLocation: '',
+      ifd: null,
+      imageWidth: 0,
+      imageHeight: 0,
+      mediaTitle: '',
+      mediaArtist: '',
+      mediaAlbum: '',
+      mediaDuration: 0,
+      mediaGenre: '',
+      mediaTrack: '',
+      mediaYearRecorded: '',
+      metadata: '',
+      originalLocation: '',
+    };
 
     if (!keepSizeFields) {
-      this.size = '';
-      this.isSizeLoading = false;
+      reset.isSizeLoading = false;
+      reset.size = '';
     }
-    this.modificationTime = '';
-    this.mediaMimeType = '';
 
-    this.type = '';
-    this.hasFileSpecificMetadata_ = false;
-
-    /** @type {?Object} */
-    this.ifd = null;
-    this.imageWidth = 0;
-    this.imageHeight = 0;
-    this.mediaTitle = '';
-    this.mediaArtist = '';
-    this.mediaAlbum = '';
-    this.mediaDuration = 0;
-    this.mediaGenre = '';
-    this.mediaTrack = '';
-    this.mediaYearRecorded = '';
+    this.setProperties(reset);
   },
 
   /**
@@ -107,6 +118,14 @@ var FilesMetadataBox = Polymer({
    */
   isAudio_: function(type) {
     return type === 'audio';
+  },
+
+  /**
+   * If the originalLocation is set, the preview is for a trashed item.
+   * @returns {boolean}
+   */
+  isTrashEntry: function(originalLocation) {
+    return !(originalLocation && originalLocation.length > 0);
   },
 
   /**
@@ -359,3 +378,5 @@ var FilesMetadataBox = Polymer({
     return result.trimEnd();
   },
 });
+
+//# sourceURL=//ui/file_manager/file_manager/foreground/elements/files_metadata_box.js

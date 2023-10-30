@@ -1,17 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertArrayEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {FileListSelectionModel} from './file_list_selection_model.js';
 
 /** @type {!FileListSelectionModel} */
 let selectionModel;
 
-function setUp() {
+export function setUp() {
   selectionModel = new FileListSelectionModel();
 }
 
 // Verify that all selection and focus is dropped if all selected files get
 // deleted.
-function testAdjustToReorderingAllAreDeleted() {
+export function testAdjustToReorderingAllAreDeleted() {
   // Set initial selection.
   selectionModel.selectedIndexes = [0, 1];
   // Delete the selected items.
@@ -23,7 +27,7 @@ function testAdjustToReorderingAllAreDeleted() {
 
 // Verify that all selection and focus is dropped only if all selected files get
 // deleted.
-function testAdjustToReorderingSomeAreDeleted() {
+export function testAdjustToReorderingSomeAreDeleted() {
   // Set initial selection.
   selectionModel.selectedIndexes = [0, 1];
   // Delete the selected items.

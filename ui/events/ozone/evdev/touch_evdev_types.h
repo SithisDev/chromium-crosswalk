@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <stddef.h>
 
+#include "base/component_export.h"
+#include "base/time/time.h"
 #include "ui/events/event_constants.h"
-#include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
 
 namespace ui {
 
@@ -17,13 +18,16 @@ namespace ui {
 const int kNumTouchEvdevSlots = 20;
 
 // Contains information about an in progress touch.
-struct EVENTS_OZONE_EVDEV_EXPORT InProgressTouchEvdev {
+struct COMPONENT_EXPORT(EVDEV) InProgressTouchEvdev {
   InProgressTouchEvdev();
   InProgressTouchEvdev(const InProgressTouchEvdev& other);
   ~InProgressTouchEvdev();
 
   // Current touch major of this slot.
   int major = 0;
+
+  // Current touch minor of this slot.
+  int minor = 0;
 
   // Current tool type of this slot.
   int tool_type = 0;
@@ -60,11 +64,26 @@ struct EVENTS_OZONE_EVDEV_EXPORT InProgressTouchEvdev {
   float radius_y = 0;
   float pressure = 0;
   int tool_code = 0;
+  int orientation = 0;
   float tilt_x = 0;
   float tilt_y = 0;
-  ui::EventPointerType reported_tool_type =
-      ui::EventPointerType::POINTER_TYPE_TOUCH;
+  ui::EventPointerType reported_tool_type = ui::EventPointerType::kTouch;
   bool stylus_button = false;
+};
+
+// Contains information about stylus event, the useful relate ddevice info and
+// the timestamp.
+struct COMPONENT_EXPORT(EVDEV) InProgressStylusState {
+  InProgressStylusState();
+  InProgressStylusState(const InProgressStylusState& other);
+  ~InProgressStylusState();
+
+  InProgressTouchEvdev stylus_event;
+  // Stylus x and y resolution, used for normalization.
+  int x_res = 1;
+  int y_res = 1;
+
+  base::TimeTicks timestamp = base::TimeTicks();
 };
 
 }  // namespace ui

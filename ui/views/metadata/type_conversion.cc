@@ -1,182 +1,92 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/metadata/type_conversion.h"
 
-#include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
-#include "base/strings/utf_string_conversions.h"
-#include "ui/gfx/geometry/rect.h"
+#include <string>
 
-namespace views {
-namespace metadata {
+#include "components/url_formatter/url_fixer.h"
+#include "ui/base/ime/text_input_type.h"
+#include "ui/native_theme/native_theme.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/bubble/bubble_frame_view.h"
+#include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/separator.h"
 
-const base::string16& GetNullOptStr() {
-  static const base::NoDestructor<base::string16> kNullOptStr(
-      base::ASCIIToUTF16("<Empty>"));
-  return *kNullOptStr;
+std::u16string ui::metadata::TypeConverter<GURL>::ToString(
+    const GURL& source_value) {
+  return base::ASCIIToUTF16(source_value.possibly_invalid_spec());
 }
 
-/***** String Conversions *****/
-
-#define CONVERT_NUMBER_TO_STRING(T)                           \
-  base::string16 TypeConverter<T>::ToString(T source_value) { \
-    return base::NumberToString16(source_value);              \
-  }
-
-CONVERT_NUMBER_TO_STRING(int8_t)
-CONVERT_NUMBER_TO_STRING(int16_t)
-CONVERT_NUMBER_TO_STRING(int32_t)
-CONVERT_NUMBER_TO_STRING(int64_t)
-CONVERT_NUMBER_TO_STRING(uint8_t)
-CONVERT_NUMBER_TO_STRING(uint16_t)
-CONVERT_NUMBER_TO_STRING(uint32_t)
-CONVERT_NUMBER_TO_STRING(uint64_t)
-CONVERT_NUMBER_TO_STRING(float)
-CONVERT_NUMBER_TO_STRING(double)
-
-base::string16 TypeConverter<bool>::ToString(bool source_value) {
-  return base::ASCIIToUTF16(source_value ? "true" : "false");
+absl::optional<GURL> ui::metadata::TypeConverter<GURL>::FromString(
+    const std::u16string& source_value) {
+  const GURL url =
+      url_formatter::FixupURL(base::UTF16ToUTF8(source_value), std::string());
+  return url.is_valid() ? absl::make_optional(url) : absl::nullopt;
 }
 
-base::string16 TypeConverter<gfx::Size>::ToString(
-    const gfx::Size& source_value) {
-  return base::ASCIIToUTF16(base::StringPrintf("{%i, %i}", source_value.width(),
-                                               source_value.height()));
+ui::metadata::ValidStrings
+ui::metadata::TypeConverter<GURL>::GetValidStrings() {
+  return {};
 }
 
-base::string16 TypeConverter<base::string16>::ToString(
-    const base::string16& source_value) {
-  return source_value;
-}
+DEFINE_ENUM_CONVERTERS(
+    views::ScrollView::ScrollBarMode,
+    {views::ScrollView::ScrollBarMode::kDisabled, u"kDisabled"},
+    {views::ScrollView::ScrollBarMode::kHiddenButEnabled, u"kHiddenButEnabled"},
+    {views::ScrollView::ScrollBarMode::kEnabled, u"kEnabled"})
 
-base::string16 TypeConverter<const char*>::ToString(const char* source_value) {
-  return base::UTF8ToUTF16(source_value);
-}
+DEFINE_ENUM_CONVERTERS(
+    views::BubbleFrameView::PreferredArrowAdjustment,
+    {views::BubbleFrameView::PreferredArrowAdjustment::kMirror, u"kMirror"},
+    {views::BubbleFrameView::PreferredArrowAdjustment::kOffset, u"kOffset"})
 
-base::Optional<int8_t> TypeConverter<int8_t>::FromString(
-    const base::string16& source_value) {
-  int32_t ret = 0;
-  if (base::StringToInt(source_value, &ret) &&
-      base::IsValueInRangeForNumericType<int8_t>(ret)) {
-    return static_cast<int8_t>(ret);
-  }
-  return base::nullopt;
-}
+DEFINE_ENUM_CONVERTERS(
+    views::BubbleBorder::Arrow,
+    {views::BubbleBorder::Arrow::TOP_LEFT, u"TOP_LEFT"},
+    {views::BubbleBorder::Arrow::TOP_RIGHT, u"TOP_RIGHT"},
+    {views::BubbleBorder::Arrow::BOTTOM_LEFT, u"BOTTOM_LEFT"},
+    {views::BubbleBorder::Arrow::BOTTOM_RIGHT, u"BOTTOM_RIGHT"},
+    {views::BubbleBorder::Arrow::LEFT_TOP, u"LEFT_TOP"},
+    {views::BubbleBorder::Arrow::RIGHT_TOP, u"RIGHT_TOP"},
+    {views::BubbleBorder::Arrow::LEFT_BOTTOM, u"LEFT_BOTTOM"},
+    {views::BubbleBorder::Arrow::RIGHT_BOTTOM, u"RIGHT_BOTTOM"},
+    {views::BubbleBorder::Arrow::TOP_CENTER, u"TOP_CENTER"},
+    {views::BubbleBorder::Arrow::BOTTOM_CENTER, u"BOTTOM_CENTER"},
+    {views::BubbleBorder::Arrow::LEFT_CENTER, u"LEFT_CENTER"},
+    {views::BubbleBorder::Arrow::RIGHT_CENTER, u"RIGHT_CENTER"},
+    {views::BubbleBorder::Arrow::NONE, u"NONE"},
+    {views::BubbleBorder::Arrow::FLOAT, u"FLOAT"})
 
-base::Optional<int16_t> TypeConverter<int16_t>::FromString(
-    const base::string16& source_value) {
-  int32_t ret = 0;
-  if (base::StringToInt(source_value, &ret) &&
-      base::IsValueInRangeForNumericType<int16_t>(ret)) {
-    return static_cast<int16_t>(ret);
-  }
-  return base::nullopt;
-}
+DEFINE_ENUM_CONVERTERS(
+    ui::TextInputType,
+    {ui::TextInputType::TEXT_INPUT_TYPE_NONE, u"TEXT_INPUT_TYPE_NONE"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_TEXT, u"TEXT_INPUT_TYPE_TEXT"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_PASSWORD, u"TEXT_INPUT_TYPE_PASSWORD"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_SEARCH, u"TEXT_INPUT_TYPE_SEARCH"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_EMAIL, u"EXT_INPUT_TYPE_EMAIL"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_NUMBER, u"TEXT_INPUT_TYPE_NUMBER"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_TELEPHONE,
+     u"TEXT_INPUT_TYPE_TELEPHONE"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_URL, u"TEXT_INPUT_TYPE_URL"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_DATE, u"TEXT_INPUT_TYPE_DATE"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_DATE_TIME,
+     u"TEXT_INPUT_TYPE_DATE_TIME"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_DATE_TIME_LOCAL,
+     u"TEXT_INPUT_TYPE_DATE_TIME_LOCAL"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_MONTH, u"TEXT_INPUT_TYPE_MONTH"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_TIME, u"TEXT_INPUT_TYPE_TIME"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_WEEK, u"TEXT_INPUT_TYPE_WEEK"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_TEXT_AREA,
+     u"TEXT_INPUT_TYPE_TEXT_AREA"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_CONTENT_EDITABLE,
+     u"TEXT_INPUT_TYPE_CONTENT_EDITABLE"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_DATE_TIME_FIELD,
+     u"TEXT_INPUT_TYPE_DATE_TIME_FIELD"},
+    {ui::TextInputType::TEXT_INPUT_TYPE_NULL, u"TEXT_INPUT_TYPE_NULL"})
 
-base::Optional<int32_t> TypeConverter<int32_t>::FromString(
-    const base::string16& source_value) {
-  int value;
-  return base::StringToInt(source_value, &value) ? base::make_optional(value)
-                                                 : base::nullopt;
-}
-
-base::Optional<int64_t> TypeConverter<int64_t>::FromString(
-    const base::string16& source_value) {
-  int64_t value;
-  return base::StringToInt64(source_value, &value) ? base::make_optional(value)
-                                                   : base::nullopt;
-}
-
-base::Optional<uint8_t> TypeConverter<uint8_t>::FromString(
-    const base::string16& source_value) {
-  uint32_t ret = 0;
-  if (base::StringToUint(source_value, &ret) &&
-      base::IsValueInRangeForNumericType<uint8_t>(ret)) {
-    return static_cast<uint8_t>(ret);
-  }
-  return base::nullopt;
-}
-
-base::Optional<uint16_t> TypeConverter<uint16_t>::FromString(
-    const base::string16& source_value) {
-  uint32_t ret = 0;
-  if (base::StringToUint(source_value, &ret) &&
-      base::IsValueInRangeForNumericType<uint16_t>(ret)) {
-    return static_cast<uint16_t>(ret);
-  }
-  return base::nullopt;
-}
-
-base::Optional<uint32_t> TypeConverter<uint32_t>::FromString(
-    const base::string16& source_value) {
-  unsigned int value;
-  return base::StringToUint(source_value, &value) ? base::make_optional(value)
-                                                  : base::nullopt;
-}
-
-base::Optional<uint64_t> TypeConverter<uint64_t>::FromString(
-    const base::string16& source_value) {
-  uint64_t value;
-  return base::StringToUint64(source_value, &value) ? base::make_optional(value)
-                                                    : base::nullopt;
-}
-
-base::Optional<float> TypeConverter<float>::FromString(
-    const base::string16& source_value) {
-  if (base::Optional<double> temp =
-          TypeConverter<double>::FromString(source_value))
-    return static_cast<float>(temp.value());
-  return base::nullopt;
-}
-
-base::Optional<double> TypeConverter<double>::FromString(
-    const base::string16& source_value) {
-  double value;
-  return base::StringToDouble(base::UTF16ToUTF8(source_value), &value)
-             ? base::make_optional(value)
-             : base::nullopt;
-}
-
-base::Optional<bool> TypeConverter<bool>::FromString(
-    const base::string16& source_value) {
-  const bool is_true = source_value == base::ASCIIToUTF16("true");
-  if (is_true || source_value == base::ASCIIToUTF16("false"))
-    return is_true;
-  return base::nullopt;
-}
-
-base::Optional<gfx::Size> TypeConverter<gfx::Size>::FromString(
-    const base::string16& source_value) {
-  const auto values =
-      base::SplitStringPiece(source_value, base::ASCIIToUTF16("{,}"),
-                             base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  int width, height;
-  if ((values.size() == 2) && base::StringToInt(values[0], &width) &&
-      base::StringToInt(values[1], &height)) {
-    return gfx::Size(width, height);
-  }
-  return base::nullopt;
-}
-
-base::Optional<base::string16> TypeConverter<base::string16>::FromString(
-    const base::string16& source_value) {
-  return source_value;
-}
-
-}  // namespace metadata
-}  // namespace views
-
-DEFINE_ENUM_CONVERTERS(gfx::HorizontalAlignment,
-                       {gfx::HorizontalAlignment::ALIGN_LEFT,
-                        base::ASCIIToUTF16("ALIGN_LEFT")},
-                       {gfx::HorizontalAlignment::ALIGN_CENTER,
-                        base::ASCIIToUTF16("ALIGN_CENTER")},
-                       {gfx::HorizontalAlignment::ALIGN_RIGHT,
-                        base::ASCIIToUTF16("ALIGN_RIGHT")},
-                       {gfx::HorizontalAlignment::ALIGN_TO_HEAD,
-                        base::ASCIIToUTF16("ALIGN_TO_HEAD")})
+DEFINE_ENUM_CONVERTERS(views::Separator::Orientation,
+                       {views::Separator::Orientation::kHorizontal,
+                        u"kHorizontal"},
+                       {views::Separator::Orientation::kVertical, u"kVertical"})

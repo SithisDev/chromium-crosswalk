@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,18 +13,14 @@
 namespace features {
 
 NATIVE_THEME_EXPORT extern const base::Feature kOverlayScrollbar;
-NATIVE_THEME_EXPORT extern const base::Feature
-    kOverlayScrollbarFlashAfterAnyScrollUpdate;
-NATIVE_THEME_EXPORT extern const base::Feature
-    kOverlayScrollbarFlashWhenMouseEnter;
+NATIVE_THEME_EXPORT extern const base::Feature kFluentScrollbar;
 
 }  // namespace features
 
 namespace ui {
 
 NATIVE_THEME_EXPORT bool IsOverlayScrollbarEnabled();
-NATIVE_THEME_EXPORT bool OverlayScrollbarFlashAfterAnyScrollUpdate();
-NATIVE_THEME_EXPORT bool OverlayScrollbarFlashWhenMouseEnter();
+NATIVE_THEME_EXPORT bool IsFluentScrollbarEnabled();
 
 }  // namespace ui
 

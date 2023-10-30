@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,33 +9,47 @@
  * destroyed when finished, and re-created when shown again.
  */
 
-cr.define('smb_shares', function() {
-  /** @enum{number} */
-  const MountErrorType = {
-    NO_ERROR: 0,
-    CREDENTIAL_ERROR: 1,
-    PATH_ERROR: 2,
-    GENERAL_ERROR: 3,
-  };
+import '../../../cr_elements/cr_button/cr_button.js';
+import '../../../cr_elements/cr_checkbox/cr_checkbox.js';
+import '../../../cr_elements/cr_dialog/cr_dialog.js';
+import '../../../cr_elements/cr_input/cr_input.js';
+import '../../../cr_elements/cr_searchable_drop_down/cr_searchable_drop_down.js';
+import '../../../cr_elements/icons.html.js';
+import '../../../cr_elements/cr_shared_style.css.js';
+import '../../../cr_elements/cr_shared_vars.css.js';
+import '../../../cr_elements/md_select.css.js';
+import '//resources/polymer/v3_0/iron-icon/iron-icon.js';
 
-  /**
-   * Regular expression that matches SMB share URLs of the form
-   * smb://server/share or \\server\share. This is a coarse regexp intended for
-   * quick UI feedback and does not reject all invalid URLs.
-   *
-   * @type {!RegExp}
-   */
-  const SMB_SHARE_URL_REGEX =
-      /^((smb:\/\/[^\/]+\/[^\/].*)|(\\\\[^\\]+\\[^\\].*))$/;
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-  return {
-    MountErrorType: MountErrorType,
-    SMB_SHARE_URL_REGEX: SMB_SHARE_URL_REGEX,
-  };
-});
+import {I18nBehavior} from '../../../cr_elements/i18n_behavior.js';
+import {loadTimeData} from '../../../js/load_time_data.m.js';
+import {WebUIListenerBehavior} from '../../../cr_elements/web_ui_listener_behavior.js';
+
+import {SmbAuthMethod, SmbBrowserProxy, SmbBrowserProxyImpl, SmbMountResult} from './smb_browser_proxy.js';
+
+/** @enum{number} */
+const MountErrorType = {
+  NO_ERROR: 0,
+  CREDENTIAL_ERROR: 1,
+  PATH_ERROR: 2,
+  GENERAL_ERROR: 3,
+};
+
+/**
+ * Regular expression that matches SMB share URLs of the form
+ * smb://server/share or \\server\share. This is a coarse regexp intended for
+ * quick UI feedback and does not reject all invalid URLs.
+ *
+ * @type {!RegExp}
+ */
+const SMB_SHARE_URL_REGEX =
+    /^((smb:\/\/[^\/]+\/[^\/].*)|(\\\\[^\\]+\\[^\\].*))$/;
 
 Polymer({
   is: 'add-smb-share-dialog',
+
+  _template: html`{__html_template__}`,
 
   behaviors: [I18nBehavior, WebUIListenerBehavior],
 
@@ -77,7 +91,7 @@ Polymer({
     /** @private {!Array<string>}*/
     discoveredShares_: {
       type: Array,
-      value: function() {
+      value() {
         return [];
       },
     },
@@ -91,19 +105,46 @@ Polymer({
     /** @private */
     isActiveDirectory_: {
       type: Boolean,
-      value: function() {
+      value() {
         return loadTimeData.getBoolean('isActiveDirectoryUser');
+      },
+    },
+
+    /** @private */
+    isKerberosEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isKerberosEnabled');
+      },
+    },
+
+    /** @private */
+    isGuest_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isGuest');
       },
     },
 
     /** @private */
     authenticationMethod_: {
       type: String,
-      value: function() {
-        return loadTimeData.getBoolean('isActiveDirectoryUser') ?
-            SmbAuthMethod.KERBEROS :
-            SmbAuthMethod.CREDENTIALS;
+      value() {
+        // SSO not supported in guest mode. TODO(crbug/1186188): Enable SSO
+        // option for MGS on file share UI, after fixing authentication error.
+        if (loadTimeData.getBoolean('isGuest')) {
+          return SmbAuthMethod.CREDENTIALS;
+        }
+
+        // SSO only supported on ChromAD or Kerberos.
+        if (loadTimeData.getBoolean('isActiveDirectoryUser') ||
+            loadTimeData.getBoolean('isKerberosEnabled')) {
+          return SmbAuthMethod.KERBEROS;
+        }
+
+        return SmbAuthMethod.CREDENTIALS;
       },
+      observer: 'onAuthenticationMethodChanged_',
     },
 
     /** @private */
@@ -115,23 +156,23 @@ Polymer({
       value: false,
     },
 
-    /** @private {!smb_shares.MountErrorType} */
+    /** @private {!MountErrorType} */
     currentMountError_: {
       type: Number,
-      value: smb_shares.MountErrorType.NO_ERROR,
+      value: MountErrorType.NO_ERROR,
     },
   },
 
-  /** @private {?smb_shares.SmbBrowserProxy} */
+  /** @private {?SmbBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
-  created: function() {
-    this.browserProxy_ = smb_shares.SmbBrowserProxyImpl.getInstance();
+  created() {
+    this.browserProxy_ = SmbBrowserProxyImpl.getInstance();
   },
 
   /** @override */
-  attached: function() {
+  attached() {
     this.browserProxy_.startDiscovery();
     this.$.dialog.showModal();
 
@@ -140,12 +181,12 @@ Polymer({
   },
 
   /** @private */
-  cancel_: function() {
+  cancel_() {
     this.$.dialog.cancel();
   },
 
   /** @private */
-  onAddButtonTap_: function() {
+  onAddButtonTap_() {
     this.resetErrorState_();
     this.inProgress_ = true;
     this.browserProxy_
@@ -164,17 +205,26 @@ Polymer({
    * @param {string} oldValue
    * @private
    */
-  onURLChanged_: function(newValue, oldValue) {
+  onURLChanged_(newValue, oldValue) {
     this.resetErrorState_();
     const parts = this.mountUrl_.split('\\');
     this.mountName_ = parts[parts.length - 1];
   },
 
   /**
+   * @param {string} newValue
+   * @param {string} oldValue
+   * @private
+   */
+  onAuthenticationMethodChanged_(newValue, oldValue) {
+    this.resetErrorState_();
+  },
+
+  /**
    * @return {boolean}
    * @private
    */
-  canAddShare_: function() {
+  canAddShare_() {
     return !!this.mountUrl_ && !this.inProgress_ && this.isShareUrlValid_();
   },
 
@@ -184,7 +234,7 @@ Polymer({
    * @param {boolean} done Whether share discovery has finished.
    * @private
    */
-  onSharesFound_: function(newSharesDiscovered, done) {
+  onSharesFound_(newSharesDiscovered, done) {
     this.discoveredShares_ = this.discoveredShares_.concat(newSharesDiscovered);
     this.discoveryActive_ = !done;
   },
@@ -193,19 +243,34 @@ Polymer({
    * @return {boolean}
    * @private
    */
-  shouldShowCredentialUI_: function() {
-    return this.authenticationMethod_ == SmbAuthMethod.CREDENTIALS;
+  shouldShowCredentialUI_() {
+    return this.authenticationMethod_ === SmbAuthMethod.CREDENTIALS;
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  shouldShowAuthenticationUI_() {
+    // SSO not supported in guest mode. TODO(crbug/1186188): Enable SSO option
+    // for MGS on file share UI, after fixing authentication error.
+    if (this.isGuest_) {
+      return false;
+    }
+
+    // SSO only supported on ChromAD or Kerberos.
+    return this.isActiveDirectory_ || this.isKerberosEnabled_;
   },
 
   /**
    * @param {SmbMountResult} result
    * @private
    */
-  onAddShare_: function(result) {
+  onAddShare_(result) {
     this.inProgress_ = false;
 
     // Success case. Close dialog.
-    if (result == SmbMountResult.SUCCESS) {
+    if (result === SmbMountResult.SUCCESS) {
       this.$.dialog.close();
       return;
     }
@@ -213,8 +278,17 @@ Polymer({
     switch (result) {
       // Credential Error
       case SmbMountResult.AUTHENTICATION_FAILED:
+        if (this.authenticationMethod_ === SmbAuthMethod.KERBEROS) {
+          this.setGeneralError_(
+              loadTimeData.getString('smbShareAddedAuthFailedMessage'));
+        } else {
+          this.setCredentialError_(
+              loadTimeData.getString('smbShareAddedAuthFailedMessage'));
+        }
+        break;
+      case SmbMountResult.INVALID_USERNAME:
         this.setCredentialError_(
-            loadTimeData.getString('smbShareAddedAuthFailedMessage'));
+            loadTimeData.getString('smbShareAddedInvalidUsernameMessage'));
         break;
 
       // Path Errors
@@ -240,6 +314,10 @@ Polymer({
         this.setGeneralError_(
             loadTimeData.getString('smbShareAddedMountExistsMessage'));
         break;
+      case SmbMountResult.TOO_MANY_OPENED:
+        this.setGeneralError_(
+            loadTimeData.getString('smbShareAddedTooManyMountsMessage'));
+        break;
       default:
         this.setGeneralError_(
             loadTimeData.getString('smbShareAddedErrorMessage'));
@@ -247,8 +325,8 @@ Polymer({
   },
 
   /** @private */
-  resetErrorState_: function() {
-    this.currentMountError_ = smb_shares.MountErrorType.NO_ERROR;
+  resetErrorState_() {
+    this.currentMountError_ = MountErrorType.NO_ERROR;
     this.$.address.errorMessage = '';
     this.$.password.errorMessage = '';
     this.generalErrorText_ = '';
@@ -258,62 +336,61 @@ Polymer({
    * @param {string} errorMessage
    * @private
    */
-  setCredentialError_: function(errorMessage) {
+  setCredentialError_(errorMessage) {
     this.$.password.errorMessage = errorMessage;
-    this.currentMountError_ = smb_shares.MountErrorType.CREDENTIAL_ERROR;
+    this.currentMountError_ = MountErrorType.CREDENTIAL_ERROR;
   },
 
   /**
    * @param {string} errorMessage
    * @private
    */
-  setGeneralError_: function(errorMessage) {
+  setGeneralError_(errorMessage) {
     this.generalErrorText_ = errorMessage;
-    this.currentMountError_ = smb_shares.MountErrorType.GENERAL_ERROR;
+    this.currentMountError_ = MountErrorType.GENERAL_ERROR;
   },
 
   /**
    * @param {string} errorMessage
    * @private
    */
-  setPathError_: function(errorMessage) {
+  setPathError_(errorMessage) {
     this.$.address.errorMessage = errorMessage;
-    this.currentMountError_ = smb_shares.MountErrorType.PATH_ERROR;
+    this.currentMountError_ = MountErrorType.PATH_ERROR;
   },
 
   /**
    * @return {boolean}
    * @private
    */
-  shouldShowCredentialError_: function() {
-    return this.currentMountError_ ==
-        smb_shares.MountErrorType.CREDENTIAL_ERROR;
+  shouldShowCredentialError_() {
+    return this.currentMountError_ === MountErrorType.CREDENTIAL_ERROR;
   },
 
   /**
    * @return {boolean}
    * @private
    */
-  shouldShowGeneralError_: function() {
-    return this.currentMountError_ == smb_shares.MountErrorType.GENERAL_ERROR;
+  shouldShowGeneralError_() {
+    return this.currentMountError_ === MountErrorType.GENERAL_ERROR;
   },
 
   /**
    * @return {boolean}
    * @private
    */
-  shouldShowPathError_: function() {
-    return this.currentMountError_ == smb_shares.MountErrorType.PATH_ERROR;
+  shouldShowPathError_() {
+    return this.currentMountError_ === MountErrorType.PATH_ERROR;
   },
 
   /**
    * @return {boolean}
    * @private
    */
-  isShareUrlValid_: function() {
+  isShareUrlValid_() {
     if (!this.mountUrl_ || this.shouldShowPathError_()) {
       return false;
     }
-    return smb_shares.SMB_SHARE_URL_REGEX.test(this.mountUrl_);
+    return SMB_SHARE_URL_REGEX.test(this.mountUrl_);
   },
 });

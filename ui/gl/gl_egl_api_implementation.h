@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_export.h"
 
 namespace gl {
@@ -18,11 +19,10 @@ namespace gl {
 struct GLWindowSystemBindingInfo;
 
 GL_EXPORT void InitializeStaticGLBindingsEGL();
-GL_EXPORT void InitializeDebugGLBindingsEGL();
 GL_EXPORT void ClearBindingsEGL();
 GL_EXPORT bool GetGLWindowSystemBindingInfoEGL(GLWindowSystemBindingInfo* info);
 GL_EXPORT void SetDisabledExtensionsEGL(const std::string& disabled_extensions);
-GL_EXPORT bool InitializeExtensionSettingsOneOffEGL();
+GL_EXPORT bool InitializeExtensionSettingsOneOffEGL(GLDisplayEGL* display);
 
 class GL_EXPORT EGLApiBase : public EGLApi {
  public:
@@ -36,7 +36,7 @@ class GL_EXPORT EGLApiBase : public EGLApi {
   ~EGLApiBase() override;
   void InitializeBase(DriverEGL* driver);
 
-  DriverEGL* driver_;
+  raw_ptr<DriverEGL> driver_;
 };
 
 class GL_EXPORT RealEGLApi : public EGLApiBase {
@@ -55,10 +55,10 @@ class GL_EXPORT RealEGLApi : public EGLApiBase {
 };
 
 // Logs debug information for every EGL call.
-class GL_EXPORT DebugEGLApi : public EGLApi {
+class GL_EXPORT LogEGLApi : public EGLApi {
  public:
-  DebugEGLApi(EGLApi* egl_api);
-  ~DebugEGLApi() override;
+  LogEGLApi(EGLApi* egl_api);
+  ~LogEGLApi() override;
   void SetDisabledExtensions(const std::string& disabled_extensions) override;
 
   // Include the auto-generated part of this class. We split this because
@@ -67,7 +67,7 @@ class GL_EXPORT DebugEGLApi : public EGLApi {
   #include "gl_bindings_api_autogen_egl.h"
 
  private:
-  EGLApi* egl_api_;
+  raw_ptr<EGLApi> egl_api_;
 };
 
 // Inserts a TRACE for every EGL call.
@@ -83,7 +83,7 @@ class GL_EXPORT TraceEGLApi : public EGLApi {
   #include "gl_bindings_api_autogen_egl.h"
 
  private:
-  EGLApi* egl_api_;
+  raw_ptr<EGLApi> egl_api_;
 };
 
 }  // namespace gl

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,9 @@ CARendererLayerParams::CARendererLayerParams(
     unsigned background_color,
     unsigned edge_aa_mask,
     float opacity,
-    unsigned filter)
+    unsigned filter,
+    absl::optional<gfx::HDRMetadata> hdr_metadata,
+    gfx::ProtectedVideoType protected_video_type)
     : is_clipped(is_clipped),
       clip_rect(clip_rect),
       rounded_corner_bounds(rounded_corner_bounds),
@@ -30,7 +32,9 @@ CARendererLayerParams::CARendererLayerParams(
       background_color(background_color),
       edge_aa_mask(edge_aa_mask),
       opacity(opacity),
-      filter(filter) {}
+      filter(filter),
+      hdr_metadata(hdr_metadata),
+      protected_video_type(protected_video_type) {}
 
 CARendererLayerParams::CARendererLayerParams(
     const CARendererLayerParams& other) = default;

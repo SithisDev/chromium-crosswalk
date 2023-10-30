@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <memory>
 
 #import "base/mac/scoped_objc_class_swizzler.h"
-#include "base/macros.h"
 #import "testing/gtest_mac.h"
 #import "testing/platform_test.h"
 #include "ui/gfx/geometry/rect.h"
@@ -36,14 +35,16 @@ class MacCoordinateConversionTest : public PlatformTest {
  public:
   MacCoordinateConversionTest() {}
 
+  MacCoordinateConversionTest(const MacCoordinateConversionTest&) = delete;
+  MacCoordinateConversionTest& operator=(const MacCoordinateConversionTest&) =
+      delete;
+
   // Overridden from testing::Test:
   void SetUp() override;
   void TearDown() override;
 
  private:
   std::unique_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_frame_;
-
-  DISALLOW_COPY_AND_ASSIGN(MacCoordinateConversionTest);
 };
 
 void MacCoordinateConversionTest::SetUp() {
@@ -53,10 +54,9 @@ void MacCoordinateConversionTest::SetUp() {
   EXPECT_EQ(0, primary_screen_frame.origin.x);
   EXPECT_EQ(0, primary_screen_frame.origin.y);
 
-  swizzle_frame_.reset(new base::mac::ScopedObjCClassSwizzler(
-      [NSScreen class],
-      [MacCoordinateConversionTestScreenDonor class],
-      @selector(frame)));
+  swizzle_frame_ = std::make_unique<base::mac::ScopedObjCClassSwizzler>(
+      [NSScreen class], [MacCoordinateConversionTestScreenDonor class],
+      @selector(frame));
 
   primary_screen_frame = [[[NSScreen screens] firstObject] frame];
   EXPECT_EQ(kTestWidth, primary_screen_frame.size.width);

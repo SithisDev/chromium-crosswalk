@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 #include <wtsapi32.h>
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "ui/gfx/win/singleton_hwnd.h"
 #include "ui/gfx/win/singleton_hwnd_observer.h"
 
@@ -29,17 +30,23 @@ class SessionChangeObserver::WtsRegistrationNotificationManager {
 
   WtsRegistrationNotificationManager() {
     DCHECK(!singleton_hwnd_observer_);
-    singleton_hwnd_observer_.reset(new gfx::SingletonHwndObserver(
+    singleton_hwnd_observer_ = std::make_unique<gfx::SingletonHwndObserver>(
         base::BindRepeating(&WtsRegistrationNotificationManager::OnWndProc,
-                            base::Unretained(this))));
+                            base::Unretained(this)));
 
-    base::OnceClosure wts_register = base::BindOnce(
-        base::IgnoreResult(&WTSRegisterSessionNotification),
-        gfx::SingletonHwnd::GetInstance()->hwnd(), NOTIFY_FOR_THIS_SESSION);
+    base::OnceClosure wts_register =
+        base::BindOnce(base::IgnoreResult(&WTSRegisterSessionNotification),
+                       gfx::SingletonHwnd::GetInstance()->hwnd(),
+                       DWORD{NOTIFY_FOR_THIS_SESSION});
 
-    base::CreateCOMSTATaskRunnerWithTraits({})->PostTask(
+    base::ThreadPool::CreateCOMSTATaskRunner({})->PostTask(
         FROM_HERE, std::move(wts_register));
   }
+
+  WtsRegistrationNotificationManager(
+      const WtsRegistrationNotificationManager&) = delete;
+  WtsRegistrationNotificationManager& operator=(
+      const WtsRegistrationNotificationManager&) = delete;
 
   ~WtsRegistrationNotificationManager() { RemoveSingletonHwndObserver(); }
 
@@ -59,8 +66,21 @@ class SessionChangeObserver::WtsRegistrationNotificationManager {
   void OnWndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
       case WM_WTSSESSION_CHANGE:
-        for (SessionChangeObserver& observer : observer_list_)
-          observer.OnSessionChange(wparam);
+        if (wparam == WTS_SESSION_LOCK || wparam == WTS_SESSION_UNLOCK) {
+          bool is_current_session;
+          const bool* is_current_session_ptr = &is_current_session;
+          DWORD current_session_id = 0;
+          if (!::ProcessIdToSessionId(::GetCurrentProcessId(),
+                                      &current_session_id)) {
+            PLOG(ERROR) << "ProcessIdToSessionId failed";
+            is_current_session_ptr = nullptr;
+          } else {
+            is_current_session =
+                (static_cast<DWORD>(lparam) == current_session_id);
+          }
+          for (SessionChangeObserver& observer : observer_list_)
+            observer.OnSessionChange(wparam, is_current_session_ptr);
+        }
         break;
       case WM_DESTROY:
         RemoveSingletonHwndObserver();
@@ -86,8 +106,6 @@ class SessionChangeObserver::WtsRegistrationNotificationManager {
 
   base::ObserverList<SessionChangeObserver, true>::Unchecked observer_list_;
   std::unique_ptr<gfx::SingletonHwndObserver> singleton_hwnd_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(WtsRegistrationNotificationManager);
 };
 
 SessionChangeObserver::SessionChangeObserver(const WtsCallback& callback)
@@ -100,8 +118,9 @@ SessionChangeObserver::~SessionChangeObserver() {
   ClearCallback();
 }
 
-void SessionChangeObserver::OnSessionChange(WPARAM wparam) {
-  callback_.Run(wparam);
+void SessionChangeObserver::OnSessionChange(WPARAM wparam,
+                                            const bool* is_current_session) {
+  callback_.Run(wparam, is_current_session);
 }
 
 void SessionChangeObserver::ClearCallback() {

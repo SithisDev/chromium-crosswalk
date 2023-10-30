@@ -1,12 +1,30 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {Command} from './ui/command.js';
+import {$} from 'chrome://resources/js/util.m.js';
+
+import {DialogType} from '../../common/js/dialog_type.js';
+import {metrics} from '../../common/js/metrics.js';
+import {str, UserCanceledError, util} from '../../common/js/util.js';
+import {AllowedPaths, VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+
+import {FileFilter} from './directory_contents.js';
+import {DirectoryModel} from './directory_model.js';
+import {FileSelectionHandler} from './file_selection.js';
+import {LaunchParam} from './launch_param.js';
+import {MetadataModel} from './metadata/metadata_model.js';
+import {NamingController} from './naming_controller.js';
+import {DialogFooter} from './ui/dialog_footer.js';
 
 /**
  * Controler for handling behaviors of the Files app opened as a file/folder
  * selection dialog.
  */
-class DialogActionController {
+export class DialogActionController {
   /**
    * @param {!DialogType} dialogType Dialog type.
    * @param {!DialogFooter} dialogFooter Dialog footer.
@@ -81,7 +99,7 @@ class DialogActionController {
     this.onFileTypeFilterChanged_();
 
     this.newFolderCommand_ =
-        /** @type {cr.ui.Command} */ ($('new-folder'));
+        /** @type {Command} */ ($('new-folder'));
     this.newFolderCommand_.addEventListener(
         'disabledChange', this.updateNewFolderButton_.bind(this));
   }
@@ -89,7 +107,7 @@ class DialogActionController {
   /**
    * @private
    */
-  processOKActionForSaveDialog_() {
+  async processOKActionForSaveDialog_() {
     const selection = this.fileSelectionHandler_.selection;
 
     // If OK action is clicked when a directory is selected, open the directory.
@@ -101,26 +119,26 @@ class DialogActionController {
 
     // Save-as doesn't require a valid selection from the list, since
     // we're going to take the filename from the text input.
+    this.updateExtensionForSelectedFileType_(true);
     const filename = this.dialogFooter_.filenameInput.value;
     if (!filename) {
       throw new Error('Missing filename!');
     }
 
-    this.namingController_.validateFileNameForSaving(filename)
-        .then(url => {
-          // TODO(mtomasz): Clean this up by avoiding constructing a URL
-          //                via string concatenation.
-          this.selectFilesAndClose_({
-            urls: [url],
-            multiple: false,
-            filterIndex: this.dialogFooter_.selectedFilterIndex
-          });
-        })
-        .catch(error => {
-          if (error instanceof Error) {
-            console.error(error.stack && error);
-          }
-        });
+    try {
+      const url =
+          await this.namingController_.validateFileNameForSaving(filename);
+
+      this.selectFilesAndClose_({
+        urls: [url],
+        multiple: false,
+        filterIndex: this.dialogFooter_.selectedFilterIndex,
+      });
+    } catch (error) {
+      if (!(error instanceof UserCanceledError)) {
+        console.warn(error);
+      }
+    }
   }
 
   /**
@@ -150,7 +168,7 @@ class DialogActionController {
       const singleSelection = {
         urls: [url],
         multiple: false,
-        filterIndex: this.dialogFooter_.selectedFilterIndex
+        filterIndex: this.dialogFooter_.selectedFilterIndex,
       };
       this.selectFilesAndClose_(singleSelection);
       return;
@@ -167,7 +185,7 @@ class DialogActionController {
     for (let i = 0; i < selectedIndexes.length; i++) {
       const entry = dm.item(selectedIndexes[i]);
       if (!entry) {
-        console.error('Error locating selected file at index: ' + i);
+        console.warn('Error locating selected file at index: ' + i);
         continue;
       }
 
@@ -204,7 +222,7 @@ class DialogActionController {
     const singleSelection = {
       urls: [files[0]],
       multiple: false,
-      filterIndex: this.dialogFooter_.selectedFilterIndex
+      filterIndex: this.dialogFooter_.selectedFilterIndex,
     };
     this.selectFilesAndClose_(singleSelection);
   }
@@ -245,133 +263,86 @@ class DialogActionController {
    */
   selectFilesAndClose_(selection) {
     const currentRootType = this.directoryModel_.getCurrentRootType();
-    const callSelectFilesApiAndClose = callback => {
-      const onFileSelected = () => {
-        callback();
-        if (!chrome.runtime.lastError) {
-          // Call next method on a timeout, as it's unsafe to
-          // close a window from a callback.
-          setTimeout(window.close.bind(window), 0);
-        }
-      };
-      // Record the root types of chosen files in OPEN dialog.
-      if (this.dialogType_ == DialogType.SELECT_OPEN_FILE ||
-          this.dialogType_ == DialogType.SELECT_OPEN_MULTI_FILE) {
-        metrics.recordEnum(
-            'OpenFiles.RootType', currentRootType,
-            VolumeManagerCommon.RootTypesForUMA);
-      }
-      if (selection.multiple) {
-        chrome.fileManagerPrivate.selectFiles(
-            selection.urls, this.allowedPaths_ === AllowedPaths.NATIVE_PATH,
-            onFileSelected);
-      } else {
-        chrome.fileManagerPrivate.selectFile(
-            selection.urls[0], selection.filterIndex,
-            this.dialogType_ !==
-                DialogType.SELECT_SAVEAS_FILE /* for opening */,
-            this.allowedPaths_ === AllowedPaths.NATIVE_PATH, onFileSelected);
+    const onFileSelected = () => {
+      if (!chrome.runtime.lastError) {
+        // Call next method on a timeout, as it's unsafe to
+        // close a window from a callback.
+        setTimeout(window.close.bind(window), 0);
       }
     };
+    // Record the root types of chosen files in OPEN dialog.
+    if (this.dialogType_ == DialogType.SELECT_OPEN_FILE ||
+        this.dialogType_ == DialogType.SELECT_OPEN_MULTI_FILE) {
+      metrics.recordEnum(
+          'OpenFiles.RootType', currentRootType,
+          VolumeManagerCommon.RootTypesForUMA);
+    }
+    if (selection.multiple) {
+      chrome.fileManagerPrivate.selectFiles(
+          selection.urls, this.allowedPaths_ === AllowedPaths.NATIVE_PATH,
+          onFileSelected);
+    } else {
+      chrome.fileManagerPrivate.selectFile(
+          selection.urls[0], selection.filterIndex,
+          this.dialogType_ !== DialogType.SELECT_SAVEAS_FILE /* for opening */,
+          this.allowedPaths_ === AllowedPaths.NATIVE_PATH, onFileSelected);
+    }
+  }
 
-    if (currentRootType !== VolumeManagerCommon.VolumeType.DRIVE ||
-        this.dialogType_ === DialogType.SELECT_SAVEAS_FILE) {
-      callSelectFilesApiAndClose(() => {});
-      return;
+  /**
+   * Returns the regex to match against files for the current filter.
+   * @return {?RegExp}
+   */
+  regexpForCurrentFilter_() {
+    // Note selectedFilterIndex indexing is 1-based. (0 is "all files").
+    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
+    if (selectedIndex < 1) {
+      return null;  // No specific filter selected.
+    }
+    return new RegExp(
+        '\\.(' + this.fileTypes_[selectedIndex - 1].extensions.join('|') + ')$',
+        'i');
+  }
+
+  /**
+   * Updates the file input field to agree with the current filter.
+   * @param {boolean} forConfirm The update is for the final confirm step.
+   * @private
+   */
+  updateExtensionForSelectedFileType_(forConfirm) {
+    const regexp = this.regexpForCurrentFilter_();
+    if (!regexp) {
+      return;  // No filter selected.
     }
 
-    const shade = document.createElement('div');
-    shade.className = 'shade';
-    const footer = this.dialogFooter_.element;
-    const progress = footer.querySelector('.progress-track');
-    progress.style.width = '0%';
-    const cancelled = false;
-
-    const progressMap = {};
-    let filesStarted = 0;
-    let filesTotal = selection.urls.length;
-    for (let index = 0; index < selection.urls.length; index++) {
-      progressMap[selection.urls[index]] = -1;
+    let filename = this.dialogFooter_.filenameInput.value;
+    if (!filename || regexp.test(filename)) {
+      return;  // Filename empty or already satisfies filter.
     }
-    let lastPercent = 0;
-    let bytesTotal = 0;
-    let bytesDone = 0;
 
-    const onFileTransfersUpdated = status => {
-      if (!(status.fileUrl in progressMap)) {
-        return;
+    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
+    assert(selectedIndex > 0);  // Otherwise there would be no regex.
+    const newExtension = this.fileTypes_[selectedIndex - 1].extensions[0];
+    if (!newExtension) {
+      return;  // No default extension.
+    }
+
+    const extensionIndex = filename.lastIndexOf('.');
+    if (extensionIndex < 0) {
+      // No current extension.
+      if (!forConfirm) {
+        return;  // Add one later.
       }
-      if (status.total === -1) {
-        return;
+      filename = `${filename}.${newExtension}`;
+    } else {
+      if (forConfirm) {
+        return;  // Keep the current user choice.
       }
+      filename = `${filename.substr(0, extensionIndex)}.${newExtension}`;
+    }
 
-      let old = progressMap[status.fileUrl];
-      if (old === -1) {
-        // -1 means we don't know file size yet.
-        bytesTotal += status.total;
-        filesStarted++;
-        old = 0;
-      }
-      bytesDone += status.processed - old;
-      progressMap[status.fileUrl] = status.processed;
-
-      let percent = bytesTotal === 0 ? 0 : bytesDone / bytesTotal;
-      // For files we don't have information about, assume the progress is zero.
-      percent = percent * filesStarted / filesTotal * 100;
-      // Do not decrease the progress. This may happen, if first downloaded
-      // file is small, and the second one is large.
-      lastPercent = Math.max(lastPercent, percent);
-      progress.style.width = lastPercent + '%';
-    };
-
-    const setup = () => {
-      document.querySelector('.dialog-container').appendChild(shade);
-      setTimeout(() => {
-        shade.setAttribute('fadein', 'fadein');
-      }, 100);
-      footer.setAttribute('progress', 'progress');
-      this.dialogFooter_.cancelButton.removeEventListener(
-          'click', this.onCancelBound_);
-      this.dialogFooter_.cancelButton.addEventListener('click', onCancel);
-      chrome.fileManagerPrivate.onFileTransfersUpdated.addListener(
-          onFileTransfersUpdated);
-    };
-
-    const cleanup = () => {
-      shade.parentNode.removeChild(shade);
-      footer.removeAttribute('progress');
-      this.dialogFooter_.cancelButton.removeEventListener('click', onCancel);
-      this.dialogFooter_.cancelButton.addEventListener(
-          'click', this.onCancelBound_);
-      chrome.fileManagerPrivate.onFileTransfersUpdated.removeListener(
-          onFileTransfersUpdated);
-    };
-
-    const onCancel = () => {
-      // According to API cancel may fail, but there is no proper UI to reflect
-      // this. So, we just silently assume that everything is cancelled.
-      util.URLsToEntries(selection.urls).then(entries => {
-        chrome.fileManagerPrivate.cancelFileTransfers(
-            entries, util.checkAPIError);
-      });
-    };
-
-    const onProperties = properties => {
-      for (let i = 0; i < properties.length; i++) {
-        if (properties[i].present) {
-          // For files already in GCache, we don't get any transfer updates.
-          filesTotal--;
-        }
-      }
-      callSelectFilesApiAndClose(cleanup);
-    };
-
-    setup();
-
-    // TODO(mtomasz): Use Entry instead of URLs, if possible.
-    util.URLsToEntries(selection.urls, entries => {
-      this.metadataModel_.get(entries, ['present']).then(onProperties);
-    });
+    this.dialogFooter_.filenameInput.value = filename;
+    this.dialogFooter_.selectTargetNameInFilenameInput();
   }
 
   /**
@@ -380,30 +351,17 @@ class DialogActionController {
    */
   onFileTypeFilterChanged_() {
     this.fileFilter_.removeFilter('fileType');
-    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
-    if (selectedIndex > 0) {  // Specific filter selected.
-      const regexp = new RegExp(
-          '\\.(' + this.fileTypes_[selectedIndex - 1].extensions.join('|') +
-              ')$',
-          'i');
-      const filter = entry => {
-        return entry.isDirectory || regexp.test(entry.name);
-      };
-      this.fileFilter_.addFilter('fileType', filter);
+    const regexp = this.regexpForCurrentFilter_();
+    if (!regexp) {
+      return;
+    }
 
-      // In save dialog, update the destination name extension.
-      if (this.dialogType_ === DialogType.SELECT_SAVEAS_FILE) {
-        const current = this.dialogFooter_.filenameInput.value;
-        const newExt = this.fileTypes_[selectedIndex - 1].extensions[0];
-        if (newExt && !regexp.test(current)) {
-          const i = current.lastIndexOf('.');
-          if (i >= 0) {
-            this.dialogFooter_.filenameInput.value =
-                current.substr(0, i) + '.' + newExt;
-            this.dialogFooter_.selectTargetNameInFilenameInput();
-          }
-        }
-      }
+    const filter = entry => entry.isDirectory || regexp.test(entry.name);
+    this.fileFilter_.addFilter('fileType', filter);
+
+    // In save dialog, update the destination name extension.
+    if (this.dialogType_ === DialogType.SELECT_SAVEAS_FILE) {
+      this.updateExtensionForSelectedFileType_(false);
     }
   }
 

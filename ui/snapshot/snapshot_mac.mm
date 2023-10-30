@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
 
@@ -71,21 +70,21 @@ void GrabWindowSnapshotAndScaleAsync(
     const gfx::Rect& snapshot_bounds,
     const gfx::Size& target_size,
     GrabWindowSnapshotAsyncCallback callback) {
-  callback.Run(gfx::Image());
+  std::move(callback).Run(gfx::Image());
 }
 
 void GrabViewSnapshotAsync(gfx::NativeView view,
                            const gfx::Rect& source_rect,
-                           const GrabWindowSnapshotAsyncCallback& callback) {
-  callback.Run(gfx::Image());
+                           GrabWindowSnapshotAsyncCallback callback) {
+  std::move(callback).Run(gfx::Image());
 }
 
 void GrabWindowSnapshotAsync(gfx::NativeWindow native_window,
                              const gfx::Rect& source_rect,
-                             const GrabWindowSnapshotAsyncCallback& callback) {
+                             GrabWindowSnapshotAsyncCallback callback) {
   NSWindow* window = native_window.GetNativeNSWindow();
   return GrabViewSnapshotAsync([[window contentView] superview], source_rect,
-                               callback);
+                               std::move(callback));
 }
 
 }  // namespace ui

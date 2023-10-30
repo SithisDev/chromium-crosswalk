@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/ozone/platform/drm/gpu/drm_overlay_plane.h"
 #include "ui/ozone/platform/drm/gpu/drm_window_proxy.h"
 #include "ui/ozone/platform/drm/gpu/gbm_pixmap.h"
@@ -18,7 +19,7 @@
 namespace ui {
 
 GbmOverlaySurface::GbmOverlaySurface(std::unique_ptr<DrmWindowProxy> window)
-    : window_(std::move(window)), weak_ptr_factory_(this) {}
+    : window_(std::move(window)) {}
 
 GbmOverlaySurface::~GbmOverlaySurface() {}
 
@@ -41,8 +42,7 @@ void GbmOverlaySurface::SubmitFrame(std::vector<OverlayPlane> overlay_planes,
   for (auto& plane : overlay_planes) {
     unsubmitted_frame.overlay_planes.push_back(ui::DrmOverlayPlane(
         static_cast<GbmPixmap*>(plane.pixmap.get())->framebuffer(),
-        plane.z_order, plane.plane_transform, plane.display_bounds,
-        plane.crop_rect, plane.enable_blend, std::move(plane.gpu_fence)));
+        plane.overlay_plane_data, std::move(plane.gpu_fence)));
   }
   unsubmitted_frame.submission_callback = std::move(submission_callback);
   unsubmitted_frame.presentation_callback = std::move(presentation_callback);
@@ -67,7 +67,7 @@ void GbmOverlaySurface::SubmitFrame() {
 }
 
 void GbmOverlaySurface::OnSubmission(gfx::SwapResult swap_result,
-                                     std::unique_ptr<gfx::GpuFence> out_fence) {
+                                     gfx::GpuFenceHandle release_fence) {
   DCHECK(page_flip_pending_);
   DCHECK(have_unsubmitted_frame_);
 

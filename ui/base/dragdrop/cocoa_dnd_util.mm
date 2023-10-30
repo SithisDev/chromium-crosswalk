@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/sys_string_conversions.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "url/gurl.h"
@@ -16,7 +16,7 @@ NSString* const kChromeDragDummyPboardType = @"org.chromium.drag-dummy-type";
 NSString* const kChromeDragImageHTMLPboardType = @"org.chromium.image-html";
 
 BOOL PopulateURLAndTitleFromPasteboard(GURL* url,
-                                       base::string16* title,
+                                       std::u16string* title,
                                        NSPasteboard* pboard,
                                        BOOL convert_filenames) {
   CHECK(url);

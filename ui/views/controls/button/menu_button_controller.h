@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 #define UI_VIEWS_CONTROLS_BUTTON_MENU_BUTTON_CONTROLLER_H_
 
 #include <memory>
+#include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "ui/views/controls/button/button_controller.h"
@@ -15,7 +16,6 @@
 namespace views {
 class ButtonControllerDelegate;
 class MenuButton;
-class MenuButtonListener;
 
 // A controller that contains the logic for showing a menu when the left mouse
 // is pushed.
@@ -32,17 +32,22 @@ class VIEWS_EXPORT MenuButtonController : public ButtonController {
                 bool is_sibling_menu_show,
                 const ui::LocatedEvent* event);
 
+    PressedLock(const PressedLock&) = delete;
+    PressedLock& operator=(const PressedLock&) = delete;
+
     ~PressedLock();
 
    private:
     base::WeakPtr<MenuButtonController> menu_button_controller_;
-
-    DISALLOW_COPY_AND_ASSIGN(PressedLock);
   };
 
   MenuButtonController(Button* button,
-                       MenuButtonListener* listener,
+                       Button::PressedCallback callback,
                        std::unique_ptr<ButtonControllerDelegate> delegate);
+
+  MenuButtonController(const MenuButtonController&) = delete;
+  MenuButtonController& operator=(const MenuButtonController&) = delete;
+
   ~MenuButtonController() override;
 
   // view::ButtonController
@@ -55,7 +60,6 @@ class VIEWS_EXPORT MenuButtonController : public ButtonController {
   bool OnKeyReleased(const ui::KeyEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void UpdateAccessibleNodeData(ui::AXNodeData* node_data) override;
-  void OnStateChanged(Button::ButtonState old_state) override;
   bool IsTriggerableEvent(const ui::Event& event) override;
 
   // Calls TakeLock with is_sibling_menu_show as false and a nullptr to the
@@ -77,9 +81,9 @@ class VIEWS_EXPORT MenuButtonController : public ButtonController {
   // menu, this is distinct from IsTriggerableEvent().
   bool IsTriggerableEventType(const ui::Event& event);
 
-  // Returns true if the amount of time since the last menu_closed_time_ is
-  // large enough to be considered an intentionally different event.
-  bool IsIntentionalMenuTrigger() const;
+  void SetCallback(Button::PressedCallback callback) {
+    callback_ = std::move(callback);
+  }
 
  private:
   // Increment/decrement the number of "pressed" locks this button has, and
@@ -92,12 +96,11 @@ class VIEWS_EXPORT MenuButtonController : public ButtonController {
 
   void DecrementPressedLocked();
 
-  // Compute the maximum X coordinate for the current screen. MenuButtons
-  // use this to make sure a menu is never shown off screen.
-  int GetMaximumScreenXCoordinate();
+  // Called if the button state changes while pressed lock is engaged.
+  void OnButtonStateChangedWhilePressedLocked();
 
-  // Our listener. Not owned.
-  MenuButtonListener* const listener_;
+  // Our callback.
+  Button::PressedCallback callback_;
 
   // We use a time object in order to keep track of when the menu was closed.
   // The time is used for simulating menu behavior for the menu button; that
@@ -107,20 +110,24 @@ class VIEWS_EXPORT MenuButtonController : public ButtonController {
   // Windows, the button is not part of the displayed menu.
   base::TimeTicks menu_closed_time_;
 
+  // Tracks if the current triggering event should open a menu.
+  bool is_intentional_menu_trigger_ = true;
+
   // The current number of "pressed" locks this button has.
   int pressed_lock_count_ = 0;
 
   // Used to let Activate() know if IncrementPressedLocked() was called.
-  bool* increment_pressed_lock_called_ = nullptr;
+  raw_ptr<bool> increment_pressed_lock_called_ = nullptr;
 
   // True if the button was in a disabled state when a menu was run, and
   // should return to it once the press is complete. This can happen if, e.g.,
   // we programmatically show a menu on a disabled button.
   bool should_disable_after_press_ = false;
 
-  base::WeakPtrFactory<MenuButtonController> weak_factory_{this};
+  // Subscribes to state changes on the button while pressed lock is engaged.
+  base::CallbackListSubscription state_changed_subscription_;
 
-  DISALLOW_COPY_AND_ASSIGN(MenuButtonController);
+  base::WeakPtrFactory<MenuButtonController> weak_factory_{this};
 };
 
 }  // namespace views

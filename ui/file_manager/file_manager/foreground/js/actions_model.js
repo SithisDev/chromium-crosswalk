@@ -1,12 +1,26 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {dispatchSimpleEvent} from 'chrome://resources/js/cr.m.js';
+import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.js';
+
+import {metrics} from '../../common/js/metrics.js';
+import {str, strf, util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {DriveSyncHandler} from '../../externs/background/drive_sync_handler.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+
+import {FolderShortcutsDataModel} from './folder_shortcuts_data_model.js';
+import {MetadataModel} from './metadata/metadata_model.js';
+import {ActionModelUI} from './ui/action_model_ui.js';
 
 /**
  * A single action, that can be taken on a set of entries.
  * @interface
  */
-class Action {
+export class Action {
   /**
    * Executes this action on the set of entries.
    */
@@ -91,13 +105,13 @@ class DriveShareAction {
             return;
           }
           if (results.length != 1) {
-            console.error(
+            console.warn(
                 'getEntryProperties for shareUrl should return 1 entry ' +
                 '(returned ' + results.length + ')');
             return;
           }
           if (results[0].shareUrl === undefined) {
-            console.error('getEntryProperties shareUrl is undefined');
+            console.warn('getEntryProperties shareUrl is undefined');
             return;
           }
           util.visitURL(assert(results[0].shareUrl));
@@ -112,9 +126,7 @@ class DriveShareAction {
     assert(metadata.length === 1);
     const canShareItem = metadata[0].canShare !== false;
     return this.volumeManager_.getDriveConnectionState().type !==
-        VolumeManagerCommon.DriveConnectionType.OFFLINE &&
-        (loadTimeData.getBoolean('DRIVE_FS_ENABLED') ||
-         !util.isTeamDriveRoot(this.entry_)) &&
+        chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE &&
         canShareItem;
   }
 
@@ -139,10 +151,13 @@ class DriveToggleOfflineAction {
    * @param {!MetadataModel} metadataModel
    * @param {!DriveSyncHandler} driveSyncHandler
    * @param {!ActionModelUI} ui
+   * @param {!VolumeManager} volumeManager
    * @param {boolean} value
    * @param {function()} onExecute
    */
-  constructor(entries, metadataModel, driveSyncHandler, ui, value, onExecute) {
+  constructor(
+      entries, metadataModel, driveSyncHandler, ui, volumeManager, value,
+      onExecute) {
     /**
      * @private {!Array<!Entry>}
      * @const
@@ -160,6 +175,12 @@ class DriveToggleOfflineAction {
      * @const
      */
     this.driveSyncHandler_ = driveSyncHandler;
+
+    /**
+     * @private {!VolumeManager}
+     * @const
+     */
+    this.volumeManager_ = volumeManager;
 
     /**
      * @private {!ActionModelUI}
@@ -185,39 +206,25 @@ class DriveToggleOfflineAction {
    * @param {!MetadataModel} metadataModel
    * @param {!DriveSyncHandler} driveSyncHandler
    * @param {!ActionModelUI} ui
+   * @param {!VolumeManager} volumeManager
    * @param {boolean} value
    * @param {function()} onExecute
    * @return {DriveToggleOfflineAction}
    */
   static create(
-      entries, metadataModel, driveSyncHandler, ui, value, onExecute) {
-    if (!loadTimeData.getBoolean('DRIVE_FS_ENABLED')) {
-      if (entries.some((entry) => entry.isDirectory)) {
-        return null;
-      }
-    }
-
-    const actionableEntries = entries.filter(entry => {
-      if (entry.isDirectory && !loadTimeData.getBoolean('DRIVE_FS_ENABLED')) {
-        return false;
-      }
-      const metadata = metadataModel.getCache([entry], ['hosted', 'pinned'])[0];
-      if (metadata.hosted) {
-        return false;
-      }
-      if (metadata.pinned === value) {
-        return false;
-      }
-      return true;
-    });
+      entries, metadataModel, driveSyncHandler, ui, volumeManager, value,
+      onExecute) {
+    const actionableEntries = entries.filter(
+        entry =>
+            metadataModel.getCache([entry], ['pinned'])[0].pinned !== value);
 
     if (actionableEntries.length === 0) {
       return null;
     }
 
     return new DriveToggleOfflineAction(
-        actionableEntries, metadataModel, driveSyncHandler, ui, value,
-        onExecute);
+        actionableEntries, metadataModel, driveSyncHandler, ui, volumeManager,
+        value, onExecute);
   }
 
   /**
@@ -240,13 +247,24 @@ class DriveToggleOfflineAction {
           return;
         }
         currentEntry = entries.shift();
-        chrome.fileManagerPrivate.pinDriveFile(
-            currentEntry, this.value_, steps.entryPinned);
+        // Skip files we cannot pin.
+        if (this.metadataModel_.getCache([currentEntry], ['canPin'])[0]
+                .canPin) {
+          chrome.fileManagerPrivate.pinDriveFile(
+              currentEntry, this.value_, steps.entryPinned);
+        } else {
+          steps.start();
+        }
       },
 
       // Check the result of pinning.
       entryPinned: () => {
         error = !!chrome.runtime.lastError;
+        metrics.recordBoolean('DrivePinSuccess', !error);
+        if (this.metadataModel_.getCache([currentEntry], ['hosted'])[0]
+                .hosted) {
+          metrics.recordBoolean('DriveHostedFilePinSuccess', !error);
+        }
         if (error && this.value_) {
           this.metadataModel_.get([currentEntry], ['size']).then(results => {
             steps.showError(results[0].size);
@@ -273,14 +291,12 @@ class DriveToggleOfflineAction {
       },
 
       // Show an error.
+      // TODO(crbug.com/1138744): Migrate this error message to a visual signal.
       showError: size => {
-        this.ui_.alertDialog.showHtml(
-            str('DRIVE_OUT_OF_SPACE_HEADER'),
-            strf(
-                'DRIVE_OUT_OF_SPACE_MESSAGE', unescape(currentEntry.name),
-                util.bytesToString(size)),
-            null, null, null);
-      }
+        this.ui_.alertDialog.show(
+            strf('OFFLINE_FAILURE_MESSAGE', unescape(currentEntry.name)), null,
+            null, null);
+      },
     };
     steps.start();
 
@@ -293,7 +309,8 @@ class DriveToggleOfflineAction {
    * @override
    */
   canExecute() {
-    return true;
+    return this.metadataModel_.getCache(this.entries_, ['canPin'])
+        .some(metadata => metadata.canPin);
   }
 
   /**
@@ -518,13 +535,13 @@ class DriveManageAction {
             return;
           }
           if (results.length != 1) {
-            console.error(
+            console.warn(
                 'getEntryProperties for alternateUrl should return 1 entry ' +
                 '(returned ' + results.length + ')');
             return;
           }
           if (results[0].alternateUrl === undefined) {
-            console.error('getEntryProperties alternateUrl is undefined');
+            console.warn('getEntryProperties alternateUrl is undefined');
             return;
           }
           util.visitURL(assert(results[0].alternateUrl));
@@ -536,9 +553,7 @@ class DriveManageAction {
    */
   canExecute() {
     return this.volumeManager_.getDriveConnectionState().type !==
-        VolumeManagerCommon.DriveConnectionType.OFFLINE &&
-        (loadTimeData.getBoolean('DRIVE_FS_ENABLED') ||
-         !util.isTeamDriveRoot(this.entry_));
+        chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE;
   }
 
   /**
@@ -632,7 +647,7 @@ class CustomAction {
  * Represents a set of actions for a set of entries. Includes actions set
  * locally in JS, as well as those retrieved from the FSP API.
  */
-class ActionsModel extends cr.EventTarget {
+export class ActionsModel extends EventTarget {
   /**
    * @param {!VolumeManager} volumeManager
    * @param {!MetadataModel} metadataModel
@@ -745,7 +760,8 @@ class ActionsModel extends cr.EventTarget {
 
               const saveForOfflineAction = DriveToggleOfflineAction.create(
                   this.entries_, this.metadataModel_, this.driveSyncHandler_,
-                  this.ui_, true, this.invalidate_.bind(this));
+                  this.ui_, this.volumeManager_, true,
+                  this.invalidate_.bind(this));
               if (saveForOfflineAction) {
                 actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE] =
                     saveForOfflineAction;
@@ -753,7 +769,8 @@ class ActionsModel extends cr.EventTarget {
 
               const offlineNotNecessaryAction = DriveToggleOfflineAction.create(
                   this.entries_, this.metadataModel_, this.driveSyncHandler_,
-                  this.ui_, false, this.invalidate_.bind(this));
+                  this.ui_, this.volumeManager_, false,
+                  this.invalidate_.bind(this));
               if (offlineNotNecessaryAction) {
                 actions[ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY] =
                     offlineNotNecessaryAction;
@@ -857,7 +874,7 @@ class ActionsModel extends cr.EventTarget {
       this.initializePromise_ = null;
       reject();
     }
-    cr.dispatchSimpleEvent(this, 'invalidated', true);
+    dispatchSimpleEvent(this, 'invalidated', true);
   }
 
   /**
@@ -877,7 +894,7 @@ class ActionsModel extends cr.EventTarget {
 ActionsModel.CommonActionId = {
   SHARE: 'SHARE',
   SAVE_FOR_OFFLINE: 'SAVE_FOR_OFFLINE',
-  OFFLINE_NOT_NECESSARY: 'OFFLINE_NOT_NECESSARY'
+  OFFLINE_NOT_NECESSARY: 'OFFLINE_NOT_NECESSARY',
 };
 
 /**
@@ -886,5 +903,5 @@ ActionsModel.CommonActionId = {
 ActionsModel.InternalActionId = {
   CREATE_FOLDER_SHORTCUT: 'pin-folder',
   REMOVE_FOLDER_SHORTCUT: 'unpin-folder',
-  MANAGE_IN_DRIVE: 'manage-in-drive'
+  MANAGE_IN_DRIVE: 'manage-in-drive',
 };

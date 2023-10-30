@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace switches {
 
@@ -23,9 +24,6 @@ const char kUISlowAnimations[] = "ui-slow-animations";
 
 const char kDisableVsyncForTests[] = "disable-vsync-for-tests";
 
-const char kUiCompositorMemoryLimitWhenVisibleMB[] =
-    "ui-compositor-memory-limit-when-visible-mb";
-
 }  // namespace switches
 
 namespace features {
@@ -35,7 +33,7 @@ namespace features {
 // to be done via corner points. See https://crbug.com/720596 for details.
 const base::Feature kEnablePixelCanvasRecording {
   "enable-pixel-canvas-recording",
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
@@ -50,7 +48,7 @@ bool IsUIZeroCopyEnabled() {
   // Match the behavior of IsZeroCopyUploadEnabled() in content/browser/gpu.
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
   return !command_line.HasSwitch(switches::kUIDisableZeroCopy);
 #else
   return command_line.HasSwitch(switches::kUIEnableZeroCopy);

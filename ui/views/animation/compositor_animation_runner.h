@@ -1,27 +1,34 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_ANIMATION_COMPOSITOR_ANIMATION_RUNNER_H_
 #define UI_VIEWS_ANIMATION_COMPOSITOR_ANIMATION_RUNNER_H_
 
-#include "base/scoped_observer.h"
+#include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
+#include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_animation_observer.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/gfx/animation/animation_container.h"
-
-namespace ui {
-class Compositor;
-}  // namespace ui
+#include "ui/views/views_export.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace views {
+class Widget;
 
 // An animation runner based on ui::Compositor.
-class CompositorAnimationRunner : public gfx::AnimationRunner,
-                                  public ui::CompositorAnimationObserver {
+class VIEWS_EXPORT CompositorAnimationRunner
+    : public gfx::AnimationRunner,
+      public ui::CompositorAnimationObserver,
+      public WidgetObserver {
  public:
-  explicit CompositorAnimationRunner(ui::Compositor* compositor);
+  explicit CompositorAnimationRunner(
+      Widget* widget,
+      const base::Location& location = FROM_HERE);
+  CompositorAnimationRunner(CompositorAnimationRunner&) = delete;
+  CompositorAnimationRunner& operator=(CompositorAnimationRunner&) = delete;
   ~CompositorAnimationRunner() override;
 
   // gfx::AnimationRunner:
@@ -31,36 +38,29 @@ class CompositorAnimationRunner : public gfx::AnimationRunner,
   void OnAnimationStep(base::TimeTicks timestamp) override;
   void OnCompositingShuttingDown(ui::Compositor* compositor) override;
 
+  // WidgetObserver:
+  void OnWidgetDestroying(Widget* widget) override;
+
  protected:
   // gfx::AnimationRunner:
-  void OnStart(base::TimeDelta min_interval) override;
+  void OnStart(base::TimeDelta min_interval, base::TimeDelta elapsed) override;
 
  private:
-  // This observes Compositor's destruction and helps CompositorAnimationRunner
-  // to stop animation. we need this because CompositorAnimationRunner observes
-  // the Compositor only when it's animating.
-  class CompositorChecker : public ui::CompositorObserver {
-   public:
-    explicit CompositorChecker(CompositorAnimationRunner* runner);
-    CompositorChecker(const CompositorChecker& other) = delete;
-    CompositorChecker& operator=(const CompositorChecker& other) = delete;
-    ~CompositorChecker() override;
+  // Called when an animation is stopped, the compositor is shutting down, or
+  // the widget is destroyed.
+  void StopInternal();
 
-    // ui::CompositorObserver:
-    void OnCompositingShuttingDown(ui::Compositor* compositor) override;
+  // When |widget_| is nullptr, it means the widget has been destroyed and
+  // |compositor_| must also be nullptr.
+  raw_ptr<Widget> widget_;
 
-   private:
-    CompositorAnimationRunner* runner_;
-    ScopedObserver<ui::Compositor, CompositorChecker> scoped_observer_{this};
-  };
-
-  // When |compositor_| is nullptr, it means compositor has been shut down.
-  ui::Compositor* compositor_;
+  // When |compositor_| is nullptr, it means either the animation is not
+  // running, or the compositor or |widget_| associated with the compositor_ has
+  // been destroyed during animation.
+  raw_ptr<ui::Compositor> compositor_ = nullptr;
 
   base::TimeDelta min_interval_ = base::TimeDelta::Max();
   base::TimeTicks last_tick_;
-
-  CompositorChecker checker_{this};
 };
 
 }  // namespace views

@@ -1,10 +1,10 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "ui/events/event_utils.h"
@@ -32,6 +32,11 @@ base::TimeTicks EventTimeFromNative(const PlatformEvent& native_event) {
   return base::TimeTicks();
 }
 
+base::TimeTicks EventLatencyTimeFromNative(const PlatformEvent& native_event,
+                                           base::TimeTicks current_time) {
+  return EventTimeFromNative(native_event);
+}
+
 gfx::PointF EventLocationFromNative(const PlatformEvent& native_event) {
   NOTIMPLEMENTED();
   return gfx::PointF();
@@ -54,10 +59,15 @@ int GetChangedMouseButtonFlagsFromNative(const PlatformEvent& native_event) {
 
 PointerDetails GetMousePointerDetailsFromNative(
     const PlatformEvent& native_event) {
-  return PointerDetails(EventPointerType::POINTER_TYPE_MOUSE);
+  return PointerDetails(EventPointerType::kMouse);
 }
 
 gfx::Vector2d GetMouseWheelOffset(const PlatformEvent& native_event) {
+  NOTIMPLEMENTED();
+  return gfx::Vector2d();
+}
+
+gfx::Vector2d GetMouseWheelTick120ths(const PlatformEvent& native_event) {
   NOTIMPLEMENTED();
   return gfx::Vector2d();
 }
@@ -69,19 +79,10 @@ PlatformEvent CopyNativeEvent(const PlatformEvent& event) {
 
 void ReleaseCopiedNativeEvent(const PlatformEvent& event) {}
 
-void ClearTouchIdIfReleased(const PlatformEvent& native_event) {
-  NOTIMPLEMENTED();
-}
-
-int GetTouchId(const PlatformEvent& native_event) {
-  NOTIMPLEMENTED();
-  return 0;
-}
-
 PointerDetails GetTouchPointerDetailsFromNative(
     const PlatformEvent& native_event) {
   NOTIMPLEMENTED();
-  return PointerDetails(EventPointerType::POINTER_TYPE_UNKNOWN,
+  return PointerDetails(EventPointerType::kUnknown,
                         /* radius_x */ 1.0,
                         /* radius_y */ 1.0,
                         /* force */ 0.f,

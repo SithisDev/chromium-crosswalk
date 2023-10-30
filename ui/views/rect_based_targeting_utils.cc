@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,9 @@ float PercentCoveredBy(const gfx::Rect& rect_1, const gfx::Rect& rect_2) {
   intersection.Intersect(rect_2);
   int intersect_area = intersection.size().GetArea();
   int rect_1_area = rect_1.size().GetArea();
-  return rect_1_area ?
-      static_cast<float>(intersect_area) / static_cast<float>(rect_1_area) : 0;
+  return rect_1_area ? static_cast<float>(intersect_area) /
+                           static_cast<float>(rect_1_area)
+                     : 0;
 }
 
 int DistanceSquaredFromCenterToPoint(const gfx::Point& point,

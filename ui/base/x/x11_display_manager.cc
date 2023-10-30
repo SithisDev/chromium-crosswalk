@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,34 +9,35 @@
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/base/x/x11_display_util.h"
-#include "ui/gfx/x/x11.h"
+#include "ui/gfx/x/future.h"
+#include "ui/gfx/x/randr.h"
 #include "ui/gfx/x/x11_atom_cache.h"
+#include "ui/gfx/x/xproto.h"
 
 namespace ui {
 
 namespace {
 
 constexpr int kMinXrandrVersion = 103;  // Need at least xrandr version 1.3
-constexpr auto kDisplayListUpdateDelay = base::TimeDelta::FromMilliseconds(250);
 
 }  // namespace
 
 XDisplayManager::XDisplayManager(Delegate* delegate)
     : delegate_(delegate),
-      xdisplay_(gfx::GetXDisplay()),
-      x_root_window_(DefaultRootWindow(xdisplay_)),
-      xrandr_version_(GetXrandrVersion(xdisplay_)) {}
+      connection_(x11::Connection::Get()),
+      x_root_window_(connection_->default_screen().root),
+      xrandr_version_(GetXrandrVersion()),
+      workspace_handler_(this) {}
 
 XDisplayManager::~XDisplayManager() = default;
 
 void XDisplayManager::Init() {
   if (IsXrandrAvailable()) {
-    int error_base_ignored = 0;
-    XRRQueryExtension(xdisplay_, &xrandr_event_base_, &error_base_ignored);
-
-    XRRSelectInput(xdisplay_, x_root_window_,
-                   RRScreenChangeNotifyMask | RROutputChangeNotifyMask |
-                       RRCrtcChangeNotifyMask);
+    auto& randr = connection_->randr();
+    randr.SelectInput(
+        {x_root_window_, x11::RandR::NotifyMask::ScreenChange |
+                             x11::RandR::NotifyMask::OutputChange |
+                             x11::RandR::NotifyMask::CrtcChange});
   }
   FetchDisplayList();
 }
@@ -59,29 +60,12 @@ void XDisplayManager::RemoveObserver(display::DisplayObserver* observer) {
   change_notifier_.RemoveObserver(observer);
 }
 
-bool XDisplayManager::CanProcessEvent(const XEvent& xev) {
-  return xev.type - xrandr_event_base_ == RRScreenChangeNotify ||
-         xev.type - xrandr_event_base_ == RRNotify ||
-         (xev.type == PropertyNotify &&
-          xev.xproperty.window == x_root_window_ &&
-          xev.xproperty.atom == gfx::GetAtom("_NET_WORKAREA"));
-}
-
-bool XDisplayManager::ProcessEvent(XEvent* xev) {
-  DCHECK(xev);
-  int ev_type = xev->type - xrandr_event_base_;
-  if (ev_type == RRScreenChangeNotify) {
-    // Pass the event through to xlib.
-    XRRUpdateConfiguration(xev);
-    return true;
-  }
-  if (ev_type == RRNotify ||
-      (xev->type == PropertyNotify &&
-       xev->xproperty.atom == gfx::GetAtom("_NET_WORKAREA"))) {
+void XDisplayManager::OnEvent(const x11::Event& xev) {
+  auto* prop = xev.As<x11::PropertyNotifyEvent>();
+  if (xev.As<x11::RandR::NotifyEvent>() ||
+      (prop && prop->atom == x11::GetAtom("_NET_WORKAREA"))) {
     DispatchDelayedDisplayListUpdate();
-    return true;
   }
-  return false;
 }
 
 void XDisplayManager::SetDisplayList(std::vector<display::Display> displays) {
@@ -104,6 +88,11 @@ void XDisplayManager::FetchDisplayList() {
   SetDisplayList(std::move(displays));
 }
 
+void XDisplayManager::OnCurrentWorkspaceChanged(
+    const std::string& new_workspace) {
+  change_notifier_.NotifyCurrentWorkspaceChanged(new_workspace);
+}
+
 void XDisplayManager::UpdateDisplayList() {
   std::vector<display::Display> old_displays = displays_;
   FetchDisplayList();
@@ -111,20 +100,20 @@ void XDisplayManager::UpdateDisplayList() {
 }
 
 void XDisplayManager::DispatchDelayedDisplayListUpdate() {
-  delayed_update_task_.Reset(base::BindOnce(&XDisplayManager::UpdateDisplayList,
-                                            base::Unretained(this)));
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, delayed_update_task_.callback(), kDisplayListUpdateDelay);
+  update_task_.Reset(base::BindOnce(&XDisplayManager::UpdateDisplayList,
+                                    base::Unretained(this)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                update_task_.callback());
 }
 
 gfx::Point XDisplayManager::GetCursorLocation() const {
-  XID root, child;
-  int root_x, root_y, win_x, win_y;
-  unsigned int mask;
-  XQueryPointer(xdisplay_, x_root_window_, &root, &child, &root_x, &root_y,
-                &win_x, &win_y, &mask);
+  if (auto response = connection_->QueryPointer({x_root_window_}).Sync())
+    return {response->root_x, response->root_y};
+  return {};
+}
 
-  return gfx::Point(root_x, root_y);
+std::string XDisplayManager::GetCurrentWorkspace() {
+  return workspace_handler_.GetCurrentWorkspace();
 }
 
 }  // namespace ui

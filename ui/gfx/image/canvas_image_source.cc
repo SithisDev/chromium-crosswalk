@@ -1,16 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/image/canvas_image_source.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "cc/paint/display_item_list.h"
 #include "cc/paint/record_paint_canvas.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/switches.h"
 
 namespace gfx {
@@ -25,6 +26,9 @@ class PaddedImageSource : public CanvasImageSource {
         image_(image),
         insets_(insets) {}
 
+  PaddedImageSource(const PaddedImageSource&) = delete;
+  PaddedImageSource& operator=(const PaddedImageSource&) = delete;
+
   // CanvasImageSource:
   void Draw(Canvas* canvas) override {
     canvas->DrawImageInt(image_, insets_.left(), insets_.top());
@@ -33,8 +37,6 @@ class PaddedImageSource : public CanvasImageSource {
  private:
   const ImageSkia image_;
   const Insets insets_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaddedImageSource);
 };
 
 }  // namespace

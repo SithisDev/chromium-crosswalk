@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_format_type.h"
 
 namespace base {
 namespace win {
@@ -19,13 +19,16 @@ class MessageWindow;
 }
 }
 
-namespace gfx {
-class Size;
-}
-
 namespace ui {
 
+// Documentation on the underlying Win32 API this ultimately abstracts is
+// available at
+// https://docs.microsoft.com/en-us/windows/win32/dataxchg/clipboard.
 class ClipboardWin : public Clipboard {
+ public:
+  ClipboardWin(const ClipboardWin&) = delete;
+  ClipboardWin& operator=(const ClipboardWin&) = delete;
+
  private:
   friend class Clipboard;
 
@@ -34,35 +37,66 @@ class ClipboardWin : public Clipboard {
 
   // Clipboard overrides:
   void OnPreShutdown() override;
-  uint64_t GetSequenceNumber(ClipboardType type) const override;
+  DataTransferEndpoint* GetSource(ClipboardBuffer buffer) const override;
+  const ClipboardSequenceNumberToken& GetSequenceNumber(
+      ClipboardBuffer buffer) const override;
+  std::vector<std::u16string> GetStandardFormats(
+      ClipboardBuffer buffer,
+      const DataTransferEndpoint* data_dst) const override;
   bool IsFormatAvailable(const ClipboardFormatType& format,
-                         ClipboardType type) const override;
-  void Clear(ClipboardType type) override;
-  void ReadAvailableTypes(ClipboardType type,
-                          std::vector<base::string16>* types,
-                          bool* contains_filenames) const override;
-  void ReadText(ClipboardType type, base::string16* result) const override;
-  void ReadAsciiText(ClipboardType type, std::string* result) const override;
-  void ReadHTML(ClipboardType type,
-                base::string16* markup,
+                         ClipboardBuffer buffer,
+                         const DataTransferEndpoint* data_dst) const override;
+  void Clear(ClipboardBuffer buffer) override;
+  void ReadAvailableTypes(ClipboardBuffer buffer,
+                          const DataTransferEndpoint* data_dst,
+                          std::vector<std::u16string>* types) const override;
+  void ReadText(ClipboardBuffer buffer,
+                const DataTransferEndpoint* data_dst,
+                std::u16string* result) const override;
+  void ReadAsciiText(ClipboardBuffer buffer,
+                     const DataTransferEndpoint* data_dst,
+                     std::string* result) const override;
+  void ReadHTML(ClipboardBuffer buffer,
+                const DataTransferEndpoint* data_dst,
+                std::u16string* markup,
                 std::string* src_url,
                 uint32_t* fragment_start,
                 uint32_t* fragment_end) const override;
-  void ReadRTF(ClipboardType type, std::string* result) const override;
-  SkBitmap ReadImage(ClipboardType type) const override;
-  void ReadCustomData(ClipboardType clipboard_type,
-                      const base::string16& type,
-                      base::string16* result) const override;
-  void ReadBookmark(base::string16* title, std::string* url) const override;
+  void ReadSvg(ClipboardBuffer buffer,
+               const DataTransferEndpoint* data_dst,
+               std::u16string* result) const override;
+  void ReadRTF(ClipboardBuffer buffer,
+               const DataTransferEndpoint* data_dst,
+               std::string* result) const override;
+  void ReadPng(ClipboardBuffer buffer,
+               const DataTransferEndpoint* data_dst,
+               ReadPngCallback callback) const override;
+  void ReadCustomData(ClipboardBuffer buffer,
+                      const std::u16string& type,
+                      const DataTransferEndpoint* data_dst,
+                      std::u16string* result) const override;
+  void ReadFilenames(ClipboardBuffer buffer,
+                     const DataTransferEndpoint* data_dst,
+                     std::vector<ui::FileInfo>* result) const override;
+  void ReadBookmark(const DataTransferEndpoint* data_dst,
+                    std::u16string* title,
+                    std::string* url) const override;
   void ReadData(const ClipboardFormatType& format,
+                const DataTransferEndpoint* data_dst,
                 std::string* result) const override;
-  void WriteObjects(ClipboardType type, const ObjectMap& objects) override;
+  void WritePortableAndPlatformRepresentations(
+      ClipboardBuffer buffer,
+      const ObjectMap& objects,
+      std::vector<Clipboard::PlatformRepresentation> platform_representations,
+      std::unique_ptr<DataTransferEndpoint> data_src) override;
   void WriteText(const char* text_data, size_t text_len) override;
   void WriteHTML(const char* markup_data,
                  size_t markup_len,
                  const char* url_data,
                  size_t url_len) override;
+  void WriteSvg(const char* markup_data, size_t markup_len) override;
   void WriteRTF(const char* rtf_data, size_t data_len) override;
+  void WriteFilenames(std::vector<ui::FileInfo> filenames) override;
   void WriteBookmark(const char* title_data,
                      size_t title_len,
                      const char* url_data,
@@ -72,20 +106,25 @@ class ClipboardWin : public Clipboard {
   void WriteData(const ClipboardFormatType& format,
                  const char* data_data,
                  size_t data_len) override;
-
-  void WriteBitmapFromHandle(HBITMAP source_hbitmap, const gfx::Size& size);
+  std::vector<uint8_t> ReadPngInternal(ClipboardBuffer buffer) const;
+  SkBitmap ReadBitmapInternal(ClipboardBuffer buffer) const;
 
   // Safely write to system clipboard. Free |handle| on failure.
-  void WriteToClipboard(unsigned int format, HANDLE handle);
+  // This function takes ownership of the given handle's memory.
+  void WriteToClipboard(ClipboardFormatType format, HANDLE handle);
 
   // Return the window that should be the clipboard owner, creating it
-  // if neccessary.  Marked const for lazily initialization by const methods.
+  // if necessary.  Marked const for lazily initialization by const methods.
   HWND GetClipboardWindow() const;
 
   // Mark this as mutable so const methods can still do lazy initialization.
   mutable std::unique_ptr<base::win::MessageWindow> clipboard_owner_;
 
-  DISALLOW_COPY_AND_ASSIGN(ClipboardWin);
+  // Mapping of OS-provided sequence number to a unique token.
+  mutable struct {
+    DWORD sequence_number;
+    ClipboardSequenceNumberToken token;
+  } clipboard_sequence_;
 };
 
 }  // namespace ui

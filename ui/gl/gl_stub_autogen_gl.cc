@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -22,6 +22,12 @@ GLenum GLStubApiBase::glClientWaitSyncFn(GLsync sync,
   return 0;
 }
 
+GLenum GLStubApiBase::glClientWaitSyncAPPLEFn(GLsync sync,
+                                              GLbitfield flags,
+                                              GLuint64 timeout) {
+  return 0;
+}
+
 GLuint GLStubApiBase::glCreateProgramFn() {
   return 0;
 }
@@ -37,6 +43,10 @@ GLuint GLStubApiBase::glCreateShaderProgramvFn(GLenum type,
 }
 
 GLsync GLStubApiBase::glFenceSyncFn(GLenum condition, GLbitfield flags) {
+  return 0;
+}
+
+GLsync GLStubApiBase::glFenceSyncAPPLEFn(GLenum condition, GLbitfield flags) {
   return 0;
 }
 
@@ -116,6 +126,10 @@ GLboolean GLStubApiBase::glIsEnabledFn(GLenum cap) {
   return 0;
 }
 
+GLboolean GLStubApiBase::glIsEnablediOESFn(GLenum target, GLuint index) {
+  return 0;
+}
+
 GLboolean GLStubApiBase::glIsFenceAPPLEFn(GLuint fence) {
   return 0;
 }
@@ -157,6 +171,10 @@ GLboolean GLStubApiBase::glIsShaderFn(GLuint shader) {
 }
 
 GLboolean GLStubApiBase::glIsSyncFn(GLsync sync) {
+  return 0;
+}
+
+GLboolean GLStubApiBase::glIsSyncAPPLEFn(GLsync sync) {
   return 0;
 }
 

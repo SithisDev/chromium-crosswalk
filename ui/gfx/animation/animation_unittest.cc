@@ -1,29 +1,31 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/animation/test_animation_delegate.h"
+#include "ui/gfx/switches.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
 namespace gfx {
 
-class AnimationTest: public testing::Test {
+class AnimationTest : public testing::Test {
  protected:
   AnimationTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI) {}
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 namespace {
@@ -94,7 +96,7 @@ class DeletingAnimationDelegate : public AnimationDelegate {
 TEST_F(AnimationTest, RunCase) {
   TestAnimationDelegate ad;
   RunAnimation a1(150, &ad);
-  a1.SetDuration(base::TimeDelta::FromSeconds(2));
+  a1.SetDuration(base::Seconds(2));
   a1.Start();
   base::RunLoop().Run();
 
@@ -104,7 +106,7 @@ TEST_F(AnimationTest, RunCase) {
 
 TEST_F(AnimationTest, CancelCase) {
   TestAnimationDelegate ad;
-  CancelAnimation a2(base::TimeDelta::FromSeconds(2), 150, &ad);
+  CancelAnimation a2(base::Seconds(2), 150, &ad);
   a2.Start();
   base::RunLoop().Run();
 
@@ -116,7 +118,7 @@ TEST_F(AnimationTest, CancelCase) {
 // right delegate methods invoked.
 TEST_F(AnimationTest, EndCase) {
   TestAnimationDelegate ad;
-  EndAnimation a2(base::TimeDelta::FromSeconds(2), 150, &ad);
+  EndAnimation a2(base::Seconds(2), 150, &ad);
   a2.Start();
   base::RunLoop().Run();
 
@@ -134,7 +136,7 @@ TEST_F(AnimationTest, DeleteFromEnd) {
 }
 
 TEST_F(AnimationTest, ShouldRenderRichAnimation) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   BOOL result;
   ASSERT_NE(0,
             ::SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, &result, 0));
@@ -148,7 +150,7 @@ TEST_F(AnimationTest, ShouldRenderRichAnimation) {
 
 // Test that current value is always 0 after Start() is called.
 TEST_F(AnimationTest, StartState) {
-  LinearAnimation animation(base::TimeDelta::FromMilliseconds(100), 60, NULL);
+  LinearAnimation animation(base::Milliseconds(100), 60, NULL);
   EXPECT_EQ(0.0, animation.GetCurrentValue());
   animation.Start();
   EXPECT_EQ(0.0, animation.GetCurrentValue());
@@ -156,6 +158,20 @@ TEST_F(AnimationTest, StartState) {
   EXPECT_EQ(1.0, animation.GetCurrentValue());
   animation.Start();
   EXPECT_EQ(0.0, animation.GetCurrentValue());
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// PrefersReducedMotion tests
+
+TEST_F(AnimationTest, PrefersReducedMotionRespectsOverrideFlag) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kForcePrefersReducedMotion, "1");
+  EXPECT_TRUE(Animation::PrefersReducedMotion());
+
+  // It doesn't matter what the system setting says; the flag should continue to
+  // override it.
+  Animation::SetPrefersReducedMotionForTesting(false);
+  EXPECT_TRUE(Animation::PrefersReducedMotion());
 }
 
 }  // namespace gfx

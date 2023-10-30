@@ -1,12 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/accelerators/global_media_keys_listener_win.h"
 
+#include <windows.h>
+
 #include "base/callback.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/events/event.h"
@@ -18,6 +20,11 @@ namespace {
 class MockMediaKeysListenerDelegate : public MediaKeysListener::Delegate {
  public:
   MockMediaKeysListenerDelegate() = default;
+
+  MockMediaKeysListenerDelegate(const MockMediaKeysListenerDelegate&) = delete;
+  MockMediaKeysListenerDelegate& operator=(
+      const MockMediaKeysListenerDelegate&) = delete;
+
   ~MockMediaKeysListenerDelegate() override = default;
 
   // MediaKeysListener::Delegate implementation.
@@ -58,8 +65,6 @@ class MockMediaKeysListenerDelegate : public MediaKeysListener::Delegate {
   std::vector<KeyEvent> received_events_;
   std::unique_ptr<base::RunLoop> key_event_wait_loop_;
   uint32_t num_key_events_to_wait_for_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(MockMediaKeysListenerDelegate);
 };
 
 }  // anonymous namespace
@@ -67,8 +72,12 @@ class MockMediaKeysListenerDelegate : public MediaKeysListener::Delegate {
 class GlobalMediaKeysListenerWinInteractiveTest : public testing::Test {
  public:
   GlobalMediaKeysListenerWinInteractiveTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
+
+  GlobalMediaKeysListenerWinInteractiveTest(
+      const GlobalMediaKeysListenerWinInteractiveTest&) = delete;
+  GlobalMediaKeysListenerWinInteractiveTest& operator=(
+      const GlobalMediaKeysListenerWinInteractiveTest&) = delete;
 
  protected:
   void SendKeyDown(KeyboardCode code) {
@@ -77,7 +86,7 @@ class GlobalMediaKeysListenerWinInteractiveTest : public testing::Test {
     input.ki.wVk = code;
     input.ki.time = time_stamp_++;
     input.ki.dwFlags = 0;
-    SendInput(1, &input, sizeof(INPUT));
+    ::SendInput(1, &input, sizeof(INPUT));
   }
 
   void SendKeyUp(KeyboardCode code) {
@@ -86,14 +95,12 @@ class GlobalMediaKeysListenerWinInteractiveTest : public testing::Test {
     input.ki.wVk = code;
     input.ki.time = time_stamp_++;
     input.ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(1, &input, sizeof(INPUT));
+    ::SendInput(1, &input, sizeof(INPUT));
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   DWORD time_stamp_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(GlobalMediaKeysListenerWinInteractiveTest);
 };
 
 TEST_F(GlobalMediaKeysListenerWinInteractiveTest, SimplePlayPauseTest) {

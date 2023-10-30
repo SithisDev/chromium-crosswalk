@@ -1,20 +1,40 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+
+import {MockEntry, MockFileSystem} from '../../common/js/mock_entry.js';
+import {str, util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {EntryLocation} from '../../externs/entry_location.js';
+import {FakeEntry, FilesAppEntry} from '../../externs/files_app_entry_interfaces.js';
+import {VolumeInfo} from '../../externs/volume_info.js';
+import {VolumeInfoList} from '../../externs/volume_info_list.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+
+import {EntryLocationImpl} from './entry_location_impl.js';
+import {VolumeInfoImpl} from './volume_info_impl.js';
+import {VolumeInfoListImpl} from './volume_info_list_impl.js';
+import {volumeManagerFactory} from './volume_manager_factory.js';
+import {VolumeManagerImpl} from './volume_manager_impl.js';
 
 /**
  * Mock class for VolumeManager.
  * @final
  * @implements {VolumeManager}
  */
-class MockVolumeManager {
+export class MockVolumeManager {
   constructor() {
     /** @const {!VolumeInfoList} */
     this.volumeInfoList = new VolumeInfoListImpl();
 
-    /** @type {!VolumeManagerCommon.DriveConnectionState} */
+    /** @type {!chrome.fileManagerPrivate.DriveConnectionState} */
     this.driveConnectionState = {
-      type: VolumeManagerCommon.DriveConnectionType.ONLINE
+      type: /** @type {!chrome.fileManagerPrivate.DriveConnectionStateType} */ (
+          'ONLINE'),
+      hasCellularNetworkAccess: false,
+      canPinHostedFiles: false,
     };
 
     // Create Drive.   Drive attempts to resolve FilesSystemURLs for '/root',
@@ -46,7 +66,7 @@ class MockVolumeManager {
         VolumeManagerCommon.RootType.DRIVE, str('DRIVE_DIRECTORY_LABEL'));
     /** @type {MockFileSystem} */ (drive.fileSystem)
         .populate(Object.values(driveFs.entries));
-    window.webkitResolveLocalFileSystmeURL = orig;
+    window.webkitResolveLocalFileSystemURL = orig;
 
     // Create Downloads.
     this.createVolumeInfo(
@@ -55,7 +75,14 @@ class MockVolumeManager {
         str('DOWNLOADS_DIRECTORY_LABEL'));
   }
 
-  /** @override */
+  getFuseBoxOnlyFilterEnabled() {
+    return false;
+  }
+
+  getMediaStoreFilesOnlyFilterEnabled() {
+    return false;
+  }
+
   dispose() {}
 
   /**
@@ -77,12 +104,13 @@ class MockVolumeManager {
    * @param {string} volumeId
    * @param {string} label
    * @param {string=} providerId
+   * @param {string=} remoteMountPath
    *
    * @return {!VolumeInfo}
    */
-  createVolumeInfo(type, volumeId, label, providerId) {
+  createVolumeInfo(type, volumeId, label, providerId, remoteMountPath) {
     const volumeInfo = MockVolumeManager.createMockVolumeInfo(
-        type, volumeId, label, undefined, providerId);
+        type, volumeId, label, undefined, providerId, remoteMountPath);
     this.volumeInfoList.add(volumeInfo);
     return volumeInfo;
   }
@@ -96,15 +124,20 @@ class MockVolumeManager {
    */
   getLocationInfo(entry) {
     if (util.isFakeEntry(entry)) {
+      const isReadOnly =
+          entry.rootType === VolumeManagerCommon.RootType.RECENT ?
+          !util.isRecentsFilterV2Enabled() :
+          true;
       return new EntryLocationImpl(
           this.volumeInfoList.item(0),
-          /** @type {!FakeEntry} */ (entry).rootType, true, true);
+          /** @type {!FakeEntry} */ (entry).rootType, /* isRootType= */ true,
+          isReadOnly);
     }
 
     if (entry.filesystem.name === VolumeManagerCommon.VolumeType.DRIVE) {
-      var volumeInfo = this.volumeInfoList.item(0);
-      var rootType = VolumeManagerCommon.RootType.DRIVE;
-      var isRootEntry = entry.fullPath === '/root';
+      const volumeInfo = this.volumeInfoList.item(0);
+      let rootType = VolumeManagerCommon.RootType.DRIVE;
+      let isRootEntry = entry.fullPath === '/root';
       if (entry.fullPath.startsWith('/team_drives')) {
         if (entry.fullPath === '/team_drives') {
           rootType = VolumeManagerCommon.RootType.SHARED_DRIVES_GRAND_ROOT;
@@ -121,14 +154,16 @@ class MockVolumeManager {
           rootType = VolumeManagerCommon.RootType.COMPUTER;
           isRootEntry = util.isComputersRoot(entry);
         }
+      } else if (/^\/\.(files|shortcut-targets)-by-id/.test(entry.fullPath)) {
+        rootType = VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME;
       }
       return new EntryLocationImpl(volumeInfo, rootType, isRootEntry, true);
     }
 
-    volumeInfo = this.getVolumeInfo(entry);
-    rootType =
-        VolumeManagerCommon.getRootTypeFromVolumeType(volumeInfo.volumeType);
-    isRootEntry = util.isSameEntry(entry, volumeInfo.fileSystem.root);
+    const volumeInfo = this.getVolumeInfo(entry);
+    const rootType = VolumeManagerCommon.getRootTypeFromVolumeType(
+        assert(volumeInfo.volumeType));
+    const isRootEntry = util.isSameEntry(entry, volumeInfo.fileSystem.root);
     return new EntryLocationImpl(volumeInfo, rootType, isRootEntry, false);
   }
 
@@ -148,7 +183,7 @@ class MockVolumeManager {
   }
 
   /**
-   * @return {!VolumeManagerCommon.DriveConnectionState} Current drive
+   * @return {!chrome.fileManagerPrivate.DriveConnectionState} Current drive
    *     connection state.
    */
   getDriveConnectionState() {
@@ -162,15 +197,25 @@ class MockVolumeManager {
    * @param {string=} label Label.
    * @param {string=} devicePath Device path.
    * @param {string=} providerId Provider id.
+   * @param {string=} remoteMountPath Remote mount path.
    * @return {!VolumeInfo} Created mock VolumeInfo.
    */
-  static createMockVolumeInfo(type, volumeId, label, devicePath, providerId) {
+  static createMockVolumeInfo(
+      type, volumeId, label, devicePath, providerId, remoteMountPath) {
     const fileSystem = new MockFileSystem(volumeId, 'filesystem:' + volumeId);
+
+    let diskFileSystemType = VolumeManagerCommon.FileSystemType.UNKNOWN;
+    if (devicePath && devicePath.startsWith('fusebox')) {
+      diskFileSystemType =
+          /** @type VolumeManagerCommon.FileSystemType */ ('fusebox');
+    }
 
     // If there's no label set it to volumeId to make it shorter to write
     // tests.
     const volumeInfo = new VolumeInfoImpl(
-        type, volumeId, fileSystem,
+        type,
+        volumeId,
+        fileSystem,
         '',                                         // error
         '',                                         // deviceType
         devicePath || '',                           // devicePath
@@ -183,22 +228,33 @@ class MockVolumeManager {
         false,                                      // configurable
         false,                                      // watchable
         VolumeManagerCommon.Source.NETWORK,         // source
-        VolumeManagerCommon.FileSystemType.UNKNOWN,  // diskFileSystemType
-        {},                                          // iconSet
-        '');                                         // driveLabel
+        diskFileSystemType,                         // diskFileSystemType
+        {},                                         // iconSet
+        '',                                         // driveLabel
+        remoteMountPath,                            // remoteMountPath
+        undefined,                                  // vmType
+    );
+
 
     return volumeInfo;
   }
 
-  mountArchive(fileUrl, successCallback, errorCallback) {
+  /**
+   * @return {!Promise<!VolumeInfo>}
+   */
+  async mountArchive(fileUrl, password) {
     throw new Error('Not implemented');
   }
 
-  unmount(volumeInfo, successCallback, errorCallback) {
+  async cancelMounting(fileUrl) {
     throw new Error('Not implemented');
   }
 
-  configure(volumeInfo) {
+  async unmount(volumeInfo) {
+    throw new Error('Not implemented');
+  }
+
+  async configure(volumeInfo) {
     throw new Error('Not implemented');
   }
 
@@ -210,6 +266,9 @@ class MockVolumeManager {
     throw new Error('Not implemented');
   }
 
+  /**
+   * @return {boolean}
+   */
   dispatchEvent(event) {
     throw new Error('Not implemented');
   }
@@ -218,19 +277,54 @@ class MockVolumeManager {
 /** @private {?VolumeManager} */
 MockVolumeManager.instance_ = null;
 
-/** @override */
 MockVolumeManager.prototype.getVolumeInfo =
     VolumeManagerImpl.prototype.getVolumeInfo;
 
-/** @override */
 MockVolumeManager.prototype.getDefaultDisplayRoot =
     VolumeManagerImpl.prototype.getDefaultDisplayRoot;
 
-
-/** @override */
 MockVolumeManager.prototype.findByDevicePath =
     VolumeManagerImpl.prototype.findByDevicePath;
 
-/** @override */
 MockVolumeManager.prototype.whenVolumeInfoReady =
     VolumeManagerImpl.prototype.whenVolumeInfoReady;
+
+/**
+ * Used to override window.webkitResolveLocalFileSystemURL for testing. This
+ * emulates the real function by parsing `url` and finding the matching entry
+ * in `volumeManager`. E.g. filesystem:downloads/dir/file.txt will look up the
+ * 'downloads' volume for /dir/file.txt.
+ *
+ * @param {VolumeManager} volumeManager VolumeManager to resolve URLs with.
+ * @param {string} url URL to resolve.
+ * @param {function(!MockEntry)} successCallback Success callback.
+ * @param {function(!FileError)=} errorCallback Error callback.
+ */
+MockVolumeManager.resolveLocalFileSystemURL =
+    (volumeManager, url, successCallback, errorCallback) => {
+      const match = url.match(/^filesystem:(\w+)(\/.*)/);
+      if (match) {
+        const volumeType =
+            /** @type {VolumeManagerCommon.VolumeType} */ (match[1]);
+        let path = match[2];
+        const volume = volumeManager.getCurrentProfileVolumeInfo(volumeType);
+        if (volume) {
+          // Decode URI in file paths.
+          path = path.split('/').map(decodeURIComponent).join('/');
+          const entry = volume.fileSystem.entries[path];
+          if (entry) {
+            setTimeout(successCallback, 0, entry);
+            return;
+          }
+        }
+      }
+      const message =
+          `MockVolumeManager.resolveLocalFileSystemURL not found: ${url}`;
+      console.warn(message);
+      const error = new DOMException(message, 'NotFoundError');
+      if (errorCallback) {
+        setTimeout(errorCallback, 0, error);
+      } else {
+        throw error;
+      }
+    };

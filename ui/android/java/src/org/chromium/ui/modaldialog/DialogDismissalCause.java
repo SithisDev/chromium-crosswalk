@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.ui.modaldialog;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -14,12 +14,15 @@ import java.lang.annotation.RetentionPolicy;
         DialogDismissalCause.DISMISSED_BY_NATIVE,
         DialogDismissalCause.NAVIGATE_BACK_OR_TOUCH_OUTSIDE, DialogDismissalCause.TAB_SWITCHED,
         DialogDismissalCause.TAB_DESTROYED, DialogDismissalCause.ACTIVITY_DESTROYED,
-        DialogDismissalCause.NOT_ATTACHED_TO_WINDOW})
+        DialogDismissalCause.NOT_ATTACHED_TO_WINDOW, DialogDismissalCause.NAVIGATE,
+        DialogDismissalCause.WEB_CONTENTS_DESTROYED,
+        DialogDismissalCause.DIALOG_INTERACTION_DEFERRED,
+        DialogDismissalCause.ACTION_ON_DIALOG_COMPLETED,
+        DialogDismissalCause.ACTION_ON_DIALOG_NOT_POSSIBLE, DialogDismissalCause.CLIENT_TIMEOUT})
 @Retention(RetentionPolicy.SOURCE)
 public @interface DialogDismissalCause {
-    // Please do not remove or change the order of the existing values, and add new value at the end
-    // of the enum. Dismissal causes that are fully controlled by clients (i.e. are not used inside
-    // the dialog manager or the dialog presenters) are marked "Controlled by client" on comments.
+    // Dismissal causes that are fully controlled by clients (i.e. are not used inside the
+    // dialog manager or the dialog presenters) are marked "Controlled by client" on comments.
 
     /** No specified reason for the dialog dismissal. */
     int UNKNOWN = 0;
@@ -41,4 +44,32 @@ public @interface DialogDismissalCause {
     int ACTIVITY_DESTROYED = 8;
     /** The content view of the activity associated with the dialog is not attached to window. */
     int NOT_ATTACHED_TO_WINDOW = 9;
+    /** User has navigated, e.g. by typing a URL in the location bar. */
+    int NAVIGATE = 10;
+    /** Controlled by client: The web contents associated with the dialog is destroyed. */
+    int WEB_CONTENTS_DESTROYED = 11;
+
+    /**
+     * Controlled by client: The dialog interaction is deferred due to user engaging with other
+     * UI surfaces outside of dialog or they clicked on a content of the dialog that allows
+     * to defer.
+     *
+     * Note that deferred would indicate that the dialog would be shown again later on
+     * unless the user has completed the interaction successfully.
+     */
+    int DIALOG_INTERACTION_DEFERRED = 12;
+    /**
+     * Controlled by client: Action taken on the dialog content that the client
+     * validates and triggers dismissal, if satisfied.
+     */
+    int ACTION_ON_DIALOG_COMPLETED = 13;
+    /**
+     * Controlled by client: The dialog was dismissed because it's not possible for client to
+     * validate after the action was taken on the dialog content.
+     */
+    int ACTION_ON_DIALOG_NOT_POSSIBLE = 14;
+    /**
+     * Controlled by client: The dialog was automatically dismissed after a timeout.
+     */
+    int CLIENT_TIMEOUT = 15;
 }

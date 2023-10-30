@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,19 +19,19 @@ SNAPSHOT_EXPORT void GrabWindowSnapshotAndScaleAsyncAura(
     aura::Window* window,
     const gfx::Rect& source_rect,
     const gfx::Size& target_size,
-    const GrabWindowSnapshotAsyncCallback& callback);
+    GrabWindowSnapshotAsyncCallback callback);
 
 SNAPSHOT_EXPORT void GrabWindowSnapshotAsyncAura(
     aura::Window* window,
     const gfx::Rect& source_rect,
-    const GrabWindowSnapshotAsyncCallback& callback);
+    GrabWindowSnapshotAsyncCallback callback);
 
 // Grabs a snapshot of a |layer| and all its descendants.
 // |source_rect| is the bounds of the snapshot content relative to |layer|.
 SNAPSHOT_EXPORT void GrabLayerSnapshotAsync(
     Layer* layer,
     const gfx::Rect& source_rect,
-    const GrabWindowSnapshotAsyncCallback& callback);
+    GrabWindowSnapshotAsyncCallback callback);
 
 }  // namespace ui
 

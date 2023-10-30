@@ -1,10 +1,12 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gl/android/scoped_java_surface.h"
 
-#include "base/logging.h"
+#include <utility>
+
+#include "base/check.h"
 #include "ui/gl/android/surface_texture.h"
 #include "ui/gl/surface_jni_headers/Surface_jni.h"
 
@@ -52,8 +54,7 @@ void ScopedJavaSurface::ReleaseSurfaceIfNeeded() {
 
 void ScopedJavaSurface::MoveFrom(ScopedJavaSurface& other) {
   ReleaseSurfaceIfNeeded();
-  JNIEnv* env = base::android::AttachCurrentThread();
-  j_surface_.Reset(env, other.j_surface_.Release());
+  j_surface_ = std::move(other.j_surface_);
   auto_release_ = other.auto_release_;
   is_protected_ = other.is_protected_;
 }
@@ -68,11 +69,9 @@ bool ScopedJavaSurface::IsValid() const {
 }
 
 // static
-ScopedJavaSurface ScopedJavaSurface::AcquireExternalSurface(jobject surface) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> surface_ref;
-  surface_ref.Reset(env, surface);
-  ScopedJavaSurface scoped_surface(surface_ref);
+ScopedJavaSurface ScopedJavaSurface::AcquireExternalSurface(
+    const base::android::JavaRef<jobject>& surface) {
+  ScopedJavaSurface scoped_surface(surface);
   scoped_surface.auto_release_ = false;
   scoped_surface.is_protected_ = true;
   return scoped_surface;

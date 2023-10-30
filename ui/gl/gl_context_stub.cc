@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gl/gl_context_stub.h"
 
+#include "build/build_config.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_stub_api.h"
 
@@ -22,7 +23,7 @@ bool GLContextStub::Initialize(GLSurface* compatible_surface,
   return true;
 }
 
-bool GLContextStub::MakeCurrent(GLSurface* surface) {
+bool GLContextStub::MakeCurrentImpl(GLSurface* surface) {
   DCHECK(surface);
   BindGLApi();
   SetCurrent(surface);
@@ -50,7 +51,7 @@ std::string GLContextStub::GetGLRenderer() {
   return std::string("CHROMIUM");
 }
 
-unsigned int GLContextStub::CheckStickyGraphicsResetStatus() {
+unsigned int GLContextStub::CheckStickyGraphicsResetStatusImpl() {
   DCHECK(IsCurrent(nullptr));
   if ((graphics_reset_status_ == GL_NO_ERROR) && HasRobustness()) {
     graphics_reset_status_ = glGetGraphicsResetStatusARB();
@@ -74,6 +75,10 @@ bool GLContextStub::HasRobustness() {
   return HasExtension("GL_ARB_robustness") ||
          HasExtension("GL_KHR_robustness") || HasExtension("GL_EXT_robustness");
 }
+
+#if BUILDFLAG(IS_APPLE)
+void GLContextStub::FlushForDriverCrashWorkaround() {}
+#endif
 
 GLContextStub::~GLContextStub() {}
 

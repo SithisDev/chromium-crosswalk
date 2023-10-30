@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <objidl.h>
 #include <wrl/implements.h>
 
-#include "base/macros.h"
+#include "base/component_export.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "ui/base/ui_base_export.h"
 
 namespace ui {
 
@@ -26,12 +26,17 @@ class DragSourceWin
           IDropSource> {
  public:
   // Factory method to avoid exporting the class and all it derives from.
-  static UI_BASE_EXPORT Microsoft::WRL::ComPtr<ui::DragSourceWin> Create();
+  static COMPONENT_EXPORT(
+      UI_BASE) Microsoft::WRL::ComPtr<DragSourceWin> Create();
 
   // Use Create() to construct these objects. Direct calls to the constructor
   // are an error - it is only public because a WRL helper function creates the
   // objects.
   DragSourceWin();
+
+  DragSourceWin(const DragSourceWin&) = delete;
+  DragSourceWin& operator=(const DragSourceWin&) = delete;
+
   ~DragSourceWin() override = default;
 
   // Stop the drag operation at the next chance we get.  This doesn't
@@ -52,17 +57,13 @@ class DragSourceWin
   void set_data(const OSExchangeData* data) { data_ = data; }
 
  protected:
-  virtual void OnDragSourceCancel() {}
   virtual void OnDragSourceDrop();
-  virtual void OnDragSourceMove() {}
 
  private:
   // Set to true if we want to cancel the drag operation.
-  bool cancel_drag_;
+  bool cancel_drag_ = false;
 
-  const OSExchangeData* data_;
-
-  DISALLOW_COPY_AND_ASSIGN(DragSourceWin);
+  raw_ptr<const OSExchangeData> data_ = nullptr;
 };
 
 }  // namespace ui

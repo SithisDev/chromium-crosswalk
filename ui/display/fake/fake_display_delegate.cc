@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include "base/command_line.h"
 #include "base/hash/hash.h"
 #include "base/logging.h"
+#include "base/observer_list.h"
 #include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "ui/display/display.h"
 #include "ui/display/display_switches.h"
@@ -32,14 +32,20 @@ constexpr uint16_t kReservedManufacturerID = 1 << 15;
 constexpr uint32_t kProductCodeHash = 3692486807;
 
 // Delay for Configure().
-constexpr base::TimeDelta kConfigureDisplayDelay =
-    base::TimeDelta::FromMilliseconds(200);
+constexpr base::TimeDelta kConfigureDisplayDelay = base::Milliseconds(200);
+
+bool AreModesEqual(const display::DisplayMode& lhs,
+                   const display::DisplayMode& rhs) {
+  return lhs.size() == rhs.size() &&
+         lhs.is_interlaced() == rhs.is_interlaced() &&
+         lhs.refresh_rate() == rhs.refresh_rate();
+}
 
 }  // namespace
 
-FakeDisplayDelegate::FakeDisplayDelegate() {}
+FakeDisplayDelegate::FakeDisplayDelegate() = default;
 
-FakeDisplayDelegate::~FakeDisplayDelegate() {}
+FakeDisplayDelegate::~FakeDisplayDelegate() = default;
 
 int64_t FakeDisplayDelegate::AddDisplay(const gfx::Size& display_size) {
   DCHECK(!display_size.IsEmpty());
@@ -122,27 +128,39 @@ void FakeDisplayDelegate::GetDisplays(GetDisplaysCallback callback) {
   std::move(callback).Run(displays);
 }
 
-void FakeDisplayDelegate::Configure(const DisplaySnapshot& output,
-                                    const DisplayMode* mode,
-                                    const gfx::Point& origin,
-                                    ConfigureCallback callback) {
-  bool configure_success = false;
+void FakeDisplayDelegate::Configure(
+    const std::vector<display::DisplayConfigurationParams>& config_requests,
+    ConfigureCallback callback,
+    uint32_t modeset_flag) {
+  bool config_success = true;
+  for (const auto& config : config_requests) {
+    bool request_success = false;
 
-  if (!mode) {
-    // This is a request to turn off the display.
-    configure_success = true;
-  } else {
-    // Check that |mode| is appropriate for the display snapshot.
-    for (const auto& existing_mode : output.modes()) {
-      if (existing_mode.get() == mode) {
-        configure_success = true;
-        break;
+    if (config.mode.has_value()) {
+      // Find display snapshot of display ID.
+      auto snapshot =
+          find_if(displays_.begin(), displays_.end(),
+                  [&config](std::unique_ptr<DisplaySnapshot>& snapshot) {
+                    return snapshot->display_id() == config.id;
+                  });
+      if (snapshot != displays_.end()) {
+        // Check that config mode is appropriate for the display snapshot.
+        for (const auto& existing_mode : snapshot->get()->modes()) {
+          if (AreModesEqual(*existing_mode.get(), *config.mode.value().get())) {
+            request_success = true;
+            break;
+          }
+        }
       }
+    } else {
+      // This is a request to turn off the display.
+      request_success = true;
     }
+    config_success &= request_success;
   }
 
   configure_callbacks_.push(
-      base::BindOnce(std::move(callback), configure_success));
+      base::BindOnce(std::move(callback), config_success));
 
   // Start the timer if it's not already running. If there are multiple queued
   // configuration requests then ConfigureDone() will handle starting the
@@ -155,12 +173,15 @@ void FakeDisplayDelegate::Configure(const DisplaySnapshot& output,
 
 void FakeDisplayDelegate::GetHDCPState(const DisplaySnapshot& output,
                                        GetHDCPStateCallback callback) {
-  std::move(callback).Run(false, HDCP_STATE_UNDESIRED);
+  std::move(callback).Run(false, HDCP_STATE_UNDESIRED,
+                          CONTENT_PROTECTION_METHOD_NONE);
 }
 
-void FakeDisplayDelegate::SetHDCPState(const DisplaySnapshot& output,
-                                       HDCPState state,
-                                       SetHDCPStateCallback callback) {
+void FakeDisplayDelegate::SetHDCPState(
+    const DisplaySnapshot& output,
+    HDCPState state,
+    ContentProtectionMethod protection_method,
+    SetHDCPStateCallback callback) {
   std::move(callback).Run(false);
 }
 
@@ -175,6 +196,12 @@ bool FakeDisplayDelegate::SetGammaCorrection(
     const std::vector<display::GammaRampRGBEntry>& degamma_lut,
     const std::vector<display::GammaRampRGBEntry>& gamma_lut) {
   return false;
+}
+
+void FakeDisplayDelegate::SetPrivacyScreen(int64_t display_id,
+                                           bool enabled,
+                                           SetPrivacyScreenCallback callback) {
+  std::move(callback).Run(false);
 }
 
 void FakeDisplayDelegate::AddObserver(NativeDisplayObserver* observer) {

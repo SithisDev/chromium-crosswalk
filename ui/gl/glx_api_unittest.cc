@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ class GLXApiTest : public testing::Test {
   }
 
   void InitializeAPI(const char* disabled_extensions) {
-    api_.reset(new RealGLXApi());
+    api_ = std::make_unique<RealGLXApi>();
     g_current_glx_context = api_.get();
     api_->Initialize(&g_driver_glx);
     if (disabled_extensions) {

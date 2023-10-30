@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.ui.widget;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.Bundle;
-import android.support.annotation.CallSuper;
 import android.text.Layout;
 import android.text.SpannableString;
 import android.text.style.ClickableSpan;
@@ -20,7 +19,8 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.PopupMenu;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.CallSuper;
+import androidx.annotation.VisibleForTesting;
 
 /**
  * ClickableSpan isn't accessible by default, so we create a subclass

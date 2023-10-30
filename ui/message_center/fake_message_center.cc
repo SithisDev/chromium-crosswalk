@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace message_center {
 
 FakeMessageCenter::FakeMessageCenter() : notifications_(this) {}
 
-FakeMessageCenter::~FakeMessageCenter() {}
+FakeMessageCenter::~FakeMessageCenter() = default;
 
 void FakeMessageCenter::AddObserver(MessageCenterObserver* observer) {
   observers_.AddObserver(observer);
@@ -29,7 +29,7 @@ void FakeMessageCenter::RemoveNotificationBlocker(
     NotificationBlocker* blocker) {}
 
 size_t FakeMessageCenter::NotificationCount() const {
-  return 0u;
+  return notifications_.GetNotifications().size();
 }
 
 bool FakeMessageCenter::HasPopupNotifications() const {
@@ -38,6 +38,27 @@ bool FakeMessageCenter::HasPopupNotifications() const {
 
 bool FakeMessageCenter::IsQuietMode() const {
   return false;
+}
+
+bool FakeMessageCenter::IsSpokenFeedbackEnabled() const {
+  return false;
+}
+
+Notification* FakeMessageCenter::FindNotificationById(const std::string& id) {
+  // stub
+  return nullptr;
+}
+
+Notification* FakeMessageCenter::FindParentNotification(
+    Notification* notification) {
+  // stub
+  return nullptr;
+}
+
+Notification* FakeMessageCenter::FindPopupNotificationById(
+    const std::string& id) {
+  // stub
+  return nullptr;
 }
 
 Notification* FakeMessageCenter::FindVisibleNotificationById(
@@ -56,6 +77,10 @@ NotificationList::Notifications FakeMessageCenter::FindNotificationsByAppId(
   return notifications_.GetNotificationsByAppId(app_id);
 }
 
+NotificationList::Notifications FakeMessageCenter::GetNotifications() {
+  return notifications_.GetNotifications();
+}
+
 const NotificationList::Notifications&
 FakeMessageCenter::GetVisibleNotifications() {
   return visible_notifications_;
@@ -63,6 +88,12 @@ FakeMessageCenter::GetVisibleNotifications() {
 
 NotificationList::PopupNotifications
 FakeMessageCenter::GetPopupNotifications() {
+  return NotificationList::PopupNotifications();
+}
+
+NotificationList::PopupNotifications
+FakeMessageCenter::GetPopupNotificationsWithoutBlocker(
+    const NotificationBlocker& blocker) const {
   return NotificationList::PopupNotifications();
 }
 
@@ -102,10 +133,17 @@ void FakeMessageCenter::RemoveNotification(const std::string& id,
 void FakeMessageCenter::RemoveNotificationsForNotifierId(
     const NotifierId& notifier_id) {}
 
-void FakeMessageCenter::RemoveAllNotifications(bool by_user, RemoveType type) {}
+void FakeMessageCenter::RemoveAllNotifications(bool by_user, RemoveType type) {
+  // Only removing all is supported.
+  DCHECK_EQ(type, RemoveType::ALL);
+  for (const auto* notification : notifications_.GetNotifications()) {
+    // This is safe to remove since GetNotifications() returned a copy.
+    RemoveNotification(notification->id(), by_user);
+  }
+}
 
 void FakeMessageCenter::SetNotificationIcon(const std::string& notification_id,
-                                            const gfx::Image& image) {}
+                                            const ui::ImageModel& image) {}
 
 void FakeMessageCenter::SetNotificationImage(const std::string& notification_id,
                                              const gfx::Image& image) {}
@@ -118,7 +156,7 @@ void FakeMessageCenter::ClickOnNotificationButton(const std::string& id,
 void FakeMessageCenter::ClickOnNotificationButtonWithReply(
     const std::string& id,
     int button_index,
-    const base::string16& reply) {}
+    const std::u16string& reply) {}
 
 void FakeMessageCenter::ClickOnSettingsButton(const std::string& id) {}
 
@@ -128,10 +166,16 @@ void FakeMessageCenter::MarkSinglePopupAsShown(const std::string& id,
                                                bool mark_notification_as_read) {
 }
 
+void FakeMessageCenter::ResetPopupTimer(const std::string& id) {}
+
+void FakeMessageCenter::ResetSinglePopup(const std::string& id) {}
+
 void FakeMessageCenter::DisplayedNotification(const std::string& id,
                                               const DisplaySource source) {}
 
 void FakeMessageCenter::SetQuietMode(bool in_quiet_mode) {}
+
+void FakeMessageCenter::SetSpokenFeedbackEnabled(bool enabled) {}
 
 void FakeMessageCenter::EnterQuietModeWithExpire(
     const base::TimeDelta& expires_in) {}
@@ -154,12 +198,15 @@ void FakeMessageCenter::RestartPopupTimers() {}
 
 void FakeMessageCenter::PausePopupTimers() {}
 
-const base::string16& FakeMessageCenter::GetSystemNotificationAppName() const {
+const std::u16string& FakeMessageCenter::GetSystemNotificationAppName() const {
   return base::EmptyString16();
 }
 
 void FakeMessageCenter::SetSystemNotificationAppName(
-    const base::string16& product_os_name) {}
+    const std::u16string& product_os_name) {}
+
+void FakeMessageCenter::OnMessageViewHovered(
+    const std::string& notification_id) {}
 
 void FakeMessageCenter::DisableTimersForTest() {}
 

@@ -1,11 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
 
 #include "base/auto_reset.h"
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "ui/events/gesture_detection/motion_event.h"
 
 namespace ui {
@@ -59,13 +60,17 @@ FilteredGestureProvider::OnTouchEvent(const MotionEvent& event) {
 void FilteredGestureProvider::OnTouchEventAck(
     uint32_t unique_event_id,
     bool event_consumed,
-    bool is_source_touch_event_set_non_blocking) {
+    bool is_source_touch_event_set_blocking) {
   gesture_filter_.OnTouchEventAck(unique_event_id, event_consumed,
-                                  is_source_touch_event_set_non_blocking);
+                                  is_source_touch_event_set_blocking);
 }
 
 void FilteredGestureProvider::ResetGestureHandlingState() {
   gesture_filter_.ResetGestureHandlingState();
+}
+
+void FilteredGestureProvider::SendSynthesizedEndEvents() {
+  gesture_provider_->SendSynthesizedEndEvents();
 }
 
 void FilteredGestureProvider::ResetDetection() {

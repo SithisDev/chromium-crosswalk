@@ -1,14 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/native/native_view_host_aura.h"
 
 #include <memory>
+#include <utility>
 
-#include "base/logging.h"
-#include "base/optional.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
@@ -17,6 +19,7 @@
 #include "ui/aura/window_targeter.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/controls/native/native_view_host.h"
@@ -40,8 +43,8 @@ class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
   gfx::Size GetMaximumSize() const override { return gfx::Size(); }
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
-  gfx::NativeCursor GetCursor(const gfx::Point& point) override {
-    return gfx::kNullCursor;
+  ui::Cursor GetCursor(const gfx::Point& point) override {
+    return ui::Cursor();
   }
   int GetNonClientComponent(const gfx::Point& point) const override {
     return HTCLIENT;
@@ -55,9 +58,8 @@ class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
     // Ask the hosted native view's delegate because directly calling
     // aura::Window::CanFocus() will call back into this when checking whether
     // parents can focus.
-    return native_view_ && native_view_->delegate()
-        ? native_view_->delegate()->CanFocus()
-        : true;
+    return !native_view_ || !native_view_->delegate() ||
+           native_view_->delegate()->CanFocus();
   }
   void OnCaptureLost() override {}
   void OnPaint(const ui::PaintContext& context) override {}
@@ -70,7 +72,7 @@ class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
   void GetHitTestMask(SkPath* mask) const override {}
 
  private:
-  aura::Window* native_view_ = nullptr;
+  raw_ptr<aura::Window> native_view_ = nullptr;
 };
 
 NativeViewHostAura::NativeViewHostAura(NativeViewHost* host) : host_(host) {}
@@ -96,12 +98,13 @@ void NativeViewHostAura::AttachNativeView() {
   clipping_window_delegate_->set_native_view(host_->native_view());
   host_->native_view()->AddObserver(this);
   host_->native_view()->SetProperty(views::kHostViewKey,
-      static_cast<View*>(host_));
+                                    static_cast<View*>(host_));
 
   original_transform_ = host_->native_view()->transform();
   original_transform_changed_ = false;
   AddClippingWindow();
   InstallMask();
+  ApplyRoundedCorners();
 }
 
 void NativeViewHostAura::SetParentAccessible(
@@ -110,11 +113,16 @@ void NativeViewHostAura::SetParentAccessible(
       aura::client::kParentNativeViewAccessibleKey, accessible);
 }
 
+gfx::NativeViewAccessible NativeViewHostAura::GetParentAccessible() {
+  return host_->native_view()->GetProperty(
+      aura::client::kParentNativeViewAccessibleKey);
+}
+
 void NativeViewHostAura::NativeViewDetaching(bool destroyed) {
   // This method causes a succession of window tree changes. ScopedPause ensures
   // that occlusion is recomputed at the end of the method instead of after each
   // change.
-  base::Optional<aura::WindowOcclusionTracker::ScopedPause> pause_occlusion;
+  absl::optional<aura::WindowOcclusionTracker::ScopedPause> pause_occlusion;
   if (clipping_window_)
     pause_occlusion.emplace();
 
@@ -160,19 +168,20 @@ void NativeViewHostAura::RemovedFromWidget() {
   }
 }
 
+bool NativeViewHostAura::SetCornerRadii(
+    const gfx::RoundedCornersF& corner_radii) {
+  corner_radii_ = corner_radii;
+  ApplyRoundedCorners();
+  return true;
+}
+
 bool NativeViewHostAura::SetCustomMask(std::unique_ptr<ui::LayerOwner> mask) {
-#if defined(OS_WIN)
-  // TODO(crbug/843250): On Aura, layer masks don't play with HiDPI. Fix this
-  // and enable this on Windows.
-  return false;
-#else
   UninstallMask();
   mask_ = std::move(mask);
   if (mask_)
     mask_->layer()->SetFillsBoundsOpaquely(false);
   InstallMask();
   return true;
-#endif
 }
 
 void NativeViewHostAura::SetHitTestTopInset(int top_inset) {
@@ -214,8 +223,8 @@ void NativeViewHostAura::ShowWidget(int x,
   } else {
     gfx::Transform transform = original_transform_;
     if (w > 0 && h > 0 && native_w > 0 && native_h > 0) {
-      transform.Scale(static_cast<SkMScalar>(w) / native_w,
-                      static_cast<SkMScalar>(h) / native_h);
+      transform.Scale(static_cast<SkScalar>(w) / native_w,
+                      static_cast<SkScalar>(h) / native_h);
     }
     // Only set the transform when it is actually different.
     if (transform != host_->native_view()->transform()) {
@@ -252,10 +261,10 @@ gfx::NativeViewAccessible NativeViewHostAura::GetNativeViewAccessible() {
   return nullptr;
 }
 
-gfx::NativeCursor NativeViewHostAura::GetCursor(int x, int y) {
+ui::Cursor NativeViewHostAura::GetCursor(int x, int y) {
   if (host_->native_view())
     return host_->native_view()->GetCursor(gfx::Point(x, y));
-  return gfx::kNullCursor;
+  return ui::Cursor();
 }
 
 void NativeViewHostAura::SetVisible(bool visible) {
@@ -328,10 +337,20 @@ void NativeViewHostAura::RemoveClippingWindow() {
     } else {
       clipping_window_->RemoveChild(host_->native_view());
     }
-    host_->native_view()->SetBounds(clipping_window_->bounds());
   }
   if (clipping_window_->parent())
     clipping_window_->parent()->RemoveChild(clipping_window_.get());
+}
+
+void NativeViewHostAura::ApplyRoundedCorners() {
+  if (!host_->native_view())
+    return;
+
+  ui::Layer* layer = host_->native_view()->layer();
+  if (layer->rounded_corner_radii() != corner_radii_) {
+    layer->SetRoundedCornerRadius(corner_radii_);
+    layer->SetIsFastRoundedCorner(true);
+  }
 }
 
 void NativeViewHostAura::InstallMask() {
@@ -366,7 +385,8 @@ void NativeViewHostAura::UpdateInsets() {
       clipping_window_->SetEventTargeter(
           std::make_unique<aura::WindowTargeter>());
     }
-    clipping_window_->targeter()->SetInsets(gfx::Insets(top_inset_, 0, 0, 0));
+    clipping_window_->targeter()->SetInsets(
+        gfx::Insets::TLBR(top_inset_, 0, 0, 0));
   }
 }
 

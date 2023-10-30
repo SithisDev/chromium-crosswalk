@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include <tuple>
 
+#include "base/component_export.h"
 #include "build/build_config.h"
-#include "ui/base/ui_base_export.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include <jni.h>
 #endif
 
@@ -22,7 +22,8 @@ enum class TouchScreensAvailability {
   DISABLED,  // Touch screens are present and disabled.
 };
 
-UI_BASE_EXPORT TouchScreensAvailability GetTouchScreensAvailability();
+COMPONENT_EXPORT(UI_BASE)
+TouchScreensAvailability GetTouchScreensAvailability();
 
 // Returns the maximum number of simultaneous touch contacts supported
 // by the device. In the case of devices with multiple digitizers (e.g.
@@ -31,11 +32,11 @@ UI_BASE_EXPORT TouchScreensAvailability GetTouchScreensAvailability();
 // For example, suppose a device has 3 touchscreens, which support 2, 5,
 // and 10 simultaneous touch contacts, respectively. This returns 10.
 // http://www.w3.org/TR/pointerevents/#widl-Navigator-maxTouchPoints
-UI_BASE_EXPORT int MaxTouchPoints();
+COMPONENT_EXPORT(UI_BASE) int MaxTouchPoints();
 
 // Bit field values indicating available pointer types. Identical to
 // blink::PointerType enums, enforced by compile-time assertions in
-// content/public/common/web_preferences.cc .
+// third_party/blink/public/common/web_preferences/web_preferences.cc.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.ui.base
 // GENERATED_JAVA_PREFIX_TO_STRIP: POINTER_TYPE_
 enum PointerType {
@@ -48,7 +49,7 @@ enum PointerType {
 
 // Bit field values indicating available hover types. Identical to
 // blink::HoverType enums, enforced by compile-time assertions in
-// content/public/common/web_preferences.cc .
+// third_party/blink/public/common/web_preferences/web_preferences.cc.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.ui.base
 // GENERATED_JAVA_PREFIX_TO_STRIP: HOVER_TYPE_
 enum HoverType {
@@ -60,12 +61,15 @@ enum HoverType {
 
 int GetAvailablePointerTypes();
 int GetAvailableHoverTypes();
-UI_BASE_EXPORT std::pair<int, int> GetAvailablePointerAndHoverTypes();
-UI_BASE_EXPORT void SetAvailablePointerAndHoverTypesForTesting(
-    int available_pointer_types,
-    int available_hover_types);
-UI_BASE_EXPORT PointerType GetPrimaryPointerType(int available_pointer_types);
-UI_BASE_EXPORT HoverType GetPrimaryHoverType(int available_hover_types);
+COMPONENT_EXPORT(UI_BASE)
+std::pair<int, int> GetAvailablePointerAndHoverTypes();
+COMPONENT_EXPORT(UI_BASE)
+void SetAvailablePointerAndHoverTypesForTesting(int available_pointer_types,
+                                                int available_hover_types);
+COMPONENT_EXPORT(UI_BASE)
+PointerType GetPrimaryPointerType(int available_pointer_types);
+COMPONENT_EXPORT(UI_BASE)
+HoverType GetPrimaryHoverType(int available_hover_types);
 
 }  // namespace ui
 

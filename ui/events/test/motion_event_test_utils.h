@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@
 namespace ui {
 namespace test {
 
-struct MockMotionEvent : public MotionEventGeneric {
+class MockMotionEvent : public MotionEventGeneric {
+ public:
   enum { TOUCH_MAJOR = 10 };
 
   MockMotionEvent();
@@ -42,6 +43,12 @@ struct MockMotionEvent : public MotionEventGeneric {
                   const std::vector<gfx::PointF>& positions);
   MockMotionEvent(const MockMotionEvent& other);
 
+  MotionEvent::Classification GetClassification() const override;
+
+  void SetClassification(MotionEvent::Classification classification) {
+    gesture_classification_ = classification;
+  }
+
   ~MockMotionEvent() override;
 
   // Utility methods.
@@ -58,6 +65,9 @@ struct MockMotionEvent : public MotionEventGeneric {
  private:
   void PushPointer(float x, float y);
   void UpdatePointersAndID();
+
+  MotionEvent::Classification gesture_classification_ =
+      MotionEvent::Classification::NONE;
 };
 
 std::string ToString(const MotionEvent& event);

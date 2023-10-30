@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,20 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.DisplayManager.DisplayListener;
+import android.os.Build;
 import android.util.SparseArray;
 import android.view.Display;
 import android.view.WindowManager;
+
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.compat.ApiHelperForR;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * DisplayAndroidManager is a class that informs its observers Display changes.
@@ -46,10 +51,15 @@ public class DisplayAndroidManager {
             // Never remove the primary display.
             if (sdkDisplayId == mMainSdkDisplayId) return;
 
-            DisplayAndroid displayAndroid = mIdMap.get(sdkDisplayId);
+            PhysicalDisplayAndroid displayAndroid =
+                    (PhysicalDisplayAndroid) mIdMap.get(sdkDisplayId);
             if (displayAndroid == null) return;
 
-            if (mNativePointer != 0) nativeRemoveDisplay(mNativePointer, sdkDisplayId);
+            displayAndroid.onDisplayRemoved();
+            if (mNativePointer != 0) {
+                DisplayAndroidManagerJni.get().removeDisplay(
+                        mNativePointer, DisplayAndroidManager.this, sdkDisplayId);
+            }
             mIdMap.remove(sdkDisplayId);
         }
 
@@ -92,6 +102,25 @@ public class DisplayAndroidManager {
     }
 
     public static Display getDefaultDisplayForContext(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Display display = null;
+            try {
+                display = ApiHelperForR.getDisplay(context);
+            } catch (UnsupportedOperationException e) {
+                // Context is not associated with a display.
+            }
+            if (display != null) return display;
+            return getGlobalDefaultDisplay();
+        }
+        return getDisplayForContextNoChecks(context);
+    }
+
+    private static Display getGlobalDefaultDisplay() {
+        return getDisplayManager().getDisplay(Display.DEFAULT_DISPLAY);
+    }
+
+    // Passing a non-window display may cause problems on newer android versions.
+    private static Display getDisplayForContextNoChecks(Context context) {
         WindowManager windowManager =
                 (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         return windowManager.getDefaultDisplay();
@@ -119,16 +148,14 @@ public class DisplayAndroidManager {
     private DisplayAndroidManager() {}
 
     private void initialize() {
-        Display display;
-
         // Make sure the display map contains the built-in primary display.
         // The primary display is never removed.
-        display = getDisplayManager().getDisplay(Display.DEFAULT_DISPLAY);
+        Display display = getGlobalDefaultDisplay();
 
         // Android documentation on Display.DEFAULT_DISPLAY suggests that the above
         // method might return null. In that case we retrieve the default display
         // from the application context and take it as the primary display.
-        if (display == null) display = getDefaultDisplayForContext(getContext());
+        if (display == null) display = getDisplayForContextNoChecks(getContext());
 
         mMainSdkDisplayId = display.getDisplayId();
         addDisplay(display); // Note this display is never removed.
@@ -138,7 +165,8 @@ public class DisplayAndroidManager {
 
     private void setNativePointer(long nativePointer) {
         mNativePointer = nativePointer;
-        nativeSetPrimaryDisplayId(mNativePointer, mMainSdkDisplayId);
+        DisplayAndroidManagerJni.get().setPrimaryDisplayId(
+                mNativePointer, DisplayAndroidManager.this, mMainSdkDisplayId);
 
         for (int i = 0; i < mIdMap.size(); ++i) {
             updateDisplayOnNativeSide(mIdMap.valueAt(i));
@@ -179,23 +207,36 @@ public class DisplayAndroidManager {
         DisplayAndroid displayAndroid = mIdMap.get(display.getDisplayId());
         assert displayAndroid == display;
 
-        if (mNativePointer != 0) nativeRemoveDisplay(mNativePointer, display.getDisplayId());
+        if (mNativePointer != 0) {
+            DisplayAndroidManagerJni.get().removeDisplay(
+                    mNativePointer, DisplayAndroidManager.this, display.getDisplayId());
+        }
         mIdMap.remove(display.getDisplayId());
     }
 
     /* package */ void updateDisplayOnNativeSide(DisplayAndroid displayAndroid) {
         if (mNativePointer == 0) return;
-        nativeUpdateDisplay(mNativePointer, displayAndroid.getDisplayId(),
-                displayAndroid.getDisplayWidth(), displayAndroid.getDisplayHeight(),
-                displayAndroid.getDipScale(), displayAndroid.getRotationDegrees(),
-                displayAndroid.getBitsPerPixel(), displayAndroid.getBitsPerComponent(),
-                displayAndroid.getIsWideColorGamut());
+        DisplayAndroidManagerJni.get().updateDisplay(mNativePointer, DisplayAndroidManager.this,
+                displayAndroid.getDisplayId(), displayAndroid.getDisplayWidth(),
+                displayAndroid.getDisplayHeight(), displayAndroid.getDipScale(),
+                displayAndroid.getRotationDegrees(), displayAndroid.getBitsPerPixel(),
+                displayAndroid.getBitsPerComponent(), displayAndroid.getIsWideColorGamut());
     }
 
-    private native void nativeUpdateDisplay(long nativeDisplayAndroidManager, int sdkDisplayId,
-            int width, int height, float dipScale, int rotationDegrees, int bitsPerPixel,
-            int bitsPerComponent, boolean isWideColorGamut);
-    private native void nativeRemoveDisplay(long nativeDisplayAndroidManager, int sdkDisplayId);
-    private native void nativeSetPrimaryDisplayId(
-            long nativeDisplayAndroidManager, int sdkDisplayId);
+    @NativeMethods
+    interface Natives {
+        void updateDisplay(long nativeDisplayAndroidManager, DisplayAndroidManager caller,
+                int sdkDisplayId, int width, int height, float dipScale, int rotationDegrees,
+                int bitsPerPixel, int bitsPerComponent, boolean isWideColorGamut);
+        void removeDisplay(
+                long nativeDisplayAndroidManager, DisplayAndroidManager caller, int sdkDisplayId);
+        void setPrimaryDisplayId(
+                long nativeDisplayAndroidManager, DisplayAndroidManager caller, int sdkDisplayId);
+    }
+
+    /** Clears the object returned by {@link #getInstance()} */
+    @VisibleForTesting
+    public static void resetInstanceForTesting() {
+        sDisplayAndroidManager = null;
+    }
 }

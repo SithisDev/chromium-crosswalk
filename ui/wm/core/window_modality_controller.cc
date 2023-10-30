@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,6 +130,10 @@ void WindowModalityController::OnTouchEvent(ui::TouchEvent* event) {
   aura::Window* target = static_cast<aura::Window*>(event->target());
   if (ProcessLocatedEvent(target, event))
     event->SetHandled();
+}
+
+base::StringPiece WindowModalityController::GetLogContext() const {
+  return "WindowModalityController";
 }
 
 ////////////////////////////////////////////////////////////////////////////////

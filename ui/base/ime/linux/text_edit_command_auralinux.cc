@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/ime/linux/text_edit_command_auralinux.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "ui/base/ime/text_edit_commands.h"
 
 namespace ui {
@@ -127,6 +127,11 @@ std::string TextEditCommandAuraLinux::GetCommandString() const {
       return "SetMark";
     case TextEditCommand::UNSELECT:
       return "Unselect";
+    case TextEditCommand::SCROLL_PAGE_DOWN:
+    case TextEditCommand::SCROLL_PAGE_UP:
+    case TextEditCommand::SCROLL_TO_BEGINNING_OF_DOCUMENT:
+    case TextEditCommand::SCROLL_TO_END_OF_DOCUMENT:
+      // Scroll commands are used by Mac only
     case TextEditCommand::INVALID_COMMAND:
       NOTREACHED();
       return std::string();

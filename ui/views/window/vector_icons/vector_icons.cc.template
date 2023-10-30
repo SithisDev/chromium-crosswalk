@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 
 #include "ui/views/window/vector_icons/vector_icons.h"
 
-#include "base/logging.h"
 #include "components/vector_icons/cc_macros.h"
 #include "ui/gfx/vector_icon_types.h"
 
-namespace views {
+#define DECLARE_VECTOR_COMMAND(x) using gfx::x;
+DECLARE_VECTOR_COMMANDS
 
-using namespace gfx;
+namespace views {
 
 TEMPLATE_PLACEHOLDER
 

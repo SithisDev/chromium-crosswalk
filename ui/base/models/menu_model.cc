@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/models/menu_model.h"
+
+#include "ui/base/models/image_model.h"
 
 namespace ui {
 
@@ -13,17 +15,29 @@ MenuModel::~MenuModel() {
     menu_model_delegate_->OnMenuClearingDelegate();
 }
 
-bool MenuModel::IsVisibleAt(int index) const {
+bool MenuModel::IsVisibleAt(size_t index) const {
   return true;
+}
+
+bool MenuModel::IsAlertedAt(size_t index) const {
+  return false;
+}
+
+bool MenuModel::IsNewFeatureAt(size_t index) const {
+  return false;
+}
+
+ElementIdentifier MenuModel::GetElementIdentifierAt(size_t index) const {
+  return ElementIdentifier();
 }
 
 // static
 bool MenuModel::GetModelAndIndexForCommandId(int command_id,
                                              MenuModel** model,
-                                             int* index) {
-  const int item_count = (*model)->GetItemCount();
-  for (int i = 0; i < item_count; ++i) {
-    const int candidate_index = i;
+                                             size_t* index) {
+  const size_t item_count = (*model)->GetItemCount();
+  for (size_t i = 0; i < item_count; ++i) {
+    const size_t candidate_index = i;
     // Actionable submenus have commands.
     if ((*model)->GetTypeAt(candidate_index) == TYPE_ACTIONABLE_SUBMENU &&
         (*model)->GetCommandIdAt(candidate_index) == command_id) {
@@ -46,24 +60,32 @@ bool MenuModel::GetModelAndIndexForCommandId(int command_id,
   return false;
 }
 
-base::string16 MenuModel::GetSublabelAt(int index) const {
-  return base::string16();
+std::u16string MenuModel::GetMinorTextAt(size_t index) const {
+  return std::u16string();
 }
 
-base::string16 MenuModel::GetMinorTextAt(int index) const {
-  return base::string16();
+std::u16string MenuModel::GetSecondaryLabelAt(size_t index) const {
+  return std::u16string();
 }
 
-const gfx::VectorIcon* MenuModel::GetMinorIconAt(int index) const {
+ImageModel MenuModel::GetMinorIconAt(size_t index) const {
+  return ImageModel();
+}
+
+bool MenuModel::MayHaveMnemonicsAt(size_t index) const {
+  return true;
+}
+
+std::u16string MenuModel::GetAccessibleNameAt(size_t index) const {
+  return std::u16string();
+}
+
+const gfx::FontList* MenuModel::GetLabelFontListAt(size_t index) const {
   return nullptr;
 }
 
-const gfx::FontList* MenuModel::GetLabelFontListAt(int index) const {
-  return NULL;
-}
-
 // Default implementation ignores the event flags.
-void MenuModel::ActivatedAt(int index, int event_flags) {
+void MenuModel::ActivatedAt(size_t index, int event_flags) {
   ActivatedAt(index);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ TEST_P(IMM32ManagerTest, ConvertInputModeToImmFlags) {
   EXPECT_EQ(test_case.expected_conversion_mode, conversion_mode);
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          IMM32ManagerTest,
                          ::testing::ValuesIn(kInputModeTestCases));
 

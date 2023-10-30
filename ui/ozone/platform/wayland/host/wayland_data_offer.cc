@@ -1,48 +1,27 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/ozone/platform/wayland/host/wayland_data_offer.h"
 
-#include <fcntl.h>
-#include <algorithm>
-
+#include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "ui/base/clipboard/clipboard_constants.h"
 
 namespace ui {
-
-namespace {
-
-const char kString[] = "STRING";
-const char kText[] = "TEXT";
-const char kTextPlain[] = "text/plain";
-const char kTextPlainUtf8[] = "text/plain;charset=utf-8";
-const char kUtf8String[] = "UTF8_STRING";
-
-}  // namespace
 
 WaylandDataOffer::WaylandDataOffer(wl_data_offer* data_offer)
     : data_offer_(data_offer),
       source_actions_(WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE),
       dnd_action_(WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE) {
-  static const struct wl_data_offer_listener kDataOfferListener = {
-      WaylandDataOffer::OnOffer, WaylandDataOffer::OnSourceAction,
-      WaylandDataOffer::OnAction};
+  static constexpr wl_data_offer_listener kDataOfferListener = {
+      &OnOffer, &OnSourceAction, &OnAction};
   wl_data_offer_add_listener(data_offer, &kDataOfferListener, this);
 }
 
 WaylandDataOffer::~WaylandDataOffer() {
   data_offer_.reset();
-}
-
-void WaylandDataOffer::SetAction(uint32_t dnd_actions,
-                                 uint32_t preferred_action) {
-  if (wl_data_offer_get_version(data_offer_.get()) >=
-      WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION) {
-    wl_data_offer_set_actions(data_offer_.get(), dnd_actions, preferred_action);
-  }
 }
 
 void WaylandDataOffer::Accept(uint32_t serial, const std::string& mime_type) {
@@ -54,23 +33,8 @@ void WaylandDataOffer::Reject(uint32_t serial) {
   wl_data_offer_accept(data_offer_.get(), serial, nullptr);
 }
 
-void WaylandDataOffer::EnsureTextMimeTypeIfNeeded() {
-  if (base::Contains(mime_types_, kTextPlain))
-    return;
-
-  if (std::any_of(mime_types_.begin(), mime_types_.end(),
-                  [](const std::string& mime_type) {
-                    return mime_type == kString || mime_type == kText ||
-                           mime_type == kTextPlainUtf8 ||
-                           mime_type == kUtf8String;
-                  })) {
-    mime_types_.push_back(kTextPlain);
-    text_plain_mime_type_inserted_ = true;
-  }
-}
-
 base::ScopedFD WaylandDataOffer::Receive(const std::string& mime_type) {
-  if (!base::Contains(mime_types_, mime_type))
+  if (!base::Contains(mime_types(), mime_type))
     return base::ScopedFD();
 
   base::ScopedFD read_fd;
@@ -81,9 +45,8 @@ base::ScopedFD WaylandDataOffer::Receive(const std::string& mime_type) {
   // mimetype, then it is safer to "read" the clipboard data with
   // a mimetype mime_type known to be available.
   std::string effective_mime_type = mime_type;
-  if (mime_type == kTextPlain && text_plain_mime_type_inserted_) {
-    effective_mime_type = kTextPlainUtf8;
-  }
+  if (mime_type == kMimeTypeText && text_plain_mime_type_inserted())
+    effective_mime_type = kMimeTypeTextUtf8;
 
   wl_data_offer_receive(data_offer_.get(), effective_mime_type.data(),
                         write_fd.get());
@@ -91,17 +54,27 @@ base::ScopedFD WaylandDataOffer::Receive(const std::string& mime_type) {
 }
 
 void WaylandDataOffer::FinishOffer() {
-  if (wl_data_offer_get_version(data_offer_.get()) >=
-      WL_DATA_OFFER_FINISH_SINCE_VERSION)
+  if (wl::get_version_of_object(data_offer_.get()) >=
+      WL_DATA_OFFER_FINISH_SINCE_VERSION) {
     wl_data_offer_finish(data_offer_.get());
+  }
 }
 
-uint32_t WaylandDataOffer::source_actions() const {
-  return source_actions_;
-}
+void WaylandDataOffer::SetDndActions(uint32_t dnd_actions) {
+  if (wl::get_version_of_object(data_offer_.get()) <
+      WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION) {
+    return;
+  }
 
-uint32_t WaylandDataOffer::dnd_action() const {
-  return dnd_action_;
+  // Determine preferred action based on the given |dnd_actions|, prioritizing
+  // "copy" over "move", if both are set.
+  uint32_t preferred_action = WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
+  if (dnd_actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+    preferred_action = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+  else if (dnd_actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)
+    preferred_action = WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+
+  wl_data_offer_set_actions(data_offer_.get(), dnd_actions, preferred_action);
 }
 
 // static
@@ -109,7 +82,7 @@ void WaylandDataOffer::OnOffer(void* data,
                                wl_data_offer* data_offer,
                                const char* mime_type) {
   auto* self = static_cast<WaylandDataOffer*>(data);
-  self->mime_types_.push_back(mime_type);
+  self->AddMimeType(mime_type);
 }
 
 void WaylandDataOffer::OnSourceAction(void* data,

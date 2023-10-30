@@ -1,6 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 /**
  * Files Tooltip.
@@ -12,7 +14,9 @@
  * document.querySelector('files-tooltip').addTargets(
  *     document.querySelectorAll('[has-tooltip]'))
  */
-var FilesTooltip = Polymer({
+export const FilesTooltip = Polymer({
+  _template: html`{__html_template__}`,
+
   is: 'files-tooltip',
 
   properties: {
@@ -22,7 +26,7 @@ var FilesTooltip = Polymer({
     showTimeout: {
       type: Number,
       value: 500,  // ms
-      readOnly: true
+      readOnly: true,
     },
 
     /**
@@ -30,9 +34,9 @@ var FilesTooltip = Polymer({
      */
     hideTimeout: {
       type: Number,
-      value: 250,  // ms
-      readOnly: true
-    }
+      value: 500,  // ms
+      readOnly: true,
+    },
   },
 
   /**
@@ -58,14 +62,26 @@ var FilesTooltip = Polymer({
      * @private {number}
      */
     this.hideTooltipTimerId_ = 0;
+
+    /**
+     * Add <files-tooltip files-ng> for files-ng specific CSS styles.
+     */
+    this.toggleAttribute('files-ng', true);
   },
 
   /**
    * Adds an event listener to the body.
    */
   attached: function() {
-    document.body.addEventListener(
-      'mousedown', this.onDocumentMouseDown_.bind(this));
+    const closeTooltipHandler = this.onDocumentMouseDown_.bind(this);
+    const cleanupTooltipHandler = this.onTransitionEnd_.bind(this);
+    const mouseoverHandler = this.onMouseOver_.bind(this, null);
+    const mouseoutHandler = this.onMouseOut_.bind(this, null);
+    document.body.addEventListener('mousedown', closeTooltipHandler);
+    this.addEventListener('transitionend', cleanupTooltipHandler);
+    window.addEventListener('resize', closeTooltipHandler);
+    this.addEventListener('mouseover', mouseoverHandler);
+    this.addEventListener('mouseout', mouseoutHandler);
   },
 
   /**
@@ -94,9 +110,21 @@ var FilesTooltip = Polymer({
    * is not dispatched. This method is used to handle these cases manually.
    */
   hideTooltip: function() {
+    if (this.showTooltipTimerId_) {
+      clearTimeout(this.showTooltipTimerId_);
+    }
     if (this.visibleTooltipTarget_) {
       this.initHidingTooltip_(this.visibleTooltipTarget_);
     }
+  },
+
+  /**
+   * Update the tooltip text with the passed-in target.
+   *
+   * @param {!HTMLElement} target
+   */
+  updateTooltipText: function(target) {
+    this.initShowingTooltip_(target);
   },
 
   /**
@@ -112,7 +140,12 @@ var FilesTooltip = Polymer({
       }
     }
 
-    if (this.visibleTooltipTarget_ === target) {
+    // Even the current target is the visible tooltip target, we still need to
+    // check if the label is different from the existing tooltip text, because
+    // if label text changes, we need to show the tooltip.
+    if (this.visibleTooltipTarget_ === target &&
+        target.hasAttribute('aria-label') &&
+        this.$.label.textContent === target.getAttribute('aria-label')) {
       return;
     }
 
@@ -142,8 +175,8 @@ var FilesTooltip = Polymer({
     if (this.hideTooltipTimerId_) {
       clearTimeout(this.hideTooltipTimerId_);
     }
-    this.hideTooltipTimerId_ = setTimeout(
-        this.hideTooltip_.bind(this), this.hideTimeout);
+    this.hideTooltipTimerId_ =
+        setTimeout(this.hideTooltip_.bind(this), this.hideTimeout);
   },
 
   /**
@@ -158,29 +191,84 @@ var FilesTooltip = Polymer({
 
     this.visibleTooltipTarget_ = target;
 
+    const useCardTooltip = target.hasAttribute('show-card-tooltip');
+
+    const windowEdgePadding = 6;
+
     const label = target.getAttribute('aria-label');
+    const showLinkTooltip = target.hasAttribute('show-link-tooltip');
     if (!label) {
       return;
     }
 
-    this.$.label.textContent = label;
+    if (showLinkTooltip) {
+      // Use innerHTML since link tooltip contains a <a href> in the label.
+      this.$.label.innerHTML = label;
+      this.$.label.classList.add('link-label');
+    } else {
+      this.$.label.textContent = label;
+    }
+
+    const invert = 'invert-tooltip';
+    this.$.label.toggleAttribute('invert', target.hasAttribute(invert));
+
     const rect = target.getBoundingClientRect();
 
     let top = rect.top + rect.height;
+    if (!useCardTooltip) {
+      top += 8;
+    }
+
     if (top + this.offsetHeight > document.body.offsetHeight) {
       top = rect.top - this.offsetHeight;
     }
+
     this.style.top = `${Math.round(top)}px`;
 
-    let left = rect.left + rect.width / 2 - this.offsetWidth / 2;
-    if (left < 0) {
-      left = 0;
-    }
-    if (left > document.body.offsetWidth - this.offsetWidth) {
-      left = document.body.offsetWidth - this.offsetWidth;
-    }
-    this.style.left = `${Math.round(left)}px`;
+    let left;
 
+    if (useCardTooltip) {
+      this.className = 'card-tooltip';
+      this.$.label.classList.add('card-label');
+
+      // Push left to the body's left when tooltip is longer than viewport.
+      if (this.offsetWidth > document.body.offsetWidth) {
+        left = 0;
+      } else if (document.dir == 'rtl') {
+        // Calculate position for rtl mode to align to the right of target.
+        const width = this.getBoundingClientRect().width;
+        const minLeft = rect.right - width;
+
+        // The tooltip remains inside viewport if right align push it outside.
+        left = Math.max(minLeft, 0);
+      } else {
+        // The tooltip remains inside viewport if left align push it outside.
+        let maxLeft = document.body.offsetWidth - this.offsetWidth;
+        maxLeft = Math.max(0, maxLeft);
+
+        // Stick to the body's right if it goes outside viewport from right.
+        left = Math.min(rect.left, maxLeft);
+      }
+    } else {
+      // Clearing out style in case card-tooltip displayed previously.
+      this.cleanupCardTooltip_();
+
+      left = rect.left + rect.width / 2 - this.offsetWidth / 2;
+      if (left < windowEdgePadding) {
+        left = windowEdgePadding;
+      }
+
+      const maxLeft =
+          document.body.offsetWidth - this.offsetWidth - windowEdgePadding;
+      if (left > maxLeft) {
+        left = maxLeft;
+      }
+    }
+
+    left = Math.round(left);
+    this.style.left = `${left}px`;
+
+    this.setAttribute('aria-hidden', 'false');
     this.setAttribute('visible', true);
   },
 
@@ -195,22 +283,31 @@ var FilesTooltip = Polymer({
 
     this.visibleTooltipTarget_ = null;
     this.removeAttribute('visible');
+    this.setAttribute('aria-hidden', 'true');
   },
 
   /**
-   * @param {Event} event
+   * @param {?HTMLElement} target Element with 'has-tooltip' attribute or null.
+   * @param {Event} event The event that triggered this handler.
    * @private
    */
   onMouseOver_: function(target, event) {
-    this.initShowingTooltip_(target);
+    const actualTarget = target || this.visibleTooltipTarget_;
+    if (actualTarget) {
+      this.initShowingTooltip_(actualTarget);
+    }
   },
 
   /**
-   * @param {Event} event
+   * @param {?HTMLElement} target Element with 'has-tooltip' attribute or null.
+   * @param {Event} event The event that triggered this handler.
    * @private
    */
   onMouseOut_: function(target, event) {
-    this.initHidingTooltip_(target);
+    const actualTarget = target || this.visibleTooltipTarget_;
+    if (actualTarget) {
+      this.initHidingTooltip_(actualTarget);
+    }
   },
 
   /**
@@ -241,5 +338,27 @@ var FilesTooltip = Polymer({
       clearTimeout(this.showTooltipTimerId_);
       this.showTooltipTimerId_ = 0;
     }
-  }
+  },
+
+  /**
+   * @param {Event} event
+   * @private
+   */
+  onTransitionEnd_: function(event) {
+    // Clear card tooltip.
+    if (!this.hasAttribute('visible')) {
+      this.cleanupCardTooltip_();
+    }
+  },
+
+  /**
+   * Clear card tooltip styles to prevent overwriting normal tooltip rules.
+   * @private
+   */
+  cleanupCardTooltip_: function() {
+    this.className = '';
+    this.$.label.className = '';
+  },
 });
+
+//# sourceURL=//ui/file_manager/file_manager/foreground/elements/files_tooltip.js

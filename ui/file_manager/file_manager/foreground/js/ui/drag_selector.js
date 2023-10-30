@@ -1,15 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-class DragSelector {
+import {List} from './list.js';
+
+export class DragSelector {
   /**
    * Drag selector used on the file list or the grid table.
    */
   constructor() {
     /**
      * Target list of drag selection.
-     * @type {cr.ui.List}
+     * @type {List}
      * @private
      */
     this.target_ = null;
@@ -72,7 +74,7 @@ class DragSelector {
     const rect = element.cachedBounds;
     return {
       x: event.clientX - rect.left + element.scrollLeft,
-      y: event.clientY - rect.top + element.scrollTop
+      y: event.clientY - rect.top + element.scrollTop,
     };
   }
 
@@ -81,7 +83,7 @@ class DragSelector {
    * This function must be called from handlers of dragstart event.
    *
    * @this {DragSelector}
-   * @param {cr.ui.List} list List where the drag selection starts.
+   * @param {List} list List where the drag selection starts.
    * @param {Event} event The dragstart event.
    */
   startDragSelection(list, event) {
@@ -135,7 +137,8 @@ class DragSelector {
       left: Math.max(Math.min(this.startX_, pos.x), 0),
       top: Math.max(Math.min(this.startY_, pos.y), 0),
       right: Math.min(Math.max(this.startX_, pos.x), this.target_.scrollWidth),
-      bottom: Math.min(Math.max(this.startY_, pos.y), this.target_.scrollHeight)
+      bottom:
+          Math.min(Math.max(this.startY_, pos.y), this.target_.scrollHeight),
     };
     borderBounds.width = borderBounds.right - borderBounds.left;
     borderBounds.height = borderBounds.bottom - borderBounds.top;
@@ -234,5 +237,5 @@ class DragSelector {
  */
 DragSelector.SelectionFlag_ = {
   IN_LAST_SELECTION: 1 << 0,
-  IN_CURRENT_SELECTION: 1 << 1
+  IN_CURRENT_SELECTION: 1 << 1,
 };

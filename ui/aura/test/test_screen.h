@@ -1,12 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_AURA_TEST_TEST_SCREEN_H_
 #define UI_AURA_TEST_TEST_SCREEN_H_
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display.h"
 #include "ui/display/screen_base.h"
@@ -29,11 +28,15 @@ class TestScreen : public display::ScreenBase, public WindowObserver {
   // Creates a display::Screen of the specified size. If no size is specified,
   // then creates a 800x600 screen. |size| is in physical pixels.
   static TestScreen* Create(const gfx::Size& size);
+
+  TestScreen(const TestScreen&) = delete;
+  TestScreen& operator=(const TestScreen&) = delete;
+
   ~TestScreen() override;
 
   WindowTreeHost* CreateHostForPrimaryDisplay();
 
-  void SetDeviceScaleFactor(float device_scale_fator);
+  void SetDeviceScaleFactor(float device_scale_factor, bool resize_host = true);
   void SetColorSpace(
       const gfx::ColorSpace& color_space,
       float sdr_white_level = gfx::ColorSpace::kDefaultSDRWhiteLevel);
@@ -56,17 +59,19 @@ class TestScreen : public display::ScreenBase, public WindowObserver {
   gfx::Point GetCursorScreenPoint() override;
   bool IsWindowUnderCursor(gfx::NativeWindow window) override;
   gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override;
+  gfx::NativeWindow GetLocalProcessWindowAtPoint(
+      const gfx::Point& point,
+      const std::set<gfx::NativeWindow>& ignore) override;
   display::Display GetDisplayNearestWindow(
       gfx::NativeWindow window) const override;
+  std::string GetCurrentWorkspace() override;
 
  private:
   explicit TestScreen(const gfx::Rect& screen_bounds);
 
-  aura::WindowTreeHost* host_ = nullptr;
+  raw_ptr<aura::WindowTreeHost> host_ = nullptr;
 
   float ui_scale_ = 1.0f;
-
-  DISALLOW_COPY_AND_ASSIGN(TestScreen);
 };
 
 }  // namespace aura

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -18,9 +19,12 @@ class SystemFontsWinTest : public testing::Test {
  public:
   SystemFontsWinTest() = default;
 
+  SystemFontsWinTest(const SystemFontsWinTest&) = delete;
+  SystemFontsWinTest& operator=(const SystemFontsWinTest&) = delete;
+
  protected:
   void SetUp() override {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // System fonts is keeping a cache of loaded system fonts. These fonts are
     // scaled based on global callbacks configured on startup. The tests in this
     // file are testing these callbacks and need to be sure we cleared the
@@ -28,12 +32,9 @@ class SystemFontsWinTest : public testing::Test {
     win::ResetSystemFontsForTesting();
 #endif
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SystemFontsWinTest);
 };
 
-LOGFONT CreateLOGFONT(const base::char16* name, LONG height) {
+LOGFONT CreateLOGFONT(const wchar_t* name, LONG height) {
   LOGFONT logfont = {};
   logfont.lfHeight = height;
   auto result = wcscpy_s(logfont.lfFaceName, name);
@@ -41,8 +42,8 @@ LOGFONT CreateLOGFONT(const base::char16* name, LONG height) {
   return logfont;
 }
 
-const base::char16 kSegoeUI[] = L"Segoe UI";
-const base::char16 kArial[] = L"Arial";
+const wchar_t kSegoeUI[] = L"Segoe UI";
+const wchar_t kArial[] = L"Arial";
 
 }  // namespace
 
@@ -143,6 +144,28 @@ TEST_F(SystemFontsWinTest, AdjustLOGFONT_ScaleUpWithRounding) {
   AdjustLOGFONTForTesting(adjustment, &logfont);
   EXPECT_EQ(11, logfont.lfHeight);
   EXPECT_STREQ(kSegoeUI, logfont.lfFaceName);
+}
+
+TEST_F(SystemFontsWinTest, GetFontFromLOGFONT) {
+  LOGFONT logfont = CreateLOGFONT(kSegoeUI, -10);
+  Font font = GetFontFromLOGFONTForTesting(logfont);
+  EXPECT_EQ(font.GetStyle(), Font::FontStyle::NORMAL);
+  EXPECT_EQ(font.GetWeight(), Font::Weight::NORMAL);
+}
+
+TEST_F(SystemFontsWinTest, GetFontFromLOGFONT_WithStyle) {
+  LOGFONT logfont = CreateLOGFONT(kSegoeUI, -10);
+  logfont.lfItalic = 1;
+  logfont.lfWeight = 700;
+
+  Font font = GetFontFromLOGFONTForTesting(logfont);
+  EXPECT_EQ(font.GetStyle(), Font::FontStyle::ITALIC);
+  EXPECT_EQ(font.GetWeight(), Font::Weight::BOLD);
+}
+
+TEST_F(SystemFontsWinTest, GetDefaultSystemFont) {
+  Font system_font = GetDefaultSystemFont();
+  EXPECT_EQ(base::WideToUTF8(kSegoeUI), system_font.GetFontName());
 }
 
 }  // namespace win

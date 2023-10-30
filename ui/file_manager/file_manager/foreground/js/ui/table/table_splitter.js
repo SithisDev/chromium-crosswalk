@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,76 +10,106 @@
  * It is column model responsibility to resize other columns accordingly.
  */
 
-cr.define('cr.ui', function() {
-  /** @const */ const Splitter = cr.ui.Splitter;
+import {dispatchSimpleEvent, getPropertyDescriptor} from 'chrome://resources/js/cr.m.js';
 
+import {Splitter} from '../splitter.js';
+
+import {Table} from './table.js';
+
+/**
+ * Creates a new table splitter element.
+ */
+export class TableSplitter extends Splitter {
   /**
-   * Creates a new table splitter element.
    * @param {Object=} opt_propertyBag Optional properties.
-   * @constructor
-   * @extends {cr.ui.Splitter}
    */
-  const TableSplitter = cr.ui.define('div');
+  constructor(opt_propertyBag) {
+    super();
+    // cr.ui magic overwrites __proto__, so here we restore it back.
+    this.__proto__ = TableSplitter.prototype;
 
-  TableSplitter.prototype = {
-    __proto__: Splitter.prototype,
+    /** @private {Table} */
+    this.table_;
+    this.table = (opt_propertyBag && opt_propertyBag.table) || null;
 
-    table_: null,
+    /** @private {number} */
+    this.columnIndex_ = -1;
 
-    columnIndex_: null,
+    /** @private {number} */
+    this.columnWidth_ = 0;
 
-    /**
-     * Initializes the element.
-     */
-    decorate: function() {
-      Splitter.prototype.decorate.call(this);
+    /** @private {number} */
+    this.nextColumnWidth_ = 0;
 
-      this.classList.add('table-header-splitter');
-    },
-
-    /**
-     * Handles start of the splitter dragging.
-     * Saves starting width of the column and changes the cursor.
-     * @override
-     */
-    handleSplitterDragStart: function() {
-      const cm = this.table_.columnModel;
-      this.ownerDocument.documentElement.classList.add('col-resize');
-
-      this.columnWidth_ = cm.getWidth(this.columnIndex);
-      this.nextColumnWidth_ = cm.getWidth(this.columnIndex + 1);
-    },
-
-    /**
-     * Handles spliter moves. Sets new width of the column.
-     * @override
-     */
-    handleSplitterDragMove: function(deltaX) {
-      this.table_.columnModel.setWidth(
-          this.columnIndex, this.columnWidth_ + deltaX);
-    },
-
-    /**
-     * Handles end of the splitter dragging. Restores cursor.
-     * @override
-     */
-    handleSplitterDragEnd: function() {
-      this.ownerDocument.documentElement.classList.remove('col-resize');
-      cr.dispatchSimpleEvent(this, 'column-resize-end', true);
-    },
-  };
+    this.decorate();
+  }
 
   /**
-   * The column index.
-   * @type {number}
+   * Initializes the element.
    */
-  cr.defineProperty(TableSplitter, 'columnIndex');
+  decorate() {
+    super.decorate();
+
+    const icon = document.createElement('cr-icon-button');
+    icon.setAttribute('iron-icon', 'files32:small-dragger');
+    icon.setAttribute('tabindex', '-1');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.classList.add('splitter-icon');
+    this.appendChild(icon);
+
+    this.classList.add('table-header-splitter');
+  }
 
   /**
-   * The table associated with the splitter.
-   * @type {Element}
+   * Handles start of the splitter dragging.
+   * Saves starting width of the column and changes the cursor.
+   * @override
    */
-  cr.defineProperty(TableSplitter, 'table');
+  handleSplitterDragStart() {
+    const cm = this.table_.columnModel;
+    this.ownerDocument.documentElement.classList.add('col-resize');
 
-  return {TableSplitter: TableSplitter};
-});
+    this.columnWidth_ = cm.getWidth(this.columnIndex);
+    this.nextColumnWidth_ = cm.getWidth(this.columnIndex + 1);
+
+    this.table_.columnModel.handleSplitterDragStart();
+  }
+
+  /**
+   * Handles spliter moves. Sets new width of the column.
+   * @override
+   */
+  handleSplitterDragMove(deltaX) {
+    if (this.table_.columnModel.setWidthAndKeepTotal) {
+      this.table_.columnModel.setWidthAndKeepTotal(
+          this.columnIndex, this.columnWidth_ + deltaX, true);
+    }
+  }
+
+  /**
+   * Handles end of the splitter dragging. Restores cursor.
+   * @override
+   */
+  handleSplitterDragEnd() {
+    this.ownerDocument.documentElement.classList.remove('col-resize');
+    dispatchSimpleEvent(this, 'column-resize-end', true);
+    this.table_.columnModel.handleSplitterDragEnd();
+  }
+}
+
+/**
+ * The column index.
+ * @type {number}
+ */
+TableSplitter.prototype.columnIndex;
+Object.defineProperty(
+    TableSplitter.prototype, 'columnIndex',
+    getPropertyDescriptor('columnIndex'));
+
+/**
+ * The table associated with the splitter.
+ * @type {Element}
+ */
+TableSplitter.prototype.table;
+Object.defineProperty(
+    TableSplitter.prototype, 'table', getPropertyDescriptor('table'));

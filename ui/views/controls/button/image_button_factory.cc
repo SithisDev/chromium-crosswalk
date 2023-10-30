@@ -1,14 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "ui/views/controls/button/image_button_factory.h"
 
+#include <memory>
+#include <utility>
+
+#include "ui/base/models/image_model.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icon_types.h"
-#include "ui/native_theme/native_theme.h"
+#include "ui/gfx/vector_icon_utils.h"
+#include "ui/views/animation/ink_drop.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
@@ -17,91 +24,100 @@ namespace views {
 
 namespace {
 
+class ColorTrackingVectorImageButton : public ImageButton {
+ public:
+  ColorTrackingVectorImageButton(PressedCallback callback,
+                                 const gfx::VectorIcon& icon,
+                                 int dip_size)
+      : ImageButton(std::move(callback)), icon_(icon), dip_size_(dip_size) {}
+
+  // ImageButton:
+  void OnThemeChanged() override {
+    ImageButton::OnThemeChanged();
+    const ui::ColorProvider* cp = GetColorProvider();
+    const SkColor color = cp->GetColor(ui::kColorIcon);
+    const SkColor disabled_color = cp->GetColor(ui::kColorIconDisabled);
+    SetImageFromVectorIconWithColor(this, icon_, dip_size_, color,
+                                    disabled_color);
+  }
+
+ private:
+  const gfx::VectorIcon& icon_;
+  int dip_size_;
+};
+
+}  // namespace
+
+std::unique_ptr<ImageButton> CreateVectorImageButtonWithNativeTheme(
+    Button::PressedCallback callback,
+    const gfx::VectorIcon& icon,
+    absl::optional<int> dip_size) {
+  auto button = std::make_unique<ColorTrackingVectorImageButton>(
+      std::move(callback), icon,
+      dip_size.value_or(GetDefaultSizeOfVectorIcon(icon)));
+  ConfigureVectorImageButton(button.get());
+  return button;
+}
+
+std::unique_ptr<ImageButton> CreateVectorImageButton(
+    Button::PressedCallback callback) {
+  auto button = std::make_unique<ImageButton>(std::move(callback));
+  ConfigureVectorImageButton(button.get());
+  return button;
+}
+
+std::unique_ptr<ToggleImageButton> CreateVectorToggleImageButton(
+    Button::PressedCallback callback) {
+  auto button = std::make_unique<ToggleImageButton>(std::move(callback));
+  ConfigureVectorImageButton(button.get());
+  return button;
+}
+
 void ConfigureVectorImageButton(ImageButton* button) {
-  button->SetInkDropMode(Button::InkDropMode::ON);
-  button->set_has_ink_drop_action_on_click(true);
+  InkDrop::Get(button)->SetMode(views::InkDropHost::InkDropMode::ON);
+  button->SetHasInkDropActionOnClick(true);
   button->SetImageHorizontalAlignment(ImageButton::ALIGN_CENTER);
   button->SetImageVerticalAlignment(ImageButton::ALIGN_MIDDLE);
   button->SetBorder(CreateEmptyBorder(
       LayoutProvider::Get()->GetInsetsMetric(INSETS_VECTOR_IMAGE_BUTTON)));
 }
 
-}  // namespace
-
-std::unique_ptr<ImageButton> CreateVectorImageButton(ButtonListener* listener) {
-  auto button = std::make_unique<ImageButton>(listener);
-  ConfigureVectorImageButton(button.get());
-  return button;
-}
-
-std::unique_ptr<ToggleImageButton> CreateVectorToggleImageButton(
-    ButtonListener* listener) {
-  auto button = std::make_unique<ToggleImageButton>(listener);
-  ConfigureVectorImageButton(button.get());
-  return button;
-}
-
-void SetImageFromVectorIcon(ImageButton* button, const gfx::VectorIcon& icon) {
-  SetImageFromVectorIconWithColor(
-      button, icon,
-      ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
-          ui::NativeTheme::kColorId_DefaultIconColor));
-}
-
-void SetImageFromVectorIcon(ImageButton* button,
-                            const gfx::VectorIcon& icon,
-                            SkColor related_text_color) {
-  SetImageFromVectorIcon(button, icon, GetDefaultSizeOfVectorIcon(icon),
-                         related_text_color);
-}
-
-void SetImageFromVectorIcon(ImageButton* button,
-                            const gfx::VectorIcon& icon,
-                            int dip_size,
-                            SkColor related_text_color) {
-  const SkColor icon_color =
-      color_utils::DeriveDefaultIconColor(related_text_color);
-  SetImageFromVectorIconWithColor(button, icon, dip_size, icon_color);
-}
-
 void SetImageFromVectorIconWithColor(ImageButton* button,
                                      const gfx::VectorIcon& icon,
-                                     SkColor icon_color) {
+                                     SkColor icon_color,
+                                     SkColor icon_disabled_color) {
   SetImageFromVectorIconWithColor(button, icon,
-                                  GetDefaultSizeOfVectorIcon(icon), icon_color);
+                                  GetDefaultSizeOfVectorIcon(icon), icon_color,
+                                  icon_disabled_color);
 }
 
 void SetImageFromVectorIconWithColor(ImageButton* button,
                                      const gfx::VectorIcon& icon,
                                      int dip_size,
-                                     SkColor icon_color) {
-  const SkColor disabled_color =
-      SkColorSetA(icon_color, gfx::kDisabledControlAlpha);
-  const gfx::ImageSkia& normal_image =
-      gfx::CreateVectorIcon(icon, dip_size, icon_color);
-  const gfx::ImageSkia& disabled_image =
-      gfx::CreateVectorIcon(icon, dip_size, disabled_color);
+                                     SkColor icon_color,
+                                     SkColor icon_disabled_color) {
+  const ui::ImageModel& normal_image =
+      ui::ImageModel::FromVectorIcon(icon, icon_color, dip_size);
+  const ui::ImageModel& disabled_image =
+      ui::ImageModel::FromVectorIcon(icon, icon_disabled_color, dip_size);
 
-  button->SetImage(Button::STATE_NORMAL, normal_image);
-  button->SetImage(Button::STATE_DISABLED, disabled_image);
-  button->set_ink_drop_base_color(icon_color);
+  button->SetImageModel(Button::STATE_NORMAL, normal_image);
+  button->SetImageModel(Button::STATE_DISABLED, disabled_image);
+  InkDrop::Get(button)->SetBaseColor(icon_color);
 }
 
-void SetToggledImageFromVectorIcon(ToggleImageButton* button,
-                                   const gfx::VectorIcon& icon,
-                                   int dip_size,
-                                   SkColor related_text_color) {
-  const SkColor icon_color =
-      color_utils::DeriveDefaultIconColor(related_text_color);
-  const SkColor disabled_color =
-      SkColorSetA(icon_color, gfx::kDisabledControlAlpha);
-  const gfx::ImageSkia normal_image =
-      gfx::CreateVectorIcon(icon, dip_size, icon_color);
-  const gfx::ImageSkia disabled_image =
-      gfx::CreateVectorIcon(icon, dip_size, disabled_color);
+void SetToggledImageFromVectorIconWithColor(ToggleImageButton* button,
+                                            const gfx::VectorIcon& icon,
+                                            int dip_size,
+                                            SkColor icon_color,
+                                            SkColor disabled_color) {
+  const ui::ImageModel& normal_image =
+      ui::ImageModel::FromVectorIcon(icon, icon_color, dip_size);
+  const ui::ImageModel& disabled_image =
+      ui::ImageModel::FromVectorIcon(icon, disabled_color, dip_size);
 
-  button->SetToggledImage(Button::STATE_NORMAL, &normal_image);
-  button->SetToggledImage(Button::STATE_DISABLED, &disabled_image);
+  button->SetToggledImageModel(Button::STATE_NORMAL, normal_image);
+  button->SetToggledImageModel(Button::STATE_DISABLED, disabled_image);
 }
 
 }  // namespace views

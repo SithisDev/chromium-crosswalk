@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,14 @@
 #include "base/location.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkFont.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/gpu/gl/GrGLAssembleInterface.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -29,12 +31,6 @@
 namespace ui {
 
 namespace {
-
-const GrGLInterface* GrGLCreateNativeInterface() {
-  return GrGLAssembleInterface(nullptr, [](void* ctx, const char name[]) {
-    return gl::GetGLProcAddress(name);
-  });
-}
 
 const char kUseDDL[] = "use-ddl";
 
@@ -49,8 +45,7 @@ SkiaGlRenderer::SkiaGlRenderer(
       window_surface_(std::move(window_surface)),
       gl_surface_(surface),
       use_ddl_(base::CommandLine::ForCurrentProcess()->HasSwitch(kUseDDL)),
-      condition_variable_(&lock_),
-      weak_ptr_factory_(this) {}
+      condition_variable_(&lock_) {}
 
 SkiaGlRenderer::~SkiaGlRenderer() {
   if (use_ddl_)
@@ -65,33 +60,33 @@ bool SkiaGlRenderer::Initialize() {
     return false;
   }
 
-  gl_surface_->Resize(size_, 1.f, gl::GLSurface::ColorSpace::UNSPECIFIED, true);
+  gl_surface_->Resize(size_, 1.f, gfx::ColorSpace(), true);
 
   if (!gl_context_->MakeCurrent(gl_surface_.get())) {
     LOG(FATAL) << "Failed to make GL context current";
     return false;
   }
 
-  auto native_interface =
-      sk_sp<const GrGLInterface>(GrGLCreateNativeInterface());
+  sk_sp<const GrGLInterface> native_interface = GrGLMakeAssembledInterface(
+      nullptr,
+      [](void* ctx, const char name[]) { return gl::GetGLProcAddress(name); });
   DCHECK(native_interface);
   GrContextOptions options;
   // TODO(csmartdalton): enable internal multisampling after the related Skia
   // rolls are in.
   options.fInternalMultisampleCount = 0;
-  gr_context_ = GrContext::MakeGL(std::move(native_interface), options);
+  gr_context_ = GrDirectContext::MakeGL(std::move(native_interface), options);
   DCHECK(gr_context_);
 
-  PostRenderFrameTask(gfx::SwapResult::SWAP_ACK, nullptr);
+  PostRenderFrameTask(gfx::SwapCompletionResult(gfx::SwapResult::SWAP_ACK));
   return true;
 }
 
 void SkiaGlRenderer::RenderFrame() {
   TRACE_EVENT0("ozone", "SkiaGlRenderer::RenderFrame");
 
-  // LegacyFontHost will get LCD text and skia figures out what type to use.
   SkSurfaceProps surface_props =
-      SkSurfaceProps(0, SkSurfaceProps::kLegacyFontHost_InitType);
+      skia::LegacyDisplayGlobals::GetSkSurfaceProps();
 
   if (!sk_surface_) {
     GrGLFramebufferInfo framebuffer_info;
@@ -107,37 +102,33 @@ void SkiaGlRenderer::RenderFrame() {
 
   if (use_ddl_) {
     StartDDLRenderThreadIfNecessary(sk_surface_.get());
-    auto ddl = GetDDL();
-    sk_surface_->draw(ddl.get());
+    sk_surface_->draw(GetDDL());
   } else {
     Draw(sk_surface_->getCanvas(), NextFraction());
   }
-  gr_context_->flush();
+  gr_context_->flushAndSubmit();
   glFinish();
 
   if (gl_surface_->SupportsAsyncSwap()) {
     gl_surface_->SwapBuffersAsync(
-        base::BindRepeating(&SkiaGlRenderer::PostRenderFrameTask,
-                            weak_ptr_factory_.GetWeakPtr()),
-        base::BindRepeating(&SkiaGlRenderer::OnPresentation,
-                            weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&SkiaGlRenderer::PostRenderFrameTask,
+                       weak_ptr_factory_.GetWeakPtr()),
+        base::BindOnce(&SkiaGlRenderer::OnPresentation,
+                       weak_ptr_factory_.GetWeakPtr()));
   } else {
     PostRenderFrameTask(
-        gl_surface_->SwapBuffers(base::BindRepeating(
-            &SkiaGlRenderer::OnPresentation, weak_ptr_factory_.GetWeakPtr())),
-        nullptr);
+        gfx::SwapCompletionResult(gl_surface_->SwapBuffers(base::BindOnce(
+            &SkiaGlRenderer::OnPresentation, weak_ptr_factory_.GetWeakPtr()))));
   }
 }
 
-void SkiaGlRenderer::PostRenderFrameTask(
-    gfx::SwapResult result,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  if (gpu_fence)
-    gpu_fence->Wait();
+void SkiaGlRenderer::PostRenderFrameTask(gfx::SwapCompletionResult result) {
+  if (!result.release_fence.is_null())
+    gfx::GpuFence(std::move(result.release_fence)).Wait();
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindRepeating(&SkiaGlRenderer::RenderFrame,
-                                     weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&SkiaGlRenderer::RenderFrame,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SkiaGlRenderer::Draw(SkCanvas* canvas, float fraction) {
@@ -219,7 +210,7 @@ void SkiaGlRenderer::StopDDLRenderThread() {
     ddls_.pop();
 }
 
-std::unique_ptr<SkDeferredDisplayList> SkiaGlRenderer::GetDDL() {
+sk_sp<SkDeferredDisplayList> SkiaGlRenderer::GetDDL() {
   base::AutoLock auto_lock_(lock_);
   DCHECK(surface_charaterization_.isValid());
   // Wait until DDL is generated by DDL render thread.
@@ -243,7 +234,7 @@ void SkiaGlRenderer::Run() {
       break;
     DCHECK_LT(ddls_.size(), kMaxPendingDDLS);
     SkDeferredDisplayListRecorder recorder(surface_charaterization_);
-    std::unique_ptr<SkDeferredDisplayList> ddl;
+    sk_sp<SkDeferredDisplayList> ddl;
     {
       base::AutoUnlock auto_unlock(lock_);
       Draw(recorder.getCanvas(), NextFraction());

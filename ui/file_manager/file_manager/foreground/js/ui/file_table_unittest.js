@@ -1,20 +1,28 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertArrayEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {FileTableColumnModel} from './file_table.js';
+import {TableColumn} from './table/table_column.js';
 
 /** @type {!FileTableColumnModel} */
 let model;
 
-/** @type {!Array<cr.ui.table.TableColumn>} */
+/** @type {!Array<TableColumn>} */
 let columns;
 
-function setUp() {
+export function setUp() {
+  window.loadTimeData.getString = id => id;
+  window.loadTimeData.getBoolean = id => false;
+
   columns = [
-    new cr.ui.table.TableColumn('col0', 'col0', 100),
-    new cr.ui.table.TableColumn('col1', 'col1', 100),
-    new cr.ui.table.TableColumn('col2', 'col2', 100),
-    new cr.ui.table.TableColumn('col3', 'col3', 100),
-    new cr.ui.table.TableColumn('col4', 'col4', 100)
+    new TableColumn('col0', 'col0', 100),
+    new TableColumn('col1', 'col1', 100),
+    new TableColumn('col2', 'col2', 100),
+    new TableColumn('col3', 'col3', 100),
+    new TableColumn('col4', 'col4', 100),
   ];
 
   model = new FileTableColumnModel(columns);
@@ -34,7 +42,7 @@ function getColumnWidths(model) {
 
 // Verify that column visibility and width are correctly set when the visibility
 // setting is toggled.
-function testToggleVisibility() {
+export function testToggleVisibility() {
   // The column under test.
   const INDEX = 2;
   const width = model.getWidth(INDEX);
@@ -56,7 +64,7 @@ function testToggleVisibility() {
 
 // Verify that the table layout does not drift when a column is repeatedly shown
 // and hidden.
-function testToggleVisibilityColumnLayout() {
+export function testToggleVisibilityColumnLayout() {
   // The index of the column under test.
   const INDEX = 2;
   // Capture column widths.
@@ -82,7 +90,7 @@ function testToggleVisibilityColumnLayout() {
 
 // Verify that table layout stays constant when the column config is exported
 // and then restored, with no hidden columns.
-function testExportAndRestoreColumnConfigWithNoHiddenColumns() {
+export function testExportAndRestoreColumnConfigWithNoHiddenColumns() {
   // Change some column widths, then capture then.
   for (let i = 0; i < model.size; i++) {
     model.setWidth(i, i * 50);
@@ -101,7 +109,7 @@ function testExportAndRestoreColumnConfigWithNoHiddenColumns() {
 
 // Verify that table layout stays constant when the column config is exported
 // and then restored, with a hidden column.
-function testExportAndRestoreColumnConfigWithHiddenColumns() {
+export function testExportAndRestoreColumnConfigWithHiddenColumns() {
   // The index of the column under test.
   const INDEX = 2;
 
@@ -128,7 +136,7 @@ function testExportAndRestoreColumnConfigWithHiddenColumns() {
 
 // Verify that table layout stays constant when the column config is exported
 // with a hidden column but then restored with the column visible.
-function testExportAndRestoreColumnConfigWithShowingColumn() {
+export function testExportAndRestoreColumnConfigWithShowingColumn() {
   // The index of the column under test.
   const INDEX = 2;
 
@@ -157,7 +165,7 @@ function testExportAndRestoreColumnConfigWithShowingColumn() {
 
 // Verify that table layout stays constant when the column config is exported
 // with all columns visible but then restored with a hidden column.
-function testExportAndRestoreColumnConfigWithHidingColumn() {
+export function testExportAndRestoreColumnConfigWithHidingColumn() {
   // The index of the column under test.
   const INDEX = 2;
 
@@ -184,22 +192,40 @@ function testExportAndRestoreColumnConfigWithHidingColumn() {
   assertEquals(expectedTotalWidth, newModel.totalWidth);
 }
 
-function testNormalizeWidth() {
-  const newContentWidth = 150;
-  const expectedWidths = [10, 20, 30, 40, 50];
+export function testNormalizeWidth() {
+  let newContentWidth = 0;
+  const initialWidths = [
+    10 * 17,
+    20 * 17,
+    30 * 17,
+    40 * 17,
+    50 * 17,
+  ];
+  // The rounding technique used in the implementation doesn't match floor() or
+  // ceil(), it diverges by +/- 1. So hard coding here.
+  const expectedWidths = [
+    56,   // ~(17 * 10 / 3)
+    114,  // ~(17 * 20 / 3)
+    170,  // ~(17 * 30 / 3)
+    226,  // ~(17 * 40 / 3)
+    284,  // ~(17 * 50 / 3)
+  ];
 
   for (let i = 0; i < model.size; i++) {
-    model.setWidth(i, expectedWidths[i] * 17);
+    const colWidth = initialWidths[i];
+    model.setWidth(i, colWidth);
+    newContentWidth += colWidth;
   }
 
-  // Resizes columns proportionally
+  // Reduce total with to 1/3 to Resizes columns proportionally.
+  newContentWidth = newContentWidth / 3;
   model.normalizeWidths(newContentWidth);
 
   assertArrayEquals(expectedWidths, getColumnWidths(model));
   assertEquals(newContentWidth, model.totalWidth);
 }
 
-function testNormalizeWidthWithSmallWidth() {
+export function testNormalizeWidthWithSmallWidth() {
   model.normalizeWidths(10);  // not enough width to contain all columns
 
   // Should keep the minimum width.
@@ -208,7 +234,7 @@ function testNormalizeWidthWithSmallWidth() {
   });
 }
 
-function testSetWidthAndKeepTotal() {
+export function testSetWidthAndKeepTotal() {
   // Make sure to take column snapshot. Required for setWidthAndKeepTotal.
   model.initializeColumnPos();
 

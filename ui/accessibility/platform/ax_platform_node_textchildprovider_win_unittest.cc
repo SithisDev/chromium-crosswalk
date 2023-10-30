@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/accessibility/platform/ax_platform_node_win_unittest.h"
 
+#include "base/win/scoped_bstr.h"
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
 #include "ui/accessibility/platform/ax_platform_node_textchildprovider_win.h"
 #include "ui/accessibility/platform/ax_platform_node_textprovider_win.h"
@@ -13,17 +14,21 @@ using Microsoft::WRL::ComPtr;
 
 namespace ui {
 
-class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
+class AXPlatformNodeTextChildProviderTest : public AXPlatformNodeWinTest {
  protected:
   // Construct an accessibility tree for testing ITextChildProvider resolution
   // from various positions in the tree. The following tree configuration
   // is constructed:
   //
-  // root_______________
-  // |                  |
-  // nontext____        text
-  // |          |       |
-  // nontext    text    text
+  // root_________________________________________________
+  // |                                                    |
+  // nontext_child_of_root______                          text_child_of_root
+  // |                          |                         |
+  // nontext_child_of_nontext   text_child_of_nontext     text_child_of_text
+  //
+  // nontext leaf elements are considered as embedded objects and expose a
+  // character to allow the text pattern navigation to work with them too.
+  // Because of that, a nontext leaf element is treated as a text element.
   void SetUp() override {
     ui::AXNodeData root;
     root.id = 1;
@@ -32,26 +37,31 @@ class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
     ui::AXNodeData nontext_child_of_root;
     nontext_child_of_root.id = 2;
     nontext_child_of_root.role = ax::mojom::Role::kGroup;
+    nontext_child_of_root.SetName("non text child of root.");
     root.child_ids.push_back(nontext_child_of_root.id);
 
     ui::AXNodeData text_child_of_root;
     text_child_of_root.id = 3;
     text_child_of_root.role = ax::mojom::Role::kStaticText;
+    text_child_of_root.SetName("text child of root.");
     root.child_ids.push_back(text_child_of_root.id);
 
     ui::AXNodeData nontext_child_of_nontext;
     nontext_child_of_nontext.id = 4;
     nontext_child_of_nontext.role = ax::mojom::Role::kGroup;
+    nontext_child_of_nontext.SetName("nontext child of nontext.");
     nontext_child_of_root.child_ids.push_back(nontext_child_of_nontext.id);
 
     ui::AXNodeData text_child_of_nontext;
     text_child_of_nontext.id = 5;
     text_child_of_nontext.role = ax::mojom::Role::kStaticText;
+    text_child_of_nontext.SetName("text child of nontext.");
     nontext_child_of_root.child_ids.push_back(text_child_of_nontext.id);
 
     ui::AXNodeData text_child_of_text;
     text_child_of_text.id = 6;
-    text_child_of_text.role = ax::mojom::Role::kStaticText;
+    text_child_of_text.role = ax::mojom::Role::kInlineTextBox;
+    text_child_of_text.SetName("text child of text.");
     text_child_of_root.child_ids.push_back(text_child_of_text.id);
 
     ui::AXTreeUpdate update;
@@ -60,17 +70,16 @@ class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
     update.tree_data = tree_data;
     update.has_tree_data = true;
     update.root_id = root.id;
-    update.nodes.push_back(root);
-    update.nodes.push_back(nontext_child_of_root);
-    update.nodes.push_back(text_child_of_root);
-    update.nodes.push_back(nontext_child_of_nontext);
-    update.nodes.push_back(text_child_of_nontext);
-    update.nodes.push_back(text_child_of_text);
+    update.nodes = {root,
+                    nontext_child_of_root,
+                    text_child_of_root,
+                    nontext_child_of_nontext,
+                    text_child_of_nontext,
+                    text_child_of_text};
 
     Init(update);
 
-    AXNode* root_node = GetRootNode();
-    AXNodePosition::SetTree(tree_.get());
+    AXNode* root_node = GetRoot();
     AXNode* nontext_child_of_root_node = root_node->children()[0];
     AXNode* text_child_of_root_node = root_node->children()[1];
     AXNode* nontext_child_of_nontext_node =
@@ -96,9 +105,8 @@ class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
     InitITextChildProvider(text_child_of_text_node,
                            text_child_of_text_text_provider_raw_,
                            text_child_of_text_text_child_provider_);
+    AXPlatformNodeWinTest::SetUp();
   }
-
-  void TearDown() override { AXNodePosition::SetTree(nullptr); }
 
   void InitITextChildProvider(
       AXNode* node,
@@ -120,6 +128,16 @@ class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
           ui::AXPlatformNodeTextChildProviderWin::Create(platform_node);
       new_child_provider->QueryInterface(IID_PPV_ARGS(&text_child_provider));
     }
+  }
+
+  void SetOwner(AXPlatformNodeWin* owner,
+                ITextRangeProvider* destination_range) {
+    ComPtr<ITextRangeProvider> destination_provider = destination_range;
+    ComPtr<AXPlatformNodeTextRangeProviderWin> destination_provider_interal;
+
+    destination_provider->QueryInterface(
+        IID_PPV_ARGS(&destination_provider_interal));
+    destination_provider_interal->SetOwnerForTesting(owner);
   }
 
   ComPtr<IRawElementProviderSimple> root_provider_raw_;
@@ -147,96 +165,96 @@ class AXPlatformNodeTextChildProviderTest : public ui::AXPlatformNodeWinTest {
 //    container.
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromRoot) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromRoot) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       root_text_child_provider_->get_TextContainer(&text_container));
-  ASSERT_EQ(nullptr, text_container);
+  ASSERT_EQ(nullptr, text_container.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromNontextChildOfRoot) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromNontextChildOfRoot) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       nontext_child_of_root_text_child_provider_->get_TextContainer(
           &text_container));
-  ASSERT_NE(nullptr, text_container);
+  ASSERT_NE(nullptr, text_container.Get());
 
-  ASSERT_EQ(root_provider_raw_.Get(), text_container);
+  EXPECT_EQ(root_provider_raw_.Get(), text_container.Get());
 
-  CComPtr<ITextProvider> text_container_text_provider;
-  text_container->GetPatternProvider(
-      UIA_TextPatternId,
-      reinterpret_cast<IUnknown**>(&text_container_text_provider));
-  ASSERT_NE(nullptr, text_container_text_provider);
+  ComPtr<IUnknown> pattern_provider;
+  ComPtr<ITextProvider> text_container_text_provider;
+  text_container->GetPatternProvider(UIA_TextPatternId, &pattern_provider);
+  ASSERT_NE(nullptr, pattern_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(pattern_provider.As(&text_container_text_provider));
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromTextChildOfRoot) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromTextChildOfRoot) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_root_text_child_provider_->get_TextContainer(
           &text_container));
-  ASSERT_NE(nullptr, text_container);
+  ASSERT_NE(nullptr, text_container.Get());
 
-  ASSERT_EQ(root_provider_raw_.Get(), text_container);
+  EXPECT_EQ(root_provider_raw_.Get(), text_container.Get());
 
-  CComPtr<ITextProvider> text_container_text_provider;
-  text_container->GetPatternProvider(
-      UIA_TextPatternId,
-      reinterpret_cast<IUnknown**>(&text_container_text_provider));
-  ASSERT_NE(nullptr, text_container_text_provider);
+  ComPtr<IUnknown> pattern_provider;
+  ComPtr<ITextProvider> text_container_text_provider;
+  text_container->GetPatternProvider(UIA_TextPatternId, &pattern_provider);
+  ASSERT_NE(nullptr, pattern_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(pattern_provider.As(&text_container_text_provider));
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromNontextChildOfNontext) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromNontextChildOfNontext) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       nontext_child_of_nontext_text_child_provider_->get_TextContainer(
           &text_container));
-  ASSERT_NE(nullptr, text_container);
+  ASSERT_NE(nullptr, text_container.Get());
 
-  ASSERT_EQ(root_provider_raw_.Get(), text_container);
+  EXPECT_EQ(root_provider_raw_.Get(), text_container.Get());
 
-  CComPtr<ITextProvider> text_container_text_provider;
-  text_container->GetPatternProvider(
-      UIA_TextPatternId,
-      reinterpret_cast<IUnknown**>(&text_container_text_provider));
-  ASSERT_NE(nullptr, text_container_text_provider);
+  ComPtr<IUnknown> pattern_provider;
+  ComPtr<ITextProvider> text_container_text_provider;
+  text_container->GetPatternProvider(UIA_TextPatternId, &pattern_provider);
+  ASSERT_NE(nullptr, pattern_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(pattern_provider.As(&text_container_text_provider));
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromTextChildOfNontext) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromTextChildOfNontext) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_nontext_text_child_provider_->get_TextContainer(
           &text_container));
-  ASSERT_NE(nullptr, text_container);
+  ASSERT_NE(nullptr, text_container.Get());
 
-  ASSERT_EQ(root_provider_raw_.Get(), text_container);
+  EXPECT_EQ(root_provider_raw_.Get(), text_container.Get());
 
-  CComPtr<ITextProvider> text_container_text_provider;
-  text_container->GetPatternProvider(
-      UIA_TextPatternId,
-      reinterpret_cast<IUnknown**>(&text_container_text_provider));
-  ASSERT_NE(nullptr, text_container_text_provider);
+  ComPtr<IUnknown> pattern_provider;
+  ComPtr<ITextProvider> text_container_text_provider;
+  text_container->GetPatternProvider(UIA_TextPatternId, &pattern_provider);
+  ASSERT_NE(nullptr, pattern_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(pattern_provider.As(&text_container_text_provider));
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextContainerFromTextChildOfText) {
-  CComPtr<IRawElementProviderSimple> text_container;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextContainerFromTextChildOfText) {
+  ComPtr<IRawElementProviderSimple> text_container;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_text_text_child_provider_->get_TextContainer(
           &text_container));
-  ASSERT_NE(nullptr, text_container);
+  ASSERT_NE(nullptr, text_container.Get());
 
-  ASSERT_EQ(text_child_of_root_text_provider_raw_.Get(), text_container);
+  EXPECT_EQ(text_child_of_root_text_provider_raw_.Get(), text_container.Get());
 
-  CComPtr<ITextProvider> text_container_text_provider;
-  text_container->GetPatternProvider(
-      UIA_TextPatternId,
-      reinterpret_cast<IUnknown**>(&text_container_text_provider));
-  ASSERT_NE(nullptr, text_container_text_provider);
+  ComPtr<IUnknown> pattern_provider;
+  ComPtr<ITextProvider> text_container_text_provider;
+  text_container->GetPatternProvider(UIA_TextPatternId, &pattern_provider);
+  ASSERT_NE(nullptr, pattern_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(pattern_provider.As(&text_container_text_provider));
 }
 
 // ITextChildProvider::TextRange Tests
@@ -246,78 +264,128 @@ TEST_F(AXPlatformNodeTextChildProviderTest,
 //    support the UIA Text control pattern.
 // 2) Any retrieved text range encloses the child element.
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromRoot) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromRoot) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       root_text_child_provider_->get_TextRange(&text_range_provider));
-  ASSERT_EQ(nullptr, text_range_provider);
+  EXPECT_EQ(nullptr, text_range_provider.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromNontextChildOfRoot) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromNontextChildOfRoot) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       nontext_child_of_root_text_child_provider_->get_TextRange(
           &text_range_provider));
-  ASSERT_NE(nullptr, text_range_provider);
+  ASSERT_NE(nullptr, text_range_provider.Get());
+  AXPlatformNodeWin* owner =
+      static_cast<AXPlatformNodeWin*>(AXPlatformNodeFromNode(GetRoot()));
+  ASSERT_NE(nullptr, owner);
+  SetOwner(owner, text_range_provider.Get());
 
-  CComPtr<IRawElementProviderSimple> enclosing_element;
+  base::win::ScopedBstr text_content;
+  // By design, empty objects, such as the unlabelled image in this case, are
+  // placed in their own paragraph for easier screen reader navigation.
+  EXPECT_HRESULT_SUCCEEDED(
+      text_range_provider->GetText(-1, text_content.Receive()));
+  EXPECT_EQ(base::WideToUTF16(text_content.Get()),
+            kEmbeddedCharacterAsString + u"\ntext child of nontext.");
+
+  ComPtr<IRawElementProviderSimple> enclosing_element;
   text_range_provider->GetEnclosingElement(&enclosing_element);
-  ASSERT_EQ(nontext_child_of_nontext_text_provider_raw_.Get(),
-            enclosing_element);
+  EXPECT_EQ(nontext_child_of_root_provider_raw_.Get(), enclosing_element.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromTextChildOfRoot) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromTextChildOfRoot) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_root_text_child_provider_->get_TextRange(
           &text_range_provider));
-  ASSERT_NE(nullptr, text_range_provider);
+  ASSERT_NE(nullptr, text_range_provider.Get());
+  AXPlatformNodeWin* owner =
+      static_cast<AXPlatformNodeWin*>(AXPlatformNodeFromNode(GetRoot()));
+  ASSERT_NE(nullptr, owner);
+  SetOwner(owner, text_range_provider.Get());
 
-  CComPtr<IRawElementProviderSimple> enclosing_element;
+  base::win::ScopedBstr text_content;
+  EXPECT_HRESULT_SUCCEEDED(
+      text_range_provider->GetText(-1, text_content.Receive()));
+  EXPECT_EQ(0, wcscmp(text_content.Get(), L"text child of text."));
+
+  ComPtr<IRawElementProviderSimple> enclosing_element;
   text_range_provider->GetEnclosingElement(&enclosing_element);
-  ASSERT_EQ(text_child_of_text_text_provider_raw_.Get(), enclosing_element);
+  EXPECT_EQ(text_child_of_root_text_provider_raw_.Get(),
+            enclosing_element.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromNontextChildOfNontext) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromNontextChildOfNontext) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       nontext_child_of_nontext_text_child_provider_->get_TextRange(
           &text_range_provider));
-  ASSERT_NE(nullptr, text_range_provider);
+  ASSERT_NE(nullptr, text_range_provider.Get());
+  AXPlatformNodeWin* owner =
+      static_cast<AXPlatformNodeWin*>(AXPlatformNodeFromNode(GetRoot()));
+  ASSERT_NE(nullptr, owner);
+  SetOwner(owner, text_range_provider.Get());
 
-  CComPtr<IRawElementProviderSimple> enclosing_element;
+  base::win::ScopedBstr text_content;
+  EXPECT_HRESULT_SUCCEEDED(
+      text_range_provider->GetText(-1, text_content.Receive()));
+  EXPECT_EQ(base::WideToUTF16(text_content.Get()), kEmbeddedCharacterAsString);
+
+  ComPtr<IRawElementProviderSimple> enclosing_element;
   text_range_provider->GetEnclosingElement(&enclosing_element);
-  ASSERT_EQ(nontext_child_of_nontext_text_provider_raw_.Get(),
-            enclosing_element);
+  EXPECT_EQ(nontext_child_of_nontext_text_provider_raw_.Get(),
+            enclosing_element.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromTextChildOfNontext) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromTextChildOfNontext) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_nontext_text_child_provider_->get_TextRange(
           &text_range_provider));
-  ASSERT_NE(nullptr, text_range_provider);
+  ASSERT_NE(nullptr, text_range_provider.Get());
+  AXPlatformNodeWin* owner =
+      static_cast<AXPlatformNodeWin*>(AXPlatformNodeFromNode(GetRoot()));
+  ASSERT_NE(nullptr, owner);
+  SetOwner(owner, text_range_provider.Get());
 
-  CComPtr<IRawElementProviderSimple> enclosing_element;
+  base::win::ScopedBstr text_content;
+  EXPECT_HRESULT_SUCCEEDED(
+      text_range_provider->GetText(-1, text_content.Receive()));
+  EXPECT_EQ(0, wcscmp(text_content.Get(), L"text child of nontext."));
+
+  ComPtr<IRawElementProviderSimple> enclosing_element;
   text_range_provider->GetEnclosingElement(&enclosing_element);
-  ASSERT_EQ(text_child_of_nontext_text_provider_raw_.Get(), enclosing_element);
+  EXPECT_EQ(text_child_of_nontext_text_provider_raw_.Get(),
+            enclosing_element.Get());
 }
 
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderTextRangeFromTextChildOfText) {
-  CComPtr<ITextRangeProvider> text_range_provider;
-  ASSERT_HRESULT_SUCCEEDED(
+       ITextChildProviderTextRangeFromTextChildOfText) {
+  ComPtr<ITextRangeProvider> text_range_provider;
+  EXPECT_HRESULT_SUCCEEDED(
       text_child_of_text_text_child_provider_->get_TextRange(
           &text_range_provider));
-  ASSERT_NE(nullptr, text_range_provider);
+  ASSERT_NE(nullptr, text_range_provider.Get());
+  AXPlatformNodeWin* owner =
+      static_cast<AXPlatformNodeWin*>(AXPlatformNodeFromNode(GetRoot()));
+  ASSERT_NE(nullptr, owner);
+  SetOwner(owner, text_range_provider.Get());
 
-  CComPtr<IRawElementProviderSimple> enclosing_element;
+  base::win::ScopedBstr text_content;
+  EXPECT_HRESULT_SUCCEEDED(
+      text_range_provider->GetText(-1, text_content.Receive()));
+  EXPECT_EQ(0, wcscmp(text_content.Get(), L"text child of text."));
+
+  ComPtr<IRawElementProviderSimple> enclosing_element;
   text_range_provider->GetEnclosingElement(&enclosing_element);
-  ASSERT_EQ(text_child_of_text_text_provider_raw_.Get(), enclosing_element);
+  EXPECT_EQ(text_child_of_root_text_provider_raw_.Get(),
+            enclosing_element.Get());
 }
 
 // ITextChildProvider Tests - Inactive AX Tree
@@ -325,20 +393,20 @@ TEST_F(AXPlatformNodeTextChildProviderTest,
 // Test that both ITextChildProvider::GetTextContainer and
 // ITextChildProvider::GetTextContainer fail under an inactive AX tree.
 TEST_F(AXPlatformNodeTextChildProviderTest,
-       TestITextChildProviderInactiveAccessibilityTree) {
-  tree_.reset();
+       ITextChildProviderInactiveAccessibilityTree) {
+  DestroyTree();
 
   // Test that GetTextContainer fails under an inactive tree.
-  CComPtr<IRawElementProviderSimple> text_container;
+  ComPtr<IRawElementProviderSimple> text_container;
   HRESULT hr = nontext_child_of_root_text_child_provider_->get_TextContainer(
       &text_container);
-  ASSERT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE), hr);
+  EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE), hr);
 
   // Test that GetTextRange fails under an inactive tree.
-  CComPtr<ITextRangeProvider> text_range_provider;
+  ComPtr<ITextRangeProvider> text_range_provider;
   hr = nontext_child_of_root_text_child_provider_->get_TextRange(
       &text_range_provider);
-  ASSERT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE), hr);
+  EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE), hr);
 }
 
 }  // namespace ui

@@ -1,13 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.ui.test.util;
 
+import org.chromium.base.test.util.Restriction;
+
 /**
  * UiRestrictions list form factor restrictions, that are usable with
- * the @Restriction enum in layers depending on //ui.
- * E.g. @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
+ * the {@link Restriction} annotation in layers depending on //ui.
+ * E.g. <code>
+ *   \@Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
+ * </code>
  */
 
 public final class UiRestriction {

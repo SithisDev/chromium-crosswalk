@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,12 +86,13 @@ class PiexReader {
     object.set("width", emscripten::val(image.full_width));
     object.set("height", emscripten::val(image.full_height));
     object.set("orientation", emscripten::val(image.exif_orientation));
+
     object.set("colorSpace", emscripten::val("sRGB"));
     const auto space = static_cast<uint32_t>(image.color_space);
     if (space == piex::PreviewImageData::kAdobeRgb)
       object.set("colorSpace", emscripten::val("AdobeRGB1998"));
-    object.set("date", emscripten::val(image.date_time));
 
+    object.set("date", emscripten::val(image.date_time));
     return object;
   }
 

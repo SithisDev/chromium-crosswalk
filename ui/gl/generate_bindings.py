@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,8 +22,6 @@ HEADER_PATHS = [
 ]
 
 UNCONDITIONALLY_BOUND_EXTENSIONS = set([
-  'WGL_ARB_extensions_string',
-  'WGL_EXT_extensions_string',
   'GL_CHROMIUM_gles_depth_binding_hack', # crbug.com/448206
   'GL_CHROMIUM_glgetstringi_hack', # crbug.com/470396
   'GL_CHROMIUM_egl_khr_fence_sync_hack', # crbug.com/504758
@@ -48,16 +46,16 @@ versions array. This can be overridden by supplying a 'known_as' key.
 """
 GL_FUNCTIONS = [
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glAcquireTexturesANGLE',
+                 'extensions': ['GL_ANGLE_vulkan_image'] }],
+  'arguments': 'GLuint numTextures, const GLuint* textures, '
+               'const GLenum* layouts', },
+{ 'return_type': 'void',
   'names': ['glActiveShaderProgram'],
   'arguments': 'GLuint pipeline, GLuint program', },
 { 'return_type': 'void',
   'names': ['glActiveTexture'],
   'arguments': 'GLenum texture', },
-{ 'return_type': 'void',
-  'known_as': 'glApplyFramebufferAttachmentCMAAINTEL',
-  'versions': [{ 'name': 'glApplyFramebufferAttachmentCMAAINTEL',
-                 'extensions': ['GL_INTEL_framebuffer_CMAA'] }],
-  'arguments': 'void', },
 { 'return_type': 'void',
   'names': ['glAttachShader'],
   'arguments': 'GLuint program, GLuint shader', },
@@ -165,18 +163,53 @@ GL_FUNCTIONS = [
   'names': ['glBlendEquation'],
   'arguments': ' GLenum mode ', },
 { 'return_type': 'void',
+  'known_as': 'glBlendEquationiOES',
+  'versions': [
+    { 'name': 'glBlendEquationi' },
+    { 'name': 'glBlendEquationiOES', 'extensions':
+      ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': ' GLuint buf, GLenum mode ', },
+{ 'return_type': 'void',
   'names': ['glBlendEquationSeparate'],
   'arguments': 'GLenum modeRGB, GLenum modeAlpha', },
 { 'return_type': 'void',
+  'known_as': 'glBlendEquationSeparateiOES',
+  'versions': [
+    { 'name': 'glBlendEquationSeparatei' },
+    { 'name': 'glBlendEquationSeparateiOES', 'extensions':
+      ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': 'GLuint buf, GLenum modeRGB, GLenum modeAlpha', },
+{ 'return_type': 'void',
   'names': ['glBlendFunc'],
   'arguments': 'GLenum sfactor, GLenum dfactor', },
+{ 'return_type': 'void',
+  'known_as': 'glBlendFunciOES',
+  'versions': [
+    { 'name': 'glBlendFunci' },
+    { 'name': 'glBlendFunciOES', 'extensions': ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': 'GLuint buf, GLenum sfactor, GLenum dfactor', },
 { 'return_type': 'void',
   'names': ['glBlendFuncSeparate'],
   'arguments':
       'GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha', },
 { 'return_type': 'void',
+  'known_as': 'glBlendFuncSeparateiOES',
+  'versions': [
+    { 'name': 'glBlendFuncSeparatei' },
+    { 'name': 'glBlendFuncSeparateiOES', 'extensions':
+      ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments':
+      'GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, '
+      'GLenum dstAlpha', },
+{ 'return_type': 'void',
   'versions' : [{'name': 'glBlitFramebuffer',
                  'extensions': ['GL_ARB_framebuffer_object']},
+                {'name': 'glBlitFramebufferNV',
+                 'extensions': ['GL_NV_framebuffer_blit']},
                 {'name': 'glBlitFramebufferANGLE'},
                 {'name': 'glBlitFramebufferEXT'}],
   'arguments': 'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
@@ -247,10 +280,23 @@ GL_FUNCTIONS = [
   'versions': [{ 'name': 'glClientWaitSync',
                  'extensions': ['GL_ARB_sync'] }],
   'arguments': 'GLsync sync, GLbitfield flags, GLuint64 timeout', },
+{ 'return_type': 'GLenum',
+  'versions': [{ 'name': 'glClientWaitSyncAPPLE',
+                 'extensions': ['GL_APPLE_sync'] }],
+  'arguments': 'GLsync sync, GLbitfield flags, GLuint64 timeout', },
 { 'return_type': 'void',
   'names': ['glColorMask'],
   'arguments':
       'GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha', },
+{ 'return_type': 'void',
+  'known_as': 'glColorMaskiOES',
+  'versions': [
+    { 'name': 'glColorMaski' },
+    { 'name': 'glColorMaskiOES', 'extensions': ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments':
+      'GLuint buf, GLboolean red, GLboolean green, GLboolean blue, '
+      'GLboolean alpha', },
 { 'return_type': 'void',
   'names': ['glCompileShader'],
   'arguments': 'GLuint shader', },
@@ -431,6 +477,11 @@ GL_FUNCTIONS = [
   'names': ['glDeleteFramebuffersEXT', 'glDeleteFramebuffers'],
   'arguments': 'GLsizei n, const GLuint* framebuffers', },
 { 'return_type': 'void',
+  'names': [ 'glDeleteMemoryObjectsEXT' ],
+  'versions': [{ 'name': 'glDeleteMemoryObjectsEXT',
+                 'extensions': ['GL_EXT_memory_object'] }],
+  'arguments': 'GLsizei n, const GLuint* memoryObjects', },
+{ 'return_type': 'void',
   'names': ['glDeletePathsNV'],
   'versions': [{ 'name': 'glDeletePathsNV',
                  'extensions': ['GL_NV_path_rendering'] },
@@ -467,6 +518,10 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_ARB_sync'] }],
   'arguments': 'GLsync sync', },
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glDeleteSyncAPPLE',
+                 'extensions': ['GL_APPLE_sync'] }],
+  'arguments': 'GLsync sync', },
+{ 'return_type': 'void',
   'names': ['glDeleteTextures'],
   'arguments': 'GLsizei n, const GLuint* textures', },
 { 'return_type': 'void',
@@ -501,6 +556,17 @@ GL_FUNCTIONS = [
   'names': ['glDisable'],
   'arguments': 'GLenum cap', },
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glDisableExtensionANGLE',
+                 'extensions': ['GL_ANGLE_request_extension'] }],
+  'arguments': 'const char* name', },
+{ 'return_type': 'void',
+  'known_as': 'glDisableiOES',
+  'versions': [
+    { 'name': 'glDisablei' },
+    { 'name': 'glDisableiOES', 'extensions': ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': 'GLenum target, GLuint index', },
+{ 'return_type': 'void',
   'names': ['glDisableVertexAttribArray'],
   'arguments': 'GLuint index', },
 { 'return_type': 'void',
@@ -526,6 +592,16 @@ GL_FUNCTIONS = [
             'glDrawArraysInstanced'],
   'arguments': 'GLenum mode, GLint first, GLsizei count, GLsizei primcount', },
 { 'return_type': 'void',
+  'known_as': 'glDrawArraysInstancedBaseInstanceANGLE',
+  #TODO(shrekshao): workaround when native support not available for cmd decoder
+  'versions' : [{ 'name': 'glDrawArraysInstancedBaseInstance',
+                 'extensions': ['GL_ARB_base_instance'] },
+                { 'name': 'glDrawArraysInstancedBaseInstanceEXT' },
+                { 'name': 'glDrawArraysInstancedBaseInstanceANGLE',
+                 'extensions': ['GL_ANGLE_base_vertex_base_instance'] }],
+  'arguments': 'GLenum mode, GLint first, GLsizei count, GLsizei primcount, '
+  'GLuint baseinstance', },
+{ 'return_type': 'void',
   'names': ['glDrawBuffer'],
   'arguments': 'GLenum mode', },
 { 'return_type': 'void',
@@ -546,6 +622,17 @@ GL_FUNCTIONS = [
       'GLenum mode, GLsizei count, GLenum type, const void* indices, '
       'GLsizei primcount', },
 { 'return_type': 'void',
+  'known_as': 'glDrawElementsInstancedBaseVertexBaseInstanceANGLE',
+  #TODO(shrekshao): workaround when native support not available for cmd decoder
+  'versions' : [{ 'name': 'glDrawElementsInstancedBaseVertexBaseInstance',
+                 'extensions': ['GL_ARB_base_instance'] },
+                { 'name': 'glDrawElementsInstancedBaseVertexBaseInstanceEXT' },
+                { 'name': 'glDrawElementsInstancedBaseVertexBaseInstanceANGLE',
+                 'extensions': ['GL_ANGLE_base_vertex_base_instance'] }],
+  'arguments':
+      'GLenum mode, GLsizei count, GLenum type, const void* indices, '
+      'GLsizei primcount, GLint baseVertex, GLuint baseInstance', },
+{ 'return_type': 'void',
   'versions': [{ 'name': 'glDrawRangeElements' }],
   'arguments': 'GLenum mode, GLuint start, GLuint end, GLsizei count, '
                'GLenum type, const void* indices', },
@@ -559,6 +646,13 @@ GL_FUNCTIONS = [
   'names': ['glEnable'],
   'arguments': 'GLenum cap', },
 { 'return_type': 'void',
+  'known_as': 'glEnableiOES',
+  'versions': [
+    { 'name': 'glEnablei' },
+    { 'name': 'glEnableiOES', 'extensions': ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': 'GLenum target, GLuint index', },
+{ 'return_type': 'void',
   'names': ['glEnableVertexAttribArray'],
   'arguments': 'GLuint index', },
 { 'return_type': 'void',
@@ -568,6 +662,10 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_EXT_occlusion_query_boolean'] }],
   'arguments': 'GLenum target', },
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glEndTilingQCOM',
+                 'extension': ['GL_QCOM_tiled_rendering'] }],
+  'arguments': 'GLbitfield preserveMask', },
+{ 'return_type': 'void',
   'versions': [{ 'name': 'glEndTransformFeedback' },
                { 'name': 'glEndTransformFeedbackEXT',
                  'extension': ['GL_EXT_transform_feedback'] }],
@@ -575,6 +673,10 @@ GL_FUNCTIONS = [
 { 'return_type': 'GLsync',
   'versions': [{ 'name': 'glFenceSync',
                  'extensions': ['GL_ARB_sync'] }],
+  'arguments': 'GLenum condition, GLbitfield flags', },
+{ 'return_type': 'GLsync',
+  'versions': [{ 'name': 'glFenceSyncAPPLE',
+                 'extensions': ['GL_APPLE_sync'] }],
   'arguments': 'GLenum condition, GLbitfield flags', },
 { 'return_type': 'void',
   'names': ['glFinish'],
@@ -596,7 +698,9 @@ GL_FUNCTIONS = [
                {'name': 'glFlushMappedBufferRangeEXT'}],
   'arguments': 'GLenum target, GLintptr offset, GLsizeiptr length', },
 { 'return_type': 'void',
-  'names': ['glFramebufferParameteri'],
+  'versions': [{'name': 'glFramebufferParameteri'},
+               {'name': 'glFramebufferParameteriMESA',
+                'extensions': ['GL_MESA_framebuffer_flip_y']}],
   'arguments': 'GLenum target, GLenum pname, GLint param', },
 { 'return_type': 'void',
   'names': ['glFramebufferRenderbufferEXT', 'glFramebufferRenderbuffer'],
@@ -1112,7 +1216,9 @@ GL_FUNCTIONS = [
     'GLsync sync, GLenum pname, GLsizei bufSize, GLsizei* length,'
     'GLint* values', },
 { 'return_type': 'void',
-  'names': ['glGetTexLevelParameterfv'],
+  'versions': [{ 'name': 'glGetTexLevelParameterfv' },
+               {'name': 'glGetTexLevelParameterfvANGLE',
+                'extensions': ['GL_ANGLE_get_tex_level_parameter']}],
   'arguments': 'GLenum target, GLint level, GLenum pname, GLfloat* params', },
 { 'return_type': 'void',
   'versions': [{'name': 'glGetTexLevelParameterfvRobustANGLE',
@@ -1121,7 +1227,9 @@ GL_FUNCTIONS = [
       'GLenum target, GLint level, GLenum pname, GLsizei bufSize, '
       'GLsizei* length, GLfloat* params', },
 { 'return_type': 'void',
-  'names': ['glGetTexLevelParameteriv'],
+  'versions': [{ 'name': 'glGetTexLevelParameteriv' },
+               {'name': 'glGetTexLevelParameterivANGLE',
+                'extensions': ['GL_ANGLE_get_tex_level_parameter']}],
   'arguments': 'GLenum target, GLint level, GLenum pname, GLint* params', },
 { 'return_type': 'void',
   'versions': [{'name': 'glGetTexLevelParameterivRobustANGLE',
@@ -1252,8 +1360,23 @@ GL_FUNCTIONS = [
   'names': ['glImportMemoryFdEXT'],
   'arguments': 'GLuint memory, GLuint64 size, GLenum handleType, GLint fd', },
 { 'return_type': 'void',
+  'names': ['glImportMemoryWin32HandleEXT'],
+  'arguments': 'GLuint memory, GLuint64 size, GLenum handleType, void* handle',
+  },
+{ 'return_type': 'void',
+  'arguments': 'GLuint memory, GLuint64 size, GLenum handleType, GLuint handle',
+  'versions': [{'name': 'glImportMemoryZirconHandleANGLE',
+                'extensions': ['GL_ANGLE_memory_object_fuchsia']}]},
+{ 'return_type': 'void',
   'names': ['glImportSemaphoreFdEXT'],
   'arguments': 'GLuint semaphore, GLenum handleType, GLint fd', },
+{ 'return_type': 'void',
+  'names': ['glImportSemaphoreWin32HandleEXT'],
+  'arguments': 'GLuint semaphore, GLenum handleType, void* handle', },
+{ 'return_type': 'void',
+  'arguments': 'GLuint semaphore, GLenum handleType, GLuint handle',
+  'versions': [{'name': 'glImportSemaphoreZirconHandleANGLE',
+                'extensions': ['GL_ANGLE_semaphore_fuchsia']}]},
 { 'return_type': 'void',
   'names': ['glInsertEventMarkerEXT'],
   'arguments': 'GLsizei length, const char* marker', },
@@ -1276,6 +1399,13 @@ GL_FUNCTIONS = [
 { 'return_type': 'GLboolean',
   'names': ['glIsEnabled'],
   'arguments': 'GLenum cap', },
+{ 'return_type': 'GLboolean',
+  'known_as': 'glIsEnablediOES',
+  'versions': [
+    { 'name': 'glIsEnabledi' },
+    { 'name': 'glIsEnablediOES', 'extensions': ['GL_OES_draw_buffers_indexed'] }
+  ],
+  'arguments': 'GLenum target, GLuint index', },
 { 'return_type': 'GLboolean',
   'known_as': 'glIsFenceAPPLE',
   'versions': [{ 'name': 'glIsFenceAPPLE',
@@ -1319,6 +1449,10 @@ GL_FUNCTIONS = [
 { 'return_type': 'GLboolean',
   'versions': [{ 'name': 'glIsSync',
                  'extensions': ['GL_ARB_sync'] }],
+  'arguments': 'GLsync sync', },
+{ 'return_type': 'GLboolean',
+  'versions': [{ 'name': 'glIsSyncAPPLE',
+                 'extensions': ['GL_APPLE_sync'] }],
   'arguments': 'GLsync sync', },
 { 'return_type': 'GLboolean',
   'names': ['glIsTexture'],
@@ -1385,6 +1519,9 @@ GL_FUNCTIONS = [
                  'extensions': ['GL_EXT_shader_image_load_store'] }],
   'arguments': 'GLbitfield barriers', },
 { 'return_type': 'void',
+  'names': ['glMemoryObjectParameterivEXT'],
+  'arguments': 'GLuint memoryObject, GLenum pname, const GLint* param'},
+{ 'return_type': 'void',
   'names': ['glMinSampleShading'],
   'arguments': 'GLfloat value', },
 { 'return_type': 'void',
@@ -1399,6 +1536,12 @@ GL_FUNCTIONS = [
                'const GLsizei* counts, const GLsizei* instanceCounts, '
                'GLsizei drawcount', },
 { 'return_type': 'void',
+  'versions' : [{'name': 'glMultiDrawArraysInstancedBaseInstanceANGLE',
+                 'extensions': ['GL_ANGLE_base_vertex_base_instance'] }],
+  'arguments': 'GLenum mode, const GLint* firsts, '
+               'const GLsizei* counts, const GLsizei* instanceCounts, '
+               'const GLuint* baseInstances, GLsizei drawcount', },
+{ 'return_type': 'void',
   'versions' : [{'name': 'glMultiDrawElementsANGLE',
                  'extensions': ['GL_ANGLE_multi_draw'] }],
   'arguments': 'GLenum mode, const GLsizei* counts, '
@@ -1411,6 +1554,14 @@ GL_FUNCTIONS = [
                'GLenum type, const GLvoid* const* indices, '
                'const GLsizei* instanceCounts, GLsizei drawcount', },
 { 'return_type': 'void',
+  'versions' : [{'name': 'glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE',
+                 'extensions': ['GL_ANGLE_base_vertex_base_instance'] }],
+  'arguments': 'GLenum mode, '
+               'const GLsizei* counts, GLenum type, '
+               'const GLvoid* const* indices, const GLsizei* instanceCounts, '
+               'const GLint* baseVertices, const GLuint* baseInstances, '
+               'GLsizei drawcount', },
+{ 'return_type': 'void',
   'versions': [{ 'name': 'glObjectLabel' },
                { 'name': 'glObjectLabelKHR',
                  'extensions': ['GL_KHR_debug'] }],
@@ -1421,6 +1572,12 @@ GL_FUNCTIONS = [
                { 'name': 'glObjectPtrLabelKHR',
                  'extensions': ['GL_KHR_debug'] }],
   'arguments': 'void* ptr, GLsizei length, const char* label', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'glPatchParameteri',
+                 'extensions': ['GL_ARB_tessellation_shader'] },
+               { 'name': 'glPatchParameteriOES',
+                 'extensions': ['GL_OES_tessellation_shader'] }],
+  'arguments': 'GLenum pname, GLint value', },
 { 'return_type': 'void',
   'names': ['glPathCommandsNV'],
   'versions': [{ 'name': 'glPathCommandsNV',
@@ -1662,6 +1819,10 @@ GL_FUNCTIONS = [
   'names': ['glReleaseShaderCompiler'],
   'arguments': 'void', },
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glReleaseTexturesANGLE',
+                 'extensions': ['GL_ANGLE_vulkan_image'] }],
+  'arguments': 'GLuint numTextures, const GLuint* textures, GLenum* layouts', },
+{ 'return_type': 'void',
   'names': ['glRenderbufferStorageEXT', 'glRenderbufferStorage'],
   'arguments':
       'GLenum target, GLenum internalformat, GLsizei width, GLsizei height', },
@@ -1777,6 +1938,13 @@ GL_FUNCTIONS = [
  'arguments': 'GLuint semaphore, GLuint numBufferBarriers, '
  'const GLuint* buffers, GLuint numTextureBarriers, '
  'const GLuint* textures, const GLenum* dstLayouts', },
+{ 'return_type': 'void',
+  'names': ['glStartTilingQCOM'],
+  'versions': [{ 'name': 'glStartTilingQCOM',
+                 'extension': ['GL_QCOM_tiled_rendering'] }],
+  'arguments':
+      'GLuint x, GLuint y, GLuint width, GLuint height, '
+      'GLbitfield preserveMask', },
 { 'return_type': 'void',
   'names': ['glStencilFillPathInstancedNV'],
   'versions': [{ 'name': 'glStencilFillPathInstancedNV',
@@ -1964,7 +2132,15 @@ GL_FUNCTIONS = [
 { 'return_type': 'void',
  'names': [ 'glTexStorageMem2DEXT'] ,
   'arguments': 'GLenum target, GLsizei levels, GLenum internalFormat, '
-  'GLsizei width, GLsizei height, GLuint memory, GLuint64 offset'},
+  'GLsizei width, GLsizei height, GLuint memory, GLuint64 offset', },
+{ 'return_type': 'void',
+ 'names': [ 'glTexStorageMemFlags2DANGLE'] ,
+  'versions': [{ 'name': 'glTexStorageMemFlags2DANGLE',
+                 'extensions': ['GL_ANGLE_memory_object_flags'] }],
+  'arguments': 'GLenum target, GLsizei levels, GLenum internalFormat, '
+  'GLsizei width, GLsizei height, GLuint memory, GLuint64 offset, '
+  'GLbitfield createFlags, GLbitfield usageFlags, '
+  'const void* imageCreateInfoPNext', },
 { 'return_type': 'void',
   'names': ['glTexSubImage2D'],
   'arguments':
@@ -2203,6 +2379,11 @@ GL_FUNCTIONS = [
   'arguments':
     'GLsync sync, GLbitfield flags, GLuint64 timeout', },
 { 'return_type': 'void',
+  'versions': [{ 'name': 'glWaitSyncAPPLE',
+                 'extensions': ['GL_APPLE_sync'] }],
+  'arguments':
+    'GLsync sync, GLbitfield flags, GLuint64 timeout', },
+{ 'return_type': 'void',
   'names': ['glWindowRectanglesEXT'],
   'arguments': 'GLenum mode, GLsizei n, const GLint* box', },
 ]
@@ -2320,6 +2501,12 @@ EGL_FUNCTIONS = [
   'arguments': 'EGLDisplay dpy, EGLImageKHR image, int* fourcc, '
                'int* num_planes, EGLuint64KHR* modifiers', },
 { 'return_type': 'EGLBoolean',
+    'versions': [{'name': 'eglExportVkImageANGLE',
+                  'extensions':
+                      ['EGL_ANGLE_vulkan_image']}],
+  'arguments': 'EGLDisplay dpy, EGLImageKHR image, void* vk_image, '
+               'void* vk_image_create_info', },
+{ 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglGetCompositorTimingANDROID',
                  'extensions': [
                    'EGL_ANDROID_get_frame_timestamps'
@@ -2369,6 +2556,14 @@ EGL_FUNCTIONS = [
                    'EGL_ANDROID_get_frame_timestamps'
                  ] }],
   'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLint timestamp', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetMscRateANGLE',
+                 'extensions': [
+                   'EGL_ANGLE_sync_control_rate'
+                 ] }],
+  'arguments':
+      'EGLDisplay dpy, EGLSurface surface, '
+      'EGLint* numerator, EGLint* denominator', },
 { 'return_type': 'EGLClientBuffer',
   'versions': [{ 'name': 'eglGetNativeClientBufferANDROID',
                  'extensions': ['EGL_ANDROID_get_native_client_buffer'], }],
@@ -2398,11 +2593,18 @@ EGL_FUNCTIONS = [
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync, EGLint attribute, '
       'EGLint* value' },
 { 'return_type': 'EGLBoolean',
-  'names': ['eglGetSyncValuesCHROMIUM'],
+  'versions': [{ 'name': 'eglGetSyncValuesCHROMIUM',
+                 'extensions': [
+                   'EGL_CHROMIUM_sync_control'
+                 ] }],
   'arguments':
       'EGLDisplay dpy, EGLSurface surface, '
       'EGLuint64CHROMIUM* ust, EGLuint64CHROMIUM* msc, '
       'EGLuint64CHROMIUM* sbc', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'eglHandleGPUSwitchANGLE',
+                 'extensions': ['EGL_ANGLE_power_preference'] }],
+  'arguments': 'EGLDisplay dpy' },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglImageFlushExternalEXT',
                  'extensions': ['EGL_EXT_image_flush_external'] }],
@@ -2437,10 +2639,48 @@ EGL_FUNCTIONS = [
   'versions': [{ 'name': 'eglQueryDebugKHR',
                  'client_extensions': ['EGL_KHR_debug'], }],
   'arguments': 'EGLint attribute, EGLAttrib* value', },
+{
+  'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglQueryDeviceAttribEXT',
+                 'client_extensions': ['EGL_EXT_device_query'], }],
+  'arguments': 'EGLDeviceEXT device, EGLint attribute, EGLAttrib* value' },
+{ 'return_type': 'EGLBoolean',
+  'known_as': 'eglQueryDevicesEXT',
+  'versions': [{ 'name': 'eglQueryDevicesEXT',
+                 'client_extensions': ['EGL_EXT_device_enumeration'], }],
+  'arguments':
+      'EGLint max_devices, EGLDeviceEXT* devices, EGLint* num_devices', },
+{ 'return_type': 'const char *',
+  'known_as': 'eglQueryDeviceStringEXT',
+  'versions': [{ 'name': 'eglQueryDeviceStringEXT',
+                 'client_extensions': ['EGL_EXT_device_query'], }],
+  'arguments': 'EGLDeviceEXT device, EGLint name', },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglQueryDisplayAttribANGLE',
                  'client_extensions': ['EGL_ANGLE_feature_control'] }],
   'arguments': 'EGLDisplay dpy, EGLint attribute, EGLAttrib* value' },
+{
+  'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglQueryDisplayAttribEXT',
+                 'client_extensions': ['EGL_EXT_device_query'], }],
+  'arguments': 'EGLDisplay dpy, EGLint attribute, EGLAttrib* value' },
+{
+  'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglQueryDmaBufFormatsEXT',
+                 'extensions':
+                     ['EGL_EXT_image_dma_buf_import_modifiers'], }],
+  'arguments':
+      'EGLDisplay dpy, EGLint max_formats, '
+      'EGLint* formats, EGLint* num_formats' },
+{
+  'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglQueryDmaBufModifiersEXT',
+                 'extensions':
+                     ['EGL_EXT_image_dma_buf_import_modifiers'], }],
+  'arguments':
+      'EGLDisplay dpy, EGLint format, EGLint max_modifiers, '
+      'EGLuint64KHR* modifiers, EGLBoolean* external_only, '
+      'EGLint* num_modifiers' },
 { 'return_type': 'EGLBoolean',
   'versions': [{ 'name': 'eglQueryStreamKHR',
                  'extensions': ['EGL_KHR_stream'] }],
@@ -2468,6 +2708,14 @@ EGL_FUNCTIONS = [
   'names': ['eglQuerySurfacePointerANGLE'],
   'arguments':
       'EGLDisplay dpy, EGLSurface surface, EGLint attribute, void** value', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'eglReacquireHighPowerGPUANGLE',
+                 'extensions': ['EGL_ANGLE_power_preference'] }],
+  'arguments': 'EGLDisplay dpy, EGLContext ctx' },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'eglReleaseHighPowerGPUANGLE',
+                 'extensions': ['EGL_ANGLE_power_preference'] }],
+  'arguments': 'EGLDisplay dpy, EGLContext ctx' },
 { 'return_type': 'EGLBoolean',
   'names': ['eglReleaseTexImage'],
   'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLint buffer', },
@@ -2543,67 +2791,52 @@ EGL_FUNCTIONS = [
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync, EGLint flags' },
 ]
 
-WGL_FUNCTIONS = [
-{ 'return_type': 'BOOL',
-  'names': ['wglChoosePixelFormatARB'],
-  'arguments':
-      'HDC dc, const int* int_attrib_list, const float* float_attrib_list, '
-      'UINT max_formats, int* formats, UINT* num_formats', },
-{ 'return_type': 'BOOL',
-  'names': ['wglCopyContext'],
-  'arguments': 'HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask', },
-{ 'return_type': 'HGLRC',
-  'names': ['wglCreateContext'],
-  'arguments': 'HDC hdc', },
-{ 'return_type': 'HGLRC',
-  'names': ['wglCreateContextAttribsARB'],
-  'arguments': 'HDC hDC, HGLRC hShareContext, const int* attribList', },
-{ 'return_type': 'HGLRC',
-  'names': ['wglCreateLayerContext'],
-  'arguments': 'HDC hdc, int iLayerPlane', },
-{ 'return_type': 'HPBUFFERARB',
-  'names': ['wglCreatePbufferARB'],
-  'arguments': 'HDC hDC, int iPixelFormat, int iWidth, int iHeight, '
-               'const int* piAttribList', },
-{ 'return_type': 'BOOL',
-  'names': ['wglDeleteContext'],
-  'arguments': 'HGLRC hglrc', },
-{ 'return_type': 'BOOL',
-  'names': ['wglDestroyPbufferARB'],
-  'arguments': 'HPBUFFERARB hPbuffer', },
-{ 'return_type': 'HGLRC',
-  'names': ['wglGetCurrentContext'],
-  'arguments': '', },
-{ 'return_type': 'HDC',
-  'names': ['wglGetCurrentDC'],
-  'arguments': '', },
-{ 'return_type': 'const char*',
-  'names': ['wglGetExtensionsStringARB'],
-  'arguments': 'HDC hDC', },
-{ 'return_type': 'const char*',
-  'names': ['wglGetExtensionsStringEXT'],
-  'arguments': '', },
-{ 'return_type': 'HDC',
-  'names': ['wglGetPbufferDCARB'],
-  'arguments': 'HPBUFFERARB hPbuffer', },
-{ 'return_type': 'BOOL',
-  'names': ['wglMakeCurrent'],
-  'arguments': 'HDC hdc, HGLRC hglrc', },
-{ 'return_type': 'BOOL',
-  'names': ['wglQueryPbufferARB'],
-  'arguments': 'HPBUFFERARB hPbuffer, int iAttribute, int* piValue', },
-{ 'return_type': 'int',
-  'names': ['wglReleasePbufferDCARB'],
-  'arguments': 'HPBUFFERARB hPbuffer, HDC hDC', },
-{ 'return_type': 'BOOL',
-  'names': ['wglShareLists'],
-  'arguments': 'HGLRC hglrc1, HGLRC hglrc2', },
-{ 'return_type': 'BOOL',
-  'names': ['wglSwapIntervalEXT'],
-  'arguments': 'int interval', },
-{ 'return_type': 'BOOL',
-  'names': ['wglSwapLayerBuffers'],
-  'arguments': 'HDC hdc, UINT fuPlanes', },
+# EGL client extensions that may not add a function but are still queried.
+EGL_CLIENT_EXTENSIONS_EXTRA = [
+  'EGL_ANGLE_display_power_preference',
+  'EGL_ANGLE_platform_angle',
+  'EGL_ANGLE_platform_angle_d3d',
+  'EGL_ANGLE_platform_angle_device_id',
+  'EGL_ANGLE_platform_angle_device_type_egl_angle',
+  'EGL_ANGLE_platform_angle_device_type_swiftshader',
+  'EGL_ANGLE_platform_angle_metal',
+  'EGL_ANGLE_platform_angle_null',
+  'EGL_ANGLE_platform_angle_opengl',
+  'EGL_ANGLE_platform_angle_vulkan',
+  'EGL_EXT_platform_device',
+  'EGL_MESA_platform_surfaceless',
+]
+
+# EGL extensions that may not add a function but are still queried.
+EGL_EXTENSIONS_EXTRA = [
+  'EGL_ANDROID_create_native_client_buffer',
+  'EGL_ANDROID_front_buffer_auto_refresh',
+  'EGL_ANGLE_display_semaphore_share_group',
+  'EGL_ANGLE_display_texture_share_group',
+  'EGL_ANGLE_context_virtualization',
+  'EGL_ANGLE_create_context_backwards_compatible',
+  'EGL_ANGLE_create_context_client_arrays',
+  'EGL_ANGLE_create_context_webgl_compatibility',
+  'EGL_ANGLE_external_context_and_surface',
+  'EGL_ANGLE_keyed_mutex',
+  'EGL_ANGLE_program_cache_control',
+  'EGL_ANGLE_robust_resource_initialization',
+  'EGL_ANGLE_surface_orientation',
+  'EGL_ANGLE_window_fixed_size',
+  'EGL_ARM_implicit_external_sync',
+  'EGL_CHROMIUM_create_context_bind_generates_resource',
+  'EGL_EXT_create_context_robustness',
+  'EGL_EXT_gl_colorspace_display_p3',
+  'EGL_EXT_gl_colorspace_display_p3_passthrough',
+  'EGL_EXT_image_dma_buf_import',
+  'EGL_EXT_pixel_format_float',
+  'EGL_IMG_context_priority',
+  'EGL_KHR_create_context',
+  'EGL_KHR_gl_colorspace',
+  'EGL_KHR_no_config_context',
+  'EGL_KHR_surfaceless_context',
+  'EGL_NV_robustness_video_memory_purge',
+  'EGL_NOK_texture_from_pixmap',
 ]
 
 GLX_FUNCTIONS = [
@@ -2782,20 +3015,22 @@ FUNCTION_SETS = [
       'GLES2/gl2chromium.h',
       'GLES2/gl2extchromium.h'
     ], [
+      "GL_ANGLE_robust_resource_initialization",
+      "GL_ANGLE_webgl_compatibility",
+      "GL_ARB_texture_swizzle",
+      "GL_EXT_texture_swizzle",
+      "GL_EXT_texture_format_BGRA8888",
       "GL_EXT_unpack_subimage",
     ]
   ],
   [EGL_FUNCTIONS, 'egl', [
       'EGL/eglext.h',
-      # Files below are Chromium-specific and shipped with Chromium sources.
-      'EGL/eglextchromium.h',
     ],
     [
       'EGL_ANGLE_d3d_share_handle_client_buffer',
       'EGL_ANGLE_surface_d3d_texture_2d_share_handle',
     ],
   ],
-  [WGL_FUNCTIONS, 'wgl', ['noninclude/GL/wglext.h'], []],
   [GLX_FUNCTIONS, 'glx', ['GL/glx.h', 'noninclude/GL/glxext.h'], []],
 ]
 
@@ -2811,7 +3046,7 @@ GLES2_HEADERS_WITH_ENUMS = [
 SELF_LOCATION = os.path.dirname(os.path.abspath(__file__))
 
 LICENSE_AND_HEADER = """\
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -2886,7 +3121,6 @@ def GenerateHeader(file, functions, set_name,
 namespace gl {
 
 class GLContext;
-
 """ % {'name': set_name.upper()})
 
   # Write typedefs for function pointer types. Always use the GL name for the
@@ -2898,11 +3132,36 @@ class GLContext;
 
   # Write declarations for booleans indicating which extensions are available.
   file.write('\n')
-  file.write("struct Extensions%s {\n" % set_name.upper())
-  for extension in sorted(used_client_extensions):
-    file.write('  bool b_%s;\n' % extension)
+  if set_name == 'egl':
+    file.write('struct GL_EXPORT ClientExtensionsEGL {\n')
+    for extension in sorted(used_client_extensions):
+      file.write('  bool b_%s;\n' % extension)
+    file.write(
+"""
+
+  void InitializeClientExtensionSettings();
+
+ private:
+  static std::string GetClientExtensions();
+};
+
+struct GL_EXPORT DisplayExtensionsEGL {
+""")
+  else:
+    assert len(used_client_extensions) == 0
+    file.write("struct Extensions%s {\n" % set_name.upper())
+
   for extension in sorted(used_extensions):
     file.write('  bool b_%s;\n' % extension)
+  if set_name == 'egl':
+    file.write(
+"""
+
+  void InitializeExtensionSettings(EGLDisplay display);
+  void UpdateConditionalExtensionSettings(EGLDisplay display);
+
+  static std::string GetPlatformExtensions(EGLDisplay display);
+""")
   file.write('};\n')
   file.write('\n')
 
@@ -2940,7 +3199,7 @@ class GLContext;
         (func['known_as'], set_name.lower(), func['known_as']))
 
   file.write('\n')
-  file.write('#endif  //  UI_GL_GL_BINDINGS_AUTOGEN_%s_H_\n' %
+  file.write('#endif  // UI_GL_GL_BINDINGS_AUTOGEN_%s_H_\n' %
       set_name.upper())
 
 
@@ -3006,8 +3265,8 @@ def GenerateStubHeader(file, functions):
   file.write(LICENSE_AND_HEADER +
 """
 
-#ifndef UI_GL_GL_STUB_AUTOGEN_H_
-#define UI_GL_GL_STUB_AUTOGEN_H_
+#ifndef UI_GL_GL_STUB_AUTOGEN_GL_H_
+#define UI_GL_GL_STUB_AUTOGEN_GL_H_
 
 """)
 
@@ -3026,7 +3285,7 @@ def GenerateStubHeader(file, functions):
       file.write(';\n');
 
   file.write('\n')
-  file.write('#endif  //  UI_GL_GL_STUB_AUTOGEN_H_')
+  file.write('#endif  //  UI_GL_GL_STUB_AUTOGEN_GL_H_')
 
 def GenerateStubSource(file, functions):
   """Generates gl_stub_autogen_gl.cc"""
@@ -3098,8 +3357,8 @@ namespace gl {
     else:
       num_dynamic = num_dynamic + 1
 
-  print "[%s] %d static bindings, %d dynamic bindings" % (
-      set_name, len(functions) - num_dynamic, num_dynamic)
+  print("[%s] %d static bindings, %d dynamic bindings" % (
+      set_name, len(functions) - num_dynamic, num_dynamic))
 
   # Write function to initialize the function pointers that are always the same
   # and to initialize bindings where choice of the function depends on the
@@ -3114,6 +3373,9 @@ namespace gl {
              'memcmp(this_bytes, this_bytes + 1, sizeof(*this) - 1) == 0);\n');
   file.write('\n')
 
+  def BindingsAreAllStatic(api_set_name):
+    return api_set_name == 'egl'
+
   def WriteFuncBinding(file, known_as, version_name):
     file.write(
         '  fn.%sFn = reinterpret_cast<%sProc>(GetGLProcAddress("%s"));\n' %
@@ -3122,6 +3384,10 @@ namespace gl {
   for func in functions:
     if 'static_binding' in func:
       WriteFuncBinding(file, func['known_as'], func['static_binding'])
+    elif BindingsAreAllStatic(set_name):
+      assert len(func['versions']) == 1
+      version = func['versions'][0]
+      WriteFuncBinding(file, func['known_as'], version['name'])
 
   def GetGLVersionCondition(gl_version):
     if GLVersionBindAlways(gl_version):
@@ -3140,10 +3406,10 @@ namespace gl {
     conditions = []
     if 'gl_versions' in version:
       conditions.extend(
-          [GetGLVersionCondition(v) for v in version['gl_versions']])
+          sorted([GetGLVersionCondition(v) for v in version['gl_versions']]))
     if 'extensions' in version and version['extensions']:
       conditions.extend(
-          ['ext.b_%s' % e for e in version['extensions']])
+          sorted(['ext.b_%s' % e for e in version['extensions']]))
     return ' || '.join(conditions)
 
   def WriteConditionalFuncBinding(file, func):
@@ -3184,53 +3450,60 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
 """)
   elif set_name == 'egl':
     file.write("""\
-void DriverEGL::InitializeClientExtensionBindings() {
+void ClientExtensionsEGL::InitializeClientExtensionSettings() {
   std::string client_extensions(GetClientExtensions());
-  gfx::ExtensionSet extensions(gfx::MakeExtensionSet(client_extensions));
-  ALLOW_UNUSED_LOCAL(extensions);
+  [[maybe_unused]] gfx::ExtensionSet extensions(
+      gfx::MakeExtensionSet(client_extensions));
 
 """)
   else:
     file.write("""\
 void Driver%s::InitializeExtensionBindings() {
   std::string platform_extensions(GetPlatformExtensions());
-  gfx::ExtensionSet extensions(gfx::MakeExtensionSet(platform_extensions));
-  ALLOW_UNUSED_LOCAL(extensions);
+  [[maybe_unused]] gfx::ExtensionSet extensions(
+      gfx::MakeExtensionSet(platform_extensions));
 
 """ % (set_name.upper(),))
 
-  def OutputExtensionBindings(extension_var, extensions, extension_funcs):
+  def OutputExtensionSettings(extension_var, extensions, struct_qualifier):
     # Extra space at the end of the extension name is intentional,
     # it is used as a separator
     for extension in extensions:
-      file.write('  ext.b_%s = gfx::HasExtension(%s, "%s");\n' %
-                 (extension, extension_var, extension))
+      file.write('  %sb_%s = gfx::HasExtension(%s, "%s");\n' %
+                 (struct_qualifier, extension, extension_var, extension))
 
+  def OutputExtensionBindings(extension_funcs):
     for func in extension_funcs:
       if not 'static_binding' in func:
         file.write('\n')
         WriteConditionalFuncBinding(file, func)
 
-  OutputExtensionBindings(
+  OutputExtensionSettings(
     'extensions',
     sorted(used_client_extensions),
-    [ f for f in functions if IsClientExtensionFunc(f) ])
+    '' if BindingsAreAllStatic(set_name) else 'ext.')
+  if not BindingsAreAllStatic(set_name):
+    OutputExtensionBindings(
+      [ f for f in functions if IsClientExtensionFunc(f) ])
 
   if set_name == 'egl':
     file.write("""\
 }
 
-void DriverEGL::InitializeExtensionBindings() {
-  std::string platform_extensions(GetPlatformExtensions());
-  gfx::ExtensionSet extensions(gfx::MakeExtensionSet(platform_extensions));
-  ALLOW_UNUSED_LOCAL(extensions);
+void DisplayExtensionsEGL::InitializeExtensionSettings(EGLDisplay display) {
+  std::string platform_extensions(GetPlatformExtensions(display));
+  [[maybe_unused]] gfx::ExtensionSet extensions(
+      gfx::MakeExtensionSet(platform_extensions));
 
 """)
 
-  OutputExtensionBindings(
+  OutputExtensionSettings(
     'extensions',
     sorted(used_extensions),
-    [ f for f in functions if not IsClientExtensionFunc(f) ])
+    '' if BindingsAreAllStatic(set_name) else 'ext.')
+  if not BindingsAreAllStatic(set_name):
+    OutputExtensionBindings(
+      [ f for f in functions if not IsClientExtensionFunc(f) ])
   file.write('}\n')
 
   # Write function to clear all function pointers.
@@ -3275,8 +3548,8 @@ void DriverEGL::InitializeExtensionBindings() {
     file.write('%s Trace%sApi::%sFn(%s) {\n' %
         (return_type, set_name.upper(), function_name, arguments))
     argument_names = MakeArgNames(arguments)
-    file.write('  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::%s")\n' %
-               function_name)
+    file.write('  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "Trace%sAPI::%s");\n' %
+               (set_name.upper(), function_name))
     if return_type == 'void':
       file.write('  %s_api_->%sFn(%s);\n' %
           (set_name.lower(), function_name, argument_names))
@@ -3285,12 +3558,12 @@ void DriverEGL::InitializeExtensionBindings() {
           (set_name.lower(), function_name, argument_names))
     file.write('}\n')
 
-  # Write DebugGLApi functions
+  # Write LogGLApi functions
   for func in functions:
     return_type = func['return_type']
     arguments = func['arguments']
     file.write('\n')
-    file.write('%s Debug%sApi::%sFn(%s) {\n' %
+    file.write('%s Log%sApi::%sFn(%s) {\n' %
         (return_type, set_name.upper(), func['known_as'], arguments))
     # Strip pointer types.
     argument_names = re.sub(
@@ -3416,7 +3689,7 @@ void DriverEGL::InitializeExtensionBindings() {
                         'GLsizei': '0',
                         'GLfloat': '0.0f',
                         'GLdouble': '0.0',
-                        'GLsync': 'NULL',
+                        'GLsync': 'nullptr',
                         'GLDEBUGPROC': 'NULL'}
       if return_type.endswith('*'):
         file.write('  return NULL;\n')
@@ -3455,7 +3728,7 @@ def GenerateMockBindingsHeader(file, functions):
 """)
   uniquely_named_functions = GetUniquelyNamedFunctions(functions)
 
-  for key in sorted(uniquely_named_functions.iterkeys()):
+  for key in sorted(uniquely_named_functions.keys()):
     func = uniquely_named_functions[key]
     file.write('static %s GL_BINDING_CALL Mock_%s(%s);\n' %
         (func['return_type'], func['name'], func['arguments']))
@@ -3470,6 +3743,7 @@ def GenerateMockBindingsSource(file, functions, set_name):
 
 #include <string.h>
 
+#include "base/notreached.h"
 #include "ui/gl/%s_mock.h"
 
 namespace {
@@ -3486,7 +3760,7 @@ namespace gl {
 
   # Write functions that trampoline into the set MockGLInterface instance.
   uniquely_named_functions = GetUniquelyNamedFunctions(functions)
-  sorted_function_names = sorted(uniquely_named_functions.iterkeys())
+  sorted_function_names = sorted(uniquely_named_functions.keys())
 
   for key in sorted_function_names:
     func = uniquely_named_functions[key]
@@ -3595,7 +3869,7 @@ def ParseFunctionsFromHeader(header_file, extensions, versions):
   version_start = re.compile(
       r'#ifndef GL_(ES_|)VERSION((?:_[0-9])+)$')
   extension_start = re.compile(
-      r'#ifndef ((?:GL|EGL|WGL|GLX)_[A-Z]+_[a-zA-Z]\w+)')
+      r'#ifndef ((?:GL|EGL|GLX)_[A-Z]+_[a-zA-Z]\w+)')
   extension_function = re.compile(r'.+\s+([a-z]+\w+)\s*\(')
   typedef = re.compile(r'typedef .*')
   macro_start = re.compile(r'^#(if|ifdef|ifndef).*')
@@ -3765,12 +4039,12 @@ def FillExtensionsFromHeaders(functions, extension_headers, extra_extensions):
 
       in_both = explicit_extensions.intersection(extensions_from_headers)
       if len(in_both):
-        print "[%s] Specified redundant extensions for binding: %s" % (
-            name, ', '.join(in_both))
+        print("[%s] Specified redundant extensions for binding: %s" % (
+            name, ', '.join(in_both)))
       diff = explicit_extensions - extensions_from_headers
       if len(diff):
-        print "[%s] Specified extra extensions for binding: %s" % (
-            name, ', '.join(diff))
+        print("[%s] Specified extra extensions for binding: %s" % (
+            name, ', '.join(diff)))
 
       if version.get('explicit_only', False):
         all_extensions = explicit_extensions
@@ -3803,11 +4077,11 @@ def FillExtensionsFromHeaders(functions, extension_headers, extra_extensions):
 
   # Print out used function count by GL(ES) version.
   for v in sorted([v for v in used_functions_by_version if v.is_es]):
-    print "OpenGL ES %d.%d: %d used functions" % (
-        v.major_version, v.minor_version, len(used_functions_by_version[v]))
+    print("OpenGL ES %d.%d: %d used functions" % (
+        v.major_version, v.minor_version, len(used_functions_by_version[v])))
   for v in sorted([v for v in used_functions_by_version if not v.is_es]):
-    print "OpenGL %d.%d: %d used functions" % (
-        v.major_version, v.minor_version, len(used_functions_by_version[v]))
+    print("OpenGL %d.%d: %d used functions" % (
+        v.major_version, v.minor_version, len(used_functions_by_version[v])))
 
   return used_extensions, used_client_extensions
 
@@ -3844,7 +4118,7 @@ def main(argv):
   if options.inputs:
     for [_, _, headers, _] in FUNCTION_SETS:
       for header in headers:
-        print ResolveHeader(header, HEADER_PATHS)
+        print(ResolveHeader(header, HEADER_PATHS))
     return 0
 
   directory = SELF_LOCATION
@@ -3887,8 +4161,12 @@ def main(argv):
     used_extensions, used_client_extensions = FillExtensionsFromHeaders(
         functions, extension_headers, extensions)
 
+    if set_name == 'egl':
+      used_extensions.update(EGL_EXTENSIONS_EXTRA)
+      used_client_extensions.update(EGL_CLIENT_EXTENSIONS_EXTRA)
+
     header_file = open(
-        os.path.join(directory, 'gl_bindings_autogen_%s.h' % set_name), 'wb')
+        os.path.join(directory, 'gl_bindings_autogen_%s.h' % set_name), 'w')
     GenerateHeader(header_file, functions, set_name,
                    used_extensions, used_client_extensions)
     header_file.close()
@@ -3896,13 +4174,13 @@ def main(argv):
 
     header_file = open(
         os.path.join(directory, 'gl_bindings_api_autogen_%s.h' % set_name),
-        'wb')
+        'w')
     GenerateAPIHeader(header_file, functions, set_name)
     header_file.close()
     ClangFormat(header_file.name)
 
     source_file = open(
-        os.path.join(directory, 'gl_bindings_autogen_%s.cc' % set_name), 'wb')
+        os.path.join(directory, 'gl_bindings_autogen_%s.cc' % set_name), 'w')
     GenerateSource(source_file, functions, set_name,
                    used_extensions, used_client_extensions, options)
     source_file.close()
@@ -3910,37 +4188,37 @@ def main(argv):
 
   if not options.verify_order:
     header_file = open(
-        os.path.join(directory, 'gl_mock_autogen_gl.h'), 'wb')
+        os.path.join(directory, 'gl_mock_autogen_gl.h'), 'w')
     GenerateMockHeader(header_file, GL_FUNCTIONS, 'gl')
     header_file.close()
     ClangFormat(header_file.name)
 
     header_file = open(os.path.join(directory, 'gl_bindings_autogen_mock.h'),
-                       'wb')
+                       'w')
     GenerateMockBindingsHeader(header_file, GL_FUNCTIONS)
     header_file.close()
     ClangFormat(header_file.name)
 
     source_file = open(os.path.join(directory, 'gl_bindings_autogen_mock.cc'),
-                       'wb')
+                       'w')
     GenerateMockBindingsSource(source_file, GL_FUNCTIONS, 'gl')
     source_file.close()
     ClangFormat(source_file.name)
 
     header_file = open(
-        os.path.join(directory, 'gl_mock_autogen_egl.h'), 'wb')
+        os.path.join(directory, 'gl_mock_autogen_egl.h'), 'w')
     GenerateMockHeader(header_file, EGL_FUNCTIONS, 'egl')
     header_file.close()
     ClangFormat(header_file.name)
 
     header_file = open(os.path.join(directory, 'egl_bindings_autogen_mock.h'),
-                       'wb')
+                       'w')
     GenerateMockBindingsHeader(header_file, EGL_FUNCTIONS)
     header_file.close()
     ClangFormat(header_file.name)
 
     source_file = open(os.path.join(directory, 'egl_bindings_autogen_mock.cc'),
-                       'wb')
+                       'w')
     GenerateMockBindingsSource(source_file, EGL_FUNCTIONS, 'egl')
     source_file.close()
     ClangFormat(source_file.name)
@@ -3949,19 +4227,19 @@ def main(argv):
                              for h in GLES2_HEADERS_WITH_ENUMS]
     header_file = open(os.path.join(directory,
                                     'gl_enums_implementation_autogen.h'),
-                       'wb')
+                       'w')
     GenerateEnumUtils(header_file, enum_header_filenames)
     header_file.close()
     ClangFormat(header_file.name)
 
     header_file = open(
-        os.path.join(directory, 'gl_stub_autogen_gl.h'), 'wb')
+        os.path.join(directory, 'gl_stub_autogen_gl.h'), 'w')
     GenerateStubHeader(header_file, GL_FUNCTIONS)
     header_file.close()
     ClangFormat(header_file.name)
 
     header_file = open(
-        os.path.join(directory, 'gl_stub_autogen_gl.cc'), 'wb')
+        os.path.join(directory, 'gl_stub_autogen_gl.cc'), 'w')
     GenerateStubSource(header_file, GL_FUNCTIONS)
     header_file.close()
     ClangFormat(header_file.name)

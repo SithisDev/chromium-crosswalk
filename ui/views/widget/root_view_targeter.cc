@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,7 @@ namespace views {
 
 RootViewTargeter::RootViewTargeter(ViewTargeterDelegate* delegate,
                                    internal::RootView* root_view)
-    : ViewTargeter(delegate), root_view_(root_view) {
-}
+    : ViewTargeter(delegate), root_view_(root_view) {}
 
 RootViewTargeter::~RootViewTargeter() = default;
 

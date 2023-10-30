@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,32 @@ struct EnumTraits<display::mojom::HDCPState, display::HDCPState> {
   static display::mojom::HDCPState ToMojom(display::HDCPState type);
   static bool FromMojom(display::mojom::HDCPState type,
                         display::HDCPState* out);
+};
+
+template <>
+struct EnumTraits<display::mojom::ContentProtectionMethod,
+                  display::ContentProtectionMethod> {
+  static display::mojom::ContentProtectionMethod ToMojom(
+      display::ContentProtectionMethod type);
+  static bool FromMojom(display::mojom::ContentProtectionMethod type,
+                        display::ContentProtectionMethod* out);
+};
+
+template <>
+struct EnumTraits<display::mojom::PanelOrientation, display::PanelOrientation> {
+  static display::mojom::PanelOrientation ToMojom(
+      display::PanelOrientation type);
+  static bool FromMojom(display::mojom::PanelOrientation type,
+                        display::PanelOrientation* out);
+};
+
+template <>
+struct EnumTraits<display::mojom::PrivacyScreenState,
+                  display::PrivacyScreenState> {
+  static display::mojom::PrivacyScreenState ToMojom(
+      display::PrivacyScreenState type);
+  static bool FromMojom(display::mojom::PrivacyScreenState type,
+                        display::PrivacyScreenState* out);
 };
 
 }  // namespace mojo

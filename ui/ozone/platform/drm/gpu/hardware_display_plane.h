@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/containers/flat_set.h"
+#include "base/trace_event/traced_value.h"
 #include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 
@@ -20,9 +21,10 @@ namespace ui {
 
 class HardwareDisplayPlane {
  public:
-  enum Type { kDummy, kPrimary, kOverlay, kCursor };
-
   HardwareDisplayPlane(uint32_t id);
+
+  HardwareDisplayPlane(const HardwareDisplayPlane&) = delete;
+  HardwareDisplayPlane& operator=(const HardwareDisplayPlane&) = delete;
 
   virtual ~HardwareDisplayPlane();
 
@@ -32,15 +34,16 @@ class HardwareDisplayPlane {
 
   std::vector<uint64_t> ModifiersForFormat(uint32_t format) const;
 
-  bool CanUseForCrtc(uint32_t crtc_index) const;
+  bool CanUseForCrtcId(uint32_t crtc_id) const;
+
+  void AsValueInto(base::trace_event::TracedValue* value) const;
 
   bool in_use() const { return in_use_; }
   void set_in_use(bool in_use) { in_use_ = in_use; }
 
   uint32_t id() const { return id_; }
 
-  Type type() const { return type_; }
-  void set_type(const Type type) { type_ = type; }
+  uint32_t type() const { return type_; }
 
   void set_owning_crtc(uint32_t crtc) { owning_crtc_ = crtc; }
   uint32_t owning_crtc() const { return owning_crtc_; }
@@ -49,6 +52,8 @@ class HardwareDisplayPlane {
 
  protected:
   struct Properties {
+    Properties();
+    ~Properties();
     // These properties are mandatory on DRM atomic. On legacy they may or may
     // not be present.
     DrmDevice::Property crtc_id;
@@ -68,24 +73,27 @@ class HardwareDisplayPlane {
     DrmDevice::Property in_formats;
     DrmDevice::Property in_fence_fd;
     DrmDevice::Property plane_ctm;
+    DrmDevice::Property plane_color_encoding;
+    DrmDevice::Property plane_color_range;
   };
 
   const uint32_t id_;
-  uint32_t crtc_mask_ = 0;
 
   Properties properties_ = {};
 
+  base::flat_set<uint32_t> possible_crtc_ids_;
   uint32_t owning_crtc_ = 0;
   uint32_t last_used_format_ = 0;
   bool in_use_ = false;
-  Type type_ = kPrimary;
+  uint32_t type_ = DRM_PLANE_TYPE_PRIMARY;
   std::vector<uint32_t> supported_formats_;
   std::vector<drm_format_modifier> supported_format_modifiers_;
 
+  uint64_t color_encoding_bt601_;
+  uint64_t color_range_limited_;
+
  private:
   void InitializeProperties(DrmDevice* drm);
-
-  DISALLOW_COPY_AND_ASSIGN(HardwareDisplayPlane);
 };
 
 }  // namespace ui

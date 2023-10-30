@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">Atspējot visu attēlu animāciju.</translation>
 <translation id="1703735871906654364">Taustiņpārlūkošana</translation>
 <translation id="1791496371305830581">Atļaut visus animētos attēlus.</translation>
+<translation id="1974060860693918893">Papildu</translation>
 <translation id="1996252509865389616">Vai iespējot?</translation>
 <translation id="2079545284768500474">Atsaukt</translation>
 <translation id="2179565792157161713">Atvērt garo aprakstu jaunā cilnē</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">Attēli ir aizstāti, izmantojot to alternatīvo tekstu.</translation>
 <translation id="4896660567607030658">Nerādīt atsauksmes; rādīt tikai kursoru.</translation>
 <translation id="4937901943818762779">Atļaut animētos attēlus, bet tikai vienreiz.</translation>
+<translation id="4949131196216960195">Lai iespējotu taustiņpārlūkošanu, nospiediet &lt;span class='key'&gt;meklēšanas taustiņu&lt;/span&gt; un vai nu taustiņu &lt;img src='increase_brightness.png'&gt; (Palielināt spilgtumu), vai F7. Lai šo funkciju izslēgtu, nospiediet šo taustiņu kombināciju vēlreiz.</translation>
 <translation id="4954450790315188152">Kad ir iespējota taustiņpārlūkošana</translation>
 <translation id="5041932793799765940">Krāsu pielāgošana</translation>
 <translation id="5094574508723441140">Palielināts kontrasts</translation>
@@ -50,6 +52,7 @@
 <translation id="6170146920149900756">Krāsu uzlabotājs</translation>
 <translation id="633394792577263429">Lai pārvietotos pa vārdiem, turiet nospiestu taustiņu &lt;span class='key'&gt;Control&lt;/span&gt;.</translation>
 <translation id="6550675742724504774">Opcijas</translation>
+<translation id="6699630355767768222">3. darbība: pielāgojiet krāsu asi, kā vēlaties.</translation>
 <translation id="6838518108677880446">Iestatīšana:</translation>
 <translation id="690628312087070417">Kad kursors tiek pārvietots ļoti tālu</translation>
 <translation id="6965382102122355670">Labi</translation>
@@ -60,10 +63,10 @@
 <translation id="7658239707568436148">Atcelt</translation>
 <translation id="786423340267544509">Pievienot apmali elementiem, kuriem ir atribūts “aria-describedat” vai “longdesc”.</translation>
 <translation id="7942349550061667556">Sarkana</translation>
-<translation id="8254860724243898966">Lai ieslēgtu taustiņpārlūkošanu, nospiediet taustiņu &lt;span class='key'&gt;Alt&lt;/span&gt; un &lt;img src='increase_brightness.png'&gt; (spilgtuma palielināšanas taustiņš vai F7). Lai izslēgtu taustiņpārlūkošanu, vēlreiz nospiediet šos taustiņus.</translation>
 <translation id="8260673944985561857">Taustiņpārlūkošanas opcijas</translation>
 <translation id="8321034316479930120">Animāciju politika</translation>
 <translation id="8480209185614411573">Liels kontrasts</translation>
 <translation id="8609925175482059018">Lai ieslēgtu taustiņpārlūkošanu, nospiediet taustiņu &lt;span class='key'&gt;F7&lt;/span&gt;. Lai to izslēgtu, vēlreiz nospiediet šo taustiņu.</translation>
+<translation id="8798099450830957504">Noklusējums</translation>
 <translation id="894241283505723656">Garais apraksts kontekstizvēlnē</translation>
 </translationbundle>

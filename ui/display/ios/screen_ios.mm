@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <UIKit/UIKit.h>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "ui/display/display.h"
 #include "ui/display/screen_base.h"
 
@@ -20,6 +21,9 @@ class ScreenIos : public ScreenBase {
     display.set_device_scale_factor([mainScreen scale]);
     ProcessDisplayChanged(display, true /* is_primary */);
   }
+
+  ScreenIos(const ScreenIos&) = delete;
+  ScreenIos& operator=(const ScreenIos&) = delete;
 
   gfx::Point GetCursorScreenPoint() override {
     NOTIMPLEMENTED();
@@ -44,9 +48,6 @@ class ScreenIos : public ScreenBase {
     return [[UIScreen screens] count];
 #endif
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScreenIos);
 };
 
 }  // namespace

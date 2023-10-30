@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,18 @@
 
 #import <AppKit/AppKit.h>
 
+#include <vector>
+
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/free_deleter.h"
 #include "base/memory/ref_counted.h"
 #include "testing/platform_test.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/clipboard/clipboard_types.h"
+#include "ui/base/clipboard/clipboard_buffer.h"
 #include "ui/base/clipboard/clipboard_util_mac.h"
+#include "ui/gfx/codec/png_codec.h"
 
 @interface RedView : NSView
 @end
@@ -39,7 +43,7 @@ void CreateImageBufferReleaser(void* info, const void* data, size_t size) {
 
 class ClipboardMacTest : public PlatformTest {
  public:
-  ClipboardMacTest() { }
+  ClipboardMacTest() = default;
 
   base::scoped_nsobject<NSImage> CreateImage(int32_t width,
                                              int32_t height,
@@ -72,15 +76,17 @@ class ClipboardMacTest : public PlatformTest {
 TEST_F(ClipboardMacTest, ReadImageRetina) {
   int32_t width = 99;
   int32_t height = 101;
-  scoped_refptr<ui::UniquePasteboard> pasteboard = new ui::UniquePasteboard;
+  scoped_refptr<UniquePasteboard> pasteboard = new UniquePasteboard;
   base::scoped_nsobject<NSImage> image = CreateImage(width, height, true);
   [pasteboard->get() writeObjects:@[ image.get() ]];
 
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-  ui::ClipboardMac* clipboard_mac = static_cast<ui::ClipboardMac*>(clipboard);
+  Clipboard* clipboard = Clipboard::GetForCurrentThread();
+  ClipboardMac* clipboard_mac = static_cast<ClipboardMac*>(clipboard);
 
-  SkBitmap bitmap = clipboard_mac->ReadImage(ui::ClipboardType::kCopyPaste,
-                                             pasteboard->get());
+  std::vector<uint8_t> png_data = clipboard_mac->ReadPngInternal(
+      ClipboardBuffer::kCopyPaste, pasteboard->get());
+  SkBitmap bitmap;
+  gfx::PNGCodec::Decode(png_data.data(), png_data.size(), &bitmap);
   EXPECT_EQ(2 * width, bitmap.width());
   EXPECT_EQ(2 * height, bitmap.height());
 }
@@ -88,29 +94,33 @@ TEST_F(ClipboardMacTest, ReadImageRetina) {
 TEST_F(ClipboardMacTest, ReadImageNonRetina) {
   int32_t width = 99;
   int32_t height = 101;
-  scoped_refptr<ui::UniquePasteboard> pasteboard = new ui::UniquePasteboard;
+  scoped_refptr<UniquePasteboard> pasteboard = new UniquePasteboard;
   base::scoped_nsobject<NSImage> image = CreateImage(width, height, false);
   [pasteboard->get() writeObjects:@[ image.get() ]];
 
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-  ui::ClipboardMac* clipboard_mac = static_cast<ui::ClipboardMac*>(clipboard);
+  Clipboard* clipboard = Clipboard::GetForCurrentThread();
+  ClipboardMac* clipboard_mac = static_cast<ClipboardMac*>(clipboard);
 
-  SkBitmap bitmap = clipboard_mac->ReadImage(ui::ClipboardType::kCopyPaste,
-                                             pasteboard->get());
+  std::vector<uint8_t> png_data = clipboard_mac->ReadPngInternal(
+      ClipboardBuffer::kCopyPaste, pasteboard->get());
+  SkBitmap bitmap;
+  gfx::PNGCodec::Decode(png_data.data(), png_data.size(), &bitmap);
   EXPECT_EQ(width, bitmap.width());
   EXPECT_EQ(height, bitmap.height());
 }
 
 TEST_F(ClipboardMacTest, EmptyImage) {
   base::scoped_nsobject<NSImage> image([[NSImage alloc] init]);
-  scoped_refptr<ui::UniquePasteboard> pasteboard = new ui::UniquePasteboard;
+  scoped_refptr<UniquePasteboard> pasteboard = new UniquePasteboard;
   [pasteboard->get() writeObjects:@[ image.get() ]];
 
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-  ui::ClipboardMac* clipboard_mac = static_cast<ui::ClipboardMac*>(clipboard);
+  Clipboard* clipboard = Clipboard::GetForCurrentThread();
+  ClipboardMac* clipboard_mac = static_cast<ClipboardMac*>(clipboard);
 
-  SkBitmap bitmap = clipboard_mac->ReadImage(ui::ClipboardType::kCopyPaste,
-                                             pasteboard->get());
+  std::vector<uint8_t> png_data = clipboard_mac->ReadPngInternal(
+      ClipboardBuffer::kCopyPaste, pasteboard->get());
+  SkBitmap bitmap;
+  gfx::PNGCodec::Decode(png_data.data(), png_data.size(), &bitmap);
   EXPECT_EQ(0, bitmap.width());
   EXPECT_EQ(0, bitmap.height());
 }
@@ -126,14 +136,16 @@ TEST_F(ClipboardMacTest, PDFImage) {
   base::scoped_nsobject<NSView> v([[RedView alloc] initWithFrame:frame]);
   NSData* data = [v dataWithPDFInsideRect:frame];
 
-  scoped_refptr<ui::UniquePasteboard> pasteboard = new ui::UniquePasteboard;
+  scoped_refptr<UniquePasteboard> pasteboard = new UniquePasteboard;
   [pasteboard->get() setData:data forType:NSPasteboardTypePDF];
 
-  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-  ui::ClipboardMac* clipboard_mac = static_cast<ui::ClipboardMac*>(clipboard);
+  Clipboard* clipboard = Clipboard::GetForCurrentThread();
+  ClipboardMac* clipboard_mac = static_cast<ClipboardMac*>(clipboard);
 
-  SkBitmap bitmap = clipboard_mac->ReadImage(ui::ClipboardType::kCopyPaste,
-                                             pasteboard->get());
+  std::vector<uint8_t> png_data = clipboard_mac->ReadPngInternal(
+      ClipboardBuffer::kCopyPaste, pasteboard->get());
+  SkBitmap bitmap;
+  gfx::PNGCodec::Decode(png_data.data(), png_data.size(), &bitmap);
   EXPECT_EQ(width, bitmap.width());
   EXPECT_EQ(height, bitmap.height());
 }

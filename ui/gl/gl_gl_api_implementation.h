@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_workarounds.h"
@@ -22,9 +22,6 @@ GL_EXPORT GLenum GetInternalFormat(const GLVersionInfo* version,
 
 GL_EXPORT void InitializeStaticGLBindingsGL();
 GL_EXPORT void ClearBindingsGL();
-
-GL_EXPORT void InitializeDebugGLBindingsGL();
-bool GetDebugGLBindingsInitializedGL();
 
 bool SetNullDrawGLBindingsEnabled(bool enabled);
 bool GetNullDrawBindingsEnabled();
@@ -43,7 +40,7 @@ class GL_EXPORT GLApiBase : public GLApi {
   ~GLApiBase() override;
   void InitializeBase(DriverGL* driver);
 
-  DriverGL* driver_;
+  raw_ptr<DriverGL> driver_;
 };
 
 // Implemenents the GL API by calling directly into the driver.
@@ -83,6 +80,25 @@ class GL_EXPORT RealGLApi : public GLApiBase {
                            GLenum internalformat,
                            GLsizei width,
                            GLsizei height) override;
+
+  void glTexStorageMem2DEXTFn(GLenum target,
+                              GLsizei levels,
+                              GLenum internalformat,
+                              GLsizei width,
+                              GLsizei height,
+                              GLuint memory,
+                              GLuint64 offset) override;
+
+  void glTexStorageMemFlags2DANGLEFn(GLenum target,
+                                     GLsizei levels,
+                                     GLenum internalformat,
+                                     GLsizei width,
+                                     GLsizei height,
+                                     GLuint memory,
+                                     GLuint64 offset,
+                                     GLbitfield createFlags,
+                                     GLbitfield usageFlags,
+                                     const void* imageCreateInfoPNext) override;
 
   void glRenderbufferStorageEXTFn(GLenum target,
                                   GLenum internalformat,
@@ -133,6 +149,7 @@ class GL_EXPORT RealGLApi : public GLApiBase {
   // Compute |filtered_exts_| & |filtered_exts_str_| from |disabled_ext_|.
   void InitializeFilteredExtensionsIfNeeded();
 
+  const bool logging_enabled_;
   std::vector<std::string> disabled_exts_;
   // Filtered GL_EXTENSIONS we return to glGetString(i) calls.
   std::vector<std::string> filtered_exts_;
@@ -154,14 +171,14 @@ class TraceGLApi : public GLApi {
   #include "gl_bindings_api_autogen_gl.h"
 
  private:
-  GLApi* gl_api_;
+  raw_ptr<GLApi> gl_api_;
 };
 
 // Logs debug information for every GL call.
-class DebugGLApi : public GLApi {
+class LogGLApi : public GLApi {
  public:
-  DebugGLApi(GLApi* gl_api);
-  ~DebugGLApi() override;
+  LogGLApi(GLApi* gl_api);
+  ~LogGLApi() override;
 
   // Include the auto-generated part of this class. We split this because
   // it means we can easily edit the non-auto generated parts right here in
@@ -169,7 +186,7 @@ class DebugGLApi : public GLApi {
   #include "gl_bindings_api_autogen_gl.h"
 
  private:
-  GLApi* gl_api_;
+  raw_ptr<GLApi> gl_api_;
 };
 
 // Catches incorrect usage when GL calls are made without a current context.

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,6 @@ package org.chromium.ui;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.support.v4.view.MarginLayoutParamsCompat;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.content.res.AppCompatResources;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
@@ -21,7 +18,9 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.view.MarginLayoutParamsCompat;
+import androidx.core.view.ViewCompat;
 
 import java.util.List;
 import java.util.Set;
@@ -83,11 +82,9 @@ public class DropdownAdapter extends ArrayAdapter<DropdownItem> {
             divider.setHeight(dividerHeight);
             int dividerColor;
             if (mSeparators != null && mSeparators.contains(position)) {
-                dividerColor = ApiCompatibilityUtils.getColor(mContext.getResources(),
-                        R.color.dropdown_dark_divider_color);
+                dividerColor = mContext.getColor(R.color.dropdown_dark_divider_color);
             } else {
-                dividerColor = ApiCompatibilityUtils.getColor(mContext.getResources(),
-                        R.color.dropdown_divider_color);
+                dividerColor = mContext.getColor(R.color.dropdown_divider_color);
             }
             divider.setDividerColor(dividerColor);
         }
@@ -124,8 +121,7 @@ public class DropdownAdapter extends ArrayAdapter<DropdownItem> {
             labelView.setTypeface(null, Typeface.NORMAL);
         }
 
-        labelView.setTextColor(ApiCompatibilityUtils.getColor(
-                mContext.getResources(), item.getLabelFontColorResId()));
+        labelView.setTextColor(mContext.getColor(item.getLabelFontColorResId()));
         labelView.setTextSize(TypedValue.COMPLEX_UNIT_PX,
                 mContext.getResources().getDimension(R.dimen.text_size_large));
 

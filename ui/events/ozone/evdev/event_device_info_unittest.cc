@@ -1,15 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/events/ozone/evdev/event_device_info.h"
+
 #include "base/format_macros.h"
-#include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/event_device_test_util.h"
 #include "ui/events/ozone/evdev/event_device_util.h"
 
@@ -21,10 +20,15 @@ TEST(EventDeviceInfoTest, BasicUsbGamepad) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_TRUE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -35,10 +39,13 @@ TEST(EventDeviceInfoTest, BasicCrosKeyboard) {
 
   EXPECT_TRUE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_TRUE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -49,10 +56,15 @@ TEST(EventDeviceInfoTest, SideVolumeButton) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 }
 
 TEST(EventDeviceInfoTest, BasicCrosTouchscreen) {
@@ -61,10 +73,15 @@ TEST(EventDeviceInfoTest, BasicCrosTouchscreen) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_TRUE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -75,10 +92,51 @@ TEST(EventDeviceInfoTest, BasicCrosTouchpad) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, HapticCrosTouchpad) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kRedrixTouchpad, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_TRUE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, BasicCrosPointingStick) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kMorphiusPointingStick, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_TRUE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -89,10 +147,15 @@ TEST(EventDeviceInfoTest, BasicUsbKeyboard) {
 
   EXPECT_TRUE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_TRUE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -103,10 +166,15 @@ TEST(EventDeviceInfoTest, BasicUsbKeyboard_Extra) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());  // Has keys, but not a full keyboard.
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -117,7 +185,9 @@ TEST(EventDeviceInfoTest, BasicUsbMouse) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_TRUE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
@@ -131,10 +201,14 @@ TEST(EventDeviceInfoTest, BasicUsbTouchscreen) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_TRUE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -145,10 +219,14 @@ TEST(EventDeviceInfoTest, BasicUsbTablet) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_TRUE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -159,7 +237,9 @@ TEST(EventDeviceInfoTest, BasicUsbTouchpad) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
@@ -174,10 +254,14 @@ TEST(EventDeviceInfoTest, HybridKeyboardWithMouse) {
   // The touchpad actually exposes mouse (relative) Events.
   EXPECT_TRUE(devinfo.HasKeyboard());
   EXPECT_TRUE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
 }
 
 TEST(EventDeviceInfoTest, AbsoluteMouseTouchscreen) {
@@ -187,10 +271,14 @@ TEST(EventDeviceInfoTest, AbsoluteMouseTouchscreen) {
   // This touchscreen uses BTN_LEFT for touch contact.
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_TRUE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -201,10 +289,14 @@ TEST(EventDeviceInfoTest, OnScreenStylus) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_TRUE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -215,10 +307,15 @@ TEST(EventDeviceInfoTest, HammerKeyboard) {
 
   EXPECT_TRUE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -229,10 +326,15 @@ TEST(EventDeviceInfoTest, HammerTouchpad) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
 }
@@ -243,10 +345,15 @@ TEST(EventDeviceInfoTest, IllitekTP_Mouse) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_FALSE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
 }
@@ -257,12 +364,158 @@ TEST(EventDeviceInfoTest, IllitekTP) {
 
   EXPECT_FALSE(devinfo.HasKeyboard());
   EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
   EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
   EXPECT_TRUE(devinfo.HasTouchscreen());
   EXPECT_FALSE(devinfo.HasTablet());
   EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
 
   EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_USB, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, Nocturne_Touchscreen) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kNocturneTouchScreen, &devinfo));
+  EXPECT_EQ(40, devinfo.GetAbsResolution(ABS_MT_POSITION_X));
+  EXPECT_EQ(10404, devinfo.GetAbsMaximum(ABS_MT_POSITION_X));
+}
+
+TEST(EventDeviceInfoTest, XboxElite) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kXboxElite, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_TRUE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_BLUETOOTH, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, DellActivePen_Button) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kDellActivePenButton, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_TRUE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_BLUETOOTH, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, BasicStylusGarageSwitch) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kDrawciaStylusGarage, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_TRUE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_UNKNOWN, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, BasicDynamicNumberpad) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kDrobitNumberpad, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_TRUE(devinfo.HasNumberpad());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, DellLatitudeE6510Touchpad) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kDellLatitudeE6510Touchpad, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasValidMTAbsXY());
+  EXPECT_TRUE(devinfo.IsSemiMultitouch());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, HPProBook6560bTouchpad) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kHPProBook6560bTouchpad, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_TRUE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_TRUE(devinfo.HasValidMTAbsXY());
+  EXPECT_TRUE(devinfo.IsSemiMultitouch());
+
+  EXPECT_EQ(ui::InputDeviceType::INPUT_DEVICE_INTERNAL, devinfo.device_type());
+}
+
+TEST(EventDeviceInfoTest, DeviceOnKeyboardBlocklist) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kSymbolTechBarcodeScanner, &devinfo));
+
+  EXPECT_FALSE(devinfo.HasKeyboard());
+  EXPECT_FALSE(devinfo.HasMouse());
+  EXPECT_FALSE(devinfo.HasPointingStick());
+  EXPECT_FALSE(devinfo.HasTouchpad());
+  EXPECT_FALSE(devinfo.HasHapticTouchpad());
+  EXPECT_FALSE(devinfo.HasTouchscreen());
+  EXPECT_FALSE(devinfo.HasTablet());
+  EXPECT_FALSE(devinfo.HasGamepad());
+  EXPECT_FALSE(devinfo.IsStylusButtonDevice());
+  EXPECT_FALSE(devinfo.HasStylusSwitch());
+  EXPECT_FALSE(devinfo.HasValidMTAbsXY());
+  EXPECT_FALSE(devinfo.IsSemiMultitouch());
 }
 
 }  // namespace ui

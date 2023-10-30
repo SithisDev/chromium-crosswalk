@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 
 namespace ui {
 
-namespace input_types {
-
 enum class ScrollGranularity : uint8_t {
   kScrollByPrecisePixel = 0,
   kFirstScrollGranularity = kScrollByPrecisePixel,
@@ -16,10 +14,9 @@ enum class ScrollGranularity : uint8_t {
   kScrollByLine,
   kScrollByPage,
   kScrollByDocument,
-  kMaxValue = kScrollByDocument
+  kScrollByPercentage,
+  kMaxValue = kScrollByPercentage
 };
-
-}  // namespace input_types
 
 }  // namespace ui
 

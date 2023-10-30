@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,13 @@ bool ScreenBase::IsWindowUnderCursor(gfx::NativeWindow window) {
 }
 
 gfx::NativeWindow ScreenBase::GetWindowAtScreenPoint(const gfx::Point& point) {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return nullptr;
+}
+
+gfx::NativeWindow ScreenBase::GetLocalProcessWindowAtPoint(
+    const gfx::Point& screen_point,
+    const std::set<gfx::NativeWindow>& ignore) {
   NOTIMPLEMENTED_LOG_ONCE();
   return nullptr;
 }
@@ -66,6 +73,17 @@ void ScreenBase::AddObserver(DisplayObserver* observer) {
 
 void ScreenBase::RemoveObserver(DisplayObserver* observer) {
   display_list_.RemoveObserver(observer);
+}
+
+bool ScreenBase::HasDisplayObservers() const {
+  return !display_list_.observers()->empty();
+}
+
+void ScreenBase::SetPanelRotationForTesting(int64_t display_id,
+                                            Display::Rotation rotation) {
+  Display display = *display_list_.FindDisplayById(display_id);
+  display.set_panel_rotation(rotation);
+  ProcessDisplayChanged(display, true);
 }
 
 void ScreenBase::ProcessDisplayChanged(const Display& changed_display,

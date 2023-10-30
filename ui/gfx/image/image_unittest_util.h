@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,9 @@
 #ifndef UI_GFX_IMAGE_IMAGE_UNITTEST_UTIL_H_
 #define UI_GFX_IMAGE_IMAGE_UNITTEST_UTIL_H_
 
+#include <stdint.h>
+
+#include "base/containers/span.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
@@ -15,9 +18,9 @@
 namespace gfx {
 namespace test {
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 typedef UIImage* PlatformImage;
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_MAC)
 typedef NSImage* PlatformImage;
 #else
 typedef gfx::ImageSkia PlatformImage;
@@ -60,10 +63,9 @@ bool AreBitmapsClose(const SkBitmap& bitmap1,
 
 // Returns true if the passed in PNG bitmap is visually similar to the passed in
 // SkBitmap.
-bool ArePNGBytesCloseToBitmap(
-    const scoped_refptr<base::RefCountedMemory>& bytes,
-    const SkBitmap& bitmap,
-    int max_deviation);
+bool ArePNGBytesCloseToBitmap(base::span<const uint8_t> bytes,
+                              const SkBitmap& bitmap,
+                              int max_deviation);
 
 // Returns the maximum color shift in the red, green, and blue components caused
 // by converting a gfx::Image between colorspaces. Color shifts occur when

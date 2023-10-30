@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,7 +9,6 @@ component("accelerated_widget_mac") {
     "accelerated_widget_mac.h",
     "accelerated_widget_mac.mm",
     "accelerated_widget_mac_export.h",
-    "availability_macros.h",
     "ca_layer_frame_sink.h",
     "ca_layer_frame_sink.mm",
     "ca_layer_tree_coordinator.h",
@@ -30,6 +29,8 @@ component("accelerated_widget_mac") {
 
   deps = [
     "//base",
+    "//components/metal_util",
+    "//media",
     "//skia",
     "//ui/base",
     "//ui/events",
@@ -39,7 +40,7 @@ component("accelerated_widget_mac") {
     "//ui/gl",
   ]
 
-  libs = [
+  frameworks = [
     "AVFoundation.framework",
     "CoreGraphics.framework",
     "Foundation.framework",
@@ -53,9 +54,7 @@ component("accelerated_widget_mac") {
 
 test("accelerated_widget_mac_unittests") {
   configs += [ "//build/config:precompiled_headers" ]
-  sources = [
-    "ca_layer_tree_unittest_mac.mm",
-  ]
+  sources = [ "ca_layer_tree_unittest_mac.mm" ]
   deps = [
     ":accelerated_widget_mac",
     "//base",
@@ -67,7 +66,7 @@ test("accelerated_widget_mac_unittests") {
     "//ui/gfx:test_support",
     "//ui/gl",
   ]
-  libs = [
+  frameworks = [
     "AVFoundation.framework",
     "QuartzCore.framework",
   ]

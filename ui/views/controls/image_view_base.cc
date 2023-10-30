@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/i18n/rtl.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/geometry/insets.h"
-#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace views {
 
@@ -32,8 +33,14 @@ void ImageViewBase::ResetImageSize() {
 }
 
 void ImageViewBase::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  const std::u16string& name = GetAccessibleName();
+  if (name.empty()) {
+    node_data->role = ax::mojom::Role::kNone;
+    return;
+  }
+
   node_data->role = ax::mojom::Role::kImage;
-  node_data->SetName(GetAccessibleName());
+  node_data->SetName(name);
 }
 
 void ImageViewBase::SetHorizontalAlignment(Alignment alignment) {
@@ -60,19 +67,28 @@ ImageViewBase::Alignment ImageViewBase::GetVerticalAlignment() const {
   return vertical_alignment_;
 }
 
-void ImageViewBase::SetAccessibleName(const base::string16& accessible_name) {
+void ImageViewBase::SetTooltipText(const std::u16string& tooltip) {
+  tooltip_text_ = tooltip;
+}
+
+const std::u16string& ImageViewBase::GetTooltipText() const {
+  return tooltip_text_;
+}
+
+void ImageViewBase::SetAccessibleName(const std::u16string& accessible_name) {
   if (accessible_name_ == accessible_name)
     return;
 
   accessible_name_ = accessible_name;
   OnPropertyChanged(&accessible_name_, kPropertyEffectsNone);
+  NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
 }
 
-const base::string16& ImageViewBase::GetAccessibleName() const {
+const std::u16string& ImageViewBase::GetAccessibleName() const {
   return accessible_name_.empty() ? tooltip_text_ : accessible_name_;
 }
 
-base::string16 ImageViewBase::GetTooltipText(const gfx::Point& p) const {
+std::u16string ImageViewBase::GetTooltipText(const gfx::Point& p) const {
   return tooltip_text_;
 }
 
@@ -147,17 +163,17 @@ void ImageViewBase::PreferredSizeChanged() {
   UpdateImageOrigin();
 }
 
-DEFINE_ENUM_CONVERTERS(
-    ImageViewBase::Alignment,
-    {ImageViewBase::Alignment::kLeading, base::ASCIIToUTF16("kLeading")},
-    {ImageViewBase::Alignment::kCenter, base::ASCIIToUTF16("kCenter")},
-    {ImageViewBase::Alignment::kTrailing, base::ASCIIToUTF16("kTrailing")})
-
-BEGIN_METADATA(ImageViewBase)
-METADATA_PARENT_CLASS(View)
-ADD_PROPERTY_METADATA(ImageViewBase, Alignment, HorizontalAlignment)
-ADD_PROPERTY_METADATA(ImageViewBase, Alignment, VerticalAlignment)
-ADD_PROPERTY_METADATA(ImageViewBase, base::string16, AccessibleName)
-END_METADATA()
+BEGIN_METADATA(ImageViewBase, View)
+ADD_PROPERTY_METADATA(Alignment, HorizontalAlignment)
+ADD_PROPERTY_METADATA(Alignment, VerticalAlignment)
+ADD_PROPERTY_METADATA(std::u16string, AccessibleName)
+ADD_PROPERTY_METADATA(std::u16string, TooltipText)
+END_METADATA
 
 }  // namespace views
+
+DEFINE_ENUM_CONVERTERS(views::ImageViewBase::Alignment,
+                       {views::ImageViewBase::Alignment::kLeading, u"kLeading"},
+                       {views::ImageViewBase::Alignment::kCenter, u"kCenter"},
+                       {views::ImageViewBase::Alignment::kTrailing,
+                        u"kTrailing"})

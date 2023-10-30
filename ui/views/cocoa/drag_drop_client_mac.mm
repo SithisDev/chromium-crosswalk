@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/strings/sys_string_conversions.h"
 #import "components/remote_cocoa/app_shim/bridged_content_view.h"
 #import "components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #import "ui/base/dragdrop/os_exchange_data_provider_mac.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/views/drag_utils.h"
@@ -29,7 +31,7 @@ void DragDropClientMac::StartDragAndDrop(
     View* view,
     std::unique_ptr<ui::OSExchangeData> data,
     int operation,
-    ui::DragDropTypes::DragEventSource source) {
+    ui::mojom::DragEventSource source) {
   exchange_data_ = std::move(data);
   source_operation_ = operation;
   is_drag_source_ = true;
@@ -48,9 +50,9 @@ void DragDropClientMac::StartDragAndDrop(
   NSWindow* window = bridge_->ns_window();
   NSPoint position = [window mouseLocationOutsideOfEventStream];
   NSTimeInterval event_time = [[NSApp currentEvent] timestamp];
-  NSEvent* event = [NSEvent mouseEventWithType:NSLeftMouseDragged
+  NSEvent* event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
                                       location:position
-                                 modifierFlags:NSLeftMouseDraggedMask
+                                 modifierFlags:0
                                      timestamp:event_time
                                   windowNumber:[window windowNumber]
                                        context:nil
@@ -102,10 +104,11 @@ NSDragOperation DragDropClientMac::Drop(id<NSDraggingInfo> sender) {
   // OnDrop may delete |this|, so clear |exchange_data_| first.
   std::unique_ptr<ui::OSExchangeData> exchange_data = std::move(exchange_data_);
 
-  int drag_operation = drop_helper_.OnDrop(
+  ui::mojom::DragOperation drag_operation = drop_helper_.OnDrop(
       *exchange_data, LocationInView([sender draggingLocation]),
       last_operation_);
-  return ui::DragDropTypes::DragOperationToNSDragOperation(drag_operation);
+  return ui::DragDropTypes::DragOperationToNSDragOperation(
+      static_cast<int>(drag_operation));
 }
 
 void DragDropClientMac::EndDrag() {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,10 @@ namespace display {
 class DISPLAY_EXPORT ScreenBase : public Screen {
  public:
   ScreenBase();
+
+  ScreenBase(const ScreenBase&) = delete;
+  ScreenBase& operator=(const ScreenBase&) = delete;
+
   ~ScreenBase() override;
 
   DisplayList& display_list() { return display_list_; }
@@ -27,6 +31,9 @@ class DISPLAY_EXPORT ScreenBase : public Screen {
   gfx::Point GetCursorScreenPoint() override;
   bool IsWindowUnderCursor(gfx::NativeWindow window) override;
   gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override;
+  gfx::NativeWindow GetLocalProcessWindowAtPoint(
+      const gfx::Point& screen_point,
+      const std::set<gfx::NativeWindow>& ignore) override;
   Display GetPrimaryDisplay() const override;
   Display GetDisplayNearestWindow(gfx::NativeWindow window) const override;
   Display GetDisplayNearestPoint(const gfx::Point& point) const override;
@@ -35,6 +42,10 @@ class DISPLAY_EXPORT ScreenBase : public Screen {
   Display GetDisplayMatching(const gfx::Rect& match_rect) const override;
   void AddObserver(DisplayObserver* observer) override;
   void RemoveObserver(DisplayObserver* observer) override;
+  void SetPanelRotationForTesting(int64_t display_id,
+                                  Display::Rotation rotation) override;
+
+  bool HasDisplayObservers() const;
 
  protected:
   // Invoked when a display changed in some way, including being added.
@@ -43,8 +54,6 @@ class DISPLAY_EXPORT ScreenBase : public Screen {
 
  private:
   DisplayList display_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScreenBase);
 };
 
 }  // namespace display

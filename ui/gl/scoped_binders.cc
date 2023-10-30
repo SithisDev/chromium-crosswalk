@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ namespace gl {
 
 ScopedFramebufferBinder::ScopedFramebufferBinder(unsigned int fbo)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       old_fbo_(-1) {
   if (!state_restorer_)
@@ -31,7 +31,7 @@ ScopedFramebufferBinder::~ScopedFramebufferBinder() {
 
 ScopedActiveTexture::ScopedActiveTexture(unsigned int texture)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       old_texture_(-1) {
   if (!state_restorer_)
@@ -51,7 +51,7 @@ ScopedActiveTexture::~ScopedActiveTexture() {
 
 ScopedTextureBinder::ScopedTextureBinder(unsigned int target, unsigned int id)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       target_(target),
       old_id_(-1) {
@@ -90,7 +90,7 @@ ScopedTextureBinder::~ScopedTextureBinder() {
 
 ScopedUseProgram::ScopedUseProgram(unsigned int program)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       old_program_(-1) {
   if (!state_restorer_)
@@ -115,7 +115,7 @@ ScopedVertexAttribArray::ScopedVertexAttribArray(unsigned int index,
                                                  int stride,
                                                  const void* pointer)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       buffer_(0),
       enabled_(GL_FALSE),
@@ -124,7 +124,7 @@ ScopedVertexAttribArray::ScopedVertexAttribArray(unsigned int index,
       type_(-1),
       normalized_(GL_FALSE),
       stride_(0),
-      pointer_(0) {
+      pointer_(nullptr) {
   if (!state_restorer_) {
     glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &buffer_);
     glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled_);
@@ -154,7 +154,7 @@ ScopedVertexAttribArray::~ScopedVertexAttribArray() {
 
 ScopedBufferBinder::ScopedBufferBinder(unsigned int target, unsigned int id)
     : state_restorer_(!GLContext::GetCurrent()
-                          ? NULL
+                          ? nullptr
                           : GLContext::GetCurrent()->GetGLStateRestorer()),
       target_(target),
       old_id_(-1) {
@@ -163,6 +163,9 @@ ScopedBufferBinder::ScopedBufferBinder(unsigned int target, unsigned int id)
     switch (target) {
       case GL_ARRAY_BUFFER:
         target_getter = GL_ARRAY_BUFFER_BINDING;
+        break;
+      case GL_PIXEL_UNPACK_BUFFER:
+        target_getter = GL_PIXEL_UNPACK_BUFFER_BINDING;
         break;
       default:
         NOTIMPLEMENTED() << " Target not supported.";

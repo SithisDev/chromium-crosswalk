@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,42 +9,10 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "ui/gfx/color_utils.h"
 #include "ui/gfx/win/singleton_hwnd_observer.h"
-
-namespace {
-
-bool g_is_inverted_color_scheme = false;
-bool g_is_inverted_color_scheme_initialized = false;
-
-void UpdateInvertedColorScheme() {
-  HIGHCONTRAST high_contrast = {0};
-  high_contrast.cbSize = sizeof(HIGHCONTRAST);
-  const bool is_high_contrast =
-      SystemParametersInfo(SPI_GETHIGHCONTRAST, 0, &high_contrast, 0) &&
-      ((high_contrast.dwFlags & HCF_HIGHCONTRASTON) != 0);
-  g_is_inverted_color_scheme =
-      is_high_contrast && (color_utils::GetRelativeLuminance(
-                               color_utils::GetSysSkColor(COLOR_WINDOWTEXT)) >
-                           color_utils::GetRelativeLuminance(
-                               color_utils::GetSysSkColor(COLOR_WINDOW)));
-  g_is_inverted_color_scheme_initialized = true;
-}
-
-}  // namespace
-
-namespace color_utils {
-
-bool IsInvertedColorScheme() {
-  if (!g_is_inverted_color_scheme_initialized)
-    UpdateInvertedColorScheme();
-  return g_is_inverted_color_scheme;
-}
-
-}  // namespace color_utils
 
 namespace gfx {
 
@@ -74,8 +42,8 @@ SysColorChangeObserver* SysColorChangeObserver::GetInstance() {
 
 SysColorChangeObserver::SysColorChangeObserver()
     : singleton_hwnd_observer_(new SingletonHwndObserver(
-          base::Bind(&SysColorChangeObserver::OnWndProc,
-                     base::Unretained(this)))) {}
+          base::BindRepeating(&SysColorChangeObserver::OnWndProc,
+                              base::Unretained(this)))) {}
 
 SysColorChangeObserver::~SysColorChangeObserver() {}
 
@@ -93,7 +61,6 @@ void SysColorChangeObserver::OnWndProc(HWND hwnd,
                                        LPARAM lparam) {
   if (message == WM_SYSCOLORCHANGE ||
       (message == WM_SETTINGCHANGE && wparam == SPI_SETHIGHCONTRAST)) {
-    UpdateInvertedColorScheme();
     for (SysColorChangeListener& observer : listeners_)
       observer.OnSysColorChange();
   }

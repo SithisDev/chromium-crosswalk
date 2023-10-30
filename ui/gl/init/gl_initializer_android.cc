@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,30 +9,16 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
-#include "ui/gl/buildflags.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_egl_api_implementation.h"
 #include "ui/gl/gl_gl_api_implementation.h"
-#include "ui/gl/gl_surface_egl.h"
-
-#if BUILDFLAG(USE_STATIC_ANGLE)
-#include <EGL/egl.h>
-#endif  // BUILDFLAG(USE_STATIC_ANGLE)
+#include "ui/gl/gl_utils.h"
 
 namespace gl {
 namespace init {
 
 namespace {
-
-#if BUILDFLAG(USE_STATIC_ANGLE)
-bool InitializeStaticANGLEEGLInternal() {
-#pragma push_macro("eglGetProcAddress")
-#undef eglGetProcAddress
-  SetGLGetProcAddressProc(&eglGetProcAddress);
-#pragma pop_macro("eglGetProcAddress")
-  return true;
-}
-#endif  // BUILDFLAG(USE_STATIC_ANGLE)
 
 bool InitializeStaticNativeEGLInternal() {
   base::NativeLibrary gles_library = LoadLibraryAndPrintError("libGLESv2.so");
@@ -62,13 +48,13 @@ bool InitializeStaticNativeEGLInternal() {
   return true;
 }
 
-bool InitializeStaticEGLInternal(GLImplementation implementation) {
+bool InitializeStaticEGLInternal(GLImplementationParts implementation) {
   bool initialized = false;
 
 #if BUILDFLAG(USE_STATIC_ANGLE)
   // Use ANGLE if it is requested and it is statically linked
-  if (implementation == kGLImplementationEGLANGLE) {
-    initialized = InitializeStaticANGLEEGLInternal();
+  if (implementation.gl == kGLImplementationEGLANGLE) {
+    initialized = InitializeStaticANGLEEGL();
   }
 #endif  // BUILDFLAG(USE_STATIC_ANGLE)
 
@@ -80,7 +66,7 @@ bool InitializeStaticEGLInternal(GLImplementation implementation) {
     return false;
   }
 
-  SetGLImplementation(implementation);
+  SetGLImplementationParts(implementation);
 
   InitializeStaticGLBindingsGL();
   InitializeStaticGLBindingsEGL();
@@ -90,33 +76,35 @@ bool InitializeStaticEGLInternal(GLImplementation implementation) {
 
 }  // namespace
 
-bool InitializeGLOneOffPlatform() {
+GLDisplay* InitializeGLOneOffPlatform(uint64_t system_device_id) {
+  GLDisplayEGL* display = GetDisplayEGL(system_device_id);
   switch (GetGLImplementation()) {
     case kGLImplementationEGLGLES2:
     case kGLImplementationEGLANGLE:
-      if (!GLSurfaceEGL::InitializeOneOff(EGL_DEFAULT_DISPLAY)) {
-        LOG(ERROR) << "GLSurfaceEGL::InitializeOneOff failed.";
-        return false;
+      if (!display->Initialize(EGLDisplayPlatform(EGL_DEFAULT_DISPLAY))) {
+        LOG(ERROR) << "GLDisplayEGL::Initialize failed.";
+        return nullptr;
       }
-      return true;
+      break;
     default:
-      return true;
+      break;
   }
+  return display;
 }
 
-bool InitializeStaticGLBindings(GLImplementation implementation) {
+bool InitializeStaticGLBindings(GLImplementationParts implementation) {
   // Prevent reinitialization with a different implementation. Once the gpu
   // unit tests have initialized with kGLImplementationMock, we don't want to
   // later switch to another GL implementation.
   DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
-  switch (implementation) {
+  switch (implementation.gl) {
     case kGLImplementationEGLGLES2:
     case kGLImplementationEGLANGLE:
       return InitializeStaticEGLInternal(implementation);
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
-      SetGLImplementation(implementation);
+      SetGLImplementationParts(implementation);
       InitializeStaticGLBindingsGL();
       return true;
     default:
@@ -126,13 +114,9 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
   return false;
 }
 
-void InitializeDebugGLBindings() {
-  InitializeDebugGLBindingsEGL();
-  InitializeDebugGLBindingsGL();
-}
-
-void ShutdownGLPlatform() {
-  GLSurfaceEGL::ShutdownOneOff();
+void ShutdownGLPlatform(GLDisplay* display) {
+  if (display)
+    display->Shutdown();
   ClearBindingsEGL();
   ClearBindingsGL();
 }

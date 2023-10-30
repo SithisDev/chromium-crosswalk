@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/mac/foundation_util.h"
 #import "ui/accessibility/platform/ax_platform_node_mac.h"
+#include "ui/compositor/layer.h"
 #import "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/widget/native_widget_mac.h"
@@ -104,7 +105,7 @@ void NativeViewHostMac::AttachNativeView() {
         host_->parent()->GetNativeViewAccessible());
   }
 
-  window_host->SetAssociationForView(host_, native_view_);
+  window_host->OnNativeViewHostAttach(host_, native_view_);
 }
 
 void NativeViewHostMac::NativeViewDetaching(bool destroyed) {
@@ -133,7 +134,7 @@ void NativeViewHostMac::NativeViewDetaching(bool destroyed) {
   auto* window_host = GetNSWindowHost();
   // NativeWidgetNSWindowBridge can be null when Widget is closing.
   if (window_host)
-    window_host->ClearAssociationForView(host_);
+    window_host->OnNativeViewHostDetach(host_);
 
   native_view_.reset();
 }
@@ -151,6 +152,15 @@ void NativeViewHostMac::RemovedFromWidget() {
     return;
 
   NativeViewDetaching(false);
+}
+
+bool NativeViewHostMac::SetCornerRadii(
+    const gfx::RoundedCornersF& corner_radii) {
+  ui::Layer* layer = GetUiLayer();
+  DCHECK(layer);
+  layer->SetRoundedCornerRadius(corner_radii);
+  layer->SetIsFastRoundedCorner(true);
+  return true;
 }
 
 bool NativeViewHostMac::SetCustomMask(std::unique_ptr<ui::LayerOwner> mask) {
@@ -235,7 +245,7 @@ gfx::NativeViewAccessible NativeViewHostMac::GetNativeViewAccessible() {
     return native_view_;
 }
 
-gfx::NativeCursor NativeViewHostMac::GetCursor(int x, int y) {
+ui::Cursor NativeViewHostMac::GetCursor(int x, int y) {
   // Intentionally not implemented: Not required on non-aura Mac because OSX
   // will query the native view for the cursor directly. For NativeViewHostMac
   // in practice, OSX will retrieve the cursor that was last set by
@@ -246,7 +256,7 @@ gfx::NativeCursor NativeViewHostMac::GetCursor(int x, int y) {
   // cleared (see -[NativeWidgetMacNSWindow cursorUpdate:]). However, while the
   // pointer is over a RenderWidgetHostViewCocoa, OSX won't ask for the fallback
   // cursor.
-  return gfx::kNullCursor;
+  return ui::Cursor();
 }
 
 void NativeViewHostMac::SetVisible(bool visible) {
@@ -266,6 +276,12 @@ void NativeViewHostMac::SetParentAccessible(
     // accessibility parent. Fortunately, this interface is only ever used
     // in practice to host a WebContentsView.
   }
+}
+
+gfx::NativeViewAccessible NativeViewHostMac::GetParentAccessible() {
+  return native_view_hostable_
+             ? native_view_hostable_->ViewsHostableGetParentAccessible()
+             : nullptr;
 }
 
 // static

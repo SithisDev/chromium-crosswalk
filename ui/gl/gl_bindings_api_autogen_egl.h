@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -81,6 +81,10 @@ EGLBoolean eglExportDMABUFImageQueryMESAFn(EGLDisplay dpy,
                                            int* fourcc,
                                            int* num_planes,
                                            EGLuint64KHR* modifiers) override;
+EGLBoolean eglExportVkImageANGLEFn(EGLDisplay dpy,
+                                   EGLImageKHR image,
+                                   void* vk_image,
+                                   void* vk_image_create_info) override;
 EGLBoolean eglGetCompositorTimingANDROIDFn(EGLDisplay dpy,
                                            EGLSurface surface,
                                            EGLint numTimestamps,
@@ -111,6 +115,10 @@ EGLBoolean eglGetFrameTimestampsANDROIDFn(EGLDisplay dpy,
 EGLBoolean eglGetFrameTimestampSupportedANDROIDFn(EGLDisplay dpy,
                                                   EGLSurface surface,
                                                   EGLint timestamp) override;
+EGLBoolean eglGetMscRateANGLEFn(EGLDisplay dpy,
+                                EGLSurface surface,
+                                EGLint* numerator,
+                                EGLint* denominator) override;
 EGLClientBuffer eglGetNativeClientBufferANDROIDFn(
     const struct AHardwareBuffer* ahardwarebuffer) override;
 EGLBoolean eglGetNextFrameIdANDROIDFn(EGLDisplay dpy,
@@ -130,6 +138,7 @@ EGLBoolean eglGetSyncValuesCHROMIUMFn(EGLDisplay dpy,
                                       EGLuint64CHROMIUM* ust,
                                       EGLuint64CHROMIUM* msc,
                                       EGLuint64CHROMIUM* sbc) override;
+void eglHandleGPUSwitchANGLEFn(EGLDisplay dpy) override;
 EGLBoolean eglImageFlushExternalEXTFn(EGLDisplay dpy,
                                       EGLImageKHR image,
                                       const EGLAttrib* attrib_list) override;
@@ -156,9 +165,30 @@ EGLBoolean eglQueryContextFn(EGLDisplay dpy,
                              EGLint attribute,
                              EGLint* value) override;
 EGLBoolean eglQueryDebugKHRFn(EGLint attribute, EGLAttrib* value) override;
+EGLBoolean eglQueryDeviceAttribEXTFn(EGLDeviceEXT device,
+                                     EGLint attribute,
+                                     EGLAttrib* value) override;
+EGLBoolean eglQueryDevicesEXTFn(EGLint max_devices,
+                                EGLDeviceEXT* devices,
+                                EGLint* num_devices) override;
+const char* eglQueryDeviceStringEXTFn(EGLDeviceEXT device,
+                                      EGLint name) override;
 EGLBoolean eglQueryDisplayAttribANGLEFn(EGLDisplay dpy,
                                         EGLint attribute,
                                         EGLAttrib* value) override;
+EGLBoolean eglQueryDisplayAttribEXTFn(EGLDisplay dpy,
+                                      EGLint attribute,
+                                      EGLAttrib* value) override;
+EGLBoolean eglQueryDmaBufFormatsEXTFn(EGLDisplay dpy,
+                                      EGLint max_formats,
+                                      EGLint* formats,
+                                      EGLint* num_formats) override;
+EGLBoolean eglQueryDmaBufModifiersEXTFn(EGLDisplay dpy,
+                                        EGLint format,
+                                        EGLint max_modifiers,
+                                        EGLuint64KHR* modifiers,
+                                        EGLBoolean* external_only,
+                                        EGLint* num_modifiers) override;
 EGLBoolean eglQueryStreamKHRFn(EGLDisplay dpy,
                                EGLStreamKHR stream,
                                EGLenum attribute,
@@ -179,6 +209,8 @@ EGLBoolean eglQuerySurfacePointerANGLEFn(EGLDisplay dpy,
                                          EGLSurface surface,
                                          EGLint attribute,
                                          void** value) override;
+void eglReacquireHighPowerGPUANGLEFn(EGLDisplay dpy, EGLContext ctx) override;
+void eglReleaseHighPowerGPUANGLEFn(EGLDisplay dpy, EGLContext ctx) override;
 EGLBoolean eglReleaseTexImageFn(EGLDisplay dpy,
                                 EGLSurface surface,
                                 EGLint buffer) override;

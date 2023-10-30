@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,11 @@
 
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/font_render_params.h"
 #include "ui/gfx/gfx_export.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -21,7 +25,7 @@ class GFX_EXPORT PlatformFont : public base::RefCounted<PlatformFont> {
 // configuration. This allows UI that wants to target a particular size of font
 // to obtain that size for the majority of users, while still compensating for a
 // user preference for a larger or smaller font.
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
   static constexpr int kDefaultBaseFontSize = 13;
 #else
   static constexpr int kDefaultBaseFontSize = 12;
@@ -29,13 +33,23 @@ class GFX_EXPORT PlatformFont : public base::RefCounted<PlatformFont> {
 
   // Creates an appropriate PlatformFont implementation.
   static PlatformFont* CreateDefault();
-#if defined(OS_MACOSX) || defined(OS_IOS)
+#if BUILDFLAG(IS_APPLE)
   static PlatformFont* CreateFromNativeFont(NativeFont native_font);
 #endif
   // Creates a PlatformFont implementation with the specified |font_name|
   // (encoded in UTF-8) and |font_size| in pixels.
   static PlatformFont* CreateFromNameAndSize(const std::string& font_name,
                                              int font_size);
+
+  // Creates a PlatformFont instance from the provided SkTypeface, ideally by
+  // just wrapping it without triggering a new font match. Implemented for
+  // PlatformFontSkia which provides true wrapping of the provided SkTypeface.
+  // The FontRenderParams can be provided or they will be determined by using
+  // gfx::GetFontRenderParams(...) otherwise.
+  static PlatformFont* CreateFromSkTypeface(
+      sk_sp<SkTypeface> typeface,
+      int font_size,
+      const absl::optional<FontRenderParams>& params);
 
   // Returns a new Font derived from the existing font.
   // |size_delta| is the size in pixels to add to the current font.
@@ -74,7 +88,7 @@ class GFX_EXPORT PlatformFont : public base::RefCounted<PlatformFont> {
   virtual const std::string& GetFontName() const = 0;
 
   // Returns the actually used font name in UTF-8.
-  virtual std::string GetActualFontNameForTesting() const = 0;
+  virtual std::string GetActualFontName() const = 0;
 
   // Returns the font size in pixels.
   virtual int GetFontSize() const = 0;
@@ -82,10 +96,15 @@ class GFX_EXPORT PlatformFont : public base::RefCounted<PlatformFont> {
   // Returns an object describing how the font should be rendered.
   virtual const FontRenderParams& GetFontRenderParams() = 0;
 
-#if defined(OS_MACOSX) || defined(OS_IOS)
+#if BUILDFLAG(IS_APPLE)
   // Returns the native font handle.
   virtual NativeFont GetNativeFont() const = 0;
 #endif
+
+  // Returns the underlying Skia typeface. Used in RenderTextHarfBuzz for having
+  // access to the exact Skia typeface returned by  font fallback, as we would
+  // otherwise lose the handle to the correct platform font instance.
+  virtual sk_sp<SkTypeface> GetNativeSkTypeface() const = 0;
 
  protected:
   virtual ~PlatformFont() {}

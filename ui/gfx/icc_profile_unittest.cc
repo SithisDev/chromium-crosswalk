@@ -1,9 +1,8 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/icc_profile.h"
-#include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/skia_color_space_util.h"
@@ -124,16 +123,13 @@ TEST(ICCProfile, GenericRGB) {
   ColorSpace color_space(ColorSpace::PrimaryID::APPLE_GENERIC_RGB,
                          ColorSpace::TransferID::GAMMA18);
 
-  SkMatrix44 icc_profile_matrix;
-  SkMatrix44 color_space_matrix;
+  SkM44 icc_profile_matrix = icc_profile.GetPrimaryMatrix();
+  SkM44 color_space_matrix = color_space.GetPrimaryMatrix();
 
-  icc_profile.GetPrimaryMatrix(&icc_profile_matrix);
-  color_space.GetPrimaryMatrix(&color_space_matrix);
-
-  SkMatrix44 eye;
-  icc_profile_matrix.invert(&eye);
+  SkM44 eye;
+  EXPECT_TRUE(icc_profile_matrix.invert(&eye));
   eye.postConcat(color_space_matrix);
-  EXPECT_TRUE(SkMatrixIsApproximatelyIdentity(eye));
+  EXPECT_TRUE(SkM44IsApproximatelyIdentity(eye));
 }
 
 }  // namespace gfx

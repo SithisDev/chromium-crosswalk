@@ -1,6 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {reportPromise} from '../../../common/js/test_error_reporting.js';
+
+import {FileSystemMetadataProvider} from './file_system_metadata_provider.js';
+import {MetadataRequest} from './metadata_request.js';
 
 /** @const {!Entry} */
 const entryA = /** @type {!Entry} */ ({
@@ -10,7 +17,7 @@ const entryA = /** @type {!Entry} */ ({
   getMetadata: function(fulfill, reject) {
     Promise.resolve({modificationTime: new Date(2015, 1, 1), size: 1024})
         .then(fulfill, reject);
-  }
+  },
 });
 
 /** @const {!Entry} */
@@ -21,19 +28,23 @@ const entryB = /** @type {!Entry} */ ({
   getMetadata: function(fulfill, reject) {
     Promise.resolve({modificationTime: new Date(2015, 2, 2), size: 2048})
         .then(fulfill, reject);
-  }
+  },
 });
 
-function testFileSystemMetadataProviderBasic(callback) {
+export function testFileSystemMetadataProviderBasic(callback) {
   const provider = new FileSystemMetadataProvider();
   const names = [
-    'modificationTime', 'size', 'contentMimeType', 'present', 'availableOffline'
+    'modificationTime',
+    'size',
+    'contentMimeType',
+    'present',
+    'availableOffline',
   ];
   reportPromise(
       provider
           .get([
             new MetadataRequest(entryA, names),
-            new MetadataRequest(entryB, names)
+            new MetadataRequest(entryB, names),
           ])
           .then(results => {
             assertEquals(2, results.length);
@@ -53,7 +64,7 @@ function testFileSystemMetadataProviderBasic(callback) {
       callback);
 }
 
-function testFileSystemMetadataProviderPartialRequest(callback) {
+export function testFileSystemMetadataProviderPartialRequest(callback) {
   const provider = new FileSystemMetadataProvider();
   reportPromise(
       provider.get([new MetadataRequest(entryA, ['modificationTime', 'size'])])

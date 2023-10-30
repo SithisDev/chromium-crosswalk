@@ -1,9 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_BUBBLE_FOOTNOTE_CONTAINER_VIEW_H_
 #define UI_VIEWS_BUBBLE_FOOTNOTE_CONTAINER_VIEW_H_
+
+#include <memory>
 
 #include "ui/views/view.h"
 
@@ -15,9 +17,15 @@ class FootnoteContainerView : public View {
  public:
   METADATA_HEADER(FootnoteContainerView);
 
+  FootnoteContainerView() = delete;
+
   FootnoteContainerView(const gfx::Insets& margins,
                         std::unique_ptr<View> child_view,
                         float corner_radius);
+
+  FootnoteContainerView(const FootnoteContainerView&) = delete;
+  FootnoteContainerView& operator=(const FootnoteContainerView&) = delete;
+
   ~FootnoteContainerView() override;
 
   void SetCornerRadius(float corner_radius);
@@ -31,8 +39,6 @@ class FootnoteContainerView : public View {
   void ResetBorder();
 
   float corner_radius_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(FootnoteContainerView);
 };
 
 }  // namespace views

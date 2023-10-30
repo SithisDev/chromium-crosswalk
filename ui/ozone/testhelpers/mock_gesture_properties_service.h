@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,14 @@
 #define UI_OZONE_TESTHELPERS_MOCK_GESTURE_PROPERTIES_SERVICE_H_
 
 #include "gmock/gmock.h"
-#include "ui/ozone/public/interfaces/gesture_properties_service.mojom.h"
+#include "ui/ozone/public/mojom/gesture_properties_service.mojom.h"
 
 // Mock of GesturePropertiesService's C++ bindings, useful for tests.
 class MockGesturePropertiesService
     : public ui::ozone::mojom::GesturePropertiesService {
  public:
   MockGesturePropertiesService();
-  ~MockGesturePropertiesService();
+  ~MockGesturePropertiesService() override;
 
   MOCK_METHOD1(ListDevices, void(ListDevicesCallback));
   MOCK_METHOD2(ListProperties, void(int32_t, ListPropertiesCallback));

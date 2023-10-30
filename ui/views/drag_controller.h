@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,7 @@ class VIEWS_EXPORT DragController {
 
   // Returns the supported drag operations (see DragDropTypes for possible
   // values). A drag is only started if this returns a non-zero value.
-  virtual int GetDragOperationsForView(View* sender,
-                                       const gfx::Point& p) = 0;
+  virtual int GetDragOperationsForView(View* sender, const gfx::Point& p) = 0;
 
   // Returns true if a drag operation can be started.
   // |press_pt| represents the coordinates where the mouse was initially

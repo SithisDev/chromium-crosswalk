@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,15 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/font_render_params.h"
-#include "ui/gfx/skia_font_delegate.h"
 #include "ui/gfx/text_utils.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "ui/gfx/system_fonts_win.h"
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+#include "ui/linux/linux_ui.h"
+#endif
 
 namespace gfx {
 namespace {
@@ -31,10 +38,10 @@ namespace {
 // The font family name which is used when a user's application font for
 // GNOME/KDE is a non-scalable one. The name should be listed in the
 // IsFallbackFontAllowed function in skia/ext/SkFontHost_fontconfig_direct.cpp.
-#if defined(OS_ANDROID)
-const char* kFallbackFontFamilyName = "serif";
+#if BUILDFLAG(IS_ANDROID)
+const char kFallbackFontFamilyName[] = "serif";
 #else
-const char* kFallbackFontFamilyName = "sans";
+const char kFallbackFontFamilyName[] = "sans";
 #endif
 
 constexpr SkGlyphID kUnsupportedGlyph = 0;
@@ -90,7 +97,7 @@ std::string* PlatformFontSkia::default_font_description_ = NULL;
 // PlatformFontSkia, public:
 
 PlatformFontSkia::PlatformFontSkia() {
-  CHECK(InitDefaultFont()) << "Could not find the default font";
+  EnsuresDefaultFontIsInitialized();
   InitFromPlatformFont(g_default_font.Get().get());
 }
 
@@ -104,29 +111,73 @@ PlatformFontSkia::PlatformFontSkia(const std::string& font_name,
                   query.weight, gfx::GetFontRenderParams(query, nullptr));
 }
 
+PlatformFontSkia::PlatformFontSkia(
+    sk_sp<SkTypeface> typeface,
+    int font_size_pixels,
+    const absl::optional<FontRenderParams>& params) {
+  DCHECK(typeface);
+
+  SkString family_name;
+  typeface->getFamilyName(&family_name);
+
+  SkFontStyle font_style = typeface->fontStyle();
+  Font::Weight font_weight = FontWeightFromInt(font_style.weight());
+
+  int style = typeface->isItalic() ? Font::ITALIC : Font::NORMAL;
+
+  FontRenderParams actual_render_params;
+  if (!params) {
+    FontRenderParamsQuery query;
+    query.families.push_back(family_name.c_str());
+    query.pixel_size = font_size_pixels;
+    query.weight = font_weight;
+    actual_render_params = gfx::GetFontRenderParams(query, nullptr);
+  } else {
+    actual_render_params = params.value();
+  }
+
+  InitFromDetails(std::move(typeface), family_name.c_str(), font_size_pixels,
+                  style, font_weight, actual_render_params);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // PlatformFontSkia, PlatformFont implementation:
 
 // static
-bool PlatformFontSkia::InitDefaultFont() {
+void PlatformFontSkia::EnsuresDefaultFontIsInitialized() {
   if (g_default_font.Get())
-    return true;
+    return;
 
-  bool success = false;
   std::string family = kFallbackFontFamilyName;
   int size_pixels = PlatformFont::kDefaultBaseFontSize;
   int style = Font::NORMAL;
   Font::Weight weight = Font::Weight::NORMAL;
   FontRenderParams params;
 
-  // On Linux, SkiaFontDelegate is used to query the native toolkit (e.g.
-  // GTK+) for the default UI font.
-  const SkiaFontDelegate* delegate = SkiaFontDelegate::instance();
-  if (delegate) {
-    delegate->GetDefaultFontDescription(&family, &size_pixels, &style, &weight,
-                                        &params);
-  } else if (default_font_description_) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN)
+  // On windows, the system default font is retrieved by using the GDI API
+  // SystemParametersInfo(...) (see struct NONCLIENTMETRICS). The font
+  // properties need to be converted as close as possible to a skia font.
+  // The style must be kept (see http://crbug/989476).
+  gfx::Font system_font = win::GetDefaultSystemFont();
+  family = system_font.GetFontName();
+  size_pixels = system_font.GetFontSize();
+  style = system_font.GetStyle();
+  weight = system_font.GetWeight();
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_LINUX)
+  // On Linux, LinuxUi is used to query the native toolkit (e.g.
+  // GTK) for the default UI font.
+  if (const auto* linux_ui = ui::LinuxUi::instance()) {
+    int weight_int;
+    linux_ui->GetDefaultFontDescription(
+        &family, &size_pixels, &style, static_cast<int*>(&weight_int), &params);
+    weight = static_cast<Font::Weight>(weight_int);
+  } else
+#endif
+      if (default_font_description_) {
+#if BUILDFLAG(IS_CHROMEOS)
     // On ChromeOS, a FontList font description string is stored as a
     // translatable resource and passed in via SetDefaultFontDescription().
     FontRenderParamsQuery query;
@@ -145,13 +196,25 @@ bool PlatformFontSkia::InitDefaultFont() {
     params = gfx::GetFontRenderParams(FontRenderParamsQuery(), nullptr);
   }
 
+  bool success = false;
   sk_sp<SkTypeface> typeface =
       CreateSkTypeface(style & Font::ITALIC, weight, &family, &success);
-  if (!success)
-    return false;
+
+  // It's possible that the Skia interface is not longer able to proxy queries
+  // to the browser process which make all requests to fail. Calling
+  // MakeDefault() will try to get the default typeface; in case of failure it
+  // returns an instance of SkEmptyTypeface. MakeDefault() should never fail.
+  // See https://crbug.com/1287371 for details.
+  if (!success) {
+    typeface = SkTypeface::MakeDefault();
+  }
+
+  // Ensure there is a typeface available. If none is available, there is
+  // nothing we can do about it and Chrome won't be able to work.
+  CHECK(typeface.get()) << "No typeface available";
+
   g_default_font.Get() = new PlatformFontSkia(
       std::move(typeface), family, size_pixels, style, weight, params);
-  return true;
 }
 
 // static
@@ -170,7 +233,12 @@ void PlatformFontSkia::SetDefaultFontDescription(
 Font PlatformFontSkia::DeriveFont(int size_delta,
                                   int style,
                                   Font::Weight weight) const {
+#if BUILDFLAG(IS_WIN)
+  const int new_size = win::AdjustFontSize(font_size_pixels_, size_delta);
+#else
   const int new_size = font_size_pixels_ + size_delta;
+#endif
+
   DCHECK_GT(new_size, 0);
 
   // If the style changed, we may need to load a new face.
@@ -228,7 +296,7 @@ const std::string& PlatformFontSkia::GetFontName() const {
   return font_family_;
 }
 
-std::string PlatformFontSkia::GetActualFontNameForTesting() const {
+std::string PlatformFontSkia::GetActualFontName() const {
   SkString family_name;
   typeface_->getFamilyName(&family_name);
   return family_name.c_str();
@@ -252,6 +320,11 @@ const FontRenderParams& PlatformFontSkia::GetFontRenderParams() {
     device_scale_factor_ = current_scale_factor;
   }
   return font_render_params_;
+}
+
+sk_sp<SkTypeface> PlatformFontSkia::GetNativeSkTypeface() const {
+  DCHECK(typeface_);
+  return sk_sp<SkTypeface>(typeface_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -285,9 +358,7 @@ void PlatformFontSkia::InitFromDetails(sk_sp<SkTypeface> typeface,
                                           &font_family_, &success);
 
   if (!success) {
-    LOG(ERROR) << "Could not find any font: " << font_family << ", "
-               << kFallbackFontFamilyName << ". Falling back to the default";
-
+    EnsuresDefaultFontIsInitialized();
     InitFromPlatformFont(g_default_font.Get().get());
     return;
   }
@@ -342,8 +413,20 @@ void PlatformFontSkia::ComputeMetricsIfNecessary() {
     SkFontMetrics metrics;
     font.getMetrics(&metrics);
     ascent_pixels_ = SkScalarCeilToInt(-metrics.fAscent);
-    height_pixels_ = ascent_pixels_ + SkScalarCeilToInt(metrics.fDescent);
     cap_height_pixels_ = SkScalarCeilToInt(metrics.fCapHeight);
+
+    // There is a mismatch between the way the PlatformFontWin was computing the
+    // font height in pixel. The font height may vary by one pixel due to
+    // decimal rounding.
+    //     Windows Skia implements : ceil(descent - ascent)
+    //     Linux Skia implements   : ceil(-ascent) + ceil(descent)
+    // TODO(etienneb): Make both implementation consistent and fix the broken
+    // unittests.
+#if BUILDFLAG(IS_WIN)
+    height_pixels_ = SkScalarCeilToInt(metrics.fDescent - metrics.fAscent);
+#else
+    height_pixels_ = ascent_pixels_ + SkScalarCeilToInt(metrics.fDescent);
+#endif
 
     if (metrics.fAvgCharWidth) {
       average_width_pixels_ = SkScalarToDouble(metrics.fAvgCharWidth);
@@ -377,7 +460,6 @@ void PlatformFontSkia::ComputeMetricsIfNecessary() {
 ////////////////////////////////////////////////////////////////////////////////
 // PlatformFont, public:
 
-#if !defined(OS_WIN)
 // static
 PlatformFont* PlatformFont::CreateDefault() {
   return new PlatformFontSkia;
@@ -389,6 +471,14 @@ PlatformFont* PlatformFont::CreateFromNameAndSize(const std::string& font_name,
   TRACE_EVENT0("fonts", "PlatformFont::CreateFromNameAndSize");
   return new PlatformFontSkia(font_name, font_size);
 }
-#endif  // !defined(OS_WIN)
+
+// static
+PlatformFont* PlatformFont::CreateFromSkTypeface(
+    sk_sp<SkTypeface> typeface,
+    int font_size_pixels,
+    const absl::optional<FontRenderParams>& params) {
+  TRACE_EVENT0("fonts", "PlatformFont::CreateFromSkTypeface");
+  return new PlatformFontSkia(typeface, font_size_pixels, params);
+}
 
 }  // namespace gfx

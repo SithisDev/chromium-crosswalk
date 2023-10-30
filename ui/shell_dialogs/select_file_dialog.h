@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/shell_dialogs/base_shell_dialog.h"
 #include "ui/shell_dialogs/shell_dialogs_export.h"
@@ -92,7 +90,7 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
     virtual void FileSelectionCanceled(void* params) {}
 
    protected:
-    virtual ~Listener() {}
+    virtual ~Listener() = default;
   };
 
   // Sets the factory that creates SelectFileDialog objects, overriding default
@@ -115,6 +113,9 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
       Listener* listener,
       std::unique_ptr<SelectFilePolicy> policy);
 
+  SelectFileDialog(const SelectFileDialog&) = delete;
+  SelectFileDialog& operator=(const SelectFileDialog&) = delete;
+
   // Holds information about allowed extensions on a file save dialog.
   struct SHELL_DIALOGS_EXPORT FileTypeInfo {
     FileTypeInfo();
@@ -132,22 +133,34 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
     // Overrides the system descriptions of the specified extensions. Entries
     // correspond to |extensions|; if left blank the system descriptions will
     // be used.
-    std::vector<base::string16> extension_description_overrides;
+    std::vector<std::u16string> extension_description_overrides;
 
     // Specifies whether there will be a filter added for all files (i.e. *.*).
-    bool include_all_files;
+    bool include_all_files = false;
 
-    // Specifies which type of paths the caller can handle. If it is
-    // NATIVE_PATH, the dialog creates a native replica of the non-native file
-    // and returns its path, so that the caller can use it without any
-    // difference than when it were local.
+    // Some implementations by default hide the extension of a file, in
+    // particular in a save file dialog. If this is set to true, where
+    // supported, the save file dialog will instead keep the file extension
+    // visible.
+    bool keep_extension_visible = false;
+
+    // Specifies which type of paths the caller can handle.
     enum AllowedPaths {
+      // Any type of path, whether on a local/native volume or a remote/virtual
+      // volume. Excludes files that can only be opened by URL; for those use
+      // ANY_PATH_OR_URL below.
       ANY_PATH,
+      // Set when the caller cannot handle virtual volumes (e.g. File System
+      // Provider [FSP] volumes like "File System for Dropbox"). When opening
+      // files, the dialog will create a native replica of the file and return
+      // its path. When saving files, the dialog will hide virtual volumes.
       NATIVE_PATH,
-      NATIVE_OR_DRIVE_PATH,
+      // Set when the caller can open files via URL. For example, when opening a
+      // .gdoc file from Google Drive the file is opened by navigating to a
+      // docs.google.com URL.
       ANY_PATH_OR_URL
     };
-    AllowedPaths allowed_paths;
+    AllowedPaths allowed_paths = NATIVE_PATH;
   };
 
   // Returns a file path with a base name at most 255 characters long. This
@@ -183,7 +196,7 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
   // NOTE: only one instance of any shell dialog can be shown per owning_window
   //       at a time (for obvious reasons).
   void SelectFile(Type type,
-                  const base::string16& title,
+                  const std::u16string& title,
                   const base::FilePath& default_path,
                   const FileTypeInfo* file_types,
                   int file_type_index,
@@ -205,7 +218,7 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
   // AllowFileSelectionDialogs-Policy.
   virtual void SelectFileImpl(
       Type type,
-      const base::string16& title,
+      const std::u16string& title,
       const base::FilePath& default_path,
       const FileTypeInfo* file_types,
       int file_type_index,
@@ -214,7 +227,7 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
       void* params) = 0;
 
   // The listener to be notified of selection completion.
-  Listener* listener_;
+  raw_ptr<Listener> listener_;
 
  private:
   // Tests if the file selection dialog can be displayed by
@@ -230,8 +243,6 @@ class SHELL_DIALOGS_EXPORT SelectFileDialog
   virtual bool HasMultipleFileTypeChoicesImpl() = 0;
 
   std::unique_ptr<SelectFilePolicy> select_file_policy_;
-
-  DISALLOW_COPY_AND_ASSIGN(SelectFileDialog);
 };
 
 SelectFileDialog* CreateSelectFileDialog(

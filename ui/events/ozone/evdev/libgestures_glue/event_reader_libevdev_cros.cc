@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <linux/input.h>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -43,8 +44,11 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(
                           devinfo.version()),
       has_keyboard_(devinfo.HasKeyboard()),
       has_mouse_(devinfo.HasMouse()),
+      has_pointing_stick_(devinfo.HasPointingStick()),
       has_touchpad_(devinfo.HasTouchpad()),
+      has_stylus_switch_(devinfo.HasSwEvent(SW_PEN_INSERTED)),
       has_caps_lock_led_(devinfo.HasLedEvent(LED_CAPSL)),
+      touch_count_(0),
       delegate_(std::move(delegate)) {
   // This class assumes it does not deal with internal keyboards.
   CHECK(!has_keyboard_ || type() != INPUT_DEVICE_INTERNAL);
@@ -62,7 +66,13 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(
 
   Event_Open(&evdev_);
 
+  haptic_touchpad_handler_ = HapticTouchpadHandler::Create(fd_, devinfo);
   delegate_->OnLibEvdevCrosOpen(&evdev_, &evstate_);
+  if (haptic_touchpad_handler_) {
+    delegate_->SetupHapticButtonGeneration(
+        base::BindRepeating(&HapticTouchpadHandler::OnGestureClick,
+                            base::Unretained(haptic_touchpad_handler_.get())));
+  }
 }
 
 EventReaderLibevdevCros::~EventReaderLibevdevCros() {
@@ -94,12 +104,53 @@ bool EventReaderLibevdevCros::HasMouse() const {
   return has_mouse_;
 }
 
+bool EventReaderLibevdevCros::HasPointingStick() const {
+  return has_pointing_stick_;
+}
+
 bool EventReaderLibevdevCros::HasTouchpad() const {
   return has_touchpad_;
 }
 
+bool EventReaderLibevdevCros::HasHapticTouchpad() const {
+  return haptic_touchpad_handler_ != nullptr;
+}
+
+bool EventReaderLibevdevCros::CanHandleHapticFeedback() {
+  return haptic_touchpad_handler_ && haptic_feedback_enabled_ &&
+         touch_count_ > 0;
+}
+
+void EventReaderLibevdevCros::PlayHapticTouchpadEffect(
+    HapticTouchpadEffect effect,
+    HapticTouchpadEffectStrength strength) {
+  if (CanHandleHapticFeedback())
+    haptic_touchpad_handler_->PlayEffect(effect, strength);
+}
+
+void EventReaderLibevdevCros::SetHapticTouchpadEffectForNextButtonRelease(
+    HapticTouchpadEffect effect,
+    HapticTouchpadEffectStrength strength) {
+  if (CanHandleHapticFeedback())
+    haptic_touchpad_handler_->SetEffectForNextButtonRelease(effect, strength);
+}
+
+void EventReaderLibevdevCros::ApplyDeviceSettings(
+    const InputDeviceSettingsEvdev& settings) {
+  if (haptic_touchpad_handler_) {
+    haptic_touchpad_handler_->SetClickStrength(
+        static_cast<HapticTouchpadEffectStrength>(
+            settings.touchpad_haptic_click_sensitivity));
+  }
+  haptic_feedback_enabled_ = settings.touchpad_haptic_feedback_enabled;
+}
+
 bool EventReaderLibevdevCros::HasCapsLockLed() const {
   return has_caps_lock_led_;
+}
+
+bool EventReaderLibevdevCros::HasStylusSwitch() const {
+  return has_stylus_switch_;
 }
 
 void EventReaderLibevdevCros::OnDisabled() {
@@ -114,6 +165,7 @@ void EventReaderLibevdevCros::OnSynReport(void* data,
   if (!reader->IsEnabled())
     return;
 
+  reader->touch_count_ = Event_Get_Touch_Count(&reader->evdev_);
   reader->delegate_->OnLibEvdevCrosEvent(&reader->evdev_, evstate, *tv);
 }
 

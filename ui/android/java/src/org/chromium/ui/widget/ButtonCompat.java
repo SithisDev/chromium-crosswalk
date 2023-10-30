@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,13 @@ import android.animation.StateListAnimator;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.TypedArray;
-import android.os.Build;
-import android.support.annotation.StyleRes;
-import android.support.v7.widget.AppCompatButton;
 import android.util.AttributeSet;
 import android.view.ContextThemeWrapper;
+
+import androidx.annotation.ColorRes;
+import androidx.annotation.StyleRes;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.appcompat.widget.AppCompatButton;
 
 import org.chromium.ui.R;
 
@@ -63,18 +65,52 @@ public class ButtonCompat extends AppCompatButton {
 
         TypedArray a = getContext().obtainStyledAttributes(
                 attrs, R.styleable.ButtonCompat, android.R.attr.buttonStyle, 0);
-        int buttonColorId =
-                a.getResourceId(R.styleable.ButtonCompat_buttonColor, R.color.blue_when_enabled);
+        int buttonColorId = a.getResourceId(
+                R.styleable.ButtonCompat_buttonColor, R.color.blue_when_enabled_list);
         int rippleColorId = a.getResourceId(
                 R.styleable.ButtonCompat_rippleColor, R.color.filled_button_ripple_color);
+        int borderColorId =
+                a.getResourceId(R.styleable.ButtonCompat_borderColor, android.R.color.transparent);
+        int borderWidthId = a.getResourceId(R.styleable.ButtonCompat_borderWidth,
+                R.dimen.default_ripple_background_border_size);
         boolean buttonRaised = a.getBoolean(R.styleable.ButtonCompat_buttonRaised, true);
         int verticalInset = a.getDimensionPixelSize(R.styleable.ButtonCompat_verticalInset,
                 getResources().getDimensionPixelSize(R.dimen.button_bg_vertical_inset));
-        a.recycle();
 
+        final int defaultRadius =
+                getResources().getDimensionPixelSize(R.dimen.button_compat_corner_radius);
+        final int topStartRippleRadius = a.getDimensionPixelSize(
+                R.styleable.ButtonCompat_rippleCornerRadiusTopStart, defaultRadius);
+        final int topEndRippleRadius = a.getDimensionPixelSize(
+                R.styleable.ButtonCompat_rippleCornerRadiusTopEnd, defaultRadius);
+        final int bottomStartRippleRadius = a.getDimensionPixelSize(
+                R.styleable.ButtonCompat_rippleCornerRadiusBottomStart, defaultRadius);
+        final int bottomEndRippleRadius = a.getDimensionPixelSize(
+                R.styleable.ButtonCompat_rippleCornerRadiusBottomEnd, defaultRadius);
+
+        // If this attribute is not set, the text will keep the color set by android:textAppearance.
+        // This would have been handled in #super().
+        final @ColorRes int textColorRes =
+                a.getResourceId(R.styleable.ButtonCompat_buttonTextColor, -1);
+
+        if (textColorRes != -1) {
+            setTextColor(AppCompatResources.getColorStateList(getContext(), textColorRes));
+        }
+
+        float[] radii;
+        if (getLayoutDirection() == LAYOUT_DIRECTION_RTL) {
+            radii = new float[] {topEndRippleRadius, topEndRippleRadius, topStartRippleRadius,
+                    topStartRippleRadius, bottomStartRippleRadius, bottomStartRippleRadius,
+                    bottomEndRippleRadius, bottomEndRippleRadius};
+        } else {
+            radii = new float[] {topStartRippleRadius, topStartRippleRadius, topEndRippleRadius,
+                    topEndRippleRadius, bottomEndRippleRadius, bottomEndRippleRadius,
+                    bottomStartRippleRadius, bottomStartRippleRadius};
+        }
+
+        a.recycle();
         mRippleBackgroundHelper = new RippleBackgroundHelper(this, buttonColorId, rippleColorId,
-                getResources().getDimensionPixelSize(R.dimen.button_compat_corner_radius),
-                verticalInset);
+                radii, borderColorId, borderWidthId, verticalInset);
         setRaised(buttonRaised);
     }
 
@@ -92,7 +128,6 @@ public class ButtonCompat extends AppCompatButton {
     */
     private void setRaised(boolean raised) {
         // All buttons are flat on pre-L devices.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
 
         if (raised) {
             // Use the StateListAnimator from the Widget.Material.Button style to animate the
@@ -115,14 +150,6 @@ public class ButtonCompat extends AppCompatButton {
         } else {
             setElevation(0f);
             setStateListAnimator(null);
-        }
-    }
-
-    @Override
-    protected void drawableStateChanged() {
-        super.drawableStateChanged();
-        if (mRippleBackgroundHelper != null) {
-            mRippleBackgroundHelper.onDrawableStateChanged();
         }
     }
 }

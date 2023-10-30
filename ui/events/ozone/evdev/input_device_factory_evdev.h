@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,29 +11,37 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/compiler_specific.h"
+#include "base/component_export.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task_runner.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "ui/events/devices/haptic_touchpad_effects.h"
 #include "ui/events/ozone/evdev/event_converter_evdev.h"
 #include "ui/events/ozone/evdev/event_device_info.h"
-#include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
+#include "ui/events/ozone/evdev/input_device_opener.h"
 #include "ui/events/ozone/evdev/input_device_settings_evdev.h"
+#include "ui/events/ozone/evdev/keyboard_imposter_checker_evdev.h"
+#include "ui/events/ozone/evdev/touch_evdev_types.h"
+#include "ui/events/ozone/evdev/touch_filter/shared_palm_detection_filter_state.h"
 #include "ui/ozone/public/input_controller.h"
 
 #if defined(USE_EVDEV_GESTURES)
-#include "ui/events/ozone/chromeos/gesture_properties_service.h"
+#include "ui/events/ozone/evdev/libgestures_glue/gesture_properties_service.h"
 #endif
 
 namespace ui {
 
 class CursorDelegateEvdev;
 class DeviceEventDispatcherEvdev;
+struct InProgressStylusState;
+struct InProgressTouchEvdev;
 
 #if !defined(USE_EVDEV)
-#error Missing dependency on ui/events/ozone:events_ozone_evdev
+#error Missing dependency on ui/events/ozone/evdev
 #endif
 
 #if defined(USE_EVDEV_GESTURES)
@@ -41,11 +49,16 @@ class GesturePropertyProvider;
 #endif
 
 // Manager for event device objects. All device I/O starts here.
-class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
+class COMPONENT_EXPORT(EVDEV) InputDeviceFactoryEvdev {
  public:
   InputDeviceFactoryEvdev(
       std::unique_ptr<DeviceEventDispatcherEvdev> dispatcher,
-      CursorDelegateEvdev* cursor);
+      CursorDelegateEvdev* cursor,
+      std::unique_ptr<InputDeviceOpener> input_device_opener);
+
+  InputDeviceFactoryEvdev(const InputDeviceFactoryEvdev&) = delete;
+  InputDeviceFactoryEvdev& operator=(const InputDeviceFactoryEvdev&) = delete;
+
   ~InputDeviceFactoryEvdev();
 
   // Open & start reading a newly plugged-in input device.
@@ -60,6 +73,19 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   // LED state.
   void SetCapsLockLed(bool enabled);
 
+  void GetStylusSwitchState(InputController::GetStylusSwitchStateReply reply);
+
+  // Handle gamepad force feedback effects.
+  void PlayVibrationEffect(int id, uint8_t amplitude, uint16_t duration_millis);
+  void StopVibration(int id);
+
+  // Handle haptic touchpad effects.
+  void PlayHapticTouchpadEffect(HapticTouchpadEffect effect,
+                                HapticTouchpadEffectStrength strength);
+  void SetHapticTouchpadEffectForNextButtonRelease(
+      HapticTouchpadEffect effect,
+      HapticTouchpadEffectStrength strength);
+
   // Bits from InputController that have to be answered on IO.
   void UpdateInputDeviceSettings(const InputDeviceSettingsEvdev& settings);
   void GetTouchDeviceStatus(InputController::GetTouchDeviceStatusReply reply);
@@ -67,7 +93,7 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
                         InputController::GetTouchEventLogReply reply);
 
   void GetGesturePropertiesService(
-      ozone::mojom::GesturePropertiesServiceRequest request);
+      mojo::PendingReceiver<ozone::mojom::GesturePropertiesService> receiver);
 
   base::WeakPtr<InputDeviceFactoryEvdev> GetWeakPtr();
 
@@ -80,6 +106,7 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
 
   // Sync input_device_settings_ to attached devices.
   void ApplyInputDeviceSettings();
+  void ApplyRelativePointingDeviceSettings(EventDeviceType type);
   void ApplyCapsLockLed();
 
   // Policy for device enablement.
@@ -95,6 +122,10 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   void NotifyGamepadDevicesUpdated();
   void NotifyUncategorizedDevicesUpdated();
 
+  // Method used as callback to update keyboard list when a valid key press is
+  // received.
+  void UpdateKeyboardDevicesOnKeyPress(const EventConverterEvdev* converter);
+
   void SetIntPropertyForOneType(const EventDeviceType type,
                                 const std::string& name,
                                 int value);
@@ -104,11 +135,20 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   void EnablePalmSuppression(bool enabled);
   void EnableDevices();
 
+  void SetLatestStylusState(const InProgressTouchEvdev& event,
+                            const int32_t x_res,
+                            const int32_t y_res,
+                            const base::TimeTicks& timestamp);
+  void GetLatestStylusState(const InProgressStylusState** stylus_state) const;
+
   // Task runner for our thread.
-  scoped_refptr<base::TaskRunner> task_runner_;
+  const scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // Cursor movement.
-  CursorDelegateEvdev* cursor_;
+  const raw_ptr<CursorDelegateEvdev> cursor_;
+
+  // Shared Palm state.
+  const std::unique_ptr<SharedPalmDetectionFilterState> shared_palm_state_;
 
 #if defined(USE_EVDEV_GESTURES)
   // Gesture library property provider (used by touchpads/mice).
@@ -117,7 +157,7 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
 #endif
 
   // Dispatcher for events.
-  std::unique_ptr<DeviceEventDispatcherEvdev> dispatcher_;
+  const std::unique_ptr<DeviceEventDispatcherEvdev> dispatcher_;
 
   // Number of pending device additions & device classes.
   int pending_device_changes_ = 0;
@@ -143,14 +183,23 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   // Device settings. These primarily affect libgestures behavior.
   InputDeviceSettingsEvdev input_device_settings_;
 
+  // Checks if a device identifying as a keyboard is another device
+  // mis-identifying as one.
+  const std::unique_ptr<KeyboardImposterCheckerEvdev>
+      keyboard_imposter_checker_;
+
   // Owned per-device event converters (by path).
   // NB: This should be destroyed early, before any shared state.
   std::map<base::FilePath, std::unique_ptr<EventConverterEvdev>> converters_;
 
-  // Support weak pointers for attach & detach callbacks.
-  base::WeakPtrFactory<InputDeviceFactoryEvdev> weak_ptr_factory_;
+  // The latest stylus state, updated every time a stylus report comes.
+  InProgressStylusState latest_stylus_state_;
 
-  DISALLOW_COPY_AND_ASSIGN(InputDeviceFactoryEvdev);
+  // Handles ioctl calls and creation of event converters.
+  const std::unique_ptr<InputDeviceOpener> input_device_opener_;
+
+  // Support weak pointers for attach & detach callbacks.
+  base::WeakPtrFactory<InputDeviceFactoryEvdev> weak_ptr_factory_{this};
 };
 
 }  // namespace ui

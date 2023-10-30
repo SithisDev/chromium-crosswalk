@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,22 +30,33 @@ void DrmWindowProxy::SchedulePageFlip(
     std::vector<DrmOverlayPlane> planes,
     SwapCompletionOnceCallback submission_callback,
     PresentationOnceCallback presentation_callback) {
+  base::OnceClosure task = base::BindOnce(
+      &DrmThread::SchedulePageFlip, base::Unretained(drm_thread_), widget_,
+      std::move(planes), CreateSafeOnceCallback(std::move(submission_callback)),
+      CreateSafeOnceCallback(std::move(presentation_callback)));
   drm_thread_->task_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(&DrmThread::SchedulePageFlip,
-                     base::Unretained(drm_thread_), widget_, std::move(planes),
-                     CreateSafeOnceCallback(std::move(submission_callback)),
-                     CreateSafeOnceCallback(std::move(presentation_callback))));
+      base::BindOnce(&DrmThread::RunTaskAfterDeviceReady,
+                     base::Unretained(drm_thread_), std::move(task), nullptr));
 }
 
 bool DrmWindowProxy::SupportsGpuFences() const {
   bool is_atomic = false;
-  PostSyncTask(
-      drm_thread_->task_runner(),
+  base::OnceClosure task =
       base::BindOnce(&DrmThread::IsDeviceAtomic, base::Unretained(drm_thread_),
-                     widget_, &is_atomic));
+                     widget_, &is_atomic);
+  PostSyncTask(drm_thread_->task_runner(),
+               base::BindOnce(&DrmThread::RunTaskAfterDeviceReady,
+                              base::Unretained(drm_thread_), std::move(task)));
   return is_atomic && !base::CommandLine::ForCurrentProcess()->HasSwitch(
                           switches::kDisableExplicitDmaFences);
+}
+
+void DrmWindowProxy::SetColorSpace(const gfx::ColorSpace& color_space) const {
+  drm_thread_->task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DrmThread::SetColorSpace, base::Unretained(drm_thread_),
+                     widget_, color_space));
 }
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread.h"
-#include "ui/ozone/public/interfaces/device_cursor.mojom.h"
+#include "ui/ozone/platform/drm/mojom/device_cursor.mojom.h"
+#include "ui/ozone/public/hardware_capabilities.h"
 #include "ui/ozone/public/overlay_surface_candidate.h"
 
 namespace ui {
@@ -25,23 +26,23 @@ class InterThreadMessagingProxy;
 // proxy objects then deal with safely posting the messages to the DRM thread.
 class DrmThreadProxy {
  public:
-  using OverlayCapabilitiesCallback =
-      base::OnceCallback<void(gfx::AcceleratedWidget,
-                              const std::vector<OverlaySurfaceCandidate>&,
-                              const std::vector<OverlayStatus>&)>;
-
   DrmThreadProxy();
+
+  DrmThreadProxy(const DrmThreadProxy&) = delete;
+  DrmThreadProxy& operator=(const DrmThreadProxy&) = delete;
+
   ~DrmThreadProxy();
 
   void BindThreadIntoMessagingProxy(InterThreadMessagingProxy* messaging_proxy);
 
-  void StartDrmThread(base::OnceClosure binding_drainer);
+  void StartDrmThread(base::OnceClosure receiver_drainer);
 
   std::unique_ptr<DrmWindowProxy> CreateDrmWindowProxy(
       gfx::AcceleratedWidget widget);
 
   void CreateBuffer(gfx::AcceleratedWidget widget,
                     const gfx::Size& size,
+                    const gfx::Size& framebuffer_size,
                     gfx::BufferFormat format,
                     gfx::BufferUsage usage,
                     uint32_t flags,
@@ -66,9 +67,9 @@ class DrmThreadProxy {
                               scoped_refptr<DrmFramebuffer>* framebuffer);
 
   // Sets a callback that will be notified when display configuration may have
-  // changed to clear the overlay configuration cache. |callback| will be run on
-  // origin thread.
-  void SetClearOverlayCacheCallback(base::RepeatingClosure reset_callback);
+  // changed, so we should update state for managing overlays.
+  // |callback| will be run on origin thread.
+  void SetDisplaysConfiguredCallback(base::RepeatingClosure callback);
 
   // Checks if overlay |candidates| can be displayed asynchronously and then
   // runs |callback|. Testing the overlay configuration requires posting a task
@@ -76,14 +77,25 @@ class DrmThreadProxy {
   void CheckOverlayCapabilities(
       gfx::AcceleratedWidget widget,
       const std::vector<OverlaySurfaceCandidate>& candidates,
-      OverlayCapabilitiesCallback callback);
+      DrmThread::OverlayCapabilitiesCallback callback);
 
-  void AddBindingDrmDevice(ozone::mojom::DrmDeviceRequest request);
+  // Similar to CheckOverlayCapabilities() but returns the result synchronously.
+  std::vector<OverlayStatus> CheckOverlayCapabilitiesSync(
+      gfx::AcceleratedWidget widget,
+      const std::vector<OverlaySurfaceCandidate>& candidates);
+
+  void GetHardwareCapabilities(
+      gfx::AcceleratedWidget widget,
+      const HardwareCapabilitiesCallback& receive_callback);
+
+  void AddDrmDeviceReceiver(
+      mojo::PendingReceiver<ozone::mojom::DrmDevice> receiver);
+
+  bool WaitUntilDrmThreadStarted();
+  scoped_refptr<base::SingleThreadTaskRunner> GetDrmThreadTaskRunner();
 
  private:
   DrmThread drm_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(DrmThreadProxy);
 };
 
 }  // namespace ui

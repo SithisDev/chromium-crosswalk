@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,25 +8,22 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/platform/drm/common/display_types.h"
 #include "ui/ozone/platform/drm/host/drm_cursor.h"
 #include "ui/ozone/platform/drm/host/gpu_thread_adapter.h"
+#include "ui/ozone/platform/drm/mojom/device_cursor.mojom.h"
+#include "ui/ozone/platform/drm/mojom/drm_device.mojom.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
-#include "ui/ozone/public/interfaces/device_cursor.mojom.h"
-#include "ui/ozone/public/interfaces/drm_device.mojom.h"
-
-namespace display {
-class DisplaySnapshot;
-}
 
 namespace ui {
 class DrmDisplayHostManager;
-class DrmOverlayManagerHost;
 class GpuThreadObserver;
 class DrmDeviceConnector;
 class HostCursorProxy;
@@ -38,16 +35,13 @@ class HostDrmDevice : public base::RefCountedThreadSafe<HostDrmDevice>,
  public:
   explicit HostDrmDevice(DrmCursor* cursor);
 
-  // Blocks until the DRM service has come up. Use this entry point only when
-  // supporting launch of the service where the ozone UI and GPU
-  // reponsibilities are performed by the same underlying thread.
-  void BlockingStartDrmDevice();
+  HostDrmDevice(const HostDrmDevice&) = delete;
+  HostDrmDevice& operator=(const HostDrmDevice&) = delete;
 
-  void ProvideManagers(DrmDisplayHostManager* display_manager,
-                       DrmOverlayManagerHost* overlay_manager);
+  void SetDisplayManager(DrmDisplayHostManager* display_manager);
 
   void OnGpuServiceLaunched(
-      ui::ozone::mojom::DrmDevicePtrInfo drm_device_ptr_info);
+      mojo::PendingRemote<ui::ozone::mojom::DrmDevice> drm_device);
 
   // Invoked by DrmDeviceConnector on loss of GPU service.
   void OnGpuServiceLost();
@@ -65,35 +59,36 @@ class HostDrmDevice : public base::RefCountedThreadSafe<HostDrmDevice>,
   bool GpuTakeDisplayControl() override;
   bool GpuRefreshNativeDisplays() override;
   bool GpuRelinquishDisplayControl() override;
-  bool GpuAddGraphicsDevice(const base::FilePath& path,
+  void GpuAddGraphicsDevice(const base::FilePath& path,
                             base::ScopedFD fd) override;
   bool GpuRemoveGraphicsDevice(const base::FilePath& path) override;
-
-  // Services needed for DrmOverlayManagerHost.
-  void RegisterHandlerForDrmOverlayManager(
-      DrmOverlayManagerHost* handler) override;
-  void UnRegisterHandlerForDrmOverlayManager() override;
-  bool GpuCheckOverlayCapabilities(
-      gfx::AcceleratedWidget widget,
-      const OverlaySurfaceCandidateList& new_params) override;
+  void GpuShouldDisplayEventTriggerConfiguration(
+      const EventPropertyMap& event_props) override;
 
   // Services needed by DrmDisplayHost
-  bool GpuConfigureNativeDisplay(int64_t display_id,
-                                 const ui::DisplayMode_Params& display_mode,
-                                 const gfx::Point& point) override;
-  bool GpuDisableNativeDisplay(int64_t display_id) override;
+  void GpuConfigureNativeDisplays(
+      const std::vector<display::DisplayConfigurationParams>& config_requests,
+      display::ConfigureCallback callback,
+      uint32_t modeset_flag) override;
   bool GpuGetHDCPState(int64_t display_id) override;
-  bool GpuSetHDCPState(int64_t display_id, display::HDCPState state) override;
+  bool GpuSetHDCPState(
+      int64_t display_id,
+      display::HDCPState state,
+      display::ContentProtectionMethod protection_method) override;
   bool GpuSetColorMatrix(int64_t display_id,
                          const std::vector<float>& color_matrix) override;
   bool GpuSetGammaCorrection(
       int64_t display_id,
       const std::vector<display::GammaRampRGBEntry>& degamma_lut,
       const std::vector<display::GammaRampRGBEntry>& gamma_lut) override;
+  void GpuSetPrivacyScreen(int64_t display_id,
+                           bool enabled,
+                           display::SetPrivacyScreenCallback callback) override;
 
   // Services needed by DrmWindowHost
   bool GpuDestroyWindow(gfx::AcceleratedWidget widget) override;
-  bool GpuCreateWindow(gfx::AcceleratedWidget widget) override;
+  bool GpuCreateWindow(gfx::AcceleratedWidget widget,
+                       const gfx::Rect& initial_bounds) override;
   bool GpuWindowBoundsChanged(gfx::AcceleratedWidget widget,
                               const gfx::Rect& bounds) override;
 
@@ -103,56 +98,32 @@ class HostDrmDevice : public base::RefCountedThreadSafe<HostDrmDevice>,
 
   void HostOnGpuServiceLaunched();
 
-  // BindInterface arranges for the drm_device_ptr to be wired up.
-  void BindInterfaceDrmDevice(
-      ui::ozone::mojom::DrmDevicePtr* drm_device_ptr) const;
-
-  // BindInterface arranges for the cursor_ptr to be wired up.
-  void BindInterfaceDeviceCursor(
-      ui::ozone::mojom::DeviceCursorPtr* cursor_ptr) const;
-
   void OnDrmServiceStarted();
 
-  // TODO(rjkroege): Get rid of the need for this method in a subsequent CL.
-  void PollForSingleThreadReady(int previous_delay);
-
-  void RunObservers();
-
-  void GpuCheckOverlayCapabilitiesCallback(
-      gfx::AcceleratedWidget widget,
-      const OverlaySurfaceCandidateList& overlays,
-      const OverlayStatusList& returns) const;
-
-  void GpuConfigureNativeDisplayCallback(int64_t display_id,
-                                         bool success) const;
-
-  void GpuRefreshNativeDisplaysCallback(
-      std::vector<std::unique_ptr<display::DisplaySnapshot>> displays) const;
-  void GpuDisableNativeDisplayCallback(int64_t display_id, bool success) const;
+  void GpuRefreshNativeDisplaysCallback(MovableDisplaySnapshots displays) const;
   void GpuTakeDisplayControlCallback(bool success) const;
   void GpuRelinquishDisplayControlCallback(bool success) const;
-  void GpuGetHDCPStateCallback(int64_t display_id,
-                               bool success,
-                               display::HDCPState state) const;
+  void GpuShouldDisplayEventTriggerConfigurationCallback(
+      bool should_trigger) const;
+  void GpuGetHDCPStateCallback(
+      int64_t display_id,
+      bool success,
+      display::HDCPState state,
+      display::ContentProtectionMethod protection_method) const;
   void GpuSetHDCPStateCallback(int64_t display_id, bool success) const;
 
   // Mojo implementation of the DrmDevice. Will be bound on the "main" thread.
-  ui::ozone::mojom::DrmDevicePtr drm_device_ptr_;
+  mojo::Remote<ui::ozone::mojom::DrmDevice> drm_device_;
 
   DrmDisplayHostManager* display_manager_;  // Not owned.
-  DrmOverlayManagerHost* overlay_manager_;  // Not owned.
   DrmCursor* const cursor_;                 // Not owned.
 
   std::unique_ptr<HostCursorProxy> cursor_proxy_;
 
-  THREAD_CHECKER(on_io_thread_);  // Needs to be rebound as is allocated on the
-                                  // UI thread.
   THREAD_CHECKER(on_ui_thread_);
 
   bool connected_ = false;
   base::ObserverList<GpuThreadObserver>::Unchecked gpu_thread_observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(HostDrmDevice);
 };
 
 }  // namespace ui

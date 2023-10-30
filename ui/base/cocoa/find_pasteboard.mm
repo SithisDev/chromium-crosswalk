@@ -1,10 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright 2009 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ui/base/cocoa/find_pasteboard.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/sys_string_conversions.h"
 
 NSString* kFindPasteboardChangedNotification =
@@ -22,7 +22,7 @@ NSString* kFindPasteboardChangedNotification =
 
 - (instancetype)init {
   if ((self = [super init])) {
-    findText_.reset([[NSString alloc] init]);
+    _findText.reset([[NSString alloc] init]);
 
     // Check if the text in the findboard has changed on app activate.
     [[NSNotificationCenter defaultCenter]
@@ -42,7 +42,7 @@ NSString* kFindPasteboardChangedNotification =
 }
 
 - (NSPasteboard*)findPboard {
-  return [NSPasteboard pasteboardWithName:NSFindPboard];
+  return [NSPasteboard pasteboardWithName:NSPasteboardNameFind];
 }
 
 - (void)loadTextFromPasteboard:(NSNotification*)notification {
@@ -52,7 +52,7 @@ NSString* kFindPasteboardChangedNotification =
 }
 
 - (NSString*)findText {
-  return findText_;
+  return _findText;
 }
 
 - (void)setFindText:(NSString*)newText {
@@ -62,12 +62,12 @@ NSString* kFindPasteboardChangedNotification =
 
   DCHECK([NSThread isMainThread]);
 
-  BOOL needToSendNotification = ![findText_.get() isEqualToString:newText];
+  BOOL needToSendNotification = ![_findText.get() isEqualToString:newText];
   if (needToSendNotification) {
-    findText_.reset([newText copy]);
+    _findText.reset([newText copy]);
     NSPasteboard* findPboard = [self findPboard];
     [findPboard declareTypes:@[ NSStringPboardType ] owner:nil];
-    [findPboard setString:findText_.get() forType:NSStringPboardType];
+    [findPboard setString:_findText.get() forType:NSStringPboardType];
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kFindPasteboardChangedNotification
                       object:self];
@@ -75,7 +75,3 @@ NSString* kFindPasteboardChangedNotification =
 }
 
 @end
-
-base::string16 GetFindPboardText() {
-  return base::SysNSStringToUTF16([[FindPasteboard sharedInstance] findText]);
-}

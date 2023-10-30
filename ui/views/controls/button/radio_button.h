@@ -1,14 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_BUTTON_RADIO_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_RADIO_BUTTON_H_
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/focus_ring.h"
+#include "ui/views/metadata/view_factory.h"
 
 namespace views {
 
@@ -18,14 +19,21 @@ class VIEWS_EXPORT RadioButton : public Checkbox {
  public:
   METADATA_HEADER(RadioButton);
 
-  RadioButton(const base::string16& label, int group_id);
+  explicit RadioButton(const std::u16string& label = std::u16string(),
+                       int group_id = 0);
+
+  RadioButton(const RadioButton&) = delete;
+  RadioButton& operator=(const RadioButton&) = delete;
+
   ~RadioButton() override;
 
   // Overridden from View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   View* GetSelectedViewForGroup(int group) override;
+  bool HandleAccessibleAction(const ui::AXActionData& action_data) override;
   bool IsGroupFocusTraversable() const override;
   void OnFocus() override;
+  void OnThemeChanged() override;
 
   // Overridden from Button:
   void RequestFocusFromEvent() override;
@@ -42,9 +50,15 @@ class VIEWS_EXPORT RadioButton : public Checkbox {
  private:
   void GetViewsInGroupFromParent(int group, Views* views);
 
-  DISALLOW_COPY_AND_ASSIGN(RadioButton);
+  bool select_on_focus_ = true;
 };
 
+BEGIN_VIEW_BUILDER(VIEWS_EXPORT, RadioButton, Checkbox)
+VIEW_BUILDER_PROPERTY(bool, Checked)
+END_VIEW_BUILDER
+
 }  // namespace views
+
+DEFINE_VIEW_BUILDER(VIEWS_EXPORT, RadioButton)
 
 #endif  // UI_VIEWS_CONTROLS_BUTTON_RADIO_BUTTON_H_

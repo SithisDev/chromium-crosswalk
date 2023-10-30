@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,15 +14,16 @@ namespace {
 class DefaultFocusManagerFactory : public FocusManagerFactory {
  public:
   DefaultFocusManagerFactory() = default;
+
+  DefaultFocusManagerFactory(const DefaultFocusManagerFactory&) = delete;
+  DefaultFocusManagerFactory& operator=(const DefaultFocusManagerFactory&) =
+      delete;
   ~DefaultFocusManagerFactory() override = default;
 
  protected:
   std::unique_ptr<FocusManager> CreateFocusManager(Widget* widget) override {
     return std::make_unique<FocusManager>(widget, nullptr /* delegate */);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DefaultFocusManagerFactory);
 };
 
 FocusManagerFactory* g_focus_manager_factory = nullptr;

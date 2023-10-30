@@ -1,13 +1,14 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
-jumbo_component("compositor") {
+component("compositor") {
   sources = [
+    "animation_throughput_reporter.cc",
+    "animation_throughput_reporter.h",
     "callback_layer_animation_observer.cc",
     "callback_layer_animation_observer.h",
     "canvas_painter.cc",
@@ -18,6 +19,7 @@ jumbo_component("compositor") {
     "closure_animation_observer.h",
     "compositor.cc",
     "compositor.h",
+    "compositor_animation_observer.cc",
     "compositor_animation_observer.h",
     "compositor_export.h",
     "compositor_lock.cc",
@@ -27,9 +29,6 @@ jumbo_component("compositor") {
     "compositor_switches.h",
     "debug_utils.cc",
     "debug_utils.h",
-    "dip_util.cc",
-    "dip_util.h",
-    "external_begin_frame_client.h",
     "float_animation_curve_adapter.cc",
     "float_animation_curve_adapter.h",
     "layer.cc",
@@ -63,40 +62,50 @@ jumbo_component("compositor") {
     "paint_context.h",
     "paint_recorder.cc",
     "paint_recorder.h",
+    "presentation_time_recorder.cc",
+    "presentation_time_recorder.h",
     "property_change_reason.h",
-    "recyclable_compositor_mac.cc",
-    "recyclable_compositor_mac.h",
-    "reflector.cc",
-    "reflector.h",
     "scoped_animation_duration_scale_mode.cc",
     "scoped_animation_duration_scale_mode.h",
     "scoped_layer_animation_settings.cc",
     "scoped_layer_animation_settings.h",
+    "throughput_tracker.cc",
+    "throughput_tracker.h",
+    "throughput_tracker_host.h",
+    "total_animation_throughput_reporter.cc",
+    "total_animation_throughput_reporter.h",
     "transform_animation_curve_adapter.cc",
     "transform_animation_curve_adapter.h",
     "transform_recorder.cc",
     "transform_recorder.h",
   ]
 
+  if (is_mac) {
+    sources += [
+      "recyclable_compositor_mac.cc",
+      "recyclable_compositor_mac.h",
+    ]
+  }
+
   defines = [ "COMPOSITOR_IMPLEMENTATION" ]
 
-  public_deps = [
-    "//cc",
-  ]
+  public_deps = [ "//cc" ]
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//build:chromeos_buildflags",
     "//cc/animation",
     "//cc/paint",
     "//components/viz/host",
-    "//components/viz/service",
     "//gpu/command_buffer/common",
+    "//services/viz/privileged/mojom/compositing",
     "//skia",
     "//ui/base",
     "//ui/display",
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/animation",
+    "//ui/gfx/animation/keyframe",
     "//ui/gfx/geometry",
     "//ui/gl",
   ]
@@ -112,9 +121,13 @@ jumbo_component("compositor") {
   }
 }
 
-jumbo_static_library("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
+    "test/animation_throughput_reporter_test_base.cc",
+    "test/animation_throughput_reporter_test_base.h",
+    "test/direct_layer_tree_frame_sink.cc",
+    "test/direct_layer_tree_frame_sink.h",
     "test/draw_waiter_for_test.cc",
     "test/draw_waiter_for_test.h",
     "test/fake_context_factory.cc",
@@ -125,15 +138,14 @@ jumbo_static_library("test_support") {
     "test/in_process_context_provider.h",
     "test/layer_animation_observer_test_api.cc",
     "test/layer_animation_observer_test_api.h",
+    "test/layer_animation_stopped_waiter.cc",
+    "test/layer_animation_stopped_waiter.h",
     "test/layer_animator_test_controller.cc",
     "test/layer_animator_test_controller.h",
     "test/multi_layer_animator_test_controller.cc",
     "test/multi_layer_animator_test_controller.h",
     "test/multi_layer_animator_test_controller_delegate.h",
     "test/test_compositor_host.h",
-    "test/test_compositor_host_android.cc",
-    "test/test_compositor_host_mac.mm",
-    "test/test_compositor_host_win.cc",
     "test/test_context_factories.cc",
     "test/test_context_factories.h",
     "test/test_layer_animation_delegate.cc",
@@ -146,13 +158,26 @@ jumbo_static_library("test_support") {
     "test/test_suite.h",
     "test/test_utils.cc",
     "test/test_utils.h",
+    "test/throughput_report_checker.cc",
+    "test/throughput_report_checker.h",
   ]
 
-  public_deps = [
-    ":compositor",
-  ]
+  if (is_android) {
+    sources += [ "test/test_compositor_host_android.cc" ]
+  }
+
+  if (is_mac) {
+    sources += [ "test/test_compositor_host_mac.mm" ]
+  }
+
+  if (is_win) {
+    sources += [ "test/test_compositor_host_win.cc" ]
+  }
+
+  public_deps = [ ":compositor" ]
   deps = [
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
     "//cc",
     "//cc:test_support",
     "//components/viz/host",
@@ -172,14 +197,6 @@ jumbo_static_library("test_support") {
     "//ui/gl:test_support",
   ]
 
-  if (use_x11) {
-    configs += [ "//build/config/linux:x11" ]
-    deps += [
-      "//ui/events/x",
-      "//ui/gfx/x",
-    ]
-  }
-
   if (is_mac) {
     deps += [
       "//gpu/ipc/service:service",
@@ -188,19 +205,23 @@ jumbo_static_library("test_support") {
   }
 
   if (use_ozone) {
-    sources += [ "test/test_compositor_host_ozone.cc" ]
+    sources += [
+      "test/test_compositor_host_ozone.cc",
+      "test/test_compositor_host_ozone.h",
+    ]
 
     deps += [
       "//ui/ozone",
       "//ui/platform_window",
     ]
-  } else if (use_x11) {
-    sources += [ "test/test_compositor_host_x11.cc" ]
   }
 }
 
 test("compositor_unittests") {
+  use_xvfb = use_xvfb_in_this_config
+
   sources = [
+    "animation_throughput_reporter_unittest.cc",
     "callback_layer_animation_observer_unittest.cc",
     "canvas_painter_unittest.cc",
     "compositor_lock_unittest.cc",
@@ -210,23 +231,24 @@ test("compositor_unittests") {
     "layer_animator_unittest.cc",
     "layer_owner_unittest.cc",
     "layer_unittest.cc",
+    "presentation_time_recorder_unittest.cc",
     "run_all_unittests.cc",
+    "throughput_tracker_unittest.cc",
+    "total_animation_throughput_reporter_unittest.cc",
     "transform_animation_curve_adapter_unittest.cc",
   ]
 
-  data = [
-    "//ui/gfx/test/data/compositor/",
-  ]
+  data = [ "//ui/gfx/test/data/compositor/" ]
 
   deps = [
     ":compositor",
     ":test_support",
     "//base",
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
     "//cc",
     "//cc:test_support",
     "//components/viz/common",
-    "//components/viz/service",
     "//components/viz/test:test_support",
     "//mojo/core/embedder",
     "//skia",
@@ -234,12 +256,28 @@ test("compositor_unittests") {
     "//testing/gtest",
     "//ui/base",
     "//ui/gfx",
+    "//ui/gfx:test_support",
     "//ui/gfx/geometry",
     "//ui/gl",
     "//ui/resources",
   ]
 
-  if (is_linux) {
+  data_deps = [ "//testing/buildbot/filters:compositor_unittests_filters" ]
+
+  if (is_linux || is_chromeos) {
     deps += [ "//third_party/mesa_headers" ]
+  }
+
+  if (is_fuchsia) {
+    use_cfv1 = false
+
+    # TODO(https://crbug.com/1185811): Investigate removing the requirement for
+    # job_policy_ambient_mark_vmo_exec for the sake of V8's allocator in tests.
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+      "//build/config/fuchsia/test/present_view.shard.test-cml",
+      "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
+    ]
   }
 }

@@ -1,19 +1,24 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/platform_window/win/win_window.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <memory>
+#include <string>
 
-#include "base/strings/string16.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
+#include "base/strings/string_util_win.h"
+#include "ui/base/cursor/platform_cursor.h"
+#include "ui/base/win/shell.h"
+#include "ui/base/win/win_cursor.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/win/msg_util.h"
-#include "ui/platform_window/platform_window_delegate.h"
-
-#include <windows.h>
 
 namespace ui {
 
@@ -21,7 +26,8 @@ namespace {
 
 bool use_popup_as_root_window_for_test = false;
 
-gfx::Rect GetWindowBoundsForClientBounds(DWORD style, DWORD ex_style,
+gfx::Rect GetWindowBoundsForClientBounds(DWORD style,
+                                         DWORD ex_style,
                                          const gfx::Rect& bounds) {
   RECT wr;
   wr.left = bounds.x();
@@ -32,8 +38,8 @@ gfx::Rect GetWindowBoundsForClientBounds(DWORD style, DWORD ex_style,
 
   // Make sure to keep the window onscreen, as AdjustWindowRectEx() may have
   // moved part of it offscreen.
-  gfx::Rect window_bounds(wr.left, wr.top,
-                          wr.right - wr.left, wr.bottom - wr.top);
+  gfx::Rect window_bounds(wr.left, wr.top, wr.right - wr.left,
+                          wr.bottom - wr.top);
   window_bounds.set_x(std::max(0, window_bounds.x()));
   window_bounds.set_y(std::max(0, window_bounds.y()));
   return window_bounds;
@@ -55,16 +61,15 @@ WinWindow::WinWindow(PlatformWindowDelegate* delegate, const gfx::Rect& bounds)
   SetWindowText(hwnd(), L"WinWindow");
 }
 
-WinWindow::~WinWindow() {
-}
+WinWindow::~WinWindow() {}
 
 void WinWindow::Destroy() {
   if (IsWindow(hwnd()))
     DestroyWindow(hwnd());
 }
 
-void WinWindow::Show() {
-  ShowWindow(hwnd(), SW_SHOWNORMAL);
+void WinWindow::Show(bool inactive) {
+  ShowWindow(hwnd(), inactive ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL);
 }
 
 void WinWindow::Hide() {
@@ -75,12 +80,16 @@ void WinWindow::Close() {
   Destroy();
 }
 
+bool WinWindow::IsVisible() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return true;
+}
+
 void WinWindow::PrepareForShutdown() {}
 
-void WinWindow::SetBounds(const gfx::Rect& bounds) {
+void WinWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
   gfx::Rect window_bounds = GetWindowBoundsForClientBounds(
-      GetWindowLong(hwnd(), GWL_STYLE),
-      GetWindowLong(hwnd(), GWL_EXSTYLE),
+      GetWindowLong(hwnd(), GWL_STYLE), GetWindowLong(hwnd(), GWL_EXSTYLE),
       bounds);
   unsigned int flags = SWP_NOREPOSITION;
   if (!::IsWindowVisible(hwnd()))
@@ -89,14 +98,24 @@ void WinWindow::SetBounds(const gfx::Rect& bounds) {
                window_bounds.width(), window_bounds.height(), flags);
 }
 
-gfx::Rect WinWindow::GetBounds() {
+gfx::Rect WinWindow::GetBoundsInPixels() const {
   RECT cr;
   GetClientRect(hwnd(), &cr);
   return gfx::Rect(cr);
 }
 
-void WinWindow::SetTitle(const base::string16& title) {
-  SetWindowText(hwnd(), title.c_str());
+void WinWindow::SetBoundsInDIP(const gfx::Rect& bounds) {
+  // SetBounds should not be used on Windows tests.
+  NOTREACHED();
+}
+gfx::Rect WinWindow::GetBoundsInDIP() const {
+  // GetBounds should not be used on Windows tests.
+  NOTREACHED();
+  return GetBoundsInPixels();
+}
+
+void WinWindow::SetTitle(const std::u16string& title) {
+  SetWindowText(hwnd(), base::as_wcstr(title));
 }
 
 void WinWindow::SetCapture() {
@@ -133,27 +152,110 @@ void WinWindow::Deactivate() {
   NOTIMPLEMENTED_LOG_ONCE();
 }
 
-void WinWindow::SetCursor(PlatformCursor cursor) {
-  ::SetCursor(cursor);
+void WinWindow::SetUseNativeFrame(bool use_native_frame) {}
+
+bool WinWindow::ShouldUseNativeFrame() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+void WinWindow::SetCursor(scoped_refptr<PlatformCursor> platform_cursor) {
+  DCHECK(platform_cursor);
+
+  auto cursor = WinCursor::FromPlatformCursor(platform_cursor);
+  ::SetCursor(cursor->hcursor());
+
+  // The new cursor needs to be stored last to avoid deleting the old cursor
+  // while it's still in use.
+  cursor_ = cursor;
 }
 
 void WinWindow::MoveCursorTo(const gfx::Point& location) {
   ::SetCursorPos(location.x(), location.y());
 }
 
-void WinWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {
-}
+void WinWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {}
 
-void WinWindow::SetRestoredBoundsInPixels(const gfx::Rect& bounds) {}
+void WinWindow::SetRestoredBoundsInDIP(const gfx::Rect& bounds) {}
 
-gfx::Rect WinWindow::GetRestoredBoundsInPixels() const {
+gfx::Rect WinWindow::GetRestoredBoundsInDIP() const {
   return gfx::Rect();
 }
 
+bool WinWindow::ShouldWindowContentsBeTransparent() const {
+  // The window contents need to be transparent when the titlebar area is drawn
+  // by the DWM rather than Chrome, so that area can show through.  This
+  // function does not describe the transparency of the whole window appearance,
+  // but merely of the content Chrome draws, so even when the system titlebars
+  // appear opaque (Win 8+), the content above them needs to be transparent, or
+  // they'll be covered by a black (undrawn) region.
+  return ui::win::IsAeroGlassEnabled() && !IsFullscreen();
+}
+
+void WinWindow::SetZOrderLevel(ZOrderLevel order) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+ZOrderLevel WinWindow::GetZOrderLevel() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return ZOrderLevel::kNormal;
+}
+
+void WinWindow::StackAbove(gfx::AcceleratedWidget widget) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::StackAtTop() {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::FlashFrame(bool flash_frame) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::SetVisibilityChangedAnimationsEnabled(bool enabled) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::SetShape(std::unique_ptr<ShapeRects> native_shape,
+                         const gfx::Transform& transform) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::SetAspectRatio(const gfx::SizeF& aspect_ratio) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::SetWindowIcons(const gfx::ImageSkia& window_icon,
+                               const gfx::ImageSkia& app_icon) {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+void WinWindow::SizeConstraintsChanged() {
+  NOTIMPLEMENTED_LOG_ONCE();
+}
+
+bool WinWindow::IsAnimatingClosed() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+bool WinWindow::IsTranslucentWindowOpacitySupported() const {
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
+}
+
+bool WinWindow::IsFullscreen() const {
+  return GetPlatformWindowState() == PlatformWindowState::kFullScreen;
+}
+
 LRESULT WinWindow::OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param) {
-  MSG msg = { hwnd(), message, w_param, l_param,
-              static_cast<DWORD>(GetMessageTime()),
-              { CR_GET_X_LPARAM(l_param), CR_GET_Y_LPARAM(l_param) } };
+  CHROME_MSG msg = {hwnd(),
+                    message,
+                    w_param,
+                    l_param,
+                    static_cast<DWORD>(GetMessageTime()),
+                    {CR_GET_X_LPARAM(l_param), CR_GET_Y_LPARAM(l_param)}};
   std::unique_ptr<Event> event = EventFromNative(msg);
   if (IsMouseEventFromTouch(message))
     event->set_flags(event->flags() | EF_FROM_TOUCH);
@@ -171,7 +273,7 @@ LRESULT WinWindow::OnCaptureChanged(UINT message,
 }
 
 LRESULT WinWindow::OnKeyEvent(UINT message, WPARAM w_param, LPARAM l_param) {
-  MSG msg = { hwnd(), message, w_param, l_param };
+  CHROME_MSG msg = {hwnd(), message, w_param, l_param};
   KeyEvent event(msg);
   delegate_->DispatchEvent(&event);
   SetMsgHandled(event.handled());
@@ -206,13 +308,10 @@ void WinWindow::OnPaint(HDC) {
 }
 
 void WinWindow::OnWindowPosChanged(WINDOWPOS* window_pos) {
-  if (!(window_pos->flags & SWP_NOSIZE) ||
-      !(window_pos->flags & SWP_NOMOVE)) {
+  if (!(window_pos->flags & SWP_NOSIZE) || !(window_pos->flags & SWP_NOMOVE)) {
     RECT cr;
     GetClientRect(hwnd(), &cr);
-    delegate_->OnBoundsChanged(
-        gfx::Rect(window_pos->x, window_pos->y,
-                  cr.right - cr.left, cr.bottom - cr.top));
+    delegate_->OnBoundsChanged({true});
   }
 }
 

@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
-#include "base/test/scoped_task_environment.h"
+
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/test/motion_event_test_utils.h"
 
@@ -13,8 +14,8 @@ class FilteredGestureProviderTest : public GestureProviderClient,
                                     public testing::Test {
  public:
   FilteredGestureProviderTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI) {}
   ~FilteredGestureProviderTest() override {}
 
   // GestureProviderClient implementation.
@@ -22,7 +23,7 @@ class FilteredGestureProviderTest : public GestureProviderClient,
   bool RequiresDoubleTapGestureEvents() const override { return false; }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 // Single touch drag test: After touch-start, the moved_beyond_slop_region bit
@@ -77,7 +78,7 @@ TEST_F(FilteredGestureProviderTest, TouchMovedBeyondSlopRegion_SingleTouch) {
   EXPECT_FALSE(result.moved_beyond_slop_region);
 
   // A fling should set the bit right away.
-  time += base::TimeDelta::FromMilliseconds(10);
+  time += base::Milliseconds(10);
   event.MovePoint(0, kSlopRegion * 50, 0);
   event.set_event_time(time);
   result = provider.OnTouchEvent(event);

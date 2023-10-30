@@ -1,23 +1,37 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/button/radio_button.h"
 
-#include "base/logging.h"
+#include "base/auto_reset.h"
+#include "base/check.h"
+#include "base/ranges/algorithm.h"
+#include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/native_theme/native_theme.h"
+#include "ui/views/controls/focus_ring.h"
 #include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/vector_icons.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
 
-RadioButton::RadioButton(const base::string16& label, int group_id)
-    : Checkbox(label, nullptr) {
+namespace {
+
+constexpr int kFocusRingRadius = 16;
+
+}  // namespace
+
+RadioButton::RadioButton(const std::u16string& label, int group_id)
+    : Checkbox(label) {
   SetGroup(group_id);
 }
 
@@ -39,6 +53,17 @@ View* RadioButton::GetSelectedViewForGroup(int group) {
   return (i == views.cend()) ? nullptr : *i;
 }
 
+bool RadioButton::HandleAccessibleAction(const ui::AXActionData& action_data) {
+  if (action_data.action == ax::mojom::Action::kFocus) {
+    if (IsAccessibilityFocusable()) {
+      base::AutoReset<bool> reset(&select_on_focus_, false);
+      RequestFocus();
+      return true;
+    }
+  }
+  return Checkbox::HandleAccessibleAction(action_data);
+}
+
 bool RadioButton::IsGroupFocusTraversable() const {
   // When focusing a radio button with tab/shift+tab, only the selected button
   // from the group should be focused.
@@ -47,7 +72,13 @@ bool RadioButton::IsGroupFocusTraversable() const {
 
 void RadioButton::OnFocus() {
   Checkbox::OnFocus();
-  SetChecked(true);
+  if (select_on_focus_)
+    SetChecked(true);
+}
+
+void RadioButton::OnThemeChanged() {
+  Checkbox::OnThemeChanged();
+  SchedulePaint();
 }
 
 void RadioButton::RequestFocusFromEvent() {
@@ -55,8 +86,7 @@ void RadioButton::RequestFocusFromEvent() {
   // Take focus only if another radio button in the group has focus.
   Views views;
   GetViewsInGroupFromParent(GetGroup(), &views);
-  if (std::any_of(views.begin(), views.end(),
-                  [](View* v) { return v->HasFocus(); }))
+  if (base::ranges::any_of(views, [](View* v) { return v->HasFocus(); }))
     RequestFocus();
 }
 
@@ -98,7 +128,8 @@ const gfx::VectorIcon& RadioButton::GetVectorIcon() const {
 
 SkPath RadioButton::GetFocusRingPath() const {
   SkPath path;
-  path.addOval(gfx::RectToSkRect(image()->GetMirroredBounds()));
+  const gfx::Point center = image()->GetMirroredBounds().CenterPoint();
+  path.addCircle(center.x(), center.y(), kFocusRingRadius);
   return path;
 }
 
@@ -107,8 +138,7 @@ void RadioButton::GetViewsInGroupFromParent(int group, Views* views) {
     parent()->GetViewsInGroup(group, views);
 }
 
-BEGIN_METADATA(RadioButton)
-METADATA_PARENT_CLASS(Checkbox)
-END_METADATA()
+BEGIN_METADATA(RadioButton, Checkbox)
+END_METADATA
 
 }  // namespace views

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,27 +10,26 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "ui/display/types/display_configuration_params.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/display/types/display_types_export.h"
 #include "ui/display/types/fake_display_controller.h"
 
-namespace gfx {
-class Point;
-}
-
 namespace display {
-class DisplayMode;
 class DisplaySnapshot;
 class NativeDisplayObserver;
 
 struct GammaRampRGBEntry;
+struct DisplayConfigurationParams;
 
 using GetDisplaysCallback =
     base::OnceCallback<void(const std::vector<DisplaySnapshot*>&)>;
 using ConfigureCallback = base::OnceCallback<void(bool)>;
-using GetHDCPStateCallback = base::OnceCallback<void(bool, HDCPState)>;
+using GetHDCPStateCallback =
+    base::OnceCallback<void(bool, HDCPState, ContentProtectionMethod)>;
 using SetHDCPStateCallback = base::OnceCallback<void(bool)>;
 using DisplayControlCallback = base::OnceCallback<void(bool)>;
+using SetPrivacyScreenCallback = base::OnceCallback<void(bool)>;
 
 // Interface for classes that perform display configuration actions on behalf
 // of DisplayConfigurator.
@@ -54,14 +53,14 @@ class DISPLAY_TYPES_EXPORT NativeDisplayDelegate {
   // Note the query operation may be expensive and take over 60 milliseconds.
   virtual void GetDisplays(GetDisplaysCallback callback) = 0;
 
-  // Configures the display represented by |output| to use |mode| and positions
-  // the display to |origin| in the framebuffer. |mode| can be NULL, which
-  // represents disabling the display. The callback will return the status of
-  // the operation.
-  virtual void Configure(const DisplaySnapshot& output,
-                         const DisplayMode* mode,
-                         const gfx::Point& origin,
-                         ConfigureCallback callback) = 0;
+  // Configures the displays represented by |config_requests| to use |mode| and
+  // positions the display to |origin| in the framebuffer. The callback will
+  // return the status of the operation. Adjusts the behavior of the commit
+  // according to |modeset_flag| (see display::ModesetFlag).
+  virtual void Configure(
+      const std::vector<display::DisplayConfigurationParams>& config_requests,
+      ConfigureCallback callback,
+      uint32_t modeset_flag) = 0;
 
   // Gets HDCP state of output.
   virtual void GetHDCPState(const DisplaySnapshot& output,
@@ -70,6 +69,7 @@ class DISPLAY_TYPES_EXPORT NativeDisplayDelegate {
   // Sets HDCP state of output.
   virtual void SetHDCPState(const DisplaySnapshot& output,
                             HDCPState state,
+                            ContentProtectionMethod protection_method,
                             SetHDCPStateCallback callback) = 0;
 
   // Sets the given 3x3 |color_matrix| on the display with |display_id|.
@@ -85,6 +85,11 @@ class DISPLAY_TYPES_EXPORT NativeDisplayDelegate {
       int64_t display_id,
       const std::vector<GammaRampRGBEntry>& degamma_lut,
       const std::vector<GammaRampRGBEntry>& gamma_lut) = 0;
+
+  // Sets the privacy screen state on the display with |display_id|.
+  virtual void SetPrivacyScreen(int64_t display_id,
+                                bool enabled,
+                                SetPrivacyScreenCallback callback) = 0;
 
   virtual void AddObserver(NativeDisplayObserver* observer) = 0;
 

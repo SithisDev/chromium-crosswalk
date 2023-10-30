@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -112,6 +112,12 @@ class GFX_EXPORT ImageSkiaOperations {
   // Creates an image by combining |image| and color |color|.
   // The image must use the kARGB_8888_Config config.
   static ImageSkia CreateColorMask(const gfx::ImageSkia& image, SkColor color);
+
+  // Creates an image with a circle background. |color| and |radius| is the
+  // color and radius of the circle background.
+  static ImageSkia CreateImageWithCircleBackground(int radius,
+                                                   SkColor color,
+                                                   const ImageSkia& image);
 
  private:
   ImageSkiaOperations();  // Class for scoping only.

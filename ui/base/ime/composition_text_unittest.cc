@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,18 +12,18 @@
 namespace ui {
 
 TEST(CompositionTextTest, CopyTest) {
-  const base::string16 kSampleText = base::UTF8ToUTF16("Sample Text");
-  const ImeTextSpan kSampleUnderline1(ImeTextSpan::Type::kComposition, 10, 20,
-                                      ImeTextSpan::Thickness::kThin,
-                                      SK_ColorTRANSPARENT);
+  const std::u16string kSampleText = u"Sample Text";
+  const ImeTextSpan kSampleUnderline1(
+      ImeTextSpan::Type::kComposition, 10, 20, ImeTextSpan::Thickness::kThin,
+      ImeTextSpan::UnderlineStyle::kSolid, SK_ColorTRANSPARENT);
 
-  const ImeTextSpan kSampleUnderline2(ImeTextSpan::Type::kComposition, 11, 21,
-                                      ImeTextSpan::Thickness::kThick,
-                                      SK_ColorTRANSPARENT);
+  const ImeTextSpan kSampleUnderline2(
+      ImeTextSpan::Type::kComposition, 11, 21, ImeTextSpan::Thickness::kThick,
+      ImeTextSpan::UnderlineStyle::kSolid, SK_ColorTRANSPARENT);
 
-  ImeTextSpan kSampleUnderline3(ImeTextSpan::Type::kComposition, 12, 22,
-                                ImeTextSpan::Thickness::kThin,
-                                SK_ColorTRANSPARENT);
+  ImeTextSpan kSampleUnderline3(
+      ImeTextSpan::Type::kComposition, 12, 22, ImeTextSpan::Thickness::kThin,
+      ImeTextSpan::UnderlineStyle::kSolid, SK_ColorTRANSPARENT);
   kSampleUnderline3.underline_color = SK_ColorRED;
 
   // Make CompositionText

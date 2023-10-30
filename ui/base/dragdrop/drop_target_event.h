@@ -1,11 +1,11 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_DRAGDROP_DROP_TARGET_EVENT_H_
 #define UI_BASE_DRAGDROP_DROP_TARGET_EVENT_H_
 
-#include "base/macros.h"
+#include "base/component_export.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/events/event.h"
 
@@ -13,7 +13,7 @@ namespace ui {
 
 // Note: This object must not outlive the OSExchangeData used to construct it,
 // as it stores that by reference.
-class UI_BASE_EXPORT DropTargetEvent : public LocatedEvent {
+class COMPONENT_EXPORT(UI_BASE) DropTargetEvent : public LocatedEvent {
  public:
   DropTargetEvent(const OSExchangeData& data,
                   const gfx::PointF& location,
@@ -23,6 +23,9 @@ class UI_BASE_EXPORT DropTargetEvent : public LocatedEvent {
 
   const OSExchangeData& data() const { return data_; }
   int source_operations() const { return source_operations_; }
+
+  // Event:
+  std::unique_ptr<Event> Clone() const override;
 
  private:
   // Data associated with the drag/drop session.
@@ -35,4 +38,3 @@ class UI_BASE_EXPORT DropTargetEvent : public LocatedEvent {
 }  // namespace ui
 
 #endif  // UI_BASE_DRAGDROP_DROP_TARGET_EVENT_H_
-

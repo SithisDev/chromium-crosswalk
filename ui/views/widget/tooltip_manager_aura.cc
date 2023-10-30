@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/widget/tooltip_manager_aura.h"
 
-#include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
@@ -101,7 +100,7 @@ void TooltipManagerAura::UpdateTooltip() {
   }
 }
 
-void TooltipManagerAura::TooltipTextChanged(View* view)  {
+void TooltipManagerAura::TooltipTextChanged(View* view) {
   aura::Window* root_window = GetWindow()->GetRootWindow();
   if (wm::GetTooltipClient(root_window)) {
     gfx::Point view_point =

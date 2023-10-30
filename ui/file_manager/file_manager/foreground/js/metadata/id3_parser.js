@@ -1,17 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-importScripts(
-    'chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/js/metadata/function_sequence.js');
-importScripts(
-    'chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/js/metadata/function_parallel.js');
+import {MetadataParserLogger} from '../../../externs/metadata_worker_window.js';
+
+import {ByteReader} from './byte_reader.js';
+import {FunctionParallel} from './function_parallel.js';
+import {FunctionSequence} from './function_sequence.js';
+import {MetadataParser} from './metadata_parser.js';
+
 
 /**
  * ID3 parser.
  * @final
  */
-class Id3Parser extends MetadataParser {
+export class Id3Parser extends MetadataParser {
   /**
    * @param {!MetadataParserLogger} parent A metadata dispatcher.
    */
@@ -283,7 +286,7 @@ class Id3Parser extends MetadataParser {
               }
             }
             this.nextStep();
-          }
+          },
         ],
         this, () => {}, error => {});
 
@@ -366,7 +369,7 @@ class Id3Parser extends MetadataParser {
                   id3v2[key].value.trim().length > 0) {
                 metadata.description.push({
                   key: Id3Parser.v2.MAPPERS[key],
-                  value: id3v2[key].value.trim()
+                  value: id3v2[key].value.trim(),
                 });
               }
             }
@@ -394,7 +397,7 @@ class Id3Parser extends MetadataParser {
                   Id3Parser.METADATA_ORDER.indexOf(b.key);
             });
             this.nextStep();
-          }
+          },
         ],
         this, () => {}, error => {});
 
@@ -440,7 +443,7 @@ Id3Parser.METADATA_ORDER = [
   'ID3_OFFICIAL_AUDIO_FILE_WEBPAGE',
   'ID3_OFFICIAL_ARTIST',
   'ID3_OFFICIAL_AUDIO_SOURCE_WEBPAGE',
-  'ID3_PUBLISHERS_OFFICIAL_WEBPAGE'
+  'ID3_PUBLISHERS_OFFICIAL_WEBPAGE',
 ];
 
 
@@ -603,8 +606,8 @@ Id3Parser.v1 = {
     'Thrash Metal',
     'Anime',
     'Jpop',
-    'Synthpop'
-  ]
+    'Synthpop',
+  ],
 };
 
 /**
@@ -649,7 +652,7 @@ Id3Parser.v2 = {
      * @const
      * @type {number}
      */
-    UTF_8: 3
+    UTF_8: 3,
   },
   HANDLERS: {
     // User defined text information frame
@@ -667,7 +670,7 @@ Id3Parser.v2 = {
     PIC: Id3Parser.prototype.readPIC_,
 
     // User attached image
-    APIC: Id3Parser.prototype.readAPIC_
+    APIC: Id3Parser.prototype.readAPIC_,
   },
   MAPPERS: {
     TALB: 'ID3_ALBUM',
@@ -689,6 +692,6 @@ Id3Parser.v2 = {
     WOAF: 'ID3_OFFICIAL_AUDIO_FILE_WEBPAGE',
     WOAR: 'ID3_OFFICIAL_ARTIST',
     WOAS: 'ID3_OFFICIAL_AUDIO_SOURCE_WEBPAGE',
-    WPUB: 'ID3_PUBLISHERS_OFFICIAL_WEBPAGE'
-  }
+    WPUB: 'ID3_PUBLISHERS_OFFICIAL_WEBPAGE',
+  },
 };

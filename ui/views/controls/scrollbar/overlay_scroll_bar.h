@@ -1,11 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_OVERLAY_SCROLL_BAR_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_OVERLAY_SCROLL_BAR_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/timer/timer.h"
 #include "ui/views/controls/scrollbar/base_scroll_bar_thumb.h"
 #include "ui/views/controls/scrollbar/scroll_bar.h"
@@ -18,25 +18,28 @@ class VIEWS_EXPORT OverlayScrollBar : public ScrollBar {
   METADATA_HEADER(OverlayScrollBar);
 
   explicit OverlayScrollBar(bool horizontal);
+
+  OverlayScrollBar(const OverlayScrollBar&) = delete;
+  OverlayScrollBar& operator=(const OverlayScrollBar&) = delete;
+
   ~OverlayScrollBar() override;
 
- protected:
-  // ScrollBar overrides:
-  gfx::Rect GetTrackBounds() const override;
-
-  // ScrollBar overrides:
-  int GetThickness() const override;
-  bool OverlapsContent() const override;
-
-  // View overrides:
-  void Layout() override;
+  // ScrollBar:
+  gfx::Insets GetInsets() const override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
+  bool OverlapsContent() const override;
+  gfx::Rect GetTrackBounds() const override;
+  int GetThickness() const override;
 
  private:
   class Thumb : public BaseScrollBarThumb {
    public:
     explicit Thumb(OverlayScrollBar* scroll_bar);
+
+    Thumb(const Thumb&) = delete;
+    Thumb& operator=(const Thumb&) = delete;
+
     ~Thumb() override;
 
     void Init();
@@ -49,9 +52,7 @@ class VIEWS_EXPORT OverlayScrollBar : public ScrollBar {
     void OnStateChanged() override;
 
    private:
-    OverlayScrollBar* scroll_bar_;
-
-    DISALLOW_COPY_AND_ASSIGN(Thumb);
+    raw_ptr<OverlayScrollBar> scroll_bar_;
   };
   friend class Thumb;
 
@@ -63,8 +64,6 @@ class VIEWS_EXPORT OverlayScrollBar : public ScrollBar {
   void StartHideCountdown();
 
   base::OneShotTimer hide_timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverlayScrollBar);
 };
 
 }  // namespace views

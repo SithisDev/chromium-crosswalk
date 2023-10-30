@@ -1,12 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/accessibility/mojom/ax_assistant_structure_mojom_traits.h"
 
 #include "mojo/public/cpp/base/string16_mojom_traits.h"
-#include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
-#include "ui/gfx/range/mojo/range_struct_traits.h"
+#include "ui/gfx/geometry/mojom/geometry_mojom_traits.h"
+#include "ui/gfx/range/mojom/range_mojom_traits.h"
 
 namespace mojo {
 

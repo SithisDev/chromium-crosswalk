@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/cocoa/base_view.h"
 
+#include "base/check_op.h"
 #include "base/mac/mac_util.h"
 
 NSString* kViewDidBecomeFirstResponder =
@@ -32,63 +33,45 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
 }
 
 - (void)enableTracking {
-  if (trackingArea_.get())
+  if (_trackingArea.get())
     return;
 
   NSTrackingAreaOptions trackingOptions = NSTrackingMouseEnteredAndExited |
                                           NSTrackingMouseMoved |
                                           NSTrackingActiveAlways |
                                           NSTrackingInVisibleRect;
-  trackingArea_.reset([[CrTrackingArea alloc] initWithRect:NSZeroRect
+  _trackingArea.reset([[CrTrackingArea alloc] initWithRect:NSZeroRect
                                                    options:trackingOptions
                                                      owner:self
                                                   userInfo:nil]);
-  [self addTrackingArea:trackingArea_.get()];
+  [self addTrackingArea:_trackingArea.get()];
 }
 
 - (void)disableTracking {
-  if (trackingArea_.get()) {
-    [self removeTrackingArea:trackingArea_.get()];
-    trackingArea_.reset();
-  }
-}
-
-- (void)updateTrackingAreas {
-  [super updateTrackingAreas];
-
-  // NSTrackingInVisibleRect doesn't work correctly with Lion's window
-  // resizing (See https://crbug.com/176725 and
-  // http://openradar.appspot.com/radar?id=2773401). It also doesn't work
-  // correctly when the window enters fullscreen
-  // (See https://crbug.com/170058).
-  //
-  // Work around it by reinstalling the tracking area after the window resizes
-  // or enters fullscreen. This AppKit bug is fixed on High Sierra, so we only
-  // apply this workaround on 10.12 or earlier.
-  if (base::mac::IsAtMostOS10_12()) {
-    [self disableTracking];
-    [self enableTracking];
+  if (_trackingArea.get()) {
+    [self removeTrackingArea:_trackingArea.get()];
+    _trackingArea.reset();
   }
 }
 
 - (void)handleLeftMouseUp:(NSEvent*)theEvent {
-  DCHECK_EQ([theEvent type], NSLeftMouseUp);
-  dragging_ = NO;
-  if (!pendingExitEvent_)
+  DCHECK_EQ([theEvent type], NSEventTypeLeftMouseUp);
+  _dragging = NO;
+  if (!_pendingExitEvent)
     return;
 
   NSEvent* exitEvent =
-      [NSEvent enterExitEventWithType:NSMouseExited
+      [NSEvent enterExitEventWithType:NSEventTypeMouseExited
                              location:[theEvent locationInWindow]
                         modifierFlags:[theEvent modifierFlags]
                             timestamp:[theEvent timestamp]
                          windowNumber:[theEvent windowNumber]
-                              context:[theEvent context]
-                          eventNumber:[pendingExitEvent_ eventNumber]
-                       trackingNumber:[pendingExitEvent_ trackingNumber]
-                             userData:[pendingExitEvent_ userData]];
+                              context:nil
+                          eventNumber:[_pendingExitEvent eventNumber]
+                       trackingNumber:[_pendingExitEvent trackingNumber]
+                             userData:[_pendingExitEvent userData]];
   [self mouseEvent:exitEvent];
-  pendingExitEvent_.reset();
+  _pendingExitEvent.reset();
 }
 
 - (void)mouseEvent:(NSEvent*)theEvent {
@@ -111,7 +94,7 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
 }
 
 - (void)mouseDown:(NSEvent*)theEvent {
-  dragging_ = YES;
+  _dragging = YES;
   [self mouseEvent:theEvent];
 }
 
@@ -153,8 +136,8 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
 }
 
 - (void)mouseEntered:(NSEvent*)theEvent {
-  if (pendingExitEvent_) {
-    pendingExitEvent_.reset();
+  if (_pendingExitEvent) {
+    _pendingExitEvent.reset();
     return;
   }
 
@@ -165,8 +148,8 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
   // The tracking area will send an exit event even during a drag, which isn't
   // how the event flow for drags should work. This stores the exit event, and
   // sends it when the drag completes instead.
-  if (dragging_) {
-    pendingExitEvent_.reset([theEvent retain]);
+  if (_dragging) {
+    _pendingExitEvent.reset([theEvent retain]);
     return;
   }
 
@@ -185,7 +168,7 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
 
 - (void)pressureChangeWithEvent:(NSEvent*)theEvent {
   NSInteger newStage = [theEvent stage];
-  if (pressureEventStage_ == newStage)
+  if (_pressureEventStage == newStage)
     return;
 
   // Call the force touch event when the stage reaches 2, which is the value
@@ -193,7 +176,7 @@ NSString* kSelectionDirection = @"Chromium.kSelectionDirection";
   if (newStage == 2) {
     [self forceTouchEvent:theEvent];
   }
-  pressureEventStage_ = newStage;
+  _pressureEventStage = newStage;
 }
 
 - (void)flagsChanged:(NSEvent*)theEvent {

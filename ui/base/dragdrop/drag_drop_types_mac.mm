@@ -1,14 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/dragdrop/drag_drop_types.h"
 
-#import <Cocoa/Cocoa.h>
+#import <AppKit/AppKit.h>
 
 namespace ui {
 
-uint64_t ui::DragDropTypes::DragOperationToNSDragOperation(int drag_operation) {
+uint64_t DragDropTypes::DragOperationToNSDragOperation(int drag_operation) {
   NSUInteger ns_drag_operation = NSDragOperationNone;
 
   if (drag_operation & DRAG_LINK)
@@ -21,8 +21,7 @@ uint64_t ui::DragDropTypes::DragOperationToNSDragOperation(int drag_operation) {
   return ns_drag_operation;
 }
 
-int ui::DragDropTypes::NSDragOperationToDragOperation(
-    uint64_t ns_drag_operation) {
+int DragDropTypes::NSDragOperationToDragOperation(uint64_t ns_drag_operation) {
   NSUInteger drag_operation = DRAG_NONE;
 
   if (ns_drag_operation & NSDragOperationLink)

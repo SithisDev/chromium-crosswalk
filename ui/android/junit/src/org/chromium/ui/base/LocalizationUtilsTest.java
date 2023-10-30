@@ -1,14 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.ui.base;
 
-import android.support.test.filters.SmallTest;
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -22,16 +22,6 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class LocalizationUtilsTest {
-    @Test
-    @SmallTest
-    public void testGetDefaultCompressedPakLocaleForLanguage() {
-        assertEquals("fr", LocalizationUtils.getDefaultCompressedPakLocaleForLanguage("fr"));
-        assertEquals("es", LocalizationUtils.getDefaultCompressedPakLocaleForLanguage("es"));
-        assertEquals("en-US", LocalizationUtils.getDefaultCompressedPakLocaleForLanguage("en"));
-        assertEquals("pt-PT", LocalizationUtils.getDefaultCompressedPakLocaleForLanguage("pt"));
-        assertEquals("zh-CN", LocalizationUtils.getDefaultCompressedPakLocaleForLanguage("zh"));
-    }
-
     @Test
     @SmallTest
     public void testGetSplitLanguageForAndroid() {

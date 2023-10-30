@@ -1,11 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/geometry/axis_transform2d.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/test/gfx_util.h"
+#include "ui/gfx/geometry/test/geometry_util.h"
 
 namespace gfx {
 namespace {
@@ -27,7 +27,7 @@ TEST(AxisTransform2dTest, Scaling) {
     AxisTransform2d t(1.25f, Vector2dF(3.75f, 55.f));
     EXPECT_EQ(AxisTransform2d(1.5625f, Vector2dF(3.75f, 55.f)),
               PreScaleAxisTransform2d(t, 1.25));
-    t.PreScale(1.25);
+    t.PreScale(Vector2dF(1.25f, 1.25f));
     EXPECT_EQ(AxisTransform2d(1.5625f, Vector2dF(3.75f, 55.f)), t);
   }
 
@@ -35,7 +35,7 @@ TEST(AxisTransform2dTest, Scaling) {
     AxisTransform2d t(1.25f, Vector2dF(3.75f, 55.f));
     EXPECT_EQ(AxisTransform2d(1.5625f, Vector2dF(4.6875f, 68.75f)),
               PostScaleAxisTransform2d(t, 1.25));
-    t.PostScale(1.25);
+    t.PostScale(Vector2dF(1.25f, 1.25f));
     EXPECT_EQ(AxisTransform2d(1.5625f, Vector2dF(4.6875f, 68.75f)), t);
   }
 }

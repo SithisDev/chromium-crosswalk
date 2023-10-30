@@ -1,27 +1,29 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/compositor/test/test_utils.h"
 
+#include "base/cancelable_callback.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/timer/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace ui {
 
-//TODO(avallee): Make this into a predicate and add some matrix pretty printing.
+// TODO(avallee): Use macros in ui/gfx/geometry/test/geometry_util.h.
 void CheckApproximatelyEqual(const gfx::Transform& lhs,
                              const gfx::Transform& rhs) {
   unsigned int errors = 0;
   for (int i = 0; i < 4; ++i) {
     for (int j = 0; j < 4; ++j) {
-      EXPECT_FLOAT_EQ(lhs.matrix().get(i, j), rhs.matrix().get(i, j))
-        << "(i, j) = (" << i << ", " << j << "), error count: " << ++errors;
+      EXPECT_FLOAT_EQ(lhs.rc(i, j), rhs.rc(i, j))
+          << "(i, j) = (" << i << ", " << j << "), error count: " << ++errors;
     }
   }
 
@@ -48,13 +50,28 @@ void CheckApproximatelyEqual(const gfx::RoundedCornersF& lhs,
   EXPECT_FLOAT_EQ(lhs.lower_right(), rhs.lower_right());
 }
 
-void WaitForNextFrameToBePresented(ui::Compositor* compositor) {
+bool WaitForNextFrameToBePresented(ui::Compositor* compositor,
+                                   absl::optional<base::TimeDelta> timeout) {
+  bool frames_presented = false;
   base::RunLoop runloop;
-  compositor->RequestPresentationTimeForNextFrame(base::BindLambdaForTesting(
-      [&runloop](const gfx::PresentationFeedback& feedback) {
-        runloop.Quit();
-      }));
+  base::CancelableOnceCallback<void(const gfx::PresentationFeedback&)>
+      cancelable_callback(base::BindLambdaForTesting(
+          [&](const gfx::PresentationFeedback& feedback) {
+            frames_presented = true;
+            runloop.Quit();
+          }));
+  compositor->RequestPresentationTimeForNextFrame(
+      cancelable_callback.callback());
+
+  absl::optional<base::OneShotTimer> timer;
+  if (timeout.has_value()) {
+    timer.emplace();
+    timer->Start(FROM_HERE, timeout.value(), runloop.QuitClosure());
+  }
+
   runloop.Run();
+
+  return frames_presented;
 }
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <wrl/client.h>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "ui/base/ime/ime_key_event_dispatcher.h"
 
 namespace ui {
 class TextInputClient;
@@ -28,6 +28,9 @@ class TextInputClient;
 // All methods in this class must be used in UI thread.
 class COMPONENT_EXPORT(UI_BASE_IME_WIN) TSFBridge {
  public:
+  TSFBridge(const TSFBridge&) = delete;
+  TSFBridge& operator=(const TSFBridge&) = delete;
+
   virtual ~TSFBridge();
 
   // Returns the thread local TSFBridge instance. Initialize() must be called
@@ -36,12 +39,16 @@ class COMPONENT_EXPORT(UI_BASE_IME_WIN) TSFBridge {
 
   // Sets the thread local instance. Must be called before any calls to
   // GetInstance().
-  static void Initialize();
+  static HRESULT Initialize();
 
-  // Injects an alternative TSFBridge such as MockTSFBridge for testing. The
-  // injected object should be released by the caller. This function returns
-  // previous TSFBridge pointer with ownership.
-  static TSFBridge* ReplaceForTesting(TSFBridge* bridge);
+  // Sets the thread local instance for testing only. Must be called before
+  // any calls to GetInstance().
+  static void InitializeForTesting();
+
+  // Sets the new instance of TSFBridge in the thread-local storage (such as
+  // MockTSFBridge for testing). This function replaces previous TSFBridge
+  // instance with the newInstance and also deletes the old instance.
+  static void ReplaceThreadLocalTSFBridge(TSFBridge* new_instance);
 
   // Destroys the thread local instance.
   static void Shutdown();
@@ -75,12 +82,12 @@ class COMPONENT_EXPORT(UI_BASE_IME_WIN) TSFBridge {
   // Caller must free |client|.
   virtual void RemoveFocusedClient(TextInputClient* client) = 0;
 
-  // Lets TSFTextstore see InputMethodDelegate instance when in focus.
-  virtual void SetInputMethodDelegate(
-      internal::InputMethodDelegate* delegate) = 0;
+  // Lets TSFTextstore see ImeKeyEventDispatcher instance when in focus.
+  virtual void SetImeKeyEventDispatcher(
+      ImeKeyEventDispatcher* ime_key_event_dispatcher) = 0;
 
-  // Remove InputMethodDelegate instance from TSFTextStore when not in focus.
-  virtual void RemoveInputMethodDelegate() = 0;
+  // Remove ImeKeyEventDispatcher instance from TSFTextStore when not in focus.
+  virtual void RemoveImeKeyEventDispatcher() = 0;
 
   // Returns whether the system's input language is CJK.
   virtual bool IsInputLanguageCJK() = 0;
@@ -94,9 +101,6 @@ class COMPONENT_EXPORT(UI_BASE_IME_WIN) TSFBridge {
  protected:
   // Uses GetInstance() instead.
   TSFBridge();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TSFBridge);
 };
 
 }  // namespace ui

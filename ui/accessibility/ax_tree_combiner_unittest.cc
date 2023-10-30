@@ -1,9 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_tree_combiner.h"
+
+#include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ui {
 
@@ -53,8 +55,7 @@ TEST(CombineAXTreesTest, EmbedChildTree) {
   parent_tree.nodes[1].role = ax::mojom::Role::kButton;
   parent_tree.nodes[2].id = 3;
   parent_tree.nodes[2].role = ax::mojom::Role::kIframe;
-  parent_tree.nodes[2].AddStringAttribute(
-      ax::mojom::StringAttribute::kChildTreeId, tree_id_2.ToString());
+  parent_tree.nodes[2].AddChildTreeId(tree_id_2);
 
   AXTreeUpdate child_tree;
   child_tree.root_id = 1;
@@ -115,7 +116,7 @@ TEST(CombineAXTreesTest, MapAllIdAttributes) {
                                 22);
   tree.nodes[0].AddIntAttribute(ax::mojom::IntAttribute::kActivedescendantId,
                                 22);
-  std::vector<int32_t> ids { 22 };
+  std::vector<AXNodeID> ids{22};
   tree.nodes[0].AddIntListAttribute(
       ax::mojom::IntListAttribute::kIndirectChildIds, ids);
   tree.nodes[0].AddIntListAttribute(ax::mojom::IntListAttribute::kControlsIds,
@@ -179,8 +180,7 @@ TEST(CombineAXTreesTest, FocusedTree) {
   parent_tree.nodes[1].role = ax::mojom::Role::kButton;
   parent_tree.nodes[2].id = 3;
   parent_tree.nodes[2].role = ax::mojom::Role::kIframe;
-  parent_tree.nodes[2].AddStringAttribute(
-      ax::mojom::StringAttribute::kChildTreeId, tree_id_2.ToString());
+  parent_tree.nodes[2].AddChildTreeId(tree_id_2);
 
   AXTreeUpdate child_tree;
   child_tree.has_tree_data = true;

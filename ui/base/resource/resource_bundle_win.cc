@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/resource/resource_bundle_win.h"
 
-#include "base/logging.h"
+#include <windows.h>
+
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "skia/ext/image_operations.h"
@@ -31,7 +32,7 @@ HINSTANCE GetCurrentResourceDLL() {
 
 void ResourceBundle::LoadCommonResources() {
   // As a convenience, add the current resource module as a data packs.
-  data_packs_.push_back(
+  resource_handles_.push_back(
       std::make_unique<ResourceDataDLL>(GetCurrentResourceDLL()));
 
   LoadChromeResources();
@@ -49,6 +50,10 @@ void SetResourcesDataDLL(HINSTANCE handle) {
 
 HICON LoadThemeIconFromResourcesDataDLL(int icon_id) {
   return ::LoadIcon(GetCurrentResourceDLL(), MAKEINTRESOURCE(icon_id));
+}
+
+HCURSOR LoadCursorFromResourcesDataDLL(const wchar_t* cursor_id) {
+  return ::LoadCursor(GetCurrentResourceDLL(), cursor_id);
 }
 
 }  // namespace ui;

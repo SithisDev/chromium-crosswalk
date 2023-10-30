@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <wtsapi32.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/win/windows_version.h"
 #include "ui/base/win/session_change_observer.h"
@@ -51,20 +50,22 @@ class SessionLockedObserver {
                                 base::Unretained(this))),
         screen_locked_(IsSessionLocked()) {}
 
+  SessionLockedObserver(const SessionLockedObserver&) = delete;
+  SessionLockedObserver& operator=(const SessionLockedObserver&) = delete;
+
   bool IsLocked() const { return screen_locked_; }
 
  private:
-  void OnSessionChange(WPARAM status_code) {
-    if (status_code == WTS_SESSION_LOCK)
-      screen_locked_ = true;
-    else if (status_code == WTS_SESSION_UNLOCK)
+  void OnSessionChange(WPARAM status_code, const bool* is_current_session) {
+    if (is_current_session && !*is_current_session)
+      return;
+    if (status_code == WTS_SESSION_UNLOCK)
       screen_locked_ = false;
+    else if (status_code == WTS_SESSION_LOCK && is_current_session)
+      screen_locked_ = true;
   }
-
   SessionChangeObserver session_change_observer_;
   bool screen_locked_;
-
-  DISALLOW_COPY_AND_ASSIGN(SessionLockedObserver);
 };
 
 }  // namespace

@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">Inhabilitar toda la animación de las imágenes.</translation>
 <translation id="1703735871906654364">Navegación por cursor de texto</translation>
 <translation id="1791496371305830581">Permitir todas las imágenes animadas.</translation>
+<translation id="1974060860693918893">Configuración avanzada</translation>
 <translation id="1996252509865389616">¿Quieres habilitar la extensión?</translation>
 <translation id="2079545284768500474">Deshacer</translation>
 <translation id="2179565792157161713">Abre la descripción larga en una pestaña nueva</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">Se han sustituido las imágenes por su texto alternativo.</translation>
 <translation id="4896660567607030658">Sin respuesta, solo se muestra el cursor.</translation>
 <translation id="4937901943818762779">Permitir imágenes animadas, pero solo una vez.</translation>
+<translation id="4949131196216960195">Pulsa &lt;span class='key'&gt;Search&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (la tecla para aumentar el brillo, o F7) para activar la navegación por cursor de texto. Para desactivarla, pulsa esta tecla de nuevo.</translation>
 <translation id="4954450790315188152">Cuando la navegación por cursor de texto está habilitada:</translation>
 <translation id="5041932793799765940">Ajuste del color</translation>
 <translation id="5094574508723441140">Contraste aumentado</translation>
@@ -49,7 +51,8 @@
 <translation id="6050189528197190982">Escala de grises</translation>
 <translation id="6170146920149900756">Potenciador del color</translation>
 <translation id="633394792577263429">Mantén pulsada la tecla &lt;span class='key'&gt;Control&lt;/span&gt; para desplazarte palabra a palabra.</translation>
-<translation id="6550675742724504774">Configuración</translation>
+<translation id="6550675742724504774">Opciones</translation>
+<translation id="6699630355767768222">Paso 3: Anulación del eje de color para la corrección.</translation>
 <translation id="6838518108677880446">Configuración:</translation>
 <translation id="690628312087070417">Cuando el cursor salta una gran distancia:</translation>
 <translation id="6965382102122355670">Aceptar</translation>
@@ -59,10 +62,10 @@
 <translation id="7658239707568436148">Cancelar</translation>
 <translation id="786423340267544509">Añadir borde a elementos con atributos aria-describedat o longdesc.</translation>
 <translation id="7942349550061667556">Rojo</translation>
-<translation id="8254860724243898966">Pulsa &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (la tecla para aumentar el brillo o F7) para volver a la navegación por cursor de texto. Vuelve a pulsar la tecla para desactivar esta opción.</translation>
 <translation id="8260673944985561857">Opciones de navegación por cursor de texto</translation>
 <translation id="8321034316479930120">Política de animación</translation>
 <translation id="8480209185614411573">Contraste alto</translation>
 <translation id="8609925175482059018">Pulsa &lt;span class='key'&gt;F7&lt;/span&gt; para activar la navegación por cursor de texto. Vuelve a pulsar la tecla para desactivarla.</translation>
+<translation id="8798099450830957504">Predeterminado</translation>
 <translation id="894241283505723656">Descripciones largas en el menú contextual</translation>
 </translationbundle>

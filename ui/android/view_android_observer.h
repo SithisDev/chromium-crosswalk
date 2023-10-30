@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,9 @@ class UI_ANDROID_EXPORT ViewAndroidObserver {
   // Notifies that view gets detached from window. Note that the notification
   // is not sent if view is already in detached state.
   virtual void OnDetachedFromWindow() = 0;
+
+  // Notifies the view has been destroyed.
+  virtual void OnViewAndroidDestroyed() {}
 
  protected:
   virtual ~ViewAndroidObserver() {}

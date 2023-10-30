@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/focus/external_focus_tracker.h"
 
-#include "base/logging.h"
+#include <memory>
+
+#include "base/check.h"
 #include "ui/views/view.h"
 #include "ui/views/view_tracker.h"
 
@@ -36,8 +38,7 @@ void ExternalFocusTracker::OnWillChangeFocus(View* focused_before,
 }
 
 void ExternalFocusTracker::OnDidChangeFocus(View* focused_before,
-                                            View* focused_now) {
-}
+                                            View* focused_now) {}
 
 void ExternalFocusTracker::FocusLastFocusedExternalView() {
   View* last_focused_view = last_focused_view_tracker_->view();
@@ -58,7 +59,12 @@ void ExternalFocusTracker::StoreLastFocusedView(View* view) {
 }
 
 void ExternalFocusTracker::StartTracking() {
-  StoreLastFocusedView(focus_manager_->GetFocusedView());
+  View* current_focused_view = focus_manager_->GetFocusedView();
+  // During focus restore events, it's possible for focus to already be within
+  // the parent_view_.
+  if (!parent_view_->Contains(current_focused_view))
+    StoreLastFocusedView(current_focused_view);
+
   focus_manager_->AddFocusChangeListener(this);
 }
 

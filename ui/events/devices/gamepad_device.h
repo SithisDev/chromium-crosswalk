@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,12 +27,17 @@ struct EVENTS_DEVICES_EXPORT GamepadDevice : public InputDevice {
     int32_t resolution = 0;
   };
 
-  GamepadDevice(const InputDevice& input_device, std::vector<Axis>&& axes);
+  GamepadDevice(const InputDevice& input_device,
+                std::vector<Axis>&& axes,
+                bool supports_rumble);
   GamepadDevice(const GamepadDevice& other);
   ~GamepadDevice() override;
 
   // Axes the gamepad has e.g. analog thumb sticks.
   std::vector<Axis> axes;
+
+  // Whether the gamepad device supports rumble type force feedback.
+  bool supports_vibration_rumble = false;
 };
 
 }  // namespace ui

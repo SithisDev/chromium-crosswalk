@@ -1,6 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertEquals} from 'chrome://webui-test/chai_assert.js';
+
+import {reportPromise} from '../../../common/js/test_error_reporting.js';
+
+import {ContentMetadataProvider} from './content_metadata_provider.js';
+import {MetadataRequest} from './metadata_request.js';
 
 function makeFileEntryFromDataURL(name, dataUrl) {
   const mimeString = dataUrl.split(',')[0].split(':')[1].split(';')[0];
@@ -20,7 +27,7 @@ function makeFileEntryFromDataURL(name, dataUrl) {
     },
     toURL: function() {
       return dataUrl;
-    }
+    },
   };
 }
 // clang-format off
@@ -59,7 +66,7 @@ const entryA = makeFileEntryFromDataURL(
 
 const entryB = makeFileEntryFromDataURL('empty.jpg', 'data:image/jpeg;base64,');
 
-function testExternalMetadataProviderBasic(callback) {
+export function testExternalMetadataProviderBasic(callback) {
   // Mocking SharedWorker's port.
   const port = /** @type {!MessagePort} */ ({
     postMessage: function(message) {
@@ -68,16 +75,17 @@ function testExternalMetadataProviderBasic(callback) {
           data: {
             verb: 'result',
             arguments: [
-              message.arguments[0], {
+              message.arguments[0],
+              {
                 thumbnailURL: message.arguments[0] + ',url',
-                thumbnailTransform: message.arguments[0] + ',transform'
-              }
-            ]
-          }
+                thumbnailTransform: message.arguments[0] + ',transform',
+              },
+            ],
+          },
         }));
       }
     },
-    start: function() {}
+    start: function() {},
   });
 
   // TODO(ryoh): chrome.mediaGalleries API is not available in unit tests.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 
 #include <windows.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
 // Returns an HWND that can be used as a temporary parent. The returned HWND is
 // never destroyed.
-UI_BASE_EXPORT HWND GetHiddenWindow();
+COMPONENT_EXPORT(UI_BASE) HWND GetHiddenWindow();
 
 }  // namespace ui
 

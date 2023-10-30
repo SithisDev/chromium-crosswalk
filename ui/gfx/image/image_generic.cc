@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <set>
 #include <utility>
 
+#include "base/logging.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/image/image_skia_source.h"
 
 namespace gfx {
@@ -27,13 +29,17 @@ ImageSkia GetErrorImageSkia() {
 class PNGImageSource : public ImageSkiaSource {
  public:
   PNGImageSource() {}
+
+  PNGImageSource(const PNGImageSource&) = delete;
+  PNGImageSource& operator=(const PNGImageSource&) = delete;
+
   ~PNGImageSource() override {}
 
   ImageSkiaRep GetImageForScale(float scale) override {
     if (image_skia_reps_.empty())
       return ImageSkiaRep();
 
-    const ImageSkiaRep* rep = NULL;
+    const ImageSkiaRep* rep = nullptr;
     // gfx::ImageSkia passes one of the resource scale factors. The source
     // should return:
     // 1) The ImageSkiaRep with the highest scale if all available
@@ -84,8 +90,6 @@ class PNGImageSource : public ImageSkiaSource {
   typedef std::set<ImageSkiaRep, Compare> ImageSkiaRepSet;
   ImageSkiaRepSet image_skia_reps_;
   gfx::Size size_;
-
-  DISALLOW_COPY_AND_ASSIGN(PNGImageSource);
 };
 
 }  // namespace
@@ -114,7 +118,7 @@ scoped_refptr<base::RefCountedMemory> Get1xPNGBytesFromImageSkia(
   if (image_skia_rep.scale() != 1.0f ||
       !PNGCodec::EncodeBGRASkBitmap(image_skia_rep.GetBitmap(), false,
                                     &png_bytes->data())) {
-    return NULL;
+    return nullptr;
   }
   return png_bytes;
 }

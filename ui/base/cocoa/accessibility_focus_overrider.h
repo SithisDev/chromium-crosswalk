@@ -1,11 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_COCOA_ACCESSIBILITY_FOCUS_OVERRIDER_H_
 #define UI_BASE_COCOA_ACCESSIBILITY_FOCUS_OVERRIDER_H_
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
+#include "base/memory/raw_ptr.h"
 
 namespace ui {
 
@@ -28,7 +29,7 @@ namespace ui {
 // The above-required overriding of focus is done by instantiating an
 // AccessibilityFocusOverrider and updating its state when the NSView in the
 // PWA process is focused.
-class UI_BASE_EXPORT AccessibilityFocusOverrider {
+class COMPONENT_EXPORT(UI_BASE) AccessibilityFocusOverrider {
  public:
   class Client {
    public:
@@ -60,7 +61,7 @@ class UI_BASE_EXPORT AccessibilityFocusOverrider {
   bool app_is_remote_ = false;
   bool window_is_key_ = false;
   bool view_is_first_responder_ = false;
-  Client* const client_;
+  const raw_ptr<Client> client_;
 };
 
 }  // namespace ui

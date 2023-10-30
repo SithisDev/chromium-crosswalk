@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <Cocoa/Cocoa.h>
 #include <stdint.h>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #import "base/mac/mac_util.h"
-#import "base/mac/sdk_forward_declarations.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "ui/events/base_event_utils.h"
@@ -24,40 +24,40 @@ namespace ui {
 EventType EventTypeFromNative(const PlatformEvent& native_event) {
   NSEventType type = [native_event type];
   switch (type) {
-    case NSKeyDown:
-    case NSKeyUp:
-    case NSFlagsChanged:
+    case NSEventTypeKeyDown:
+    case NSEventTypeKeyUp:
+    case NSEventTypeFlagsChanged:
       return IsKeyUpEvent(native_event) ? ET_KEY_RELEASED : ET_KEY_PRESSED;
-    case NSLeftMouseDown:
-    case NSRightMouseDown:
-    case NSOtherMouseDown:
+    case NSEventTypeLeftMouseDown:
+    case NSEventTypeRightMouseDown:
+    case NSEventTypeOtherMouseDown:
       return ET_MOUSE_PRESSED;
-    case NSLeftMouseUp:
-    case NSRightMouseUp:
-    case NSOtherMouseUp:
+    case NSEventTypeLeftMouseUp:
+    case NSEventTypeRightMouseUp:
+    case NSEventTypeOtherMouseUp:
       return ET_MOUSE_RELEASED;
-    case NSLeftMouseDragged:
-    case NSRightMouseDragged:
-    case NSOtherMouseDragged:
+    case NSEventTypeLeftMouseDragged:
+    case NSEventTypeRightMouseDragged:
+    case NSEventTypeOtherMouseDragged:
       return ET_MOUSE_DRAGGED;
-    case NSMouseMoved:
+    case NSEventTypeMouseMoved:
       return ET_MOUSE_MOVED;
-    case NSScrollWheel:
+    case NSEventTypeScrollWheel:
       return ET_SCROLL;
-    case NSMouseEntered:
+    case NSEventTypeMouseEntered:
       return ET_MOUSE_ENTERED;
-    case NSMouseExited:
+    case NSEventTypeMouseExited:
       return ET_MOUSE_EXITED;
     case NSEventTypeSwipe:
       return ET_SCROLL_FLING_START;
-    case NSAppKitDefined:
-    case NSSystemDefined:
+    case NSEventTypeAppKitDefined:
+    case NSEventTypeSystemDefined:
       return ET_UNKNOWN;
-    case NSApplicationDefined:
-    case NSPeriodic:
-    case NSCursorUpdate:
-    case NSTabletPoint:
-    case NSTabletProximity:
+    case NSEventTypeApplicationDefined:
+    case NSEventTypePeriodic:
+    case NSEventTypeCursorUpdate:
+    case NSEventTypeTabletPoint:
+    case NSEventTypeTabletProximity:
     case NSEventTypeGesture:
     case NSEventTypeMagnify:
     case NSEventTypeRotate:
@@ -84,6 +84,11 @@ base::TimeTicks EventTimeFromNative(const PlatformEvent& native_event) {
   return timestamp;
 }
 
+base::TimeTicks EventLatencyTimeFromNative(const PlatformEvent& native_event,
+                                           base::TimeTicks current_time) {
+  return EventTimeFromNative(native_event);
+}
+
 gfx::PointF EventLocationFromNative(const PlatformEvent& native_event) {
   NSWindow* window = [native_event window];
   NSPoint location = [native_event locationInWindow];
@@ -107,17 +112,17 @@ int EventButtonFromNative(const PlatformEvent& native_event) {
 int GetChangedMouseButtonFlagsFromNative(const PlatformEvent& native_event) {
   NSEventType type = [native_event type];
   switch (type) {
-    case NSLeftMouseDown:
-    case NSLeftMouseUp:
-    case NSLeftMouseDragged:
+    case NSEventTypeLeftMouseDown:
+    case NSEventTypeLeftMouseUp:
+    case NSEventTypeLeftMouseDragged:
       return EF_LEFT_MOUSE_BUTTON;
-    case NSRightMouseDown:
-    case NSRightMouseUp:
-    case NSRightMouseDragged:
+    case NSEventTypeRightMouseDown:
+    case NSEventTypeRightMouseUp:
+    case NSEventTypeRightMouseDragged:
       return EF_RIGHT_MOUSE_BUTTON;
-    case NSOtherMouseDown:
-    case NSOtherMouseUp:
-    case NSOtherMouseDragged:
+    case NSEventTypeOtherMouseDown:
+    case NSEventTypeOtherMouseUp:
+    case NSEventTypeOtherMouseDragged:
       return EF_MIDDLE_MOUSE_BUTTON;
     default:
       break;
@@ -127,7 +132,7 @@ int GetChangedMouseButtonFlagsFromNative(const PlatformEvent& native_event) {
 
 PointerDetails GetMousePointerDetailsFromNative(
     const PlatformEvent& native_event) {
-  return PointerDetails(EventPointerType::POINTER_TYPE_MOUSE);
+  return PointerDetails(EventPointerType::kMouse);
 }
 
 gfx::Vector2d GetMouseWheelOffset(const PlatformEvent& event) {
@@ -151,6 +156,22 @@ gfx::Vector2d GetMouseWheelOffset(const PlatformEvent& event) {
   }
 }
 
+gfx::Vector2d GetMouseWheelTick120ths(const PlatformEvent& event) {
+  CGEventRef cg_event = [event CGEvent];
+
+  if (!cg_event ||
+      CGEventGetIntegerValueField(cg_event, kCGScrollWheelEventIsContinuous)) {
+    // Since the device does continuous scrolling, it has no concept of ticks.
+    return gfx::Vector2d(0, 0);
+  }
+
+  return gfx::Vector2d(
+      CGEventGetIntegerValueField(cg_event, kCGScrollWheelEventDeltaAxis2) *
+          120,
+      CGEventGetIntegerValueField(cg_event, kCGScrollWheelEventDeltaAxis1) *
+          120);
+}
+
 PlatformEvent CopyNativeEvent(const PlatformEvent& event) {
   return [event copy];
 }
@@ -163,15 +184,10 @@ void ClearTouchIdIfReleased(const PlatformEvent& native_event) {
   NOTIMPLEMENTED();
 }
 
-int GetTouchId(const PlatformEvent& native_event) {
-  NOTIMPLEMENTED();
-  return 0;
-}
-
 PointerDetails GetTouchPointerDetailsFromNative(
     const PlatformEvent& native_event) {
   NOTIMPLEMENTED();
-  return PointerDetails(EventPointerType::POINTER_TYPE_UNKNOWN,
+  return PointerDetails(EventPointerType::kUnknown,
                         /* pointer_id*/ 0,
                         /* radius_x */ 1.0,
                         /* radius_y */ 1.0,
@@ -196,6 +212,8 @@ bool GetScrollOffsets(const PlatformEvent& native_event,
 
   // If a user just rests two fingers on the touchpad without moving, AppKit
   // uses NSEventPhaseMayBegin. Treat this the same as NSEventPhaseBegan.
+  // TODO(bokan): Now that ui::ScrollEvent supports the scroll phase as well as
+  // the momentum phase, we should plumb these through individually.
   const NSUInteger kBeginPhaseMask = NSEventPhaseBegan | NSEventPhaseMayBegin;
   const NSUInteger kEndPhaseMask = NSEventPhaseCancelled | NSEventPhaseEnded;
 
@@ -251,7 +269,7 @@ uint32_t WindowsKeycodeFromNative(const PlatformEvent& native_event) {
 
 uint16_t TextFromNative(const PlatformEvent& native_event) {
   NSString* text = @"";
-  if ([native_event type] != NSFlagsChanged)
+  if ([native_event type] != NSEventTypeFlagsChanged)
     text = [native_event characters];
 
   // These exceptions are based on web_input_event_builders_mac.mm:
@@ -270,7 +288,7 @@ uint16_t TextFromNative(const PlatformEvent& native_event) {
 
 uint16_t UnmodifiedTextFromNative(const PlatformEvent& native_event) {
   NSString* text = @"";
-  if ([native_event type] != NSFlagsChanged)
+  if ([native_event type] != NSEventTypeFlagsChanged)
     text = [native_event charactersIgnoringModifiers];
 
   // These exceptions are based on web_input_event_builders_mac.mm:

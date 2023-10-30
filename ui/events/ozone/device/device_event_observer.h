@@ -1,17 +1,17 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_EVENTS_OZONE_DEVICE_EVENT_OBSERVER_H_
-#define UI_EVENTS_OZONE_DEVICE_EVENT_OBSERVER_H_
+#ifndef UI_EVENTS_OZONE_DEVICE_DEVICE_EVENT_OBSERVER_H_
+#define UI_EVENTS_OZONE_DEVICE_DEVICE_EVENT_OBSERVER_H_
 
-#include "ui/events/ozone/events_ozone_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
 class DeviceEvent;
 
-class EVENTS_OZONE_EXPORT DeviceEventObserver {
+class COMPONENT_EXPORT(EVENTS_OZONE) DeviceEventObserver {
  public:
   virtual ~DeviceEventObserver() {}
 
@@ -20,5 +20,4 @@ class EVENTS_OZONE_EXPORT DeviceEventObserver {
 
 }  // namespace ui
 
-#endif  // UI_EVENTS_OZONE_DEVICE_EVENT_OBSERVER_H_
-
+#endif  // UI_EVENTS_OZONE_DEVICE_DEVICE_EVENT_OBSERVER_H_

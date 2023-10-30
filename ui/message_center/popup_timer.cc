@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,8 @@ void PopupTimer::Start() {
       timeout_ <= passed_ ? base::TimeDelta() : timeout_ - passed_;
   start_time_ = base::Time::Now();
 
-  timer_->Start(
-      FROM_HERE, timeout_to_close,
-      base::Bind(&Delegate::TimerFinished, timer_delegate_, id_));
+  timer_->Start(FROM_HERE, timeout_to_close,
+                base::BindOnce(&Delegate::TimerFinished, timer_delegate_, id_));
 }
 
 void PopupTimer::Pause() {

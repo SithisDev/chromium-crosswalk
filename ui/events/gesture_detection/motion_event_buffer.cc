@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,8 +117,7 @@ std::unique_ptr<MotionEventGeneric> ResampleMotionEvent(
   DCHECK(time0 < time1);
   DCHECK(time0 <= resample_time);
 
-  const float alpha = (resample_time - time0).InMillisecondsF() /
-                      (time1 - time0).InMillisecondsF();
+  const float alpha = (resample_time - time0) / (time1 - time0);
 
   std::unique_ptr<MotionEventGeneric> event;
   const size_t pointer_count = event0.GetPointerCount();
@@ -130,8 +129,8 @@ std::unique_ptr<MotionEventGeneric> ResampleMotionEvent(
         event0, event1, event0_i, static_cast<size_t>(event1_i), alpha);
 
     if (event0_i == 0) {
-      event.reset(new MotionEventGeneric(MotionEvent::Action::MOVE,
-                                         resample_time, pointer));
+      event = std::make_unique<MotionEventGeneric>(MotionEvent::Action::MOVE,
+                                                   resample_time, pointer);
     } else {
       event->PushPointer(pointer);
     }
@@ -180,9 +179,8 @@ std::unique_ptr<MotionEventGeneric> ConsumeSamplesAndTryResampling(
 
     const base::TimeTicks time1 = event1->GetEventTime();
     base::TimeTicks max_predict =
-        time1 +
-        std::min((event1->GetEventTime() - event0->GetEventTime()) / 2,
-                 base::TimeDelta::FromMilliseconds(kResampleMaxPredictionMs));
+        time1 + std::min((event1->GetEventTime() - event0->GetEventTime()) / 2,
+                         base::Milliseconds(kResampleMaxPredictionMs));
     if (resample_time > max_predict) {
       TRACE_EVENT_INSTANT2("input",
                            "MotionEventBuffer::TryResample prediction adjust",
@@ -205,7 +203,7 @@ std::unique_ptr<MotionEventGeneric> ConsumeSamplesAndTryResampling(
   const base::TimeTicks time0 = event0->GetEventTime();
   const base::TimeTicks time1 = event1->GetEventTime();
   base::TimeDelta delta = time1 - time0;
-  if (delta < base::TimeDelta::FromMilliseconds(kResampleMinDeltaMs)) {
+  if (delta < base::Milliseconds(kResampleMinDeltaMs)) {
     TRACE_EVENT_INSTANT1("input",
                          "MotionEventBuffer::TryResample failure",
                          TRACE_EVENT_SCOPE_THREAD,
@@ -276,7 +274,7 @@ void MotionEventBuffer::Flush(base::TimeTicks frame_time) {
   // Shifting the sample time back slightly minimizes the potential for
   // misprediction when extrapolating events.
   if (resample_)
-    frame_time -= base::TimeDelta::FromMilliseconds(kResampleLatencyMs);
+    frame_time -= base::Milliseconds(kResampleLatencyMs);
 
   // TODO(jdduke): Use a persistent MotionEventVector vector for temporary
   // storage.

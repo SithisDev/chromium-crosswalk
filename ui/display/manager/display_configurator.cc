@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/syslog_logging.h"
 #include "base/time/time.h"
 #include "chromeos/system/devicemode.h"
 #include "ui/display/display.h"
@@ -19,7 +19,7 @@
 #include "ui/display/display_switches.h"
 #include "ui/display/manager/content_protection_manager.h"
 #include "ui/display/manager/display_layout_manager.h"
-#include "ui/display/manager/display_util.h"
+#include "ui/display/manager/display_manager_util.h"
 #include "ui/display/manager/managed_display_info.h"
 #include "ui/display/manager/update_display_configuration_task.h"
 #include "ui/display/types/display_mode.h"
@@ -44,31 +44,14 @@ struct DisplayState {
   const DisplayMode* mirror_mode = nullptr;
 };
 
-// This is used for calling either SetColorMatrix() or SetGammaCorrection()
-// depending on the given |color_correction_closure| which is run synchronously.
-// If |reset_color_space_on_success| is true and running
-// |color_correction_closure| returns true, then the color space of the display
-// with |display_id| will be reset.
-bool RunColorCorrectionClosureSync(
+// Returns whether |display_id| can be found in |display_list|,
+bool IsDisplayIdInDisplayStateList(
     int64_t display_id,
-    const DisplayConfigurator::DisplayStateList& cached_displays,
-    bool reset_color_space_on_success,
-    base::OnceCallback<bool(void)> color_correction_closure) {
-  for (DisplaySnapshot* display : cached_displays) {
-    if (display->display_id() != display_id)
-      continue;
-
-    const bool success = std::move(color_correction_closure).Run();
-
-    // Nullify the |display|s ColorSpace to avoid correcting colors twice, if
-    // we have successfully configured something.
-    if (success && reset_color_space_on_success)
-      display->reset_color_space();
-
-    return success;
-  }
-
-  return false;
+    const DisplayConfigurator::DisplayStateList& display_list) {
+  return std::find_if(display_list.begin(), display_list.end(),
+                      [display_id](DisplaySnapshot* display) {
+                        return display->display_id() == display_id;
+                      }) != display_list.end();
 }
 
 // Returns true if a platform native |mode| is equal to a |managed_mode|.
@@ -129,6 +112,10 @@ class DisplayConfigurator::DisplayLayoutManagerImpl
     : public DisplayLayoutManager {
  public:
   explicit DisplayLayoutManagerImpl(DisplayConfigurator* configurator);
+
+  DisplayLayoutManagerImpl(const DisplayLayoutManagerImpl&) = delete;
+  DisplayLayoutManagerImpl& operator=(const DisplayLayoutManagerImpl&) = delete;
+
   ~DisplayLayoutManagerImpl() override;
 
   // DisplayLayoutManager:
@@ -140,6 +127,7 @@ class DisplayConfigurator::DisplayLayoutManagerImpl
       const std::vector<DisplaySnapshot*>& displays,
       MultipleDisplayState new_display_state,
       chromeos::DisplayPowerState new_power_state,
+      RefreshRateThrottleState new_throttle_state,
       std::vector<DisplayConfigureRequest>* requests) const override;
   DisplayStateList GetDisplayStates() const override;
   bool IsMirroring() const override;
@@ -175,8 +163,6 @@ class DisplayConfigurator::DisplayLayoutManagerImpl
                                    bool preserve_native_aspect_ratio) const;
 
   DisplayConfigurator* configurator_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayLayoutManagerImpl);
 };
 
 DisplayConfigurator::DisplayLayoutManagerImpl::DisplayLayoutManagerImpl(
@@ -216,6 +202,12 @@ DisplayConfigurator::DisplayLayoutManagerImpl::ParseDisplays(
     display_state.selected_mode = GetUserSelectedMode(*snapshot);
     cached_displays.push_back(display_state);
   }
+
+  // Hardware mirroring is now disabled by default until it is decided whether
+  // to permanently remove hardware mirroring support. See crbug.com/1161556 for
+  // details.
+  if (!features::IsHardwareMirrorModeEnabled())
+    return cached_displays;
 
   // Hardware mirroring doesn't work on desktop-linux Chrome OS's fake displays.
   // Skip mirror mode setup in that case to fall back on software mirroring.
@@ -260,6 +252,7 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::GetDisplayLayout(
     const std::vector<DisplaySnapshot*>& displays,
     MultipleDisplayState new_display_state,
     chromeos::DisplayPowerState new_power_state,
+    RefreshRateThrottleState new_throttle_state,
     std::vector<DisplayConfigureRequest>* requests) const {
   std::vector<DisplayState> states = ParseDisplays(displays);
   std::vector<bool> display_power;
@@ -340,8 +333,9 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::GetDisplayLayout(
 
       const DisplayMode* mode_info = states[0].mirror_mode;
       if (!mode_info) {
-        LOG(WARNING) << "No mirror mode when configuring display: "
-                     << states[0].display->ToString();
+        SYSLOG(INFO) << "Either hardware mirroring was disabled or no common "
+                        "mode between the available displays was found to "
+                        "support it. Using software mirroring instead.";
         return false;
       }
       size = mode_info->size();
@@ -383,6 +377,24 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::GetDisplayLayout(
       break;
     }
   }
+
+  // DisplayConfigureRequest for internal displays should already be configured
+  // to request their native modes, which should be the highest refresh rate.
+  if (new_throttle_state == kRefreshRateThrottleEnabled) {
+    for (DisplayConfigureRequest& request : *requests) {
+      if (request.display->type() != DISPLAY_CONNECTION_TYPE_INTERNAL)
+        continue;
+
+      std::vector<const DisplayMode*> modes =
+          GetSeamlessRefreshRateModes(*request.display, *request.mode);
+      if (modes.size() < 2)
+        break;
+
+      DCHECK_GT(request.mode->refresh_rate(), (*modes.begin())->refresh_rate());
+      request.mode = (*modes.begin());
+    }
+  }
+
   DCHECK(new_display_state == MULTIPLE_DISPLAY_STATE_HEADLESS ||
          !size.IsEmpty());
   return true;
@@ -562,8 +574,8 @@ const DisplayMode* DisplayConfigurator::FindDisplayModeMatchingSize(
 }
 
 DisplayConfigurator::DisplayConfigurator()
-    : state_controller_(NULL),
-      mirroring_controller_(NULL),
+    : state_controller_(nullptr),
+      mirroring_controller_(nullptr),
       is_panel_fitting_enabled_(false),
       configure_display_(chromeos::IsRunningAsSystemCompositor()),
       current_display_state_(MULTIPLE_DISPLAY_STATE_INVALID),
@@ -581,8 +593,7 @@ DisplayConfigurator::DisplayConfigurator()
           layout_manager_.get(),
           base::BindRepeating(&DisplayConfigurator::configurator_disabled,
                               base::Unretained(this)))),
-      has_unassociated_display_(false),
-      weak_ptr_factory_(this) {
+      has_unassociated_display_(false) {
   AddObserver(content_protection_manager_.get());
 }
 
@@ -662,8 +673,8 @@ void DisplayConfigurator::TakeControl(DisplayControlCallback callback) {
 
   display_control_changing_ = true;
   native_display_delegate_->TakeDisplayControl(
-      base::Bind(&DisplayConfigurator::OnDisplayControlTaken,
-                 weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+      base::BindOnce(&DisplayConfigurator::OnDisplayControlTaken,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void DisplayConfigurator::OnDisplayControlTaken(DisplayControlCallback callback,
@@ -706,8 +717,8 @@ void DisplayConfigurator::RelinquishControl(DisplayControlCallback callback) {
   // them for output.
   SetDisplayPowerInternal(
       chromeos::DISPLAY_POWER_ALL_OFF, kSetDisplayPowerNoFlags,
-      base::Bind(&DisplayConfigurator::SendRelinquishDisplayControl,
-                 weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+      base::BindOnce(&DisplayConfigurator::SendRelinquishDisplayControl,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void DisplayConfigurator::SendRelinquishDisplayControl(
@@ -718,8 +729,8 @@ void DisplayConfigurator::SendRelinquishDisplayControl(
     // while we're releasing control of the displays.
     display_externally_controlled_ = true;
     native_display_delegate_->RelinquishDisplayControl(
-        base::Bind(&DisplayConfigurator::OnDisplayControlRelinquished,
-                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+        base::BindOnce(&DisplayConfigurator::OnDisplayControlRelinquished,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   } else {
     display_control_changing_ = false;
     std::move(callback).Run(false);
@@ -750,37 +761,53 @@ void DisplayConfigurator::ForceInitialConfigure() {
   // be anything scheduled.
   DCHECK(!configuration_task_);
 
-  configuration_task_.reset(new UpdateDisplayConfigurationTask(
+  configuration_task_ = std::make_unique<UpdateDisplayConfigurationTask>(
       native_display_delegate_.get(), layout_manager_.get(),
       requested_display_state_, GetRequestedPowerState(),
-      kSetDisplayPowerForceProbe, /*force_configure=*/true,
-      base::Bind(&DisplayConfigurator::OnConfigured,
-                 weak_ptr_factory_.GetWeakPtr())));
+      kSetDisplayPowerForceProbe, kRefreshRateThrottleDisabled,
+      /*force_configure=*/true, kConfigurationTypeFull,
+      base::BindOnce(&DisplayConfigurator::OnConfigured,
+                     weak_ptr_factory_.GetWeakPtr()));
   configuration_task_->Run();
 }
 
 bool DisplayConfigurator::SetColorMatrix(
     int64_t display_id,
     const std::vector<float>& color_matrix) {
-  return RunColorCorrectionClosureSync(
-      display_id, cached_displays_,
-      !color_matrix.empty() /* reset_color_space_on_success */,
-      base::BindOnce(&NativeDisplayDelegate::SetColorMatrix,
-                     base::Unretained(native_display_delegate_.get()),
-                     display_id, color_matrix));
+  if (!IsDisplayIdInDisplayStateList(display_id, cached_displays_))
+    return false;
+  return native_display_delegate_->SetColorMatrix(display_id, color_matrix);
 }
 
 bool DisplayConfigurator::SetGammaCorrection(
     int64_t display_id,
     const std::vector<GammaRampRGBEntry>& degamma_lut,
     const std::vector<GammaRampRGBEntry>& gamma_lut) {
-  const bool reset_color_space_on_success =
-      !degamma_lut.empty() || !gamma_lut.empty();
-  return RunColorCorrectionClosureSync(
-      display_id, cached_displays_, reset_color_space_on_success,
-      base::BindOnce(&NativeDisplayDelegate::SetGammaCorrection,
-                     base::Unretained(native_display_delegate_.get()),
-                     display_id, degamma_lut, gamma_lut));
+  if (!IsDisplayIdInDisplayStateList(display_id, cached_displays_))
+    return false;
+  return native_display_delegate_->SetGammaCorrection(display_id, degamma_lut,
+                                                      gamma_lut);
+}
+
+void DisplayConfigurator::SetPrivacyScreen(int64_t display_id,
+                                           bool enabled,
+                                           ConfigurationCallback callback) {
+#if DCHECK_IS_ON()
+  DisplaySnapshot* internal_display = nullptr;
+  for (DisplaySnapshot* display : cached_displays_) {
+    if (display->type() == DISPLAY_CONNECTION_TYPE_INTERNAL) {
+      internal_display = display;
+      break;
+    }
+  }
+  DCHECK(internal_display);
+  DCHECK_EQ(internal_display->display_id(), display_id);
+  DCHECK_NE(internal_display->privacy_screen_state(), kNotSupported);
+  DCHECK(internal_display->current_mode());
+#endif
+
+  native_display_delegate_->SetPrivacyScreen(display_id, enabled,
+                                             std::move(callback));
 }
 
 chromeos::DisplayPowerState DisplayConfigurator::GetRequestedPowerState()
@@ -795,7 +822,7 @@ void DisplayConfigurator::PrepareForExit() {
 void DisplayConfigurator::SetDisplayPowerInternal(
     chromeos::DisplayPowerState power_state,
     int flags,
-    const ConfigurationCallback& callback) {
+    ConfigurationCallback callback) {
   // Only skip if the current power state is the same and the latest requested
   // power state is the same. If |pending_power_state_ != current_power_state_|
   // then there is a current task pending or the last configuration failed. In
@@ -804,14 +831,14 @@ void DisplayConfigurator::SetDisplayPowerInternal(
   if (power_state == current_power_state_ &&
       power_state == pending_power_state_ &&
       !(flags & kSetDisplayPowerForceProbe)) {
-    callback.Run(true);
+    std::move(callback).Run(true);
     return;
   }
 
   pending_power_state_ = power_state;
   has_pending_power_state_ = true;
   pending_power_flags_ = flags;
-  queued_configuration_callbacks_.push_back(callback);
+  queued_configuration_callbacks_.push_back(std::move(callback));
 
   if (configure_timer_.IsRunning()) {
     // If there is a configuration task scheduled, avoid performing
@@ -827,9 +854,9 @@ void DisplayConfigurator::SetDisplayPowerInternal(
 void DisplayConfigurator::SetDisplayPower(
     chromeos::DisplayPowerState power_state,
     int flags,
-    const ConfigurationCallback& callback) {
+    ConfigurationCallback callback) {
   if (configurator_disabled()) {
-    callback.Run(false);
+    std::move(callback).Run(false);
     return;
   }
 
@@ -839,7 +866,7 @@ void DisplayConfigurator::SetDisplayPower(
           << (configure_timer_.IsRunning() ? "Running" : "Stopped");
 
   requested_power_state_ = power_state;
-  SetDisplayPowerInternal(*requested_power_state_, flags, callback);
+  SetDisplayPowerInternal(*requested_power_state_, flags, std::move(callback));
 }
 
 void DisplayConfigurator::SetDisplayMode(MultipleDisplayState new_state) {
@@ -875,9 +902,8 @@ void DisplayConfigurator::OnConfigurationChanged() {
 
   // Configure displays with |kConfigureDelayMs| delay,
   // so that time-consuming ConfigureDisplays() won't be called multiple times.
-  configure_timer_.Start(FROM_HERE,
-                         base::TimeDelta::FromMilliseconds(kConfigureDelayMs),
-                         this, &DisplayConfigurator::ConfigureDisplays);
+  configure_timer_.Start(FROM_HERE, base::Milliseconds(kConfigureDelayMs), this,
+                         &DisplayConfigurator::ConfigureDisplays);
 }
 
 void DisplayConfigurator::OnDisplaySnapshotsInvalidated() {
@@ -893,10 +919,47 @@ void DisplayConfigurator::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void DisplayConfigurator::SuspendDisplays(
-    const ConfigurationCallback& callback) {
+void DisplayConfigurator::MaybeSetRefreshRateThrottleState(
+    int64_t display_id,
+    RefreshRateThrottleState state) {
+  DisplaySnapshot* display = nullptr;
+  for (DisplaySnapshot* cached_display : cached_displays_) {
+    if (cached_display->display_id() == display_id) {
+      display = cached_display;
+      break;
+    }
+  }
+  if (display == nullptr) {
+    LOG(ERROR) << "Did not find display with id: " << display_id;
+    return;
+  }
+  if (display->type() != DISPLAY_CONNECTION_TYPE_INTERNAL) {
+    LOG(ERROR) << "Can't throttle refresh rate for non-internal display: "
+               << display_id;
+    return;
+  }
+  if (display->current_mode() == nullptr) {
+    VLOG(4) << "Mode not set for display.";
+    return;
+  }
+
+  std::vector<const DisplayMode*> matching_modes =
+      GetSeamlessRefreshRateModes(*display, *display->current_mode());
+  if (matching_modes.size() < 2) {
+    VLOG(4) << "No mode candidates for seamless refresh rate change.";
+    return;
+  }
+
+  if ((state == kRefreshRateThrottleEnabled) !=
+      (display->current_mode() == *matching_modes.begin())) {
+    pending_refresh_rate_throttle_state_ = state;
+    RunPendingConfiguration();
+  }
+}
+
+void DisplayConfigurator::SuspendDisplays(ConfigurationCallback callback) {
   if (configurator_disabled()) {
-    callback.Run(false);
+    std::move(callback).Run(false);
     return;
   }
 
@@ -911,7 +974,7 @@ void DisplayConfigurator::SuspendDisplays(
   // unless explicitly requested by lucid sleep code). Use
   // SetDisplayPowerInternal so requested_power_state_ is maintained.
   SetDisplayPowerInternal(chromeos::DISPLAY_POWER_ALL_OFF,
-                          kSetDisplayPowerNoFlags, callback);
+                          kSetDisplayPowerNoFlags, std::move(callback));
 }
 
 void DisplayConfigurator::ResumeDisplays() {
@@ -929,8 +992,7 @@ void DisplayConfigurator::ResumeDisplays() {
     // before configuration is performed, so we won't immediately resize the
     // desktops and the windows on it to fit on a single display.
     configure_timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(kResumeConfigureMultiDisplayDelayMs),
+        FROM_HERE, base::Milliseconds(kResumeConfigureMultiDisplayDelayMs),
         this, &DisplayConfigurator::ConfigureDisplays);
   }
 
@@ -964,13 +1026,20 @@ void DisplayConfigurator::RunPendingConfiguration() {
     CallAndClearQueuedCallbacks(true);
     return;
   }
+  ConfigurationType configuration_type = kConfigurationTypeFull;
+  if (!HasPendingFullConfiguration()) {
+    DCHECK(HasPendingSeamlessConfiguration());
+    configuration_type = kConfigurationTypeSeamless;
+  }
 
-  configuration_task_.reset(new UpdateDisplayConfigurationTask(
+  configuration_task_ = std::make_unique<UpdateDisplayConfigurationTask>(
       native_display_delegate_.get(), layout_manager_.get(),
       requested_display_state_, pending_power_state_, pending_power_flags_,
-      force_configure_,
-      base::Bind(&DisplayConfigurator::OnConfigured,
-                 weak_ptr_factory_.GetWeakPtr())));
+      pending_refresh_rate_throttle_state_.value_or(
+          kRefreshRateThrottleDisabled),
+      force_configure_, configuration_type,
+      base::BindOnce(&DisplayConfigurator::OnConfigured,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   // Reset the flags before running the task; otherwise it may end up scheduling
   // another configuration.
@@ -978,6 +1047,7 @@ void DisplayConfigurator::RunPendingConfiguration() {
   pending_power_flags_ = kSetDisplayPowerNoFlags;
   has_pending_power_state_ = false;
   requested_display_state_ = MULTIPLE_DISPLAY_STATE_INVALID;
+  pending_refresh_rate_throttle_state_ = absl::nullopt;
 
   DCHECK(in_progress_configuration_callbacks_.empty());
   in_progress_configuration_callbacks_.swap(queued_configuration_callbacks_);
@@ -1009,8 +1079,7 @@ void DisplayConfigurator::OnConfigured(
 
   if (success && !configure_timer_.IsRunning() &&
       ShouldRunConfigurationTask()) {
-    configure_timer_.Start(FROM_HERE,
-                           base::TimeDelta::FromMilliseconds(kConfigureDelayMs),
+    configure_timer_.Start(FROM_HERE, base::Milliseconds(kConfigureDelayMs),
                            this, &DisplayConfigurator::RunPendingConfiguration);
   } else {
     // If a new configuration task isn't scheduled respond to all queued
@@ -1024,16 +1093,27 @@ void DisplayConfigurator::UpdatePowerState(
     chromeos::DisplayPowerState new_power_state) {
   chromeos::DisplayPowerState old_power_state = current_power_state_;
   current_power_state_ = new_power_state;
+
+  // Don't notify observers of |current_power_state_| when there is a pending
+  // power state. Notifying the observers may confuse them because they may
+  // already know the up-to-date state via PowerManagerClient. Please refer to
+  // b/134459602 for details.
+  if (has_pending_power_state_)
+    return;
+
   // If the pending power state hasn't changed then make sure that value gets
   // updated as well since the last requested value may have been dependent on
   // certain conditions (ie: if only the internal monitor was present).
-  if (!has_pending_power_state_)
-    pending_power_state_ = new_power_state;
+  pending_power_state_ = new_power_state;
   if (old_power_state != current_power_state_)
     NotifyPowerStateObservers();
 }
 
 bool DisplayConfigurator::ShouldRunConfigurationTask() const {
+  return HasPendingSeamlessConfiguration() || HasPendingFullConfiguration();
+}
+
+bool DisplayConfigurator::HasPendingFullConfiguration() const {
   if (force_configure_)
     return true;
 
@@ -1049,16 +1129,21 @@ bool DisplayConfigurator::ShouldRunConfigurationTask() const {
   return false;
 }
 
+bool DisplayConfigurator::HasPendingSeamlessConfiguration() const {
+  // Schedule if there is a pending request to change the refresh rate.
+  return pending_refresh_rate_throttle_state_.has_value();
+}
+
 void DisplayConfigurator::CallAndClearInProgressCallbacks(bool success) {
-  for (const auto& callback : in_progress_configuration_callbacks_)
-    callback.Run(success);
+  for (auto& callback : in_progress_configuration_callbacks_)
+    std::move(callback).Run(success);
 
   in_progress_configuration_callbacks_.clear();
 }
 
 void DisplayConfigurator::CallAndClearQueuedCallbacks(bool success) {
-  for (const auto& callback : queued_configuration_callbacks_)
-    callback.Run(success);
+  for (auto& callback : queued_configuration_callbacks_)
+    std::move(callback).Run(success);
 
   queued_configuration_callbacks_.clear();
 }

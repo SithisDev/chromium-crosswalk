@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/lazy_instance.h"
 #include "base/mac/mac_util.h"
 #include "ui/gfx/geometry/dip_util.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace ui {
 namespace {
@@ -43,7 +44,7 @@ void AcceleratedWidgetMac::SetNSView(AcceleratedWidgetMacNSView* view) {
 
 void AcceleratedWidgetMac::ResetNSView() {
   last_ca_layer_params_valid_ = false;
-  view_ = NULL;
+  view_ = nullptr;
 }
 
 const gfx::CALayerParams* AcceleratedWidgetMac::GetCALayerParams() const {
@@ -56,8 +57,9 @@ bool AcceleratedWidgetMac::HasFrameOfSize(
     const gfx::Size& dip_size) const {
   if (!last_ca_layer_params_valid_)
     return false;
-  gfx::Size last_swap_size_dip = gfx::ConvertSizeToDIP(
-      last_ca_layer_params_.scale_factor, last_ca_layer_params_.pixel_size);
+  // TODO(danakj): We should avoid lossy conversions to integer DIPs.
+  gfx::Size last_swap_size_dip = gfx::ToFlooredSize(gfx::ConvertSizeToDips(
+      last_ca_layer_params_.pixel_size, last_ca_layer_params_.scale_factor));
   return last_swap_size_dip == dip_size;
 }
 

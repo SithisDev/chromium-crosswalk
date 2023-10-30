@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/debug/alias.h"
 #include "third_party/khronos/EGL/egl.h"
 #include "third_party/khronos/EGL/eglext.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/gl_angle_util_win.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_image.h"
@@ -39,15 +40,7 @@ bool SupportedBindFormat(gfx::BufferFormat format) {
 
 bool HasAlpha(gfx::BufferFormat format) {
   DCHECK(SupportedBindFormat(format));
-  switch (format) {
-    case gfx::BufferFormat::RGBA_8888:
-      return true;
-    case gfx::BufferFormat::RGBX_8888:
-      return false;
-    default:
-      NOTREACHED();
-      return false;
-  };
+  return gfx::AlphaBitsForBufferFormat(format) > 0;
 }
 
 EGLConfig ChooseCompatibleConfig(gfx::BufferFormat format) {
@@ -71,14 +64,14 @@ EGLConfig ChooseCompatibleConfig(gfx::BufferFormat format) {
                                 EGL_NONE};
 
   EGLint num_config;
-  EGLDisplay display = gl::GLSurfaceEGL::GetHardwareDisplay();
+  EGLDisplay display = gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay();
   EGLBoolean result =
       eglChooseConfig(display, attrib_list, nullptr, 0, &num_config);
   if (result != EGL_TRUE)
     return nullptr;
   std::vector<EGLConfig> all_configs(num_config);
-  result = eglChooseConfig(gl::GLSurfaceEGL::GetHardwareDisplay(), attrib_list,
-                           all_configs.data(), num_config, &num_config);
+  result = eglChooseConfig(display, attrib_list, all_configs.data(), num_config,
+                           &num_config);
   if (result != EGL_TRUE)
     return nullptr;
   for (EGLConfig config : all_configs) {
@@ -132,7 +125,7 @@ EGLSurface CreatePbuffer(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& texture,
       EGL_NONE};
 
   return eglCreatePbufferFromClientBuffer(
-      gl::GLSurfaceEGL::GetHardwareDisplay(), EGL_D3D_TEXTURE_ANGLE,
+      gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay(), EGL_D3D_TEXTURE_ANGLE,
       texture.Get(), config, pBufferAttributes);
 }
 
@@ -179,8 +172,8 @@ bool GLImageDXGI::BindTexImage(unsigned target) {
     return false;
   }
 
-  return eglBindTexImage(gl::GLSurfaceEGL::GetHardwareDisplay(), surface_,
-                         EGL_BACK_BUFFER) == EGL_TRUE;
+  return eglBindTexImage(gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay(),
+                         surface_, EGL_BACK_BUFFER) == EGL_TRUE;
 }
 
 bool GLImageDXGI::CopyTexImage(unsigned target) {
@@ -201,6 +194,10 @@ unsigned GLImageDXGI::GetInternalFormat() {
     return GL_BGRA_EXT;
   else
     return HasAlpha(buffer_format_) ? GL_RGBA : GL_RGB;
+}
+
+unsigned GLImageDXGI::GetDataType() {
+  return GL_UNSIGNED_BYTE;
 }
 
 gfx::Size GLImageDXGI::GetSize() {
@@ -224,19 +221,8 @@ void GLImageDXGI::ReleaseTexImage(unsigned target) {
 
   keyed_mutex_->ReleaseSync(KEY_RELEASE);
 
-  eglReleaseTexImage(gl::GLSurfaceEGL::GetHardwareDisplay(), surface_,
-                     EGL_BACK_BUFFER);
-}
-
-bool GLImageDXGI::ScheduleOverlayPlane(
-    gfx::AcceleratedWidget widget,
-    int z_order,
-    gfx::OverlayTransform transform,
-    const gfx::Rect& bounds_rect,
-    const gfx::RectF& crop_rect,
-    bool enable_blend,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  return false;
+  eglReleaseTexImage(gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay(),
+                     surface_, EGL_BACK_BUFFER);
 }
 
 bool GLImageDXGI::InitializeHandle(base::win::ScopedHandle handle,
@@ -250,18 +236,18 @@ bool GLImageDXGI::InitializeHandle(base::win::ScopedHandle handle,
     return false;
 
   Microsoft::WRL::ComPtr<ID3D11Device1> d3d11_device1;
-  if (FAILED(d3d11_device.CopyTo(d3d11_device1.GetAddressOf())))
+  if (FAILED(d3d11_device.As(&d3d11_device1)))
     return false;
 
-  if (FAILED(d3d11_device1->OpenSharedResource1(
-          handle.Get(), IID_PPV_ARGS(texture_.GetAddressOf())))) {
+  if (FAILED(d3d11_device1->OpenSharedResource1(handle.Get(),
+                                                IID_PPV_ARGS(&texture_)))) {
     return false;
   }
   D3D11_TEXTURE2D_DESC desc;
   texture_->GetDesc(&desc);
   if (desc.ArraySize <= level_)
     return false;
-  if (FAILED(texture_.CopyTo(keyed_mutex_.GetAddressOf())))
+  if (FAILED(texture_.As(&keyed_mutex_)))
     return false;
 
   handle_ = std::move(handle);
@@ -278,11 +264,12 @@ void GLImageDXGI::SetTexture(
 GLImageDXGI::~GLImageDXGI() {
   if (handle_.Get()) {
     if (surface_ != EGL_NO_SURFACE) {
-      eglDestroySurface(gl::GLSurfaceEGL::GetHardwareDisplay(), surface_);
+      eglDestroySurface(gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay(),
+                        surface_);
     }
   } else if (stream_) {
-    EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
-    eglDestroyStreamKHR(egl_display, stream_);
+    eglDestroyStreamKHR(gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay(),
+                        stream_);
   }
 }
 
@@ -306,13 +293,13 @@ bool CopyingGLImageDXGI::Initialize() {
   desc.CPUAccessFlags = 0;
   desc.MiscFlags = 0;
 
-  HRESULT hr = d3d11_device_->CreateTexture2D(
-      &desc, nullptr, decoder_copy_texture_.GetAddressOf());
+  HRESULT hr =
+      d3d11_device_->CreateTexture2D(&desc, nullptr, &decoder_copy_texture_);
   if (FAILED(hr)) {
     DLOG(ERROR) << "CreateTexture2D failed: " << std::hex << hr;
     return false;
   }
-  EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
+  EGLDisplay egl_display = gl::GLSurfaceEGL::GetGLDisplayEGL()->GetDisplay();
 
   EGLAttrib frame_attributes[] = {
       EGL_D3D_TEXTURE_SUBRESOURCE_ID_ANGLE, 0, EGL_NONE,
@@ -331,14 +318,14 @@ bool CopyingGLImageDXGI::Initialize() {
     return false;
   }
 
-  d3d11_device_.CopyTo(video_device_.GetAddressOf());
+  d3d11_device_.As(&video_device_);
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-  d3d11_device_->GetImmediateContext(context.GetAddressOf());
-  context.CopyTo(video_context_.GetAddressOf());
+  d3d11_device_->GetImmediateContext(&context);
+  context.As(&video_context_);
 
 #if DCHECK_IS_ON()
   Microsoft::WRL::ComPtr<ID3D10Multithread> multithread;
-  d3d11_device_.CopyTo(multithread.GetAddressOf());
+  d3d11_device_.As(&multithread);
   DCHECK(multithread->GetMultithreadProtected());
 #endif  // DCHECK_IS_ON()
 
@@ -351,7 +338,7 @@ bool CopyingGLImageDXGI::InitializeVideoProcessor(
   output_view_.Reset();
 
   Microsoft::WRL::ComPtr<ID3D11Device> processor_device;
-  video_processor->GetDevice(processor_device.GetAddressOf());
+  video_processor->GetDevice(&processor_device);
   DCHECK_EQ(d3d11_device_.Get(), processor_device.Get());
 
   d3d11_processor_ = video_processor;
@@ -362,7 +349,7 @@ bool CopyingGLImageDXGI::InitializeVideoProcessor(
   Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> output_view;
   HRESULT hr = video_device_->CreateVideoProcessorOutputView(
       decoder_copy_texture_.Get(), enumerator_.Get(), &output_view_desc,
-      output_view_.GetAddressOf());
+      &output_view_);
   if (FAILED(hr)) {
     DLOG(ERROR) << "Failed to get output view";
     return false;
@@ -380,7 +367,7 @@ bool CopyingGLImageDXGI::BindTexImage(unsigned target) {
 
   DCHECK(video_device_);
   Microsoft::WRL::ComPtr<ID3D11Device> texture_device;
-  texture_->GetDevice(texture_device.GetAddressOf());
+  texture_->GetDevice(&texture_device);
   DCHECK_EQ(d3d11_device_.Get(), texture_device.Get());
 
   D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input_view_desc = {0};
@@ -389,8 +376,7 @@ bool CopyingGLImageDXGI::BindTexImage(unsigned target) {
   input_view_desc.Texture2D.MipSlice = 0;
   Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input_view;
   HRESULT hr = video_device_->CreateVideoProcessorInputView(
-      texture_.Get(), enumerator_.Get(), &input_view_desc,
-      input_view.GetAddressOf());
+      texture_.Get(), enumerator_.Get(), &input_view_desc, &input_view);
   if (FAILED(hr)) {
     DLOG(ERROR) << "Failed to create video processor input view.";
     return false;

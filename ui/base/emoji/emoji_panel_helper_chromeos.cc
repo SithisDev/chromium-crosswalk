@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/emoji/emoji_panel_helper.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/no_destructor.h"
 
 namespace ui {
@@ -12,6 +12,11 @@ namespace ui {
 namespace {
 
 base::RepeatingClosure& GetShowEmojiKeyboardCallback() {
+  static base::NoDestructor<base::RepeatingClosure> callback;
+  return *callback;
+}
+
+base::RepeatingClosure& GetTabletModeShowEmojiKeyboardCallback() {
   static base::NoDestructor<base::RepeatingClosure> callback;
   return *callback;
 }
@@ -29,8 +34,17 @@ void ShowEmojiPanel() {
   GetShowEmojiKeyboardCallback().Run();
 }
 
+void ShowTabletModeEmojiPanel() {
+  DCHECK(GetTabletModeShowEmojiKeyboardCallback());
+  GetTabletModeShowEmojiKeyboardCallback().Run();
+}
+
 void SetShowEmojiKeyboardCallback(base::RepeatingClosure callback) {
   GetShowEmojiKeyboardCallback() = callback;
+}
+
+void SetTabletModeShowEmojiKeyboardCallback(base::RepeatingClosure callback) {
+  GetTabletModeShowEmojiKeyboardCallback() = callback;
 }
 
 }  // namespace ui

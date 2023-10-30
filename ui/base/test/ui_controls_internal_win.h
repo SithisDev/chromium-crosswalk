@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ bool SendKeyPressImpl(HWND hwnd,
                       bool shift,
                       bool alt,
                       base::OnceClosure task);
-bool SendMouseMoveImpl(long screen_x, long screen_y, base::OnceClosure task);
+bool SendMouseMoveImpl(int screen_x, int screen_y, base::OnceClosure task);
 bool SendMouseEventsImpl(MouseButton type,
                          int button_state,
                          base::OnceClosure task,

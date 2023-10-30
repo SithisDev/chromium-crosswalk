@@ -1,8 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-function testLRUCache() {
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {LRUCache} from './lru_cache.js';
+
+export function testLRUCache() {
   const cache = new LRUCache(3);
 
   // Querying by non-existent key will get null.
@@ -72,7 +76,7 @@ function testLRUCache() {
   assertEquals(0, cache.size());
 }
 
-function testLRUCacheWithIndividualSizes() {
+export function testLRUCacheWithIndividualSizes() {
   const cache = new LRUCache(10);
 
   // Querying by non-existent key will get null.
@@ -137,7 +141,7 @@ function generateRandom3letters(generator) {
   return res;
 }
 
-function testSizeCalculationByRandomInput() {
+export function testSizeCalculationByRandomInput() {
   const cache = new LRUCache(10000);
 
   // We need fixed random number sequence to avoid test flakiness, so
@@ -166,7 +170,7 @@ function testSizeCalculationByRandomInput() {
   assertEquals(0, cache.size());
 }
 
-function testSetMaxSize() {
+export function testSetMaxSize() {
   const cache = new LRUCache(10);
   cache.put('a', 'valueA');
   cache.put('b', 'valueB');

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,15 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "third_party/skia/modules/skcms/skcms.h"
 #include "ui/gfx/color_space.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size);
+
+namespace IPC {
+template <class P>
+struct ParamTraits;
+}  // namespace IPC
 
 namespace gfx {
 
@@ -60,29 +66,12 @@ class COLOR_SPACE_EXPORT ICCProfile {
   // Return the data for the profile.
   std::vector<char> GetData() const;
 
-  // Histogram how we this was approximated by a gfx::ColorSpace. Only
-  // histogram a given profile once per display.
-  void HistogramDisplay(int64_t display_id) const;
-
  private:
   class Internals : public base::RefCountedThreadSafe<ICCProfile::Internals> {
    public:
     explicit Internals(std::vector<char>);
-    void HistogramDisplay(int64_t display_id);
-
-    // This must match ICCProfileAnalyzeResult enum in histograms.xml.
-    enum AnalyzeResult {
-      kICCFailedToParse = 5,
-      kICCNoProfile = 10,
-      kICCFailedToMakeUsable = 11,
-      kICCExtractedMatrixAndTrFn = 12,
-      kMaxValue = kICCExtractedMatrixAndTrFn,
-    };
 
     const std::vector<char> data_;
-
-    // The result of attepting to extract a color space from the color profile.
-    AnalyzeResult analyze_result_ = kICCNoProfile;
 
     // True iff we can create a valid ColorSpace (and ColorTransform) from this
     // object. The transform may be LUT-based (using an SkColorSpaceXform to
@@ -98,15 +87,9 @@ class COLOR_SPACE_EXPORT ICCProfile {
     skcms_Matrix3x3 to_XYZD50_;
     skcms_TransferFunction transfer_fn_;
 
-    // The set of display ids which have have caused this ICC profile to be
-    // recorded in UMA histograms. Only record an ICC profile once per display
-    // id (since the same profile will be re-read repeatedly, e.g, when displays
-    // are resized).
-    std::set<int64_t> histogrammed_display_ids_;
-
    protected:
     friend class base::RefCountedThreadSafe<ICCProfile::Internals>;
-    AnalyzeResult Initialize();
+    void Initialize();
     virtual ~Internals();
   };
   scoped_refptr<Internals> internals_;

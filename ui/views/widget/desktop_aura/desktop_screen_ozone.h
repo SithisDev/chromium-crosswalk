@@ -1,37 +1,26 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_SCREEN_OZONE_H_
 #define UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_SCREEN_OZONE_H_
 
-#include "ui/display/screen_base.h"
-#include "ui/display/types/native_display_observer.h"
-
-namespace display {
-class NativeDisplayDelegate;
-class DisplaySnapshot;
-}  // namespace display
+#include "ui/aura/screen_ozone.h"
+#include "ui/views/views_export.h"
 
 namespace views {
 
-class DesktopScreenOzone : public display::ScreenBase,
-                           public display::NativeDisplayObserver {
+class VIEWS_EXPORT DesktopScreenOzone : public aura::ScreenOzone {
  public:
   DesktopScreenOzone();
+  DesktopScreenOzone(const DesktopScreenOzone&) = delete;
+  DesktopScreenOzone& operator=(const DesktopScreenOzone&) = delete;
   ~DesktopScreenOzone() override;
 
  private:
-  void OnHostDisplaysReady(
-      const std::vector<display::DisplaySnapshot*>& displays);
-
-  // display::NativeDisplayDelegate:
-  void OnConfigurationChanged() override;
-  void OnDisplaySnapshotsInvalidated() override;
-
-  std::unique_ptr<display::NativeDisplayDelegate> delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopScreenOzone);
+  // ui::aura::ScreenOzone:
+  gfx::NativeWindow GetNativeWindowFromAcceleratedWidget(
+      gfx::AcceleratedWidget widget) const override;
 };
 
 }  // namespace views

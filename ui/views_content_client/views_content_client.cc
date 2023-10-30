@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 
 namespace ui {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 ViewsContentClient::ViewsContentClient(
     HINSTANCE instance, sandbox::SandboxInterfaceInfo* sandbox_info)
     : instance_(instance), sandbox_info_(sandbox_info) {
@@ -30,7 +30,7 @@ int ViewsContentClient::RunMain() {
   ViewsContentMainDelegate delegate(this);
   content::ContentMainParams params(&delegate);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   params.instance = instance_;
   params.sandbox_info = sandbox_info_;
 #else
@@ -38,7 +38,7 @@ int ViewsContentClient::RunMain() {
   params.argv = argv_;
 #endif
 
-  return content::ContentMain(params);
+  return content::ContentMain(std::move(params));
 }
 
 void ViewsContentClient::OnPreMainMessageLoopRun(
@@ -46,6 +46,11 @@ void ViewsContentClient::OnPreMainMessageLoopRun(
     gfx::NativeWindow window_context) {
   std::move(on_pre_main_message_loop_run_callback_)
       .Run(browser_context, window_context);
+}
+
+void ViewsContentClient::OnResourcesLoaded() {
+  if (on_resources_loaded_callback_)
+    std::move(on_resources_loaded_callback_).Run();
 }
 
 }  // namespace ui

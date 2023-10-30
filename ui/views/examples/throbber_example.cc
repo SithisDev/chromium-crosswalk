@@ -1,11 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/examples/throbber_example.h"
 
-#include "base/macros.h"
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/throbber.h"
+#include "ui/views/examples/grit/views_examples_resources.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 
@@ -16,10 +20,13 @@ namespace {
 
 class ThrobberView : public View {
  public:
-  ThrobberView() : throbber_(new Throbber()) {
-    AddChildView(throbber_);
+  ThrobberView() {
+    throbber_ = AddChildView(std::make_unique<Throbber>());
     throbber_->Start();
   }
+
+  ThrobberView(const ThrobberView&) = delete;
+  ThrobberView& operator=(const ThrobberView&) = delete;
 
   // View::
   gfx::Size CalculatePreferredSize() const override {
@@ -28,8 +35,7 @@ class ThrobberView : public View {
 
   void Layout() override {
     int diameter = 16;
-    throbber_->SetBounds((width() - diameter) / 2,
-                         (height() - diameter) / 2,
+    throbber_->SetBounds((width() - diameter) / 2, (height() - diameter) / 2,
                          diameter, diameter);
     SizeToPreferredSize();
   }
@@ -48,22 +54,21 @@ class ThrobberView : public View {
   }
 
  private:
-  Throbber* throbber_;
+  raw_ptr<Throbber> throbber_;
   bool is_checked_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ThrobberView);
 };
 
 }  // namespace
 
-ThrobberExample::ThrobberExample() : ExampleBase("Throbber") {
+ThrobberExample::ThrobberExample()
+    : ExampleBase(l10n_util::GetStringUTF8(IDS_THROBBER_SELECT_LABEL).c_str()) {
 }
 
 ThrobberExample::~ThrobberExample() = default;
 
 void ThrobberExample::CreateExampleView(View* container) {
   container->SetLayoutManager(std::make_unique<FillLayout>());
-  container->AddChildView(new ThrobberView());
+  container->AddChildView(std::make_unique<ThrobberView>());
 }
 
 }  // namespace examples

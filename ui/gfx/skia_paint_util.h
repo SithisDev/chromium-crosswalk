@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,12 +40,12 @@ GFX_EXPORT sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
     const SkMatrix& local_matrix,
     SkScalar scale);
 
-// Creates a vertical gradient shader. The caller owns the shader.
-// Example usage to avoid leaks:
-GFX_EXPORT sk_sp<cc::PaintShader> CreateGradientShader(int start_point,
-                                                       int end_point,
-                                                       SkColor start_color,
-                                                       SkColor end_color);
+// Creates a gradient shader. The caller owns the shader.
+GFX_EXPORT sk_sp<cc::PaintShader> CreateGradientShader(
+    const gfx::Point& start_point,
+    const gfx::Point& end_point,
+    SkColor start_color,
+    SkColor end_color);
 
 // Creates a draw looper to generate |shadows|. The caller owns the draw looper.
 // NULL is returned if |shadows| is empty since no draw looper is needed in
@@ -55,4 +55,4 @@ GFX_EXPORT sk_sp<SkDrawLooper> CreateShadowDrawLooper(
 
 }  // namespace gfx
 
-#endif  // UI_GFX_SKIA_UTIL_H_
+#endif  // UI_GFX_SKIA_PAINT_UTIL_H_

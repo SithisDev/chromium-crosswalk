@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "ui/accessibility/mojom/ax_relative_bounds_mojom_traits.h"
@@ -24,7 +24,7 @@ bool StructTraits<ax::mojom::AXRelativeBoundsDataView, ui::AXRelativeBounds>::
   if (!data.ReadTransform(&transform))
     return false;
   if (!transform.IsIdentity())
-    out->transform.reset(new gfx::Transform(transform));
+    out->transform = std::make_unique<gfx::Transform>(transform);
 
   if (!data.ReadBounds(&out->bounds))
     return false;

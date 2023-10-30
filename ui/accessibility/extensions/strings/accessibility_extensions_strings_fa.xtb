@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">همه پویانمایی‌های تصویر غیرفعال شود.</translation>
 <translation id="1703735871906654364">مرور هشتک</translation>
 <translation id="1791496371305830581">همه تصاویر پویانمایی مجاز هستند.</translation>
+<translation id="1974060860693918893">پیشرفته</translation>
 <translation id="1996252509865389616">فعال شود؟</translation>
 <translation id="2079545284768500474">لغو</translation>
 <translation id="2179565792157161713">باز کردن «توضیح طولانی» در «برگه جدید»</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">‏نوشتار «alt» جایگزین تصاویر مربوطه شد.</translation>
 <translation id="4896660567607030658">بازخوردی وجود ندارد، فقط نشانگر نشان داده شود.</translation>
 <translation id="4937901943818762779">تصاویر پویانمایی مجاز هستند اما تنها یک‌بار.</translation>
+<translation id="4949131196216960195">‏برای روشن کردن «مرور هشتگ» &lt;span class='key'&gt;جستجو&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (کلید «افزایش روشنایی یا F7) را فشار دهید. برای خاموش کردن، آن را دوباره فشار دهید.</translation>
 <translation id="4954450790315188152">زمانی که «مرور هشتک» فعال است</translation>
 <translation id="5041932793799765940">تنظیم رنگ</translation>
 <translation id="5094574508723441140">کنتراست افزایش یافته</translation>
@@ -50,6 +52,7 @@
 <translation id="6170146920149900756">تقویت‌کننده رنگ</translation>
 <translation id="633394792577263429">‏برای جابه‌جایی کلمه به کلمه، &lt;span class='key'&gt;Control (کنترل)&lt;/span&gt; را پایین نگه دارید.</translation>
 <translation id="6550675742724504774">گزینه‌ها</translation>
+<translation id="6699630355767768222">مرحله ۳: ملغی کردن محور رنگ برای تصحیح.</translation>
 <translation id="6838518108677880446">راه‌اندازی:</translation>
 <translation id="690628312087070417">زمانی که هشتک یک فاصله زیاد را رد می‌کند:</translation>
 <translation id="6965382102122355670">قبول</translation>
@@ -59,10 +62,10 @@
 <translation id="7658239707568436148">لغو</translation>
 <translation id="786423340267544509">‏به عناصر دارای ویژگی «aria-describedat» یا «longdesc» حد ومرز اضافه کنید.</translation>
 <translation id="7942349550061667556">قرمز</translation>
-<translation id="8254860724243898966">‏برای روشن کردن «مرور هشتک» &lt;span class='key'&gt;Alt (دگرساز)&lt;/span&gt;‏ + &lt;img src='increase_brightness.png'‎&gt; (کلید «افزایش روشنایی یا F7) را فشار دهید. برای خاموش کردن، دوباره آن را فشار دهید.</translation>
 <translation id="8260673944985561857">گزینه‌های مرور هشتک</translation>
 <translation id="8321034316479930120">خطمشی پویانمایی</translation>
 <translation id="8480209185614411573">کنتراست بالا</translation>
 <translation id="8609925175482059018">‏دکمه &lt;span class='key'&gt;F7&lt;/span&gt; را برای روشن کردن «مرور هشتک» فشار دهید. برای خاموش کردن آن را دوباره فشار دهید.</translation>
+<translation id="8798099450830957504">پیش‌فرض</translation>
 <translation id="894241283505723656">توضیحات طولانی در منوی زمینه</translation>
 </translationbundle>

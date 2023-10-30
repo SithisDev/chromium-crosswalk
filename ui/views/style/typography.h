@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define UI_VIEWS_STYLE_TYPOGRAPHY_H_
 
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/views/views_export.h"
 
 namespace gfx {
@@ -40,14 +41,17 @@ enum TextContext {
   // Text to label a control, usually next to it. "Body 2". Usually 12pt.
   CONTEXT_LABEL,
 
-  // Text used for body text in message boxes.
-  CONTEXT_MESSAGE_BOX_BODY_TEXT,
+  // Text used for body text in dialogs.
+  CONTEXT_DIALOG_BODY_TEXT,
 
   // Text in a table row.
   CONTEXT_TABLE_ROW,
 
   // An editable text field. Usually matches CONTROL_LABEL.
   CONTEXT_TEXTFIELD,
+
+  // Text in a menu.
+  CONTEXT_MENU,
 
   // Text for the menu items that appear in the touch-selection context menu.
   CONTEXT_TOUCH_MENU,
@@ -71,11 +75,31 @@ enum TextStyle {
   // contexts (e.g. BUTTON_TEXT, FIELD).
   STYLE_PRIMARY = VIEWS_TEXT_STYLE_START,
 
+  // Secondary text: Appears near the primary text.
+  STYLE_SECONDARY,
+
+  // "Hint" text, usually a line that gives context to something more important.
+  STYLE_HINT,
+
+  // Style for text that is displayed in a selection.
+  STYLE_SELECTED,
+
+  // Style for text is part of a static highlight.
+  STYLE_HIGHLIGHTED,
+
   // Style for the default button on a dialog.
   STYLE_DIALOG_BUTTON_DEFAULT,
 
   // Disabled "greyed out" text.
   STYLE_DISABLED,
+
+  // Used to draw attention to a section of body text such as an extension name
+  // or hostname.
+  STYLE_EMPHASIZED,
+
+  // Emphasized secondary style. Like STYLE_EMPHASIZED but styled to match
+  // surrounding STYLE_SECONDARY text.
+  STYLE_EMPHASIZED_SECONDARY,
 
   // The style used for links. Usually a solid shade of blue.
   STYLE_LINK,
@@ -91,6 +115,8 @@ enum TextStyle {
 // current LayoutProvider. |view| is the View requesting the property. |context|
 // can be an enum value from TextContext, or a value understood by the
 // embedder's TypographyProvider. Similarly, |style| corresponds to TextStyle.
+VIEWS_EXPORT ui::ResourceBundle::FontDetails GetFontDetails(int context,
+                                                            int style);
 VIEWS_EXPORT const gfx::FontList& GetFont(int context, int style);
 VIEWS_EXPORT SkColor GetColor(const views::View& view, int context, int style);
 VIEWS_EXPORT int GetLineHeight(int context, int style);

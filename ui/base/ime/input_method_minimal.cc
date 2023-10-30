@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 
 #include "ui/base/ime/text_input_client.h"
 #include "ui/events/event.h"
-#include "ui/events/event_constants.h"
+#include "ui/events/types/event_type.h"
 
 namespace ui {
 
-InputMethodMinimal::InputMethodMinimal(internal::InputMethodDelegate* delegate)
-    : InputMethodBase(delegate) {}
+InputMethodMinimal::InputMethodMinimal(
+    ImeKeyEventDispatcher* ime_key_event_dispatcher)
+    : InputMethodBase(ime_key_event_dispatcher) {}
 
 InputMethodMinimal::~InputMethodMinimal() {}
 

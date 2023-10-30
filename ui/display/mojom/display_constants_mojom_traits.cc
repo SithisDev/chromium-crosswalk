@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,6 +103,137 @@ bool EnumTraits<display::mojom::HDCPState, display::HDCPState>::FromMojom(
       return true;
     case display::mojom::HDCPState::HDCP_STATE_ENABLED:
       *out = display::HDCPState::HDCP_STATE_ENABLED;
+      return true;
+  }
+  return false;
+}
+
+// static
+display::mojom::ContentProtectionMethod EnumTraits<
+    display::mojom::ContentProtectionMethod,
+    display::ContentProtectionMethod>::ToMojom(display::ContentProtectionMethod
+                                                   type) {
+  switch (type) {
+    case display::ContentProtectionMethod::CONTENT_PROTECTION_METHOD_NONE:
+      return display::mojom::ContentProtectionMethod::
+          CONTENT_PROTECTION_METHOD_NONE;
+    case display::ContentProtectionMethod::
+        CONTENT_PROTECTION_METHOD_HDCP_TYPE_0:
+      return display::mojom::ContentProtectionMethod::
+          CONTENT_PROTECTION_METHOD_HDCP_TYPE_0;
+    case display::ContentProtectionMethod::
+        CONTENT_PROTECTION_METHOD_HDCP_TYPE_1:
+      return display::mojom::ContentProtectionMethod::
+          CONTENT_PROTECTION_METHOD_HDCP_TYPE_1;
+  }
+  NOTREACHED();
+  return display::mojom::ContentProtectionMethod::
+      CONTENT_PROTECTION_METHOD_NONE;
+}
+
+// static
+bool EnumTraits<display::mojom::ContentProtectionMethod,
+                display::ContentProtectionMethod>::
+    FromMojom(display::mojom::ContentProtectionMethod type,
+              display::ContentProtectionMethod* out) {
+  switch (type) {
+    case display::mojom::ContentProtectionMethod::
+        CONTENT_PROTECTION_METHOD_NONE:
+      *out = display::ContentProtectionMethod::CONTENT_PROTECTION_METHOD_NONE;
+      return true;
+    case display::mojom::ContentProtectionMethod::
+        CONTENT_PROTECTION_METHOD_HDCP_TYPE_0:
+      *out = display::ContentProtectionMethod::
+          CONTENT_PROTECTION_METHOD_HDCP_TYPE_0;
+      return true;
+    case display::mojom::ContentProtectionMethod::
+        CONTENT_PROTECTION_METHOD_HDCP_TYPE_1:
+      *out = display::ContentProtectionMethod::
+          CONTENT_PROTECTION_METHOD_HDCP_TYPE_1;
+      return true;
+  }
+  return false;
+}
+
+// static
+display::mojom::PanelOrientation EnumTraits<
+    display::mojom::PanelOrientation,
+    display::PanelOrientation>::ToMojom(display::PanelOrientation rotation) {
+  switch (rotation) {
+    case display::PanelOrientation::kNormal:
+      return display::mojom::PanelOrientation::NORMAL;
+    case display::PanelOrientation::kBottomUp:
+      return display::mojom::PanelOrientation::BOTTOM_UP;
+    case display::PanelOrientation::kLeftUp:
+      return display::mojom::PanelOrientation::LEFT_UP;
+    case display::PanelOrientation::kRightUp:
+      return display::mojom::PanelOrientation::RIGHT_UP;
+  }
+  NOTREACHED();
+  return display::mojom::PanelOrientation::NORMAL;
+}
+
+// static
+bool EnumTraits<display::mojom::PanelOrientation, display::PanelOrientation>::
+    FromMojom(display::mojom::PanelOrientation rotation,
+              display::PanelOrientation* out) {
+  switch (rotation) {
+    case display::mojom::PanelOrientation::NORMAL:
+      *out = display::PanelOrientation::kNormal;
+      return true;
+    case display::mojom::PanelOrientation::BOTTOM_UP:
+      *out = display::PanelOrientation::kBottomUp;
+      return true;
+    case display::mojom::PanelOrientation::LEFT_UP:
+      *out = display::PanelOrientation::kLeftUp;
+      return true;
+    case display::mojom::PanelOrientation::RIGHT_UP:
+      *out = display::PanelOrientation::kRightUp;
+      return true;
+  }
+  return false;
+}
+
+// static
+display::mojom::PrivacyScreenState EnumTraits<
+    display::mojom::PrivacyScreenState,
+    display::PrivacyScreenState>::ToMojom(display::PrivacyScreenState state) {
+  switch (state) {
+    case display::PrivacyScreenState::kDisabled:
+      return display::mojom::PrivacyScreenState::DISABLED;
+    case display::PrivacyScreenState::kEnabled:
+      return display::mojom::PrivacyScreenState::ENABLED;
+    case display::PrivacyScreenState::kDisabledLocked:
+      return display::mojom::PrivacyScreenState::DISABLED_LOCKED;
+    case display::PrivacyScreenState::kEnabledLocked:
+      return display::mojom::PrivacyScreenState::ENABLED_LOCKED;
+    case display::PrivacyScreenState::kNotSupported:
+      return display::mojom::PrivacyScreenState::NOT_SUPPORTED;
+  }
+  NOTREACHED();
+  return display::mojom::PrivacyScreenState::NOT_SUPPORTED;
+}
+
+// static
+bool EnumTraits<display::mojom::PrivacyScreenState,
+                display::PrivacyScreenState>::
+    FromMojom(display::mojom::PrivacyScreenState state,
+              display::PrivacyScreenState* out) {
+  switch (state) {
+    case display::mojom::PrivacyScreenState::DISABLED:
+      *out = display::PrivacyScreenState::kDisabled;
+      return true;
+    case display::mojom::PrivacyScreenState::ENABLED:
+      *out = display::PrivacyScreenState::kEnabled;
+      return true;
+    case display::mojom::PrivacyScreenState::DISABLED_LOCKED:
+      *out = display::PrivacyScreenState::kDisabledLocked;
+      return true;
+    case display::mojom::PrivacyScreenState::ENABLED_LOCKED:
+      *out = display::PrivacyScreenState::kEnabledLocked;
+      return true;
+    case display::mojom::PrivacyScreenState::NOT_SUPPORTED:
+      *out = display::PrivacyScreenState::kNotSupported;
       return true;
   }
   return false;

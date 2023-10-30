@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,19 @@
 
 #include <memory>
 
+#include "ui/accessibility/platform/ax_platform_node_mac.h"
 #include "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace views {
 
 // static
 std::unique_ptr<ViewAccessibility> ViewAccessibility::Create(View* view) {
-  return std::make_unique<ViewAXPlatformNodeDelegateMac>(view);
+  auto result = std::make_unique<ViewAXPlatformNodeDelegateMac>(view);
+  result->Init();
+  return result;
 }
 
 ViewAXPlatformNodeDelegateMac::ViewAXPlatformNodeDelegateMac(View* view)
@@ -27,21 +31,17 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegateMac::GetNSWindow() {
   if (!widget)
     return nil;
 
-  auto* top_level_widget = widget->GetTopLevelWidget();
-  if (!top_level_widget)
-    return nil;
-
   auto* window_host = NativeWidgetMacNSWindowHost::GetFromNativeWindow(
-      top_level_widget->GetNativeWindow());
+      widget->GetNativeWindow());
   if (!window_host)
     return nil;
 
   return window_host->GetNativeViewAccessibleForNSWindow();
 }
 
-gfx::NativeViewAccessible ViewAXPlatformNodeDelegateMac::GetParent() {
+gfx::NativeViewAccessible ViewAXPlatformNodeDelegateMac::GetParent() const {
   if (view()->parent())
-    return view()->parent()->GetNativeViewAccessible();
+    return ViewAXPlatformNodeDelegate::GetParent();
 
   auto* widget = view()->GetWidget();
   if (!widget)
@@ -53,6 +53,13 @@ gfx::NativeViewAccessible ViewAXPlatformNodeDelegateMac::GetParent() {
     return nil;
 
   return window_host->GetNativeViewAccessibleForNSView();
+}
+
+void ViewAXPlatformNodeDelegateMac::OverrideNativeWindowTitle(
+    const std::string& title) {
+  if (gfx::NativeViewAccessible ax_window = GetNSWindow()) {
+    [ax_window setAccessibilityLabel:base::SysUTF8ToNSString(title)];
+  }
 }
 
 }  // namespace views

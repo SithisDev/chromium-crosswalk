@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/animation/tween.h"
 
@@ -23,37 +23,50 @@ class ANIMATION_EXPORT MultiAnimation : public Animation {
  public:
   // Defines part of the animation. Each part consists of the following:
   //
-  // time_ms: the time of the part.
-  // start_time_ms: the amount of time to offset this part by when calculating
-  // the percented completed.
-  // end_time_ms: the end time used to calculate the percentange completed.
+  // part_length: the length of time the part runs.
+  // part_start: the amount of time to offset this part by when calculating the
+  // initial percentage.
+  // total_length: the total length used to calculate the percentange completed.
+  // start_value: the animation value at the beginning of this part of the
+  // animation. Defaults to 0.
+  // end_value: the animation value at the end of this part of the animation.
+  // Defaults to 1.
   //
-  // In most cases |start_time_ms| = 0 and |end_time_ms| = |time_ms|. But you
-  // can adjust the start/end for different effects. For example, to run a part
-  // for 200ms with a % between .25 and .75 use the following three values: 200,
-  // 100, 400.
+  // In most cases |part_start| is empty and |total_length| = |part_length|. But
+  // you can adjust the start/total for different effects. For example, to run a
+  // part for 200ms with a % between .25 and .75 use the following three values:
+  // part_length = 200, part_start = 100, total_length = 400.
+  //
+  // |start_value| and |end_value| can be used to chain multiple animations into
+  // a single function. A common use case is a MultiAnimation that consists of
+  // these parts: 0->1 (fade-in), 1->1 (hold) and 1->0 (fade out).
   struct Part {
-    Part() : Part(0, Tween::ZERO) {}
-    Part(int time_ms, Tween::Type type) : Part(time_ms, 0, time_ms, type) {}
-    Part(int time_ms, int start_time_ms, int end_time_ms, Tween::Type type)
-        : time_ms(time_ms),
-          start_time_ms(start_time_ms),
-          end_time_ms(end_time_ms),
-          type(type) {}
+    Part(base::TimeDelta length,
+         Tween::Type type,
+         double start_value = 0.0,
+         double end_value = 1.0)
+        : length(length),
+          type(type),
+          start_value(start_value),
+          end_value(end_value) {}
 
-    int time_ms;
-    int start_time_ms;
-    int end_time_ms;
+    base::TimeDelta length;
     Tween::Type type;
+    double start_value;
+    double end_value;
   };
+  using Parts = std::vector<Part>;
 
-  typedef std::vector<Part> Parts;
+  static constexpr auto kDefaultTimerInterval = base::Milliseconds(20);
 
-  MultiAnimation(const Parts& parts, base::TimeDelta timer_interval);
+  explicit MultiAnimation(
+      const Parts& parts,
+      base::TimeDelta timer_interval = kDefaultTimerInterval);
+
+  MultiAnimation(const MultiAnimation&) = delete;
+  MultiAnimation& operator=(const MultiAnimation&) = delete;
+
   ~MultiAnimation() override;
-
-  // Default interval.
-  static base::TimeDelta GetDefaultTimerInterval();
 
   // Sets whether the animation continues after it reaches the end. If true, the
   // animation runs until explicitly stopped. The default is true.
@@ -72,27 +85,25 @@ class ANIMATION_EXPORT MultiAnimation : public Animation {
   void SetStartTime(base::TimeTicks start_time) override;
 
  private:
-  // Returns the part containing the specified time. |time_ms| is reset to be
+  // Returns the part containing the specified time. |time| is reset to be
   // relative to the part containing the time and |part_index| the index of the
   // part.
-  const Part& GetPart(int* time_ms, size_t* part_index);
+  const Part& GetPart(base::TimeDelta* time, size_t* part_index);
 
   // The parts that make up the animation.
   const Parts parts_;
 
   // Total time of all the parts.
-  const int cycle_time_ms_;
+  const base::TimeDelta cycle_time_;
 
-  // Current value for the animation.
-  double current_value_;
+  // Animation state for the current part.
+  double current_part_state_ = 0.0;
 
   // Index of the current part.
-  size_t current_part_index_;
+  size_t current_part_index_ = 0;
 
   // See description above setter.
-  bool continuous_;
-
-  DISALLOW_COPY_AND_ASSIGN(MultiAnimation);
+  bool continuous_ = true;
 };
 
 }  // namespace gfx

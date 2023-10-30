@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define UI_VIEWS_FOCUS_FOCUS_SEARCH_H_
 
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -18,7 +18,7 @@ class FocusTraversable;
 class VIEWS_EXPORT FocusSearch {
  public:
   // The direction in which the focus traversal is going.
-  // TODO (jcampan): add support for lateral (left, right) focus traversal. The
+  // TODO(jcampan): add support for lateral (left, right) focus traversal. The
   // goal is to switch to focusable views on the same level when using the arrow
   // keys (ala Windows: in a dialog box, arrow keys typically move between the
   // dialog OK, Cancel buttons).
@@ -54,6 +54,9 @@ class VIEWS_EXPORT FocusSearch {
   //   needed and you want to check IsAccessibilityFocusable(), rather than
   //   IsFocusable().
   FocusSearch(View* root, bool cycle, bool accessibility_mode);
+
+  FocusSearch(const FocusSearch&) = delete;
+  FocusSearch& operator=(const FocusSearch&) = delete;
   virtual ~FocusSearch() = default;
 
   // Finds the next view that should be focused and returns it. If a
@@ -146,11 +149,9 @@ class VIEWS_EXPORT FocusSearch {
       FocusTraversable** focus_traversable,
       View** focus_traversable_view);
 
-  View* root_;
+  raw_ptr<View> root_;
   bool cycle_;
   bool accessibility_mode_;
-
-  DISALLOW_COPY_AND_ASSIGN(FocusSearch);
 };
 
 }  // namespace views

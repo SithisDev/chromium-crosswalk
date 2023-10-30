@@ -1,27 +1,27 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/memory/raw_ptr.h"
 
 #import "ui/views/cocoa/drag_drop_client_mac.h"
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/bind.h"
-#include "base/mac/availability.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #import "components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h"
 #import "ui/base/clipboard/clipboard_util_mac.h"
+#import "ui/base/dragdrop/drag_drop_types.h"
+#import "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/gfx/image/image_unittest_util.h"
 #import "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/native_widget_mac.h"
 #include "ui/views/widget/widget.h"
-
-using base::ASCIIToUTF16;
 
 @interface NSView (DragSessionTestingDonor)
 @end
@@ -39,14 +39,13 @@ using base::ASCIIToUTF16;
 // Drop() methods. Out of the required methods of the protocol, only
 // draggingLocation and draggingPasteboard are used.
 @interface MockDraggingInfo : NSObject<NSDraggingInfo> {
-  NSPasteboard* pasteboard_;
+  NSPasteboard* _pasteboard;
 }
 
 @property BOOL animatesToDestination;
 @property NSInteger numberOfValidItemsForDrop;
 @property NSDraggingFormation draggingFormation;
-@property(readonly)
-    NSSpringLoadingHighlight springLoadingHighlight API_AVAILABLE(macos(10.11));
+@property(readonly) NSSpringLoadingHighlight springLoadingHighlight;
 
 @end
 
@@ -59,7 +58,7 @@ using base::ASCIIToUTF16;
 
 - (instancetype)initWithPasteboard:(NSPasteboard*)pasteboard {
   if ((self = [super init])) {
-    pasteboard_ = pasteboard;
+    _pasteboard = pasteboard;
   }
   return self;
 }
@@ -69,7 +68,7 @@ using base::ASCIIToUTF16;
 }
 
 - (NSPasteboard*)draggingPasteboard {
-  return pasteboard_;
+  return _pasteboard;
 }
 
 - (NSInteger)draggingSequenceNumber {
@@ -121,10 +120,16 @@ enumerateDraggingItemsWithOptions:(NSDraggingItemEnumerationOptions)enumOpts
 namespace views {
 namespace test {
 
+using ::base::ASCIIToUTF16;
+using ::ui::mojom::DragOperation;
+
 // View object that will receive and process dropped data from the test.
 class DragDropView : public View {
  public:
   DragDropView() = default;
+
+  DragDropView(const DragDropView&) = delete;
+  DragDropView& operator=(const DragDropView&) = delete;
 
   void set_formats(int formats) { formats_ = formats; }
 
@@ -142,20 +147,25 @@ class DragDropView : public View {
     return ui::DragDropTypes::DRAG_COPY;
   }
 
-  int OnPerformDrop(const ui::DropTargetEvent& event) override {
-    return ui::DragDropTypes::DRAG_MOVE;
+  views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override {
+    return base::BindOnce([](const ui::DropTargetEvent& event,
+                             ui::mojom::DragOperation& output_drag_op) {
+      output_drag_op = DragOperation::kMove;
+    });
   }
 
  private:
   // Drop formats accepted by this View object.
   int formats_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(DragDropView);
 };
 
 class DragDropClientMacTest : public WidgetTest {
  public:
   DragDropClientMacTest() : widget_(new Widget) {}
+
+  DragDropClientMacTest(const DragDropClientMacTest&) = delete;
+  DragDropClientMacTest& operator=(const DragDropClientMacTest&) = delete;
 
   DragDropClientMac* drag_drop_client() {
     return ns_window_host_->drag_drop_client();
@@ -195,7 +205,7 @@ class DragDropClientMacTest : public WidgetTest {
     widget_->Show();
 
     target_ = new DragDropView();
-    widget_->GetContentsView()->AddChildView(target_);
+    widget_->non_client_view()->frame_view()->AddChildView(target_.get());
     target_->SetBoundsRect(bounds);
 
     drag_drop_client()->source_operation_ = ui::DragDropTypes::DRAG_COPY;
@@ -208,21 +218,18 @@ class DragDropClientMacTest : public WidgetTest {
   }
 
  protected:
-  Widget* widget_ = nullptr;
-  remote_cocoa::NativeWidgetNSWindowBridge* bridge_ = nullptr;
-  NativeWidgetMacNSWindowHost* ns_window_host_ = nullptr;
-  DragDropView* target_ = nullptr;
+  raw_ptr<Widget> widget_ = nullptr;
+  raw_ptr<remote_cocoa::NativeWidgetNSWindowBridge> bridge_ = nullptr;
+  raw_ptr<NativeWidgetMacNSWindowHost> ns_window_host_ = nullptr;
+  raw_ptr<DragDropView> target_ = nullptr;
   base::scoped_nsobject<MockDraggingInfo> dragging_info_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DragDropClientMacTest);
 };
 
 // Tests if the drag and drop target receives the dropped data.
 TEST_F(DragDropClientMacTest, BasicDragDrop) {
   // Create the drop data
   OSExchangeData data;
-  const base::string16& text = ASCIIToUTF16("text");
+  const std::u16string& text = u"text";
   data.SetString(text);
   SetData(data);
 
@@ -246,7 +253,7 @@ TEST_F(DragDropClientMacTest, ReleaseCapture) {
 
   // Create the drop data
   std::unique_ptr<OSExchangeData> data(std::make_unique<OSExchangeData>());
-  const base::string16& text = ASCIIToUTF16("text");
+  const std::u16string& text = u"text";
   data->SetString(text);
   data->provider().SetDragImage(gfx::test::CreateImageSkia(100, 100),
                                 gfx::Vector2d());
@@ -264,8 +271,8 @@ TEST_F(DragDropClientMacTest, ReleaseCapture) {
                                 base::Unretained(drag_drop_client())));
 
   // It will call ReleaseCapture().
-  drag_drop_client()->StartDragAndDrop(
-      target_, std::move(data), 0, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
+  drag_drop_client()->StartDragAndDrop(target_, std::move(data), 0,
+                                       ui::mojom::DragEventSource::kMouse);
 
   // The capture should be released.
   EXPECT_FALSE(ns_window_host_->IsMouseCaptureActive());
@@ -275,7 +282,7 @@ TEST_F(DragDropClientMacTest, ReleaseCapture) {
 // incorrect format.
 TEST_F(DragDropClientMacTest, InvalidFormatDragDrop) {
   OSExchangeData data;
-  const base::string16& text = ASCIIToUTF16("text");
+  const std::u16string& text = u"text";
   data.SetString(text);
   SetData(data);
 
@@ -311,32 +318,41 @@ class DragDropCloseView : public DragDropView {
  public:
   DragDropCloseView() {}
 
-  // View:
-  int OnPerformDrop(const ui::DropTargetEvent& event) override {
-    GetWidget()->CloseNow();
-    return ui::DragDropTypes::DRAG_MOVE;
+  DragDropCloseView(const DragDropCloseView&) = delete;
+  DragDropCloseView& operator=(const DragDropCloseView&) = delete;
+
+  views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override {
+    // base::Unretained is safe here because in the tests the view isn't deleted
+    // before the drop callback is run.
+    return base::BindOnce(&DragDropCloseView::PerformDrop,
+                          base::Unretained(this));
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DragDropCloseView);
+  void PerformDrop(const ui::DropTargetEvent& event,
+                   ui::mojom::DragOperation& output_drag_op) {
+    GetWidget()->CloseNow();
+    output_drag_op = DragOperation::kMove;
+  }
 };
 
-// Tests that closing Widget on OnPerformDrop does not crash.
+// Tests that closing Widget on drop does not crash.
 TEST_F(DragDropClientMacTest, CloseWidgetOnDrop) {
   OSExchangeData data;
-  const base::string16& text = ASCIIToUTF16("text");
+  const std::u16string& text = u"text";
   data.SetString(text);
   SetData(data);
 
   target_ = new DragDropCloseView();
-  widget_->GetContentsView()->AddChildView(target_);
+  widget_->non_client_view()->frame_view()->AddChildView(target_.get());
   target_->SetBoundsRect(gfx::Rect(0, 0, 100, 100));
   target_->set_formats(ui::OSExchangeData::STRING | ui::OSExchangeData::URL);
 
   EXPECT_EQ(DragUpdate(nil), NSDragOperationCopy);
   EXPECT_EQ(Drop(), NSDragOperationMove);
 
-  // OnPerformDrop() will have deleted the widget.
+  // Drop callback will have deleted the widget.
   widget_ = nullptr;
 }
 

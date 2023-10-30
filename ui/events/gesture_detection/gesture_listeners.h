@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ class GESTURE_DETECTION_EXPORT GestureListener {
   virtual bool OnDown(const MotionEvent& e) = 0;
   virtual void OnShowPress(const MotionEvent& e) = 0;
   virtual bool OnSingleTapUp(const MotionEvent& e, int tap_count) = 0;
+  virtual void OnShortPress(const MotionEvent& e) = 0;
   virtual void OnLongPress(const MotionEvent& e) = 0;
   virtual bool OnScroll(const MotionEvent& e1,
                         const MotionEvent& e2,
@@ -34,6 +35,7 @@ class GESTURE_DETECTION_EXPORT GestureListener {
                        float velocity_x,
                        float velocity_y) = 0;
   virtual bool OnTwoFingerTap(const MotionEvent& e1, const MotionEvent& e2) = 0;
+  virtual void OnTapCancel(const MotionEvent& e) = 0;
 };
 
 // Client through which |GestureDetector| signals double-tap detection.
@@ -57,6 +59,7 @@ class GESTURE_DETECTION_EXPORT SimpleGestureListener
   bool OnDown(const MotionEvent& e) override;
   void OnShowPress(const MotionEvent& e) override;
   bool OnSingleTapUp(const MotionEvent& e, int tap_count) override;
+  void OnShortPress(const MotionEvent& e) override;
   void OnLongPress(const MotionEvent& e) override;
   bool OnScroll(const MotionEvent& e1,
                 const MotionEvent& e2,
@@ -72,6 +75,7 @@ class GESTURE_DETECTION_EXPORT SimpleGestureListener
                float velocity_x,
                float velocity_y) override;
   bool OnTwoFingerTap(const MotionEvent& e1, const MotionEvent& e2) override;
+  void OnTapCancel(const MotionEvent& e) override {}
 
   // DoubleTapListener implementation.
   bool OnSingleTapConfirmed(const MotionEvent& e) override;

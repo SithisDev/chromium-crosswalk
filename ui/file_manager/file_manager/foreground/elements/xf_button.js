@@ -1,113 +1,77 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+
+import {html} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+const htmlTemplate = html`{__html_template__}`;
 
 /**
  * A button used inside PanelItem with varying display characteristics.
  */
-class PanelButton extends HTMLElement {
+export class PanelButton extends HTMLElement {
   constructor() {
-    PanelButton.createElement_.call(super());
+    super();
+    this.createElement_();
   }
 
   /**
    * Creates a PanelButton.
    * @private
    */
-  static createElement_() {
-    const template = document.createElement('template');
-    template.innerHTML = PanelButton.html_();
-    const fragment = template.content.cloneNode(true);
+  createElement_() {
+    const fragment = htmlTemplate.content.cloneNode(true);
     this.attachShadow({mode: 'open'}).appendChild(fragment);
   }
 
   /**
-   * Get the custom element template string.
-   * TODO(crbug.com/947388) Replace 'button' to WebUI's 'cr-button'.
+   * Registers this instance to listen to these attribute changes.
    * @private
-   * @return {string}
    */
-  static html_() {
-    return `<style>
-              cr-icon-button, cr-button {
-                margin-inline-start: 0px;
-              }
+  static get observedAttributes() {
+    return [
+      'data-category',
+    ];
+  }
 
-              :host([data-category='pause']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMyc+CiAgICAgICAgPGxpbmUgeDE9JzE\
-                  1JyB5MT0nMTInIHgyPScxNScgeTI9JzI0Jy8+CiAgICAgICAgPGxpbmUgeDE\
-                  9JzIxJyB5MT0nMTInIHgyPScyMScgeTI9JzI0Jy8+CiAgICA8L2c+Cjwvc3Z\
-                  nPg==') no-repeat center;
-              }
+  /**
+   * Callback triggered by the browser when our attribute values change.
+   * @param {string} name Attribute that's changed.
+   * @param {?string} oldValue Old value of the attribute.
+   * @param {?string} newValue New value of the attribute.
+   * @private
+   */
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (oldValue === newValue) {
+      return;
+    }
+    /** @type {Element} */
+    const iconButton = this.shadowRoot.querySelector('cr-icon-button');
+    if (name === 'data-category') {
+      switch (newValue) {
+        case 'cancel':
+          iconButton.setAttribute('iron-icon', 'cr:clear');
+          break;
+        case 'collapse':
+        case 'expand':
+          iconButton.setAttribute('iron-icon', 'cr:expand-less');
+          break;
+      }
+    }
+  }
 
-              :host([data-category='cancel']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMic+CiAgICAgICAgPGxpbmUgeDE9JzE\
-                  yJyB5MT0nMTInIHgyPScyNCcgeTI9JzI0Jy8+CiAgICAgICAgPGxpbmUgeDE\
-                  9JzI0JyB5MT0nMTInIHgyPScxMicgeTI9JzI0Jy8+CiAgICA8L2c+Cjwvc3Z\
-                  nPg==') no-repeat center;
-              }
-
-              :host([data-category='expand']),
-              :host([data-category='collapse']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMic+CiAgICAgICAgPHBhdGggZmlsbD0\
-                  ibm9uZSIgZD0nTTEyLDIxbDYsLTYgNiw2Jy8+CiAgICA8L2c+Cjwvc3ZnPg=='
-                  ) no-repeat center;
-              }
-
-              @keyframes setcollapse {
-                from {
-                  transform: rotate(0deg);
-                }
-                to {
-                  transform: rotate(180deg);
-                }
-              }
-
-              @keyframes setexpand {
-                from {
-                  transform: rotate(-180deg);
-                }
-                to {
-                  transform: rotate(0deg);
-                }
-              }
-
-              :host([data-category='expand']) {
-                  animation: setexpand 200ms forwards;
-              }
-
-              :host([data-category='collapse']) {
-                  animation: setcollapse 200ms forwards;
-              }
-
-              :host {
-                position: relative;
-              }
-
-              :host(:not([data-category='dismiss'])) {
-                width: 36px;
-              }
-
-              :host([data-category='dismiss']) #icon {
-                display: none;
-              }
-
-              :host(:not([data-category='dismiss'])) #dismiss {
-                display: none;
-              }
-            </style>
-            <cr-button id='dismiss'>$i18n{DRIVE_WELCOME_DISMISS}</cr-button>
-            <cr-icon-button id='icon'></cr-icon-button>`;
+  /**
+   * When using the extra button, the text can be programmatically set
+   * @param {string} text The text to use on the extra button.
+   */
+  setExtraButtonText(text) {
+    const extraButton = this.shadowRoot.querySelector('#extra-button');
+    extraButton.innerText = text;
   }
 }
 
 window.customElements.define('xf-button', PanelButton);
+
+//# sourceURL=//ui/file_manager/file_manager/foreground/elements/xf_button.js

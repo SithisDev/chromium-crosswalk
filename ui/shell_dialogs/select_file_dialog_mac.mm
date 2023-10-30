@@ -1,17 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/shell_dialogs/select_file_dialog_mac.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/remote_cocoa/app_shim/select_file_dialog_bridge.h"
 #include "components/remote_cocoa/browser/window.h"
 #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "ui/shell_dialogs/select_file_policy.h"
 
 using remote_cocoa::mojom::SelectFileDialogType;
@@ -37,7 +37,7 @@ bool SelectFileDialogImpl::IsRunning(gfx::NativeWindow parent_window) const {
 }
 
 void SelectFileDialogImpl::ListenerDestroyed() {
-  listener_ = NULL;
+  listener_ = nullptr;
 }
 
 void SelectFileDialogImpl::FileWasSelected(
@@ -52,6 +52,9 @@ void SelectFileDialogImpl::FileWasSelected(
   DCHECK(it != dialog_data_list_.end());
   void* params = dialog_data->params;
   dialog_data_list_.erase(it);
+
+  if (dialog_closed_callback_for_testing_)
+    dialog_closed_callback_for_testing_.Run();
 
   if (!listener_)
     return;
@@ -69,7 +72,7 @@ void SelectFileDialogImpl::FileWasSelected(
 
 void SelectFileDialogImpl::SelectFileImpl(
     Type type,
-    const base::string16& title,
+    const std::u16string& title,
     const base::FilePath& default_path,
     const FileTypeInfo* file_types,
     int file_type_index,
@@ -92,14 +95,14 @@ void SelectFileDialogImpl::SelectFileImpl(
 
   // Create a NSSavePanel for it.
   auto* mojo_window = remote_cocoa::GetWindowMojoInterface(gfx_window);
-  auto request = mojo::MakeRequest(&dialog_data.select_file_dialog);
+  auto receiver = dialog_data.select_file_dialog.BindNewPipeAndPassReceiver();
   if (mojo_window) {
-    mojo_window->CreateSelectFileDialog(std::move(request));
+    mojo_window->CreateSelectFileDialog(std::move(receiver));
   } else {
     NSWindow* ns_window = gfx_window.GetNativeNSWindow();
-    mojo::MakeStrongBinding(
+    mojo::MakeSelfOwnedReceiver(
         std::make_unique<remote_cocoa::SelectFileDialogBridge>(ns_window),
-        std::move(request));
+        std::move(receiver));
   }
 
   // Show the panel.
@@ -135,6 +138,8 @@ void SelectFileDialogImpl::SelectFileImpl(
     mojo_file_types->extension_description_overrides =
         file_types->extension_description_overrides;
     mojo_file_types->include_all_files = file_types->include_all_files;
+    mojo_file_types->keep_extension_visible =
+        file_types->keep_extension_visible;
   }
 
   auto callback = base::BindOnce(&SelectFileDialogImpl::FileWasSelected,
@@ -164,7 +169,7 @@ SelectFileDialogImpl::~SelectFileDialogImpl() {
       listener_->FileSelectionCanceled(dialog_data.params);
   }
 
-  // Cancel the NSSavePanels be destroying their bridges.
+  // Cancel the NSSavePanels by destroying their bridges.
   dialog_data_list_.clear();
 }
 

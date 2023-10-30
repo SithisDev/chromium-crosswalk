@@ -1,10 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/compositor/callback_layer_animation_observer.h"
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "ui/compositor/layer_animation_sequence.h"
 
 namespace ui {
@@ -21,39 +22,35 @@ bool CallbackLayerAnimationObserver::DummyAnimationEndedCallback(
 CallbackLayerAnimationObserver::CallbackLayerAnimationObserver(
     AnimationStartedCallback animation_started_callback,
     AnimationEndedCallback animation_ended_callback)
-    : animation_started_callback_(animation_started_callback),
-      animation_ended_callback_(animation_ended_callback) {}
+    : animation_started_callback_(std::move(animation_started_callback)),
+      animation_ended_callback_(std::move(animation_ended_callback)) {}
 
 CallbackLayerAnimationObserver::CallbackLayerAnimationObserver(
     AnimationStartedCallback animation_started_callback,
     bool should_delete_observer)
-    : animation_started_callback_(animation_started_callback),
-      animation_ended_callback_(base::Bind(
+    : animation_started_callback_(std::move(animation_started_callback)),
+      animation_ended_callback_(base::BindRepeating(
           &CallbackLayerAnimationObserver::DummyAnimationEndedCallback,
           should_delete_observer)) {}
 
 CallbackLayerAnimationObserver::CallbackLayerAnimationObserver(
     AnimationEndedCallback animation_ended_callback)
-    : animation_started_callback_(base::Bind(
+    : animation_started_callback_(base::BindRepeating(
           &CallbackLayerAnimationObserver::DummyAnimationStartedCallback)),
-      animation_ended_callback_(animation_ended_callback) {}
+      animation_ended_callback_(std::move(animation_ended_callback)) {}
 
-CallbackLayerAnimationObserver::~CallbackLayerAnimationObserver() {
-  if (destroyed_)
-    *destroyed_ = true;
-}
+CallbackLayerAnimationObserver::~CallbackLayerAnimationObserver() = default;
 
 void CallbackLayerAnimationObserver::SetActive() {
   active_ = true;
 
-  bool destroyed = false;
-  destroyed_ = &destroyed;
+  base::WeakPtr<CallbackLayerAnimationObserver> weak_this =
+      weak_factory_.GetWeakPtr();
 
   CheckAllSequencesStarted();
 
-  if (destroyed)
+  if (!weak_this)
     return;
-  destroyed_ = nullptr;
 
   CheckAllSequencesCompleted();
 }
@@ -96,6 +93,8 @@ void CallbackLayerAnimationObserver::OnDetachedFromSequence(
     ui::LayerAnimationSequence* sequence) {
   CHECK_LT(detached_sequence_count_, attached_sequence_count_);
   ++detached_sequence_count_;
+  CheckAllSequencesStarted();
+  CheckAllSequencesCompleted();
 }
 
 int CallbackLayerAnimationObserver::GetNumSequencesCompleted() {
@@ -103,26 +102,26 @@ int CallbackLayerAnimationObserver::GetNumSequencesCompleted() {
 }
 
 void CallbackLayerAnimationObserver::CheckAllSequencesStarted() {
-  if (active_ && attached_sequence_count_ == started_count_)
+  if (active_ && (attached_sequence_count_ == started_count_ ||
+                  detached_sequence_count_ == attached_sequence_count_))
     animation_started_callback_.Run(*this);
 }
 
 void CallbackLayerAnimationObserver::CheckAllSequencesCompleted() {
-  if (active_ && GetNumSequencesCompleted() == attached_sequence_count_) {
+  if (active_ && (GetNumSequencesCompleted() == attached_sequence_count_ ||
+                  detached_sequence_count_ == attached_sequence_count_)) {
     active_ = false;
-    bool destroyed = false;
-    destroyed_ = &destroyed;
-
+    base::WeakPtr<CallbackLayerAnimationObserver> weak_this =
+        weak_factory_.GetWeakPtr();
     bool should_delete = animation_ended_callback_.Run(*this);
 
-    if (destroyed) {
+    if (!weak_this) {
       if (should_delete)
         LOG(WARNING) << "CallbackLayerAnimationObserver was explicitly "
                         "destroyed AND was requested to be destroyed via the "
                         "AnimationEndedCallback's return value.";
       return;
     }
-    destroyed_ = nullptr;
 
     if (should_delete)
       delete this;

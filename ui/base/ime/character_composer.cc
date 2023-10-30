@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include <iterator>
 #include <string>
 
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/strings/utf_string_conversions.h"
@@ -32,7 +34,7 @@ bool CheckCharacterComposeTable(
 
 // Converts |character| to UTF16 string.
 // Returns false when |character| is not a valid character.
-bool UTF32CharacterToUTF16(uint32_t character, base::string16* output) {
+bool UTF32CharacterToUTF16(uint32_t character, std::u16string* output) {
   output->clear();
   // Reject invalid character. (e.g. codepoint greater than 0x10ffff)
   if (!CBU_IS_UNICODE_CHAR(character))
@@ -155,7 +157,7 @@ bool CharacterComposer::FilterKeyPressSequenceMode(const KeyEvent& event) {
 bool CharacterComposer::FilterKeyPressHexMode(const KeyEvent& event) {
   DCHECK(composition_mode_ == HEX_MODE);
   const size_t kMaxHexSequenceLength = 8;
-  base::char16 c = event.GetCharacter();
+  char16_t c = event.GetCharacter();
   int hex_digit = 0;
   if (base::IsHexDigit(c)) {
     hex_digit = base::HexDigitToInt(c);
@@ -232,12 +234,17 @@ ComposeChecker::CheckSequenceResult TreeComposeChecker::CheckSequence(
   for (const auto& keystroke : sequence) {
     DCHECK(tree_index < data_.tree_entries);
 
-    // If we are looking up a dead key, skip over the character tables.
+    // If we are looking up a dead key or the Compose key, skip over the
+    // character tables.
     int32_t character = -1;
-    if (keystroke.IsDeadKey()) {
+    if (keystroke.IsDeadKey() || keystroke.IsComposeKey()) {
       tree_index += 2 * data_.tree[tree_index] + 1;  // internal unicode table
       tree_index += 2 * data_.tree[tree_index] + 1;  // leaf unicode table
-      character = keystroke.ToDeadKeyCombiningCharacter();
+      // The generate_character_composer_data.py script assigns 0 to the Compose
+      // key.
+      character = keystroke.IsComposeKey()
+                      ? 0
+                      : keystroke.ToDeadKeyCombiningCharacter();
     } else if (keystroke.IsCharacter()) {
       character = keystroke.ToCharacter();
     }

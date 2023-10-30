@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,9 @@ NSEvent* TestScrollEvent(NSPoint location,
                          NSEventPhase event_phase,
                          NSEventPhase momentum_phase);
 
+// Returns a key-down event with isARepeat:YES.
+NSEvent* KeyDownEventWithRepeat();
+
 // Returns a key event with the given character.
 NSEvent* KeyEventWithCharacter(unichar c);
 
@@ -75,9 +78,10 @@ NSEvent* KeyEventWithKeyCode(unsigned short key_code,
                              NSUInteger modifiers);
 
 // Returns a key event for pressing or releasing a modifier key (aka
-// NSFlagsChanged). For example |key_code| == kVK_Shift with (|modifiers| &
-// NSShiftKeyMask) != 0 means Shift is pressed and |key_code| == kVK_Shift
-// with (|modifiers| & NSShiftKeyMask) == 0 means Shift is released.
+// NSEventTypeFlagsChanged). For example |key_code| == kVK_Shift with
+// (|modifiers| & NSEventModifierFlagShift) != 0 means Shift is pressed and
+// |key_code| == kVK_Shift with (|modifiers| & NSEventModifierFlagShift) == 0
+// means Shift is released.
 NSEvent* KeyEventWithModifierOnly(unsigned short key_code,
                                   NSUInteger modifiers);
 

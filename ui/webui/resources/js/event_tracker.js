@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,80 +11,80 @@
  * calling Function.bind.
  */
 
-/**
- * Create an EventTracker to track a set of events.
- * EventTracker instances are typically tied 1:1 with other objects or
- * DOM elements whose listeners should be removed when the object is disposed
- * or the corresponding elements are removed from the DOM.
- * @constructor
- */
-function EventTracker() {
-  /**
-   * @type {Array<EventTracker.Entry>}
-   * @private
-   */
-  this.listeners_ = [];
-}
+  export class EventTracker {
+    /**
+     * Create an EventTracker to track a set of events.
+     * EventTracker instances are typically tied 1:1 with other objects or
+     * DOM elements whose listeners should be removed when the object is
+     * disposed or the corresponding elements are removed from the DOM.
+     */
+    constructor() {
+      /**
+       * @type {Array<EventTrackerEntry>}
+       * @private
+       */
+      this.listeners_ = [];
+    }
 
-/**
- * The type of the internal tracking entry.
- * @typedef {{target: !EventTarget,
- *            eventType: string,
- *            listener: (EventListener|Function),
- *            capture: boolean}}
- */
-EventTracker.Entry;
+    /**
+     * Add an event listener - replacement for EventTarget.addEventListener.
+     * @param {!EventTarget} target The DOM target to add a listener to.
+     * @param {string} eventType The type of event to subscribe to.
+     * @param {EventListener|Function} listener The listener to add.
+     * @param {boolean=} capture Whether to invoke during the capture phase.
+     */
+    add(target, eventType, listener, capture = false) {
+      const h = {
+        target: target,
+        eventType: eventType,
+        listener: listener,
+        capture: capture,
+      };
+      this.listeners_.push(h);
+      target.addEventListener(eventType, listener, capture);
+    }
 
-EventTracker.prototype = {
-  /**
-   * Add an event listener - replacement for EventTarget.addEventListener.
-   * @param {!EventTarget} target The DOM target to add a listener to.
-   * @param {string} eventType The type of event to subscribe to.
-   * @param {EventListener|Function} listener The listener to add.
-   * @param {boolean=} opt_capture Whether to invoke during the capture phase.
-   */
-  add: function(target, eventType, listener, opt_capture) {
-    const capture = !!opt_capture;
-    const h = {
-      target: target,
-      eventType: eventType,
-      listener: listener,
-      capture: capture,
-    };
-    this.listeners_.push(h);
-    target.addEventListener(eventType, listener, capture);
-  },
+    /**
+     * Remove any specified event listeners added with this EventTracker.
+     * @param {!EventTarget} target The DOM target to remove a listener from.
+     * @param {?string} eventType The type of event to remove.
+     */
+    remove(target, eventType) {
+      this.listeners_ = this.listeners_.filter(listener => {
+        if (listener.target === target &&
+            (!eventType || (listener.eventType === eventType))) {
+          EventTracker.removeEventListener(listener);
+          return false;
+        }
+        return true;
+      });
+    }
 
-  /**
-   * Remove any specified event listeners added with this EventTracker.
-   * @param {!EventTarget} target The DOM target to remove a listener from.
-   * @param {?string} eventType The type of event to remove.
-   */
-  remove: function(target, eventType) {
-    this.listeners_ = this.listeners_.filter(function(h) {
-      if (h.target == target && (!eventType || (h.eventType == eventType))) {
-        EventTracker.removeEventListener_(h);
-        return false;
-      }
-      return true;
-    });
-  },
+    /** Remove all event listeners added with this EventTracker. */
+    removeAll() {
+      this.listeners_.forEach(
+          listener => EventTracker.removeEventListener(listener));
+      this.listeners_ = [];
+    }
 
-  /**
-   * Remove all event listeners added with this EventTracker.
-   */
-  removeAll: function() {
-    this.listeners_.forEach(EventTracker.removeEventListener_);
-    this.listeners_ = [];
+    /**
+     * Remove a single event listener given it's tracking entry. It's up to the
+     * caller to ensure the entry is removed from listeners_.
+     * @param {EventTrackerEntry} entry The entry describing the listener to
+     * remove.
+     */
+    static removeEventListener(entry) {
+      entry.target.removeEventListener(
+          entry.eventType, entry.listener, entry.capture);
+    }
   }
-};
 
-/**
- * Remove a single event listener given it's tracking entry. It's up to the
- * caller to ensure the entry is removed from listeners_.
- * @param {EventTracker.Entry} h The entry describing the listener to remove.
- * @private
- */
-EventTracker.removeEventListener_ = function(h) {
-  h.target.removeEventListener(h.eventType, h.listener, h.capture);
-};
+  /**
+   * The type of the internal tracking entry.
+   * @typedef {{target: !EventTarget,
+   *            eventType: string,
+   *            listener: (EventListener|Function),
+   *            capture: boolean}}
+   */
+  let EventTrackerEntry;
+

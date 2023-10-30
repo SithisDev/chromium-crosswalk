@@ -1,11 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
 #include "ui/base/view_prop.h"
 
 #include <set>
+
+#include "base/memory/raw_ptr.h"
 
 namespace ui {
 
@@ -53,9 +54,10 @@ class ViewProp::Data : public base::RefCounted<ViewProp::Data> {
   typedef std::set<Data*, DataComparator> DataSet;
 
   Data(gfx::AcceleratedWidget view, const char* key)
-      : view_(view),
-        key_(key),
-        data_(NULL) {}
+      : view_(view), key_(key), data_(nullptr) {}
+
+  Data(const Data&) = delete;
+  Data& operator=(const Data&) = delete;
 
   ~Data() {
     auto i = data_set_->find(this);
@@ -70,9 +72,7 @@ class ViewProp::Data : public base::RefCounted<ViewProp::Data> {
 
   const gfx::AcceleratedWidget view_;
   const char* key_;
-  void* data_;
-
-  DISALLOW_COPY_AND_ASSIGN(Data);
+  raw_ptr<void> data_;
 };
 
 // static

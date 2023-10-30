@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/views/views_touch_selection_controller_factory.h"
 #include "ui/views/widget/native_widget_private.h"
 
@@ -31,7 +32,11 @@ ViewsDelegate::ViewsDelegate()
   ui::TouchEditingControllerFactory::SetInstance(
       editing_controller_factory_.get());
 
-#if defined(USE_AURA)
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) || BUILDFLAG(IS_CHROMEOS_ASH)
+  // TouchSelectionMenuRunnerViews is not supported on Mac or Cast.
+  // It is also not used on Ash (the ChromeViewsDelegate() for Ash will
+  // immediately replace this). But tests running without the Chrome layer
+  // will not get the replacement.
   touch_selection_menu_runner_ =
       std::make_unique<TouchSelectionMenuRunnerViews>();
 #endif
@@ -61,8 +66,8 @@ bool ViewsDelegate::GetSavedWindowPlacement(
   return false;
 }
 
-void ViewsDelegate::NotifyMenuItemFocused(const base::string16& menu_name,
-                                          const base::string16& menu_item_name,
+void ViewsDelegate::NotifyMenuItemFocused(const std::u16string& menu_name,
+                                          const std::u16string& menu_item_name,
                                           int item_index,
                                           int item_count,
                                           bool has_submenu) {}
@@ -73,7 +78,11 @@ ViewsDelegate::ProcessAcceleratorWhileMenuShowing(
   return ProcessMenuAcceleratorResult::LEAVE_MENU_OPEN;
 }
 
-#if defined(OS_WIN)
+bool ViewsDelegate::ShouldCloseMenuIfMouseCaptureLost() const {
+  return true;
+}
+
+#if BUILDFLAG(IS_WIN)
 HICON ViewsDelegate::GetDefaultWindowIcon() const {
   return nullptr;
 }
@@ -85,14 +94,15 @@ HICON ViewsDelegate::GetSmallWindowIcon() const {
 bool ViewsDelegate::IsWindowInMetro(gfx::NativeWindow window) const {
   return false;
 }
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#elif BUILDFLAG(ENABLE_DESKTOP_AURA) && \
+    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
 gfx::ImageSkia* ViewsDelegate::GetDefaultWindowIcon() const {
   return nullptr;
 }
 #endif
 
-NonClientFrameView* ViewsDelegate::CreateDefaultNonClientFrameView(
-    Widget* widget) {
+std::unique_ptr<NonClientFrameView>
+ViewsDelegate::CreateDefaultNonClientFrameView(Widget* widget) {
   return nullptr;
 }
 
@@ -112,20 +122,18 @@ bool ViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
   return false;
 }
 
+#if BUILDFLAG(IS_MAC)
 ui::ContextFactory* ViewsDelegate::GetContextFactory() {
   return nullptr;
 }
-
-ui::ContextFactoryPrivate* ViewsDelegate::GetContextFactoryPrivate() {
-  return nullptr;
-}
+#endif
 
 std::string ViewsDelegate::GetApplicationName() {
   base::FilePath program = base::CommandLine::ForCurrentProcess()->GetProgram();
   return program.BaseName().AsUTF8Unsafe();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 int ViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,
                                           base::OnceClosure callback) {
   return EDGE_BOTTOM;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,147 +9,94 @@
 
 namespace ui {
 
-// Event types. (prefixed because of a conflict with windows headers)
-enum EventType {
-  ET_UNKNOWN = 0,
-  ET_MOUSE_PRESSED,
-  ET_MOUSE_DRAGGED,
-  ET_MOUSE_RELEASED,
-  ET_MOUSE_MOVED,
-  ET_MOUSE_ENTERED,
-  ET_MOUSE_EXITED,
-  ET_KEY_PRESSED,
-  ET_KEY_RELEASED,
-  ET_MOUSEWHEEL,
-  ET_MOUSE_CAPTURE_CHANGED,  // Event has no location.
-  ET_TOUCH_RELEASED,
-  ET_TOUCH_PRESSED,
-  // NOTE: This corresponds to a drag and is always preceeded by an
-  // ET_TOUCH_PRESSED. GestureRecognizers generally ignore ET_TOUCH_MOVED events
-  // without a corresponding ET_TOUCH_PRESSED.
-  ET_TOUCH_MOVED,
-  ET_TOUCH_CANCELLED,
-  ET_DROP_TARGET_EVENT,
-
-  // GestureEvent types
-  ET_GESTURE_SCROLL_BEGIN,
-  ET_GESTURE_TYPE_START = ET_GESTURE_SCROLL_BEGIN,
-  ET_GESTURE_SCROLL_END,
-  ET_GESTURE_SCROLL_UPDATE,
-  ET_GESTURE_TAP,
-  ET_GESTURE_TAP_DOWN,
-  ET_GESTURE_TAP_CANCEL,
-  ET_GESTURE_TAP_UNCONFIRMED,  // User tapped, but the tap delay hasn't expired.
-  ET_GESTURE_DOUBLE_TAP,
-  ET_GESTURE_BEGIN,  // The first event sent when each finger is pressed.
-  ET_GESTURE_END,    // Sent for each released finger.
-  ET_GESTURE_TWO_FINGER_TAP,
-  ET_GESTURE_PINCH_BEGIN,
-  ET_GESTURE_PINCH_END,
-  ET_GESTURE_PINCH_UPDATE,
-  ET_GESTURE_LONG_PRESS,
-  ET_GESTURE_LONG_TAP,
-  // A SWIPE gesture can happen at the end of a touch sequence involving one or
-  // more fingers if the finger velocity was high enough when the first finger
-  // was released.
-  ET_GESTURE_SWIPE,
-  ET_GESTURE_SHOW_PRESS,
-
-  // Scroll support.
-  // TODO[davemoore] we need to unify these events w/ touch and gestures.
-  ET_SCROLL,
-  ET_SCROLL_FLING_START,
-  ET_SCROLL_FLING_CANCEL,
-  ET_GESTURE_TYPE_END = ET_SCROLL_FLING_CANCEL,
-
-  // Sent by the system to indicate any modal type operations, such as drag and
-  // drop or menus, should stop.
-  ET_CANCEL_MODE,
-
-  // Sent by the CrOS gesture library for interesting patterns that we want
-  // to track with the UMA system.
-  ET_UMA_DATA,
-
-  // Must always be last. User namespace starts above this value.
-  // See ui::RegisterCustomEventType().
-  ET_LAST
-};
-
-// Event flags currently supported.  It is OK to add values to the middle of
+// Event flags currently supported. It is OK to add values to the middle of
 // this list and/or reorder it, but make sure you also touch the various other
-// enums/constants that want to stay in sync with this.
-enum EventFlags {
-  EF_NONE = 0,  // Used to denote no flags explicitly
+// enums/constants that want to stay in sync with this. For example,
+// KeyEventFlags and MouseEventFlags should not overlap EventFlags.
+using EventFlags = int;
+// Used to denote no flags explicitly
+constexpr EventFlags EF_NONE = 0;
 
-  // Universally applicable status bits.
-  EF_IS_SYNTHESIZED = 1 << 0,
+// Universally applicable status bits.
+constexpr EventFlags EF_IS_SYNTHESIZED = 1 << 0;
 
-  // Modifier key state.
-  EF_SHIFT_DOWN = 1 << 1,
-  EF_CONTROL_DOWN = 1 << 2,
-  EF_ALT_DOWN = 1 << 3,
-  EF_COMMAND_DOWN = 1 << 4,  // GUI Key (e.g. Command on OS X
-                             // keyboards, Search on Chromebook
-                             // keyboards, Windows on MS-oriented
-                             // keyboards)
-  EF_ALTGR_DOWN = 1 << 5,
-  EF_MOD3_DOWN = 1 << 6,
+// Modifier key state.
+constexpr EventFlags EF_SHIFT_DOWN = 1 << 1;
+constexpr EventFlags EF_CONTROL_DOWN = 1 << 2;
+constexpr EventFlags EF_ALT_DOWN = 1 << 3;
+// GUI Key (e.g. Command on OS X keyboards, Search on Chromebook keyboards,
+// Windows on MS-oriented keyboards)
+constexpr EventFlags EF_COMMAND_DOWN = 1 << 4;
+// Function key.
+constexpr EventFlags EF_FUNCTION_DOWN = 1 << 5;
+constexpr EventFlags EF_ALTGR_DOWN = 1 << 6;
+constexpr EventFlags EF_MOD3_DOWN = 1 << 7;
 
-  // Other keyboard states.
-  EF_NUM_LOCK_ON = 1 << 7,
-  EF_CAPS_LOCK_ON = 1 << 8,
-  EF_SCROLL_LOCK_ON = 1 << 9,
+// Other keyboard states.
+constexpr EventFlags EF_NUM_LOCK_ON = 1 << 8;
+constexpr EventFlags EF_CAPS_LOCK_ON = 1 << 9;
+constexpr EventFlags EF_SCROLL_LOCK_ON = 1 << 10;
 
-  // Mouse buttons.
-  EF_LEFT_MOUSE_BUTTON = 1 << 10,
-  EF_MIDDLE_MOUSE_BUTTON = 1 << 11,
-  EF_RIGHT_MOUSE_BUTTON = 1 << 12,
-  EF_BACK_MOUSE_BUTTON = 1 << 13,
-  EF_FORWARD_MOUSE_BUTTON = 1 << 14,
+// Mouse buttons.
+constexpr EventFlags EF_LEFT_MOUSE_BUTTON = 1 << 11;
+constexpr EventFlags EF_MIDDLE_MOUSE_BUTTON = 1 << 12;
+constexpr EventFlags EF_RIGHT_MOUSE_BUTTON = 1 << 13;
+constexpr EventFlags EF_BACK_MOUSE_BUTTON = 1 << 14;
+constexpr EventFlags EF_FORWARD_MOUSE_BUTTON = 1 << 15;
+constexpr EventFlags EF_MOUSE_BUTTON =
+    EF_LEFT_MOUSE_BUTTON | EF_MIDDLE_MOUSE_BUTTON | EF_RIGHT_MOUSE_BUTTON |
+    EF_BACK_MOUSE_BUTTON | EF_FORWARD_MOUSE_BUTTON;
 
 // An artificial value used to bridge platform differences.
 // Many commands on Mac as Cmd+Key are the counterparts of
 // Ctrl+Key on other platforms.
-#if defined(OS_MACOSX)
-  EF_PLATFORM_ACCELERATOR = EF_COMMAND_DOWN,
+#if BUILDFLAG(IS_APPLE)
+constexpr EventFlags EF_PLATFORM_ACCELERATOR = EF_COMMAND_DOWN;
 #else
-  EF_PLATFORM_ACCELERATOR = EF_CONTROL_DOWN,
+constexpr EventFlags EF_PLATFORM_ACCELERATOR = EF_CONTROL_DOWN;
 #endif
-};
 
 // Flags specific to key events.
 // WARNING: If you add or remove values make sure traits for serializing these
 // values are updated.
-enum KeyEventFlags {
-  EF_IME_FABRICATED_KEY = 1 << 15,  // Key event fabricated by the underlying
-                                    // IME without a user action.
-                                    // (Linux X11 only)
-  EF_IS_REPEAT = 1 << 16,
-  EF_FINAL = 1 << 17,            // Do not remap; the event was created with
-                                 // the desired final values.
-  EF_IS_EXTENDED_KEY = 1 << 18,  // Windows extended key (see WM_KEYDOWN doc)
-  EF_MAX_KEY_EVENT_FLAGS_VALUE = (1 << 19) - 1,
-};
+using KeyEventFlags = EventFlags;
+// Key event fabricated by the underlying IME without a user action. (Linux X11
+// only)
+constexpr KeyEventFlags EF_IME_FABRICATED_KEY = 1 << 16;
+constexpr KeyEventFlags EF_IS_REPEAT = 1 << 17;
+// Do not remap; the event was created with the desired final values.
+constexpr KeyEventFlags EF_FINAL = 1 << 18;
+// Windows extended key (see WM_KEYDOWN doc)
+constexpr KeyEventFlags EF_IS_EXTENDED_KEY = 1 << 19;
+// Event was generated by a stylus button
+constexpr KeyEventFlags EF_IS_STYLUS_BUTTON = 1 << 20;
+constexpr KeyEventFlags EF_MAX_KEY_EVENT_FLAGS_VALUE = (1 << 21) - 1;
 
 // Flags specific to mouse events.
-enum MouseEventFlags {
-  EF_IS_DOUBLE_CLICK = 1 << 15,
-  EF_IS_TRIPLE_CLICK = 1 << 16,
-  EF_IS_NON_CLIENT = 1 << 17,
-  EF_FROM_TOUCH = 1 << 18,           // Indicates this mouse event is generated
-                                     // from an unconsumed touch/gesture event.
-  EF_TOUCH_ACCESSIBILITY = 1 << 19,  // Indicates this event was generated from
-                                     // touch accessibility mode.
-  EF_CURSOR_HIDE = 1 << 20,          // Indicates this mouse event is generated
-                                     // because the cursor was just hidden. This
-                                     // can be used to update hover state.
-  EF_PRECISION_SCROLLING_DELTA =     // Indicates this mouse event is from high
-  1 << 21,                           // precision touchpad and will come with a
-                                     // high precision delta.
-  EF_SCROLL_BY_PAGE = 1 << 22,       // Indicates this mouse event is generated
-                                     // when users is requesting to scroll by
-                                     // pages.
-};
+using MouseEventFlags = EventFlags;
+constexpr MouseEventFlags EF_IS_DOUBLE_CLICK = 1 << 16;
+constexpr MouseEventFlags EF_IS_TRIPLE_CLICK = 1 << 17;
+constexpr MouseEventFlags EF_IS_NON_CLIENT = 1 << 18;
+// Indicates this mouse event is generated from an unconsumed touch/gesture
+// event.
+constexpr MouseEventFlags EF_FROM_TOUCH = 1 << 19;
+// Indicates this event was generated from touch accessibility mode.
+constexpr MouseEventFlags EF_TOUCH_ACCESSIBILITY = 1 << 20;
+// Indicates this mouse event is generated because the cursor was just hidden.
+// This can be used to update hover state.
+constexpr MouseEventFlags EF_CURSOR_HIDE = 1 << 21;
+// Indicates this mouse event is from high precision touchpad and will come with
+// a high precision delta.
+constexpr MouseEventFlags EF_PRECISION_SCROLLING_DELTA = 1 << 22;
+// Indicates this mouse event is generated when users is requesting to scroll by
+// pages.
+constexpr MouseEventFlags EF_SCROLL_BY_PAGE = 1 << 23;
+// Indicates this mouse event is unadjusted mouse events that has unadjusted
+// movement delta, i.e. is from WM_INPUT on Windows.
+constexpr MouseEventFlags EF_UNADJUSTED_MOUSE = 1 << 24;
+// Indicates this mouse event should not trigger mouse warping (which moves the
+// mouse to another display when the mouse hits the window boundaries).
+constexpr MouseEventFlags EF_NOT_SUITABLE_FOR_MOUSE_WARPING = 1 << 25;
 
 // Result of dispatching an event.
 enum EventResult {
@@ -220,20 +167,30 @@ enum class EventMomentumPhase {
   // for events that are not a "stream", but indicate both the start and end of
   // the event (e.g. a mouse wheel tick).
   END,
+
+  // EventMomentumPhase can only be BLOCKED when ScrollEventPhase is kEnd. Event
+  // marks the end of the current event stream, when there will be no inertia
+  // scrolling after the user gesture. ScrollEventPhase must simultaneously be
+  // kEnd because that is when it is determined if an event stream that results
+  // in momentum will begin or not. This phase is only used on Windows.
+  BLOCKED,
 };
 
-// Device ID for Touch and Key Events.
 enum EventDeviceId {
-  ED_UNKNOWN_DEVICE = -1
+  // Device ID for Touch, Mouse and Key Events.
+  ED_UNKNOWN_DEVICE = -1,
+  // Device ID for events injected through a remote connection (like CRD).
+  ED_REMOTE_INPUT_DEVICE = -2,
 };
 
 // Pointing device type.
 enum class EventPointerType : int {
-  POINTER_TYPE_UNKNOWN = 0,
-  POINTER_TYPE_MOUSE,
-  POINTER_TYPE_PEN,
-  POINTER_TYPE_TOUCH,
-  POINTER_TYPE_ERASER,
+  kUnknown,
+  kMouse,
+  kPen,
+  kTouch,
+  kEraser,
+  kMaxValue = kEraser,
 };
 
 // Device type for gesture events.

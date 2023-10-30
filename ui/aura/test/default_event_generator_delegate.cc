@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,11 @@ namespace test {
 DefaultEventGeneratorDelegate::DefaultEventGeneratorDelegate(
     gfx::NativeWindow root_window)
     : root_window_(root_window) {}
+
+void DefaultEventGeneratorDelegate::SetTargetWindow(
+    gfx::NativeWindow target_window) {
+  root_window_ = target_window->GetRootWindow();
+}
 
 ui::EventTarget* DefaultEventGeneratorDelegate::GetTargetAt(
     const gfx::Point& location) {

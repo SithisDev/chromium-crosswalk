@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_EVENTS_OZONE_LAYOUT_NO_NO_KEYBOARD_LAYOUT_ENGINE_H_
 #define UI_EVENTS_OZONE_LAYOUT_NO_NO_KEYBOARD_LAYOUT_ENGINE_H_
 
-#include "ui/events/ozone/layout/events_ozone_layout_export.h"
+#include "base/component_export.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine.h"
 
 namespace ui {
 
-class EVENTS_OZONE_LAYOUT_EXPORT NoKeyboardLayoutEngine
+class COMPONENT_EXPORT(EVENTS_OZONE_LAYOUT) NoKeyboardLayoutEngine
     : public KeyboardLayoutEngine {
  public:
   NoKeyboardLayoutEngine() {}
@@ -27,6 +27,7 @@ class EVENTS_OZONE_LAYOUT_EXPORT NoKeyboardLayoutEngine
               int flags,
               DomKey* dom_key,
               KeyboardCode* key_code) const override;
+  void SetInitCallbackForTest(base::OnceClosure closure) override;
 };
 
 }  // namespace ui

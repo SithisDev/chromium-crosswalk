@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@ class Transform;
 }  // namespace gfx
 
 namespace views {
+class View;
 
 // A layer |transform| may add an offset to its layer relative to the parent
 // layer. This offset does not take into consideration the subpixel positioning.
@@ -21,6 +22,8 @@ namespace views {
 VIEWS_EXPORT gfx::Transform GetTransformSubpixelCorrection(
     const gfx::Transform& transform,
     float device_scale_factor);
+
+VIEWS_EXPORT bool UsingPlatformHighContrastInkDrop(const View* view);
 
 }  // namespace views
 

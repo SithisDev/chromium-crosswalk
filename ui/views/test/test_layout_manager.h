@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_TEST_TEST_LAYOUT_MANAGER_H_
 #define UI_VIEWS_TEST_TEST_LAYOUT_MANAGER_H_
 
-#include "base/macros.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/layout/layout_manager.h"
 
@@ -17,6 +16,10 @@ namespace test {
 class TestLayoutManager : public LayoutManager {
  public:
   TestLayoutManager();
+
+  TestLayoutManager(const TestLayoutManager&) = delete;
+  TestLayoutManager& operator=(const TestLayoutManager&) = delete;
+
   ~TestLayoutManager() override;
 
   void SetPreferredSize(const gfx::Size& size) { preferred_size_ = size; }
@@ -25,10 +28,13 @@ class TestLayoutManager : public LayoutManager {
     preferred_height_for_width_ = height;
   }
 
+  int invalidate_count() const { return invalidate_count_; }
+
   // LayoutManager:
   void Layout(View* host) override;
   gfx::Size GetPreferredSize(const View* host) const override;
   int GetPreferredHeightForWidth(const View* host, int width) const override;
+  void InvalidateLayout() override;
 
  private:
   // The return value of GetPreferredSize();
@@ -37,7 +43,8 @@ class TestLayoutManager : public LayoutManager {
   // The return value for GetPreferredHeightForWidth().
   int preferred_height_for_width_ = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(TestLayoutManager);
+  // The number of calls to InvalidateLayout().
+  int invalidate_count_ = 0;
 };
 
 }  // namespace test

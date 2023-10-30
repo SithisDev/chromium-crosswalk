@@ -1,14 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/animation/square_ink_drop_ripple.h"
 
 #include <memory>
+#include <vector>
 
-#include "base/stl_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/compositor/compositor.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -36,86 +38,75 @@ gfx::Point TransformPoint(const gfx::Transform& transform,
 class SquareInkDropRippleCalculateTransformsTest : public WidgetTest {
  public:
   SquareInkDropRippleCalculateTransformsTest();
+
+  SquareInkDropRippleCalculateTransformsTest(
+      const SquareInkDropRippleCalculateTransformsTest&) = delete;
+  SquareInkDropRippleCalculateTransformsTest& operator=(
+      const SquareInkDropRippleCalculateTransformsTest&) = delete;
+
   ~SquareInkDropRippleCalculateTransformsTest() override;
 
  protected:
   // Half the width/height of the drawn ink drop.
-  static const int kHalfDrawnSize;
+  static constexpr int kHalfDrawnSize = 5;
 
   // The full width/height of the drawn ink drop.
-  static const int kDrawnSize;
+  static constexpr int kDrawnSize = 2 * kHalfDrawnSize;
 
   // The radius of the rounded rectangle corners.
-  static const int kTransformedRadius;
+  static constexpr int kTransformedRadius = 10;
 
   // Half the width/height of the transformed ink drop.
-  static const int kHalfTransformedSize;
+  static const int kHalfTransformedSize = 100;
 
   // The full width/height of the transformed ink drop.
-  static const int kTransformedSize;
+  static const int kTransformedSize = 2 * kHalfTransformedSize;
 
   // Constant points in the drawn space that will be transformed.
-  static const gfx::Point kDrawnCenterPoint;
-  static const gfx::Point kDrawnMidLeftPoint;
-  static const gfx::Point kDrawnMidRightPoint;
-  static const gfx::Point kDrawnTopMidPoint;
-  static const gfx::Point kDrawnBottomMidPoint;
+  static constexpr gfx::Point kDrawnCenterPoint =
+      gfx::Point(kHalfDrawnSize, kHalfDrawnSize);
+  static constexpr gfx::Point kDrawnMidLeftPoint =
+      gfx::Point(0, kHalfDrawnSize);
+  static constexpr gfx::Point kDrawnMidRightPoint =
+      gfx::Point(kDrawnSize, kHalfDrawnSize);
+  static constexpr gfx::Point kDrawnTopMidPoint = gfx::Point(kHalfDrawnSize, 0);
+  static constexpr gfx::Point kDrawnBottomMidPoint =
+      gfx::Point(kHalfDrawnSize, kDrawnSize);
 
   // The test target.
-  SquareInkDropRipple ink_drop_ripple_;
+  SquareInkDropRipple ink_drop_ripple_{
+      gfx::Size(kDrawnSize, kDrawnSize),
+      2,
+      gfx::Size(kHalfDrawnSize, kHalfDrawnSize),
+      1,
+      gfx::Point(),
+      SK_ColorBLACK,
+      0.175f};
 
   // Provides internal access to the test target.
-  SquareInkDropRippleTestApi test_api_;
+  SquareInkDropRippleTestApi test_api_{&ink_drop_ripple_};
 
   // The gfx::Transforms collection that is populated via the
   // Calculate*Transforms() calls.
   SquareInkDropRippleTestApi::InkDropTransforms transforms_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SquareInkDropRippleCalculateTransformsTest);
 };
 
-const int SquareInkDropRippleCalculateTransformsTest::kHalfDrawnSize = 5;
-const int SquareInkDropRippleCalculateTransformsTest::kDrawnSize =
-    2 * kHalfDrawnSize;
-
-const int SquareInkDropRippleCalculateTransformsTest::kTransformedRadius = 10;
-const int SquareInkDropRippleCalculateTransformsTest::kHalfTransformedSize =
-    100;
-const int SquareInkDropRippleCalculateTransformsTest::kTransformedSize =
-    2 * kHalfTransformedSize;
-
-const gfx::Point SquareInkDropRippleCalculateTransformsTest::kDrawnCenterPoint =
-    gfx::Point(kHalfDrawnSize, kHalfDrawnSize);
-
-const gfx::Point
-    SquareInkDropRippleCalculateTransformsTest::kDrawnMidLeftPoint =
-        gfx::Point(0, kHalfDrawnSize);
-
-const gfx::Point
-    SquareInkDropRippleCalculateTransformsTest::kDrawnMidRightPoint =
-        gfx::Point(kDrawnSize, kHalfDrawnSize);
-
-const gfx::Point SquareInkDropRippleCalculateTransformsTest::kDrawnTopMidPoint =
-    gfx::Point(kHalfDrawnSize, 0);
-
-const gfx::Point
-    SquareInkDropRippleCalculateTransformsTest::kDrawnBottomMidPoint =
-        gfx::Point(kHalfDrawnSize, kDrawnSize);
-
 SquareInkDropRippleCalculateTransformsTest::
-    SquareInkDropRippleCalculateTransformsTest()
-    : ink_drop_ripple_(gfx::Size(kDrawnSize, kDrawnSize),
-                       2,
-                       gfx::Size(kHalfDrawnSize, kHalfDrawnSize),
-                       1,
-                       gfx::Point(),
-                       SK_ColorBLACK,
-                       0.175f),
-      test_api_(&ink_drop_ripple_) {}
+    SquareInkDropRippleCalculateTransformsTest() = default;
 
 SquareInkDropRippleCalculateTransformsTest::
     ~SquareInkDropRippleCalculateTransformsTest() = default;
+
+constexpr gfx::Point
+    SquareInkDropRippleCalculateTransformsTest::kDrawnCenterPoint;
+constexpr gfx::Point
+    SquareInkDropRippleCalculateTransformsTest::kDrawnMidLeftPoint;
+constexpr gfx::Point
+    SquareInkDropRippleCalculateTransformsTest::kDrawnMidRightPoint;
+constexpr gfx::Point
+    SquareInkDropRippleCalculateTransformsTest::kDrawnTopMidPoint;
+constexpr gfx::Point
+    SquareInkDropRippleCalculateTransformsTest::kDrawnBottomMidPoint;
 
 }  // namespace
 
@@ -124,7 +115,7 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest,
   test_api_.CalculateCircleTransforms(
       gfx::Size(kTransformedSize, kTransformedSize), &transforms_);
 
-  struct {
+  constexpr struct {
     PaintedShape shape;
     gfx::Point center_point;
     gfx::Point mid_left_point;
@@ -183,10 +174,10 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest,
       gfx::Size(kTransformedSize, kTransformedSize), kTransformedRadius,
       &transforms_);
 
-  const int x_offset = kHalfTransformedSize - kTransformedRadius;
-  const int y_offset = kHalfTransformedSize - kTransformedRadius;
+  constexpr int x_offset = kHalfTransformedSize - kTransformedRadius;
+  constexpr int y_offset = kHalfTransformedSize - kTransformedRadius;
 
-  struct {
+  constexpr struct {
     PaintedShape shape;
     gfx::Point center_point;
     gfx::Point mid_left_point;
@@ -243,11 +234,11 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest,
 TEST_F(SquareInkDropRippleCalculateTransformsTest, RippleIsPixelAligned) {
   // Create a ripple that would not naturally be pixel aligned at a fractional
   // scale factor.
-  const gfx::Point center(14, 14);
-  const gfx::Rect drawn_rect_bounds(0, 0, 10, 10);
-  SquareInkDropRipple ink_drop_ripple(drawn_rect_bounds.size(), 2,
+  constexpr gfx::Point kCenter(14, 14);
+  constexpr gfx::Rect kDrawnRectBounds(0, 0, 10, 10);
+  SquareInkDropRipple ink_drop_ripple(kDrawnRectBounds.size(), 2,
                                       gfx::Size(1, 1),  // unimportant
-                                      1, center, SK_ColorBLACK, 0.175f);
+                                      1, kCenter, SK_ColorBLACK, 0.175f);
   SquareInkDropRippleTestApi test_api(&ink_drop_ripple);
 
   // Add to a widget so we can control the DSF.
@@ -259,15 +250,15 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest, RippleIsPixelAligned) {
   host_view->layer()->Add(ink_drop_ripple.GetRootLayer());
 
   // Test a variety of scale factors and target transform sizes.
-  std::vector<float> dsfs({1.0f, 1.25f, 1.5f, 2.0f, 3.0f});
-  std::vector<int> target_sizes({5, 7, 11, 13, 31});
+  const std::vector<float> dsfs({1.0f, 1.25f, 1.5f, 2.0f, 3.0f});
+  const std::vector<int> target_sizes({5, 7, 11, 13, 31});
 
   for (float dsf : dsfs) {
     for (int target_size : target_sizes) {
       SCOPED_TRACE(testing::Message()
                    << "target_size=" << target_size << " dsf=" << dsf);
       host_view->layer()->GetCompositor()->SetScaleAndSize(
-          dsf, gfx::Size(100, 100), viz::LocalSurfaceIdAllocation());
+          dsf, gfx::Size(100, 100), viz::LocalSurfaceId());
 
       SquareInkDropRippleTestApi::InkDropTransforms transforms;
       test_api.CalculateRectTransforms(gfx::Size(target_size, target_size), 0,
@@ -280,10 +271,10 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest, RippleIsPixelAligned) {
         float float_max_x = rect.right();
         float float_max_y = rect.bottom();
 
-        int min_x = gfx::ToRoundedInt(float_min_x);
-        int min_y = gfx::ToRoundedInt(float_min_y);
-        int max_x = gfx::ToRoundedInt(float_max_x);
-        int max_y = gfx::ToRoundedInt(float_max_y);
+        int min_x = base::ClampRound(float_min_x);
+        int min_y = base::ClampRound(float_min_y);
+        int max_x = base::ClampRound(float_max_x);
+        int max_y = base::ClampRound(float_max_y);
 
         EXPECT_LT(std::abs(min_x - float_min_x), 0.01f);
         EXPECT_LT(std::abs(min_y - float_min_y), 0.01f);
@@ -295,13 +286,13 @@ TEST_F(SquareInkDropRippleCalculateTransformsTest, RippleIsPixelAligned) {
       // what the target size was you should get an integer aligned bounding
       // box.
       gfx::Transform transform = transforms[PaintedShape::HORIZONTAL_RECT];
-      gfx::RectF horizontal_rect(drawn_rect_bounds);
+      gfx::RectF horizontal_rect(kDrawnRectBounds);
       transform.TransformRect(&horizontal_rect);
       horizontal_rect.Scale(dsf);
       verify_bounds(horizontal_rect);
 
       transform = transforms[PaintedShape::VERTICAL_RECT];
-      gfx::RectF vertical_rect(drawn_rect_bounds);
+      gfx::RectF vertical_rect(kDrawnRectBounds);
       transform.TransformRect(&vertical_rect);
       vertical_rect.Scale(dsf);
       verify_bounds(vertical_rect);

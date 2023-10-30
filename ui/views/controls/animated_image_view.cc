@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,19 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/paint/skottie_wrapper.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/compositor/compositor.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
 namespace {
 
-bool AreAnimatedImagesEqual(const gfx::SkiaVectorAnimation& animation_1,
-                            const gfx::SkiaVectorAnimation& animation_2) {
+bool AreAnimatedImagesEqual(const lottie::Animation& animation_1,
+                            const lottie::Animation& animation_2) {
   // In rare cases this may return false, even if the animated images are backed
   // by the same resource file.
   return animation_1.skottie() == animation_2.skottie();
@@ -28,7 +31,7 @@ AnimatedImageView::AnimatedImageView() = default;
 AnimatedImageView::~AnimatedImageView() = default;
 
 void AnimatedImageView::SetAnimatedImage(
-    std::unique_ptr<gfx::SkiaVectorAnimation> animated_image) {
+    std::unique_ptr<lottie::Animation> animated_image) {
   if (animated_image_ &&
       AreAnimatedImagesEqual(*animated_image, *animated_image_)) {
     Stop();
@@ -46,15 +49,24 @@ void AnimatedImageView::SetAnimatedImage(
   SchedulePaint();
 }
 
-void AnimatedImageView::Play() {
+void AnimatedImageView::Play(
+    absl::optional<lottie::Animation::PlaybackConfig> playback_config) {
   DCHECK(animated_image_);
-  DCHECK_EQ(state_, State::kStopped);
+  if (state_ == State::kPlaying)
+    return;
 
   state_ = State::kPlaying;
 
+  if (!playback_config) {
+    playback_config =
+        lottie::Animation::PlaybackConfig::CreateDefault(*animated_image_);
+  }
+  set_check_active_duration(playback_config->style !=
+                            lottie::Animation::Style::kLoop);
+
   SetCompositorFromWidget();
 
-  animated_image_->Start();
+  animated_image_->Start(std::move(playback_config));
 }
 
 void AnimatedImageView::Stop() {
@@ -78,18 +90,21 @@ void AnimatedImageView::OnPaint(gfx::Canvas* canvas) {
   if (!animated_image_)
     return;
   canvas->Save();
-  canvas->Translate(GetImageBounds().origin().OffsetFromOrigin());
 
-  // OnPaint may be called before clock tick was received; in that case just
-  // paint the first frame.
-  if (!previous_timestamp_.is_null() && state_ != State::kStopped)
+  gfx::Vector2d translation = GetImageBounds().origin().OffsetFromOrigin();
+  translation.Add(additional_translation_);
+  canvas->Translate(std::move(translation));
+
+  if (!previous_timestamp_.is_null() && state_ != State::kStopped) {
     animated_image_->Paint(canvas, previous_timestamp_, GetImageSize());
-  else
+  } else {
+    // OnPaint may be called before clock tick was received; in that case just
+    // paint the first frame.
     animated_image_->PaintFrame(canvas, 0, GetImageSize());
+  }
 
   canvas->Restore();
 }
-
 
 void AnimatedImageView::NativeViewHierarchyChanged() {
   ui::Compositor* compositor = GetWidget()->GetCompositor();
@@ -111,6 +126,8 @@ void AnimatedImageView::RemovedFromWidget() {
 }
 
 void AnimatedImageView::OnAnimationStep(base::TimeTicks timestamp) {
+  TRACE_EVENT1("views", "AnimatedImageView::OnAnimationStep", "timestamp",
+               timestamp);
   previous_timestamp_ = timestamp;
   SchedulePaint();
 }
@@ -139,8 +156,7 @@ void AnimatedImageView::ClearCurrentCompositor() {
   }
 }
 
-BEGIN_METADATA(AnimatedImageView)
-METADATA_PARENT_CLASS(ImageViewBase)
-END_METADATA()
+BEGIN_METADATA(AnimatedImageView, ImageViewBase)
+END_METADATA
 
 }  // namespace views

@@ -1,11 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_MOJOM_WINDOW_OPEN_DISPOSITION_MOJOM_TRAITS_H_
 #define UI_BASE_MOJOM_WINDOW_OPEN_DISPOSITION_MOJOM_TRAITS_H_
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "mojo/public/cpp/bindings/enum_traits.h"
 #include "ui/base/mojom/window_open_disposition.mojom.h"
 #include "ui/base/window_open_disposition.h"
@@ -27,6 +27,8 @@ struct EnumTraits<ui::mojom::WindowOpenDisposition, WindowOpenDisposition> {
         return ui::mojom::WindowOpenDisposition::NEW_FOREGROUND_TAB;
       case WindowOpenDisposition::NEW_BACKGROUND_TAB:
         return ui::mojom::WindowOpenDisposition::NEW_BACKGROUND_TAB;
+      case WindowOpenDisposition::NEW_PICTURE_IN_PICTURE:
+        return ui::mojom::WindowOpenDisposition::NEW_PICTURE_IN_PICTURE;
       case WindowOpenDisposition::NEW_POPUP:
         return ui::mojom::WindowOpenDisposition::NEW_POPUP;
       case WindowOpenDisposition::NEW_WINDOW:
@@ -60,6 +62,9 @@ struct EnumTraits<ui::mojom::WindowOpenDisposition, WindowOpenDisposition> {
         return true;
       case ui::mojom::WindowOpenDisposition::NEW_BACKGROUND_TAB:
         *out = WindowOpenDisposition::NEW_BACKGROUND_TAB;
+        return true;
+      case ui::mojom::WindowOpenDisposition::NEW_PICTURE_IN_PICTURE:
+        *out = WindowOpenDisposition::NEW_PICTURE_IN_PICTURE;
         return true;
       case ui::mojom::WindowOpenDisposition::NEW_POPUP:
         *out = WindowOpenDisposition::NEW_POPUP;

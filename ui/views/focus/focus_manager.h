@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/views/view_observer.h"
@@ -22,12 +22,6 @@
 //
 // - The native focus, which is the focus that a gfx::NativeView has.
 // - The view focus, which is the focus that a views::View has.
-//
-// When registering a view with the FocusManager, the caller can provide a view
-// whose focus will be kept in sync with the view the FocusManager is managing.
-//
-// (Focus registration is already done for you if you subclass the NativeControl
-// class or if you use the NativeViewHost class.)
 //
 // When a top window (derived from views::Widget) that is not a child window is
 // created, it creates and owns a FocusManager to manage the focus for itself
@@ -44,8 +38,8 @@
 // order.
 //
 // If you are embedding a native view containing a nested RootView (for example
-// by adding a NativeControl that contains a NativeWidgetWin as its native
-// component), then you need to:
+// by adding a view that contains a native widget as its native component),
+// then you need to:
 //
 // - Override the View::GetFocusTraversable method in your outer component.
 //   It should return the RootView of the inner component. This is used when
@@ -124,31 +118,28 @@ class VIEWS_EXPORT FocusChangeListener {
 class VIEWS_EXPORT FocusManager : public ViewObserver {
  public:
   // The reason why the focus changed.
-  enum FocusChangeReason {
+  enum class FocusChangeReason {
     // The focus changed because the user traversed focusable views using
     // keys like Tab or Shift+Tab.
-    kReasonFocusTraversal,
+    kFocusTraversal,
 
     // The focus changed due to restoring the focus.
-    kReasonFocusRestore,
+    kFocusRestore,
 
     // The focus changed due to a click or a shortcut to jump directly to
     // a particular view.
-    kReasonDirectFocusChange
+    kDirectFocusChange
   };
 
-  // TODO: use Direction in place of bool reverse throughout.
-  enum Direction {
-    kForward,
-    kBackward
-  };
+  // TODO(dmazzoni): use Direction in place of bool reverse throughout.
+  enum class Direction { kForward, kBackward };
 
-  enum FocusCycleWrappingBehavior {
-    kWrap,
-    kNoWrap
-  };
+  enum class FocusCycleWrapping { kEnabled, kDisabled };
 
   FocusManager(Widget* widget, std::unique_ptr<FocusManagerDelegate> delegate);
+
+  FocusManager(const FocusManager&) = delete;
+  FocusManager& operator=(const FocusManager&) = delete;
   ~FocusManager() override;
 
   // Processes the passed key event for accelerators and keyboard traversal.
@@ -171,9 +162,7 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // a reason). If the focus change should only happen if the view is
   // currenty focusable, enabled, and visible, call view->RequestFocus().
   void SetFocusedViewWithReason(View* view, FocusChangeReason reason);
-  void SetFocusedView(View* view) {
-    SetFocusedViewWithReason(view, kReasonDirectFocusChange);
-  }
+  void SetFocusedView(View* view);
 
   // Get the reason why the focus most recently changed.
   FocusChangeReason focus_change_reason() const { return focus_change_reason_; }
@@ -264,6 +253,9 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   void AddFocusChangeListener(FocusChangeListener* listener);
   void RemoveFocusChangeListener(FocusChangeListener* listener);
 
+  // Whether the given |accelerator| is registered.
+  bool IsAcceleratorRegistered(const ui::Accelerator& accelerator) const;
+
   // Whether the given |accelerator| has a priority handler associated with it.
   bool HasPriorityHandler(const ui::Accelerator& accelerator) const;
 
@@ -277,7 +269,7 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // order to trap keyboard focus within that pane. If |wrap| is kWrap,
   // it keeps cycling within this widget, otherwise it returns false after
   // reaching the last pane so that focus can cycle to another widget.
-  bool RotatePaneFocus(Direction direction, FocusCycleWrappingBehavior wrap);
+  bool RotatePaneFocus(Direction direction, FocusCycleWrapping wrapping);
 
   // Convenience method that returns true if the passed |key_event| should
   // trigger tab traversal (if it is a TAB key press with or without SHIFT
@@ -295,17 +287,11 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
     return arrow_key_traversal_enabled_;
   }
 
-  // Similar to above, but only for the widget that owns this FocusManager.
-  void set_arrow_key_traversal_enabled_for_widget(bool enabled) {
-    arrow_key_traversal_enabled_for_widget_ = enabled;
-  }
-
   // Returns the next focusable view. Traversal starts at |starting_view|. If
-  // |starting_view| is NULL |starting_widget| is consuled to determine which
-  // Widget to start from. See
-  // WidgetDelegate::ShouldAdvanceFocusToTopLevelWidget() for details. If both
-  // |starting_view| and |starting_widget| are NULL, traversal starts at
-  // |widget_|.
+  // |starting_view| is null, |starting_widget| is consulted to determine which
+  // Widget to start from. See WidgetDelegate::Params::focus_traverses_out for
+  // details. If both |starting_view| and |starting_widget| are null, traversal
+  // starts at |widget_|.
   View* GetNextFocusableView(View* starting_view,
                              Widget* starting_widget,
                              bool reverse,
@@ -316,6 +302,9 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // Updates |keyboard_accessible_| to the given value and advances focus if
   // necessary.
   void SetKeyboardAccessible(bool keyboard_accessible);
+
+  // Checks if a focused view is being set.
+  bool IsSettingFocusedView() const;
 
  private:
   // Returns the focusable view found in the FocusTraversable specified starting
@@ -337,22 +326,26 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // ViewObserver:
   void OnViewIsDeleting(View* view) override;
 
+  // Try to redirect the accelerator to bubble's anchor widget to process it if
+  // the bubble didn't.
+  bool RedirectAcceleratorToBubbleAnchorWidget(
+      const ui::Accelerator& accelerator);
+
+  // Returns true if arrow key traversal is enabled for the current widget.
+  bool IsArrowKeyTraversalEnabledForWidget() const;
+
   // Whether arrow key traversal is enabled globally.
   static bool arrow_key_traversal_enabled_;
 
-  // Whether arrow key traversal is enabled for all widgets under the top-level
-  // widget that owns the FocusManager.
-  bool arrow_key_traversal_enabled_for_widget_ = false;
-
   // The top-level Widget this FocusManager is associated with.
-  Widget* widget_;
+  raw_ptr<Widget> widget_;
 
   // The object which handles an accelerator when |accelerator_manager_| doesn't
   // handle it.
   std::unique_ptr<FocusManagerDelegate> delegate_;
 
   // The view that currently is focused.
-  View* focused_view_ = nullptr;
+  raw_ptr<View> focused_view_ = nullptr;
 
   // The AcceleratorManager this FocusManager is associated with.
   ui::AcceleratorManager accelerator_manager_;
@@ -363,7 +356,8 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   std::unique_ptr<ViewTracker> view_tracker_for_stored_view_;
 
   // The reason why the focus most recently changed.
-  FocusChangeReason focus_change_reason_ = kReasonDirectFocusChange;
+  FocusChangeReason focus_change_reason_ =
+      FocusChangeReason::kDirectFocusChange;
 
   // The list of registered FocusChange listeners.
   base::ObserverList<FocusChangeListener, true>::Unchecked
@@ -377,7 +371,13 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // access is enabled.
   bool keyboard_accessible_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(FocusManager);
+  // Whether FocusManager is currently trying to restore a focused view.
+  bool in_restoring_focused_view_ = false;
+
+  // Count of SetFocusedViewWithReason() in the current stack.
+  // This value is ideally 0 or 1, i.e. no nested focus change.
+  // See crbug.com/1203960.
+  int setting_focused_view_entrance_count = 0;
 };
 
 }  // namespace views

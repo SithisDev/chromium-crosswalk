@@ -1,10 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <atk/atk.h>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include "base/memory/singleton.h"
 #include "base/no_destructor.h"
 #include "ui/accessibility/platform/atk_util_auralinux.h"
+#include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/accessibility/platform/ax_platform_node_auralinux.h"
 
 namespace {
@@ -22,64 +24,28 @@ const char* kAccessibilityEnabledVariables[] = {
     "QT_ACCESSIBILITY",
 };
 
-}  // namespace
-
-G_BEGIN_DECLS
-
 //
-// atk_util_auralinux AtkObject definition and implementation.
+// AtkUtilAuraLinux definition and implementation.
 //
-
-#define ATK_UTIL_AURALINUX_TYPE (atk_util_auralinux_get_type())
-#define ATK_UTIL_AURALINUX(obj) \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), \
-     ATK_UTIL_AURALINUX_TYPE, \
-     AtkUtilAuraLinux))
-#define ATK_UTIL_AURALINUX_CLASS(klass) \
-    (G_TYPE_CHECK_CLASS_CAST((klass), \
-                             ATK_UTIL_AURALINUX_TYPE, \
-                             AtkUtilAuraLinuxClass))
-#define IS_ATK_UTIL_AURALINUX(obj) \
-    (G_TYPE_CHECK_INSTANCE_TYPE((obj), ATK_UTIL_AURALINUX_TYPE))
-#define IS_ATK_UTIL_AURALINUX_CLASS(klass) \
-    (G_TYPE_CHECK_CLASS_TYPE((klass), ATK_UTIL_AURALINUX_TYPE))
-#define ATK_UTIL_AURALINUX_GET_CLASS(obj) \
-    (G_TYPE_INSTANCE_GET_CLASS((obj), \
-                               ATK_UTIL_AURALINUX_TYPE, \
-                               AtkUtilAuraLinuxClass))
-
-typedef struct _AtkUtilAuraLinux        AtkUtilAuraLinux;
-typedef struct _AtkUtilAuraLinuxClass   AtkUtilAuraLinuxClass;
-
-struct _AtkUtilAuraLinux {
+struct AtkUtilAuraLinux {
   AtkUtil parent;
 };
 
-struct _AtkUtilAuraLinuxClass {
+struct AtkUtilAuraLinuxClass {
   AtkUtilClass parent_class;
 };
-
-GType atk_util_auralinux_get_type();
 
 G_DEFINE_TYPE(AtkUtilAuraLinux, atk_util_auralinux, ATK_TYPE_UTIL)
 
 static void atk_util_auralinux_init(AtkUtilAuraLinux *ax_util) {
 }
 
-static AtkObject* atk_util_auralinux_get_root() {
+static AtkObject* AtkUtilAuraLinuxGetRoot() {
   ui::AXPlatformNode* application = ui::AXPlatformNodeAuraLinux::application();
   if (application) {
     return application->GetNativeViewAccessible();
   }
   return nullptr;
-}
-
-static G_CONST_RETURN gchar* atk_util_auralinux_get_toolkit_name(void) {
-  return "Chromium";
-}
-
-static G_CONST_RETURN gchar* atk_util_auralinux_get_toolkit_version(void) {
-  return "1.0";
 }
 
 using KeySnoopFuncMap = std::map<guint, std::pair<AtkKeySnoopFunc, gpointer>>;
@@ -88,9 +54,31 @@ static KeySnoopFuncMap& GetActiveKeySnoopFunctions() {
   return *active_key_snoop_functions;
 }
 
-static guint atk_util_add_key_event_listener(AtkKeySnoopFunc key_snoop_function,
-                                             gpointer data) {
+using AXPlatformNodeSet = std::set<ui::AXPlatformNodeAuraLinux*>;
+static AXPlatformNodeSet& GetNodesWithPostponedEvents() {
+  static base::NoDestructor<AXPlatformNodeSet> nodes_with_postponed_events_list;
+  return *nodes_with_postponed_events_list;
+}
+
+static void RunPostponedEvents() {
+  for (ui::AXPlatformNodeAuraLinux* entry : GetNodesWithPostponedEvents()) {
+    entry->RunPostponedEvents();
+  }
+  GetNodesWithPostponedEvents().clear();
+}
+
+static guint AtkUtilAuraLinuxAddKeyEventListener(
+    AtkKeySnoopFunc key_snoop_function,
+    gpointer data) {
   static guint current_key_event_listener_id = 0;
+
+  // AtkUtilAuraLinuxAddKeyEventListener is called by
+  // spi_atk_register_event_listeners in the at-spi2-atk library after it has
+  // initialized all its other listeners. Our internal knowledge of the
+  // internals of the AT-SPI/ATK bridge allows us to use this call as an
+  // indication of AT-SPI being ready, so we can finally run any events that had
+  // been waiting.
+  ui::AtkUtilAuraLinux::GetInstance()->SetAtSpiReady(true);
 
   current_key_event_listener_id++;
   GetActiveKeySnoopFunctions()[current_key_event_listener_id] =
@@ -98,29 +86,21 @@ static guint atk_util_add_key_event_listener(AtkKeySnoopFunc key_snoop_function,
   return current_key_event_listener_id;
 }
 
-static void atk_util_remove_key_event_listener(guint listener_id) {
+static void AtkUtilAuraLinuxRemoveKeyEventListener(guint listener_id) {
   GetActiveKeySnoopFunctions().erase(listener_id);
 }
 
 static void atk_util_auralinux_class_init(AtkUtilAuraLinuxClass *klass) {
-  AtkUtilClass* atk_class;
-  gpointer data;
+  AtkUtilClass* atk_class = ATK_UTIL_CLASS(g_type_class_peek(ATK_TYPE_UTIL));
 
-  data = g_type_class_peek(ATK_TYPE_UTIL);
-  atk_class = ATK_UTIL_CLASS(data);
-
-  atk_class->get_root = atk_util_auralinux_get_root;
-  atk_class->get_toolkit_name = atk_util_auralinux_get_toolkit_name;
-  atk_class->get_toolkit_version = atk_util_auralinux_get_toolkit_version;
-  atk_class->add_key_event_listener = atk_util_add_key_event_listener;
-  atk_class->remove_key_event_listener = atk_util_remove_key_event_listener;
+  atk_class->get_root = AtkUtilAuraLinuxGetRoot;
+  atk_class->get_toolkit_name = []() { return "Chromium"; };
+  atk_class->get_toolkit_version = []() { return "1.0"; };
+  atk_class->add_key_event_listener = AtkUtilAuraLinuxAddKeyEventListener;
+  atk_class->remove_key_event_listener = AtkUtilAuraLinuxRemoveKeyEventListener;
 }
 
-G_END_DECLS
-
-//
-// AtkUtilAuraLinuxClass implementation.
-//
+}  // namespace
 
 namespace ui {
 
@@ -150,7 +130,7 @@ void AtkUtilAuraLinux::InitializeAsync() {
   initialized = true;
 
   // Register our util class.
-  g_type_class_unref(g_type_class_ref(ATK_UTIL_AURALINUX_TYPE));
+  g_type_class_unref(g_type_class_ref(atk_util_auralinux_get_type()));
 
   PlatformInitializeAsync();
 }
@@ -169,7 +149,8 @@ DiscardAtkKeyEvent AtkUtilAuraLinux::HandleAtkKeyEvent(
     AtkKeyEventStruct* key_event) {
   DCHECK(key_event);
 
-  if (!GetInstance()->ShouldEnableAccessibility())
+  if (!ui::AXPlatformNode::GetAccessibilityMode().has_mode(
+          ui::AXMode::kNativeAPIs))
     return DiscardAtkKeyEvent::Retain;
 
   GetInstance()->InitializeAsync();
@@ -188,11 +169,22 @@ DiscardAtkKeyEvent AtkUtilAuraLinux::HandleAtkKeyEvent(
   return discard ? DiscardAtkKeyEvent::Discard : DiscardAtkKeyEvent::Retain;
 }
 
-#if !defined(USE_X11)
-DiscardAtkKeyEvent AtkUtilAuraLinux::HandleKeyEvent(
-    const ui::KeyEvent& ui_key_event) {
-  NOTREACHED();
+bool AtkUtilAuraLinux::IsAtSpiReady() {
+  return at_spi_ready_;
 }
-#endif
+
+void AtkUtilAuraLinux::SetAtSpiReady(bool ready) {
+  at_spi_ready_ = ready;
+  if (ready)
+    RunPostponedEvents();
+}
+
+void AtkUtilAuraLinux::PostponeEventsFor(AXPlatformNodeAuraLinux* node) {
+  GetNodesWithPostponedEvents().insert(node);
+}
+
+void AtkUtilAuraLinux::CancelPostponedEventsFor(AXPlatformNodeAuraLinux* node) {
+  GetNodesWithPostponedEvents().erase(node);
+}
 
 }  // namespace ui

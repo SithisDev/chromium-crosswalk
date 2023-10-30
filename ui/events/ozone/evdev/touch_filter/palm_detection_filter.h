@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <bitset>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "ui/events/ozone/evdev/touch_evdev_types.h"
 #include "ui/events/ozone/evdev/touch_filter/shared_palm_detection_filter_state.h"
@@ -19,11 +20,12 @@ namespace ui {
 // 2. To decide which touches to suppress / "cancel".
 // Interface is similar to that of TouchFilter but enshrines the "hold" as a
 // first class citizen.
-class EVENTS_OZONE_EVDEV_EXPORT PalmDetectionFilter {
+class COMPONENT_EXPORT(EVDEV) PalmDetectionFilter {
  public:
   // shared_palm_state is not owned!
   explicit PalmDetectionFilter(
       SharedPalmDetectionFilterState* shared_palm_state);
+  virtual ~PalmDetectionFilter();
 
   // Execute a filter event. Expected to be executed on every update to touches.
   // Arguments are:
@@ -39,12 +41,15 @@ class EVENTS_OZONE_EVDEV_EXPORT PalmDetectionFilter {
                       base::TimeTicks time,
                       std::bitset<kNumTouchEvdevSlots>* slots_to_hold,
                       std::bitset<kNumTouchEvdevSlots>* slots_to_suppress) = 0;
-  virtual ~PalmDetectionFilter();
+
+  // The name of this filter, for testing purposes.
+  virtual std::string FilterNameForTesting() const = 0;
 
  protected:
   // Not owned!
-  SharedPalmDetectionFilterState* shared_palm_state_;
+  const raw_ptr<SharedPalmDetectionFilterState> shared_palm_state_;
 };
+
 }  // namespace ui
 
 #endif  // UI_EVENTS_OZONE_EVDEV_TOUCH_FILTER_PALM_DETECTION_FILTER_H_

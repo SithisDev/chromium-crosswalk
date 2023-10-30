@@ -1,8 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {ENTRIES, getCaller, pending, repeatUntil, RootPath, sendTestMessage, TestEntryInfo} from '../test_util.js';
+import {testcase} from '../testcase.js';
+
+import {expandTreeItem, IGNORE_APP_ERRORS, remoteCall, setupAndWaitUntilReady} from './background.js';
+import {TREEITEM_DOWNLOADS, TREEITEM_DRIVE} from './create_new_folder.js';
 
 /**
  * Waits until a dialog with an OK button is shown, and accepts it by clicking
@@ -11,16 +15,14 @@
  * @param {string} appId The Files app windowId.
  * @return {Promise} Promise to be fulfilled after clicking the OK button.
  */
-async function waitAndAcceptDialog(appId) {
+export async function waitAndAcceptDialog(appId) {
   const okButton = '.cr-dialog-ok';
 
-  // Wait for the Ok button to appear.
-  await remoteCall.waitForElement(appId, okButton);
+  // Wait until the dialog is shown.
+  await remoteCall.waitForElement(appId, '.cr-dialog-container.shown');
 
-  // Click the Ok button.
-  chrome.test.assertTrue(
-      await remoteCall.callRemoteTestUtil('fakeMouseClick', appId, [okButton]),
-      'Dialog Ok button click failed');
+  // Click the dialog OK button.
+  await remoteCall.waitAndClickElement(appId, okButton);
 
   // Wait until the dialog closes.
   await remoteCall.waitForElementLost(appId, '.cr-dialog-container');
@@ -44,7 +46,7 @@ function getVisibleDirectoryTreeItemNames(appId) {
  * @return {!Promise}
  */
 function waitForDirectoryTreeItem(appId, name) {
-  let caller = getCaller();
+  const caller = getCaller();
   return repeatUntil(async () => {
     if ((await getVisibleDirectoryTreeItemNames(appId)).indexOf(name) !== -1) {
       return true;
@@ -61,7 +63,7 @@ function waitForDirectoryTreeItem(appId, name) {
  * @return {!Promise}
  */
 function waitForDirectoryTreeItemLost(appId, name) {
-  let caller = getCaller();
+  const caller = getCaller();
   return repeatUntil(async () => {
     if ((await getVisibleDirectoryTreeItemNames(appId)).indexOf(name) === -1) {
       return true;
@@ -89,8 +91,7 @@ async function keyboardCopy(path) {
   await remoteCall.waitForFiles(
       appId, expectedEntryRows, {ignoreLastModifiedTime: true});
   const files = await remoteCall.callRemoteTestUtil('getFileList', appId, []);
-  if (path == RootPath.DRIVE &&
-      await sendTestMessage({name: 'getDriveFsEnabled'}) === 'true') {
+  if (path == RootPath.DRIVE) {
     // DriveFs doesn't preserve mtimes so they shouldn't match.
     chrome.test.assertTrue(files[0][3] != files[1][3], files[0][3]);
   } else {
@@ -114,7 +115,9 @@ async function keyboardDelete(path) {
       'deleteFile failed');
 
   // Run the delete entry confirmation dialog.
-  await waitAndAcceptDialog(appId);
+  if (await sendTestMessage({name: 'isTrashEnabled'}) !== 'true') {
+    await waitAndAcceptDialog(appId);
+  }
 
   // Check: the file list should be empty.
   await remoteCall.waitForFiles(appId, []);
@@ -132,7 +135,7 @@ async function keyboardDeleteFolder(path, treeItem) {
       await setupAndWaitUntilReady(path, [ENTRIES.photos], [ENTRIES.photos]);
 
   // Expand the directory tree |treeItem|.
-  await expandRoot(appId, treeItem);
+  await expandTreeItem(appId, treeItem);
 
   // Check: the folder should be shown in the directory tree.
   await waitForDirectoryTreeItem(appId, 'photos');
@@ -143,7 +146,9 @@ async function keyboardDeleteFolder(path, treeItem) {
       'deleteFile failed');
 
   // Run the delete entry confirmation dialog.
-  await waitAndAcceptDialog(appId);
+  if (await sendTestMessage({name: 'isTrashEnabled'}) !== 'true') {
+    await waitAndAcceptDialog(appId);
+  }
 
   // Check: the file list should be empty.
   await remoteCall.waitForFiles(appId, []);
@@ -164,9 +169,7 @@ async function renameFile(appId, oldName, newName) {
   const textInput = '#file-list .table-row[renaming] input.rename';
 
   // Select the file.
-  chrome.test.assertTrue(
-      await remoteCall.callRemoteTestUtil('selectFile', appId, [oldName]),
-      'selectFile failed');
+  await remoteCall.waitUntilSelected(appId, oldName);
 
   // Press Ctrl+Enter key to rename the file.
   const key = ['#file-list', 'Enter', true, false, false];
@@ -177,7 +180,7 @@ async function renameFile(appId, oldName, newName) {
   await remoteCall.waitForElement(appId, textInput);
 
   // Type new file name.
-  await remoteCall.callRemoteTestUtil('inputText', appId, [textInput, newName]);
+  await remoteCall.inputText(appId, textInput, newName);
 
   // Send Enter key to the text input.
   const key2 = [textInput, 'Enter', false, false, false];
@@ -199,7 +202,7 @@ async function testRenameFolder(path, treeItem) {
       await setupAndWaitUntilReady(path, [ENTRIES.photos], [ENTRIES.photos]);
 
   // Expand the directory tree |treeItem|.
-  await expandRoot(appId, treeItem);
+  await expandTreeItem(appId, treeItem);
 
   // Check: the photos folder should be shown in the directory tree.
   await waitForDirectoryTreeItem(appId, 'photos');
@@ -224,8 +227,7 @@ async function testRenameFolder(path, treeItem) {
   await remoteCall.waitForElement(appId, textInput);
 
   // Type the new folder name.
-  await remoteCall.callRemoteTestUtil(
-      'inputText', appId, [textInput, 'bbq photos']);
+  await remoteCall.inputText(appId, textInput, 'bbq photos');
 
   // Send Enter to the list to attempt to enter the directory.
   key = ['#list-container', 'Enter', false, false, false];
@@ -249,7 +251,6 @@ async function testRenameFolder(path, treeItem) {
   // Check: the renamed folder should be shown in the directory tree.
   await waitForDirectoryTreeItem(appId, 'bbq photos');
 }
-
 
 /**
  * Tests renaming a file.
@@ -323,6 +324,180 @@ testcase.renameNewFolderDrive = () => {
 };
 
 /**
+ * Tests renaming partitions with the keyboard on the file list.
+ */
+testcase.renameRemovableWithKeyboardOnFileList = async () => {
+  // Open Files app on local downloads.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.world]);
+
+  // Mount removable device with partitions.
+  await sendTestMessage({name: 'mountUsbWithMultiplePartitionTypes'});
+
+  // Wait and select the removable group by clicking the label.
+  const removableGroup = '#directory-tree [root-type-icon="removable"]';
+  await remoteCall.waitAndClickElement(appId, removableGroup);
+
+  // Focus on the file list.
+  await remoteCall.callRemoteTestUtil('focus', appId, ['#file-list']);
+
+  // Wait for partitions to show up.
+  const expectedRows = [
+    ['partition-1', '--', 'ntfs', ''],
+    ['partition-2', '--', 'ext4', ''],
+    ['partition-3', '--', 'vfat', ''],
+  ];
+  await remoteCall.waitForFiles(
+      appId, expectedRows, {ignoreLastModifiedTime: true});
+
+  // Attempt to rename partition with a label longer than permitted for fat32.
+  const partitionToRename = 'partition-3';  // fat32
+  await renameFile(appId, partitionToRename, 'very-long-partition-name');
+
+  // Verify that an error was triggered.
+  const errorTextElement =
+      await remoteCall.waitForElement(appId, '.cr-dialog-text');
+  chrome.test.assertEq(
+      `Use a name that's 11 characters or less`, errorTextElement.text);
+
+  // Dismiss the error dialog.
+  await remoteCall.waitAndClickElement(appId, '.cr-dialog-ok');
+
+  // Enter ctrl+A to select the old text so we can replace it.
+  const textInput = '#file-list > li input';
+  await remoteCall.callRemoteTestUtil(
+      'fakeKeyDown', appId, [textInput, 'A', true, false, false]);
+
+  // Enter a valid name this time.
+  const smallerPartitionName = 'smaller';
+  const enterKey = [textInput, 'Enter', false, false, false];
+  await remoteCall.inputText(appId, textInput, smallerPartitionName);
+  await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, enterKey);
+
+  // Wait for the renaming input element to disappear.
+  await remoteCall.waitForElementLost(appId, textInput);
+
+  // verify the partition was successfully renamed.
+  expectedRows[2][0] = smallerPartitionName;
+  await remoteCall.waitForFiles(
+      appId, expectedRows, {ignoreLastModifiedTime: true});
+
+  // Even though the Files app rename flow worked, the background.js page
+  // console errors about not being able to 'mount' the older volume name
+  // due to a disk_mount_manager.cc error: user/fake-usb not found.
+  return IGNORE_APP_ERRORS;
+};
+
+/**
+ * Tests that the root html element .focus-outline-visible class appears for
+ * keyboard interaction and is removed on mouse interaction.
+ */
+testcase.keyboardFocusOutlineVisible = async () => {
+  // Open Files app.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Check: the html element should have focus-outline-visible class.
+  const htmlFocusOutlineVisible = ['html.focus-outline-visible'];
+  await remoteCall.waitForElementsCount(appId, htmlFocusOutlineVisible, 1);
+
+  // Send mousedown to the toolbar delete button.
+  if (await sendTestMessage({name: 'isTrashEnabled'}) === 'true') {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#move-to-trash-button', 'mousedown']));
+  } else {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#delete-button', 'mousedown']));
+  }
+
+  // Check: the html element should not have focus-outline-visible class.
+  await remoteCall.waitForElementLost(appId, htmlFocusOutlineVisible);
+};
+
+/**
+ * Tests that the root html element .pointer-active class is added and removed
+ * for mouse interaction.
+ */
+testcase.keyboardFocusOutlineVisibleMouse = async () => {
+  // Open Files app.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Send mousedown to the toolbar delete button.
+  if (await sendTestMessage({name: 'isTrashEnabled'}) === 'true') {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#move-to-trash-button', 'mousedown']));
+  } else {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#delete-button', 'mousedown']));
+  }
+
+  // Check: the html element should have pointer-active class.
+  const htmlPointerActive = ['html.pointer-active'];
+  await remoteCall.waitForElementsCount(appId, htmlPointerActive, 1);
+
+  // Check: the html element should not have focus-outline-visible class.
+  await remoteCall.waitForElementLost(appId, ['html.focus-outline-visible']);
+
+  // Send mouseup to the toolbar delete button.
+  if (await sendTestMessage({name: 'isTrashEnabled'}) === 'true') {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#move-to-trash-button', 'mouseup']));
+  } else {
+    chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+        'fakeEvent', appId, ['#delete-button', 'mouseup']));
+  }
+
+  // Check: the html element should not have pointer-active class.
+  await remoteCall.waitForElementLost(appId, htmlPointerActive);
+};
+
+/**
+ * Tests that the root html element .pointer-active class will be removed with
+ * pointerup event triggered by touch.
+ */
+testcase.pointerActiveRemovedByTouch = async () => {
+  // Open Files app.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Send pointerdown to the list container.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'fakeEvent', appId, ['#list-container', 'pointerdown']));
+
+  // Check: the html element should have pointer-active class.
+  const htmlPointerActive = ['html.pointer-active'];
+  await remoteCall.waitForElementsCount(appId, htmlPointerActive, 1);
+
+  // Send pointerup with touch to the list container.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'fakeEvent', appId,
+      ['#list-container', 'pointerup', {pointerType: 'touch'}]));
+
+  // Check: the html element should not have pointer-active class.
+  await remoteCall.waitForElementLost(appId, htmlPointerActive);
+};
+
+/**
+ * Tests that the root html element .pointer-active class should not be added if
+ * the PointerDown event is triggered by touch.
+ */
+testcase.noPointerActiveOnTouch = async () => {
+  // Open Files app.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Send pointerdown with touch to the list container.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'fakeEvent', appId,
+      ['#list-container', 'pointerdown', {pointerType: 'touch'}]));
+
+  // Check: the html element should not have pointer-active class.
+  const htmlPointerActive = ['html.pointer-active'];
+  await remoteCall.waitForElementLost(appId, htmlPointerActive);
+};
+
+/**
  * Test that selecting "Google Drive" in the directory tree with the keyboard
  * expands it and selects "My Drive".
  */
@@ -333,6 +508,9 @@ testcase.keyboardSelectDriveDirectoryTree = async () => {
 
   // Focus the directory tree.
   await remoteCall.callRemoteTestUtil('focus', appId, ['#directory-tree']);
+
+  // Wait for Google Drive root to be available.
+  await remoteCall.waitForElement(appId, '.drive-volume');
 
   // Select Google Drive in the directory tree; as of the time of writing, it's
   // the last item so this happens to work.
@@ -362,38 +540,41 @@ testcase.keyboardSelectDriveDirectoryTree = async () => {
 testcase.keyboardDisableCopyWhenDialogDisplayed = async () => {
   // Open Files app.
   const appId =
-      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+      await setupAndWaitUntilReady(RootPath.DRIVE, [], [ENTRIES.hello]);
 
   // Select a file for deletion.
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil('selectFile', appId, ['hello.txt']),
-      'selectFile failed');
+  await remoteCall.waitUntilSelected(appId, ENTRIES.hello.nameText);
   await remoteCall.waitForElement(appId, '.table-row[selected]');
 
   // Click delete button in the toolbar.
   await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['button#delete-button']);
+      'fakeMouseClick', appId, ['#delete-button']);
 
-  // Confirm that the delete confirmation dialog is shown.
+  // Check: the delete confirm dialog should appear.
   await remoteCall.waitForElement(appId, '.cr-dialog-container.shown');
+
+  // Check: the dialog 'Cancel' button should be focused by default.
+  const defaultButton =
+      await remoteCall.waitForElement(appId, '.cr-dialog-cancel:focus');
+  chrome.test.assertEq('Cancel', defaultButton.text);
 
   // Try to copy file. We need to use execCommand as the command handler that
   // interprets key strokes will drop events if there is a dialog on screen.
   chrome.test.assertTrue(
       await remoteCall.callRemoteTestUtil('execCommand', appId, ['copy']));
 
-  // Press Cancel button to stop the delete operation.
-  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['button.cr-dialog-cancel']));
+  // Click the delete confirm dialog 'Cancel' button to cancel the deletion.
+  await remoteCall.waitAndClickElement(appId, '.cr-dialog-cancel');
 
-  // Wait for dialog to disappear.
-  chrome.test.assertTrue(
-      await remoteCall.waitForElementLost(appId, '.cr-dialog-container.shown'));
+  // Check: the delete confirm dialog should close.
+  await remoteCall.waitForElementLost(appId, '.cr-dialog-container.shown');
+
+  // Send a paste command to the file-list.
   const key = ['#file-list', 'v', true, false, false];
   chrome.test.assertTrue(
       await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, key));
 
-  // Check no files were pasted.
+  // Check: no files should be pasted.
   const files = TestEntryInfo.getExpectedRows([ENTRIES.hello]);
   await remoteCall.waitForFiles(appId, files);
 };
@@ -407,10 +588,8 @@ testcase.keyboardOpenNewWindow = async () => {
       await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
 
   // Grab the current open windows.
-  const initialWindows =
-      await remoteCall.callRemoteTestUtil('getWindows', null, []);
+  const initialWindows = await remoteCall.getWindows();
   const initialWindowsCount = Object.keys(initialWindows).length;
-  console.log(JSON.stringify(initialWindows));
 
   // Send Ctrl+N to open a new window.
   const key = ['#file-list', 'n', true, false, false];
@@ -420,8 +599,7 @@ testcase.keyboardOpenNewWindow = async () => {
   // Wait for the new window to appear.
   return repeatUntil(async () => {
     const caller = getCaller();
-    const currentWindows =
-        await remoteCall.callRemoteTestUtil('getWindows', null, []);
+    const currentWindows = await remoteCall.getWindows();
     const currentWindowsIds = Object.keys(currentWindows);
     if (initialWindowsCount < currentWindowsIds.length) {
       return true;

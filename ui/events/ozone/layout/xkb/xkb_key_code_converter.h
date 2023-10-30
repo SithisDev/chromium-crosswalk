@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ enum class DomCode;
 // with the mapping from DomCode to xkb_keycode_t. (This mapping is in principle
 // derivable from the XKB keyboard layout, but xkbcommon does not provide a
 // practical interface to do so.)
-class EVENTS_OZONE_LAYOUT_EXPORT XkbKeyCodeConverter {
+class COMPONENT_EXPORT(EVENTS_OZONE_LAYOUT) XkbKeyCodeConverter {
  public:
   XkbKeyCodeConverter();
   virtual ~XkbKeyCodeConverter();

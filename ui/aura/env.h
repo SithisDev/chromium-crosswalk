@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,26 @@
 #include <memory>
 #include <set>
 
-#include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/supports_user_data.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "ui/aura/aura_export.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/events/event_target.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/geometry/point.h"
 
 namespace ui {
 class ContextFactory;
-class ContextFactoryPrivate;
 class EventObserver;
 class GestureRecognizer;
 class PlatformEventSource;
+
+#if BUILDFLAG(IS_WIN)
+class WinCursorFactory;
+#endif
 }  // namespace ui
 
 namespace aura {
@@ -44,6 +48,9 @@ class WindowTreeHost;
 class AURA_EXPORT Env : public ui::EventTarget,
                         public base::SupportsUserData {
  public:
+  Env(const Env&) = delete;
+  Env& operator=(const Env&) = delete;
+
   ~Env() override;
 
   // Creates a new Env instance.
@@ -104,20 +111,17 @@ class AURA_EXPORT Env : public ui::EventTarget,
   }
   bool throttle_input_on_resize() const { return throttle_input_on_resize_; }
 
-  void set_context_factory_private(
-      ui::ContextFactoryPrivate* context_factory_private) {
-    context_factory_private_ = context_factory_private;
-  }
-  ui::ContextFactoryPrivate* context_factory_private() {
-    return context_factory_private_;
-  }
-
   ui::GestureRecognizer* gesture_recognizer() {
     return gesture_recognizer_.get();
   }
-
   void SetGestureRecognizer(
       std::unique_ptr<ui::GestureRecognizer> gesture_recognizer);
+
+  // The `fallback` parameter allows callers of this API to specify a
+  // value to be returned in the case of a missing touch state.
+  gfx::Point GetLastPointerPoint(ui::mojom::DragEventSource event_source,
+                                 aura::Window* window,
+                                 absl::optional<gfx::Point> fallback);
 
   // Get WindowOcclusionTracker instance. Create one if not yet created.
   WindowOcclusionTracker* GetWindowOcclusionTracker();
@@ -137,6 +141,10 @@ class AURA_EXPORT Env : public ui::EventTarget,
   void RemoveEventObserver(ui::EventObserver* observer);
   void NotifyEventObservers(const ui::Event& event);
 
+  const std::vector<aura::WindowTreeHost*>& window_tree_hosts() const {
+    return window_tree_hosts_;
+  }
+
  private:
   friend class test::EnvTestHelper;
   friend class EventInjector;
@@ -145,13 +153,18 @@ class AURA_EXPORT Env : public ui::EventTarget,
 
   Env();
 
-  void Init();
+  // Returns whether the initialisation was successful.  If it was not,
+  // CreateInstance will return nullptr, and the process will eventually exit.
+  bool Init();
 
   // Called by the Window when it is initialized. Notifies observers.
   void NotifyWindowInitialized(Window* window);
 
   // Called by the WindowTreeHost when it is initialized. Notifies observers.
   void NotifyHostInitialized(WindowTreeHost* host);
+
+  // Called by the WindowTreeHost before it is destroyed. Notifies observers.
+  void NotifyHostDestroyed(WindowTreeHost* host);
 
   // Overridden from ui::EventTarget:
   bool CanAcceptEvent(const ui::Event& event) override;
@@ -179,18 +192,23 @@ class AURA_EXPORT Env : public ui::EventTarget,
 
   std::unique_ptr<ui::GestureRecognizer> gesture_recognizer_;
 
+#if BUILDFLAG(IS_WIN)
+  std::unique_ptr<ui::WinCursorFactory> cursor_factory_;
+#endif
+
   std::unique_ptr<InputStateLookup> input_state_lookup_;
   std::unique_ptr<ui::PlatformEventSource> event_source_;
 
-  ui::ContextFactory* context_factory_ = nullptr;
-  ui::ContextFactoryPrivate* context_factory_private_ = nullptr;
+  // TODO(crbug.com/1298696): Breaks content_unittests.
+  raw_ptr<ui::ContextFactory, DanglingUntriagedDegradeToNoOpWhenMTE>
+      context_factory_ = nullptr;
 
   static bool initial_throttle_input_on_resize_;
   bool throttle_input_on_resize_ = initial_throttle_input_on_resize_;
 
   std::unique_ptr<WindowOcclusionTracker> window_occlusion_tracker_;
 
-  DISALLOW_COPY_AND_ASSIGN(Env);
+  std::vector<aura::WindowTreeHost*> window_tree_hosts_;
 };
 
 }  // namespace aura

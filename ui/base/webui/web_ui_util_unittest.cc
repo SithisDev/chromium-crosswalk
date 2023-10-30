@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,70 +53,6 @@ TEST(WebUIUtilTest, ParsePathAndScale) {
   EXPECT_EQ(1.3f, factor);
 }
 
-TEST(WebUIUtilTest, ParsePathAndFrame) {
-  std::string path;
-
-  int index = -2;
-  GURL url("http://[::192.9.5.5]/and/some/more");
-  webui::ParsePathAndFrame(url, &path, &index);
-  EXPECT_EQ("and/some/more", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url2("http://host/and/some/more");
-  webui::ParsePathAndFrame(url2, &path, &index);
-  EXPECT_EQ("and/some/more", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url3("http://host/and/some/more[2a]");
-  webui::ParsePathAndFrame(url3, &path, &index);
-  EXPECT_EQ("and/some/more[2a]", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url4("http://host/and/some/more[]");
-  webui::ParsePathAndFrame(url4, &path, &index);
-  EXPECT_EQ("and/some/more[]", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url5("http://host/and/some/more[-2]");
-  webui::ParsePathAndFrame(url5, &path, &index);
-  EXPECT_EQ("and/some/more[-2]", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url6("http://[::192.9.5.5]/and/some/more[0]");
-  webui::ParsePathAndFrame(url6, &path, &index);
-  EXPECT_EQ("and/some/more", path);
-  EXPECT_EQ(0, index);
-
-  index = -2;
-  GURL url7("http://host/and/some/more[1]");
-  webui::ParsePathAndFrame(url7, &path, &index);
-  EXPECT_EQ("and/some/more", path);
-  EXPECT_EQ(1, index);
-
-  index = -2;
-  GURL url8("http://host/and/some/more[3]");
-  webui::ParsePathAndFrame(url8, &path, &index);
-  EXPECT_EQ("and/some/more", path);
-  EXPECT_EQ(3, index);
-
-  index = -2;
-  GURL url9("http://host/and/some/more0]");
-  webui::ParsePathAndFrame(url9, &path, &index);
-  EXPECT_EQ("and/some/more0]", path);
-  EXPECT_EQ(-1, index);
-
-  index = -2;
-  GURL url10("http://host/and/some/more[0");
-  webui::ParsePathAndFrame(url10, &path, &index);
-  EXPECT_EQ("and/some/more[0", path);
-  EXPECT_EQ(-1, index);
-}
-
 TEST(WebUIUtilTest, ParsePathAndImageSpec) {
   std::string path;
 
@@ -151,4 +87,17 @@ TEST(WebUIUtilTest, ParsePathAndImageSpec) {
   EXPECT_EQ("some/random/username@email/and/more", path);
   EXPECT_EQ(1.5f, factor);
   EXPECT_EQ(1, index);
+}
+
+TEST(WebUIUtilTest, GetPngDataUrl_Basic) {
+  // The input doesn't have to be a valid image.
+  std::vector<unsigned char> in = {1, 2, 3, 4};
+  std::string out = webui::GetPngDataUrl(in.data(), in.size());
+  EXPECT_EQ("data:image/png;base64,AQIDBA==", out);
+}
+
+TEST(WebUIUtilTest, GetPngDataUrl_EmptyInput) {
+  std::vector<unsigned char> in;
+  webui::GetPngDataUrl(in.data(), in.size());
+  // No crash.
 }

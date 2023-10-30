@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -32,8 +32,17 @@
 #     For example "cr.foo.Bar|Bar" will replace all occurrences of "cr.foo.Bar"
 #     with "Bar". This flag works identically with the one in
 #     polymer_modulizer.gni.
+#
+#   preserve_offsets:
+#     If present, uses regular expressions for the import and export
+#     replacements that contain the same number of characters in the input
+#     and output. This is used to support code coverage tools that map the
+#     original source files to evaluate coverage and need the character
+#     offsets to lines of code to remain constant.
+#
 
 import argparse
+import io
 import os
 import re
 import sys
@@ -42,6 +51,7 @@ _CWD = os.getcwd()
 
 IMPORT_LINE_REGEX = '// #import'
 EXPORT_LINE_REGEX = '/* #export */'
+IGNORE_LINE_REGEX = '\s*/\* #ignore \*/(\S|\s)*'
 
 # Ignore lines that contain <include> tags, (for example see util.js).
 INCLUDE_LINE_REGEX = '^// <include '
@@ -61,12 +71,11 @@ def _rewrite_namespaces(string, namespace_rewrites):
   return string
 
 
-def ProcessFile(filename, out_folder, namespace_rewrites):
+def ProcessFile(filename, out_folder, namespace_rewrites, preserve_offsets):
   # Gather indices of lines to be removed.
-  indices_to_remove = [];
-  renames = {}
+  indices_to_remove = []
 
-  with open(filename) as f:
+  with io.open(filename, encoding='utf-8', mode='r') as f:
     lines = f.readlines()
     ignore_remaining_lines = False
     cr_define_start_index = -1
@@ -78,6 +87,10 @@ def ProcessFile(filename, out_folder, namespace_rewrites):
         continue
 
       if re.match(INCLUDE_LINE_REGEX, line):
+        indices_to_remove.append(i)
+        continue
+
+      if re.match(IGNORE_LINE_REGEX, line):
         indices_to_remove.append(i)
         continue
 
@@ -98,11 +111,19 @@ def ProcessFile(filename, out_folder, namespace_rewrites):
         ignore_remaining_lines = True
         continue
 
-      line = line.replace(EXPORT_LINE_REGEX, 'export')
-      line = line.replace(IMPORT_LINE_REGEX, 'import')
+      # TODO(crbug.com/1030998): Remove this option when File Manager gets rid
+      # of its non JS-module code.
+      if preserve_offsets:
+        line = line.replace(EXPORT_LINE_REGEX, '/*   */export')
+        line = line.replace(IMPORT_LINE_REGEX, '/**/import')
+      else:
+        line = line.replace(EXPORT_LINE_REGEX, 'export')
+        line = line.replace(IMPORT_LINE_REGEX, 'import')
       line = _rewrite_namespaces(line, namespace_rewrites)
       lines[i] = line
 
+  if cr_define_start_index != -1:
+    assert cr_define_end_index != -1, 'No cr_define_end found'
 
   # Process line numbers in descending order, such that the array can be
   # modified in-place.
@@ -113,9 +134,11 @@ def ProcessFile(filename, out_folder, namespace_rewrites):
   out_filename = os.path.splitext(os.path.basename(filename))[0] + '.m.js'
 
   # Reconstruct file.
-  with open(os.path.join(out_folder, out_filename), 'w') as f:
+  # Specify the newline character so that the exact same file is generated
+  # across platforms.
+  with io.open(os.path.join(out_folder, out_filename), 'wb') as f:
     for l in lines:
-      f.write(l)
+      f.write(l.encode('utf-8'))
   return
 
 def main(argv):
@@ -124,6 +147,7 @@ def main(argv):
   parser.add_argument('--in_folder', required=True)
   parser.add_argument('--out_folder', required=True)
   parser.add_argument('--namespace_rewrites', required=False, nargs="*")
+  parser.add_argument('--preserve_offsets', required=False)
   args = parser.parse_args(argv)
 
   # Extract namespace rewrites from arguments.
@@ -133,11 +157,16 @@ def main(argv):
       before, after = r.split('|')
       namespace_rewrites[before] = after
 
+  preserve_offsets = False
+  if args.preserve_offsets:
+    preserve_offsets = True
+
   in_folder = os.path.normpath(os.path.join(_CWD, args.in_folder))
   out_folder = os.path.normpath(os.path.join(_CWD, args.out_folder))
 
   for f in args.input_files:
-    ProcessFile(os.path.join(in_folder, f), out_folder, namespace_rewrites)
+    ProcessFile(os.path.join(in_folder, f), out_folder, namespace_rewrites,
+                preserve_offsets)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/timer/lap_timer.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 #include "ui/views/test/views_test_base.h"
 
 namespace views {
@@ -20,8 +20,8 @@ TEST_F(LabelPerfTest, GetPreferredSize) {
   Label label;
 
   // Alternate between two strings to ensure caches are cleared.
-  base::string16 string1 = base::ASCIIToUTF16("boring ascii string");
-  base::string16 string2 = base::ASCIIToUTF16("another uninteresting sequence");
+  std::u16string string1 = u"boring ascii string";
+  std::u16string string2 = u"another uninteresting sequence";
 
   constexpr int kLaps = 5000;  // Aim to run in under 3 seconds.
   constexpr int kWarmupLaps = 5;
@@ -34,8 +34,9 @@ TEST_F(LabelPerfTest, GetPreferredSize) {
     label.GetPreferredSize();
     timer.NextLap();
   }
-  perf_test::PrintResult("LabelPerfTest", std::string(), "GetPreferredSize",
-                         timer.LapsPerSecond(), "runs/s", true);
+  perf_test::PerfResultReporter reporter("LabelPerfTest", "GetPreferredSize");
+  reporter.RegisterImportantMetric("", "runs/s");
+  reporter.AddResult("", timer.LapsPerSecond());
 }
 
 }  // namespace views

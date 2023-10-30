@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,17 +7,18 @@
 window.onload = () => {
   console.log('[piexwasm] window.onload');
 
-  let script = document.createElement('script');
+  const script = document.createElement('script');
   document.head.appendChild(script);
 
   script.onerror = (error) => {
     console.log('[piexwasm] failed loading script:', script.src);
   };
 
-  window.Module = {
-    onRuntimeInitialized: () => {
-      console.log('[piexwasm] runtime loaded');
-    },
+  script.onload = () => {
+    console.log('[piexwasm] wrapper loaded');
+    createPiexModule().then(module => {
+      console.log('[piexwasm] module initialized', module);
+    });
   };
 
   script.src = '/piex.js.wasm';

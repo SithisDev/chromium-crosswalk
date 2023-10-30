@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
  * @fileoverview Behavior for network config elements.
  */
 
+import {OncMojo} from './onc_mojo.js';
+
 /** @polymerBehavior */
-const NetworkConfigElementBehavior = {
+export const NetworkConfigElementBehavior = {
   properties: {
     disabled: {
       type: Boolean,
@@ -17,7 +19,7 @@ const NetworkConfigElementBehavior = {
 
     /**
      * Network managed property associated with the config element.
-     * @type {?CrOnc.ManagedProperty}
+     * @type {?OncMojo.ManagedProperty}
      */
     property: {
       type: Object,
@@ -27,11 +29,11 @@ const NetworkConfigElementBehavior = {
 
   /**
    * @param {boolean} disabled
-   * @param {?CrOnc.ManagedProperty} property
+   * @param {?OncMojo.ManagedProperty} property
    * @return {boolean} True if the element should be disabled.
-   * @private
+   * @protected
    */
-  getDisabled_: function(disabled, property) {
+  getDisabled_(disabled, property) {
     return disabled || (!!property && this.isNetworkPolicyEnforced(property));
   },
 };

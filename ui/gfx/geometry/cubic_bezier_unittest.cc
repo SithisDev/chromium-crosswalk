@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/geometry/cubic_bezier.h"
 
+#include <cmath>
 #include <memory>
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,60 +77,115 @@ TEST(CubicBezierTest, UnclampedYValues) {
   EXPECT_NEAR(function.Solve(1.0), 1.0, epsilon);
 }
 
+static void TestBezierFiniteRange(CubicBezier& function) {
+  for (double i = 0; i <= 1.01; i += 0.05) {
+    EXPECT_TRUE(std::isfinite(function.Solve(i)));
+    EXPECT_TRUE(std::isfinite(function.Slope(i)));
+    EXPECT_TRUE(std::isfinite(function.GetX2()));
+    EXPECT_TRUE(std::isfinite(function.GetY2()));
+    EXPECT_TRUE(std::isfinite(function.SampleCurveX(i)));
+    EXPECT_TRUE(std::isfinite(function.SampleCurveY(i)));
+    EXPECT_TRUE(std::isfinite(function.SampleCurveDerivativeX(i)));
+    EXPECT_TRUE(std::isfinite(function.SampleCurveDerivativeY(i)));
+  }
+}
+
+// Tests that solving the bezier works with huge value infinity evaluation
+TEST(CubicBezierTest, ClampInfinityEvaluation) {
+  auto test_cases = {
+      CubicBezier(0.5, std::numeric_limits<double>::max(), 0.5,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(0.5, std::numeric_limits<double>::lowest(), 0.5,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(0.5, std::numeric_limits<double>::max(), 0.5,
+                  std::numeric_limits<double>::lowest()),
+      CubicBezier(0.5, std::numeric_limits<double>::lowest(), 0.5,
+                  std::numeric_limits<double>::lowest()),
+
+      CubicBezier(0, std::numeric_limits<double>::max(), 0,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(0, std::numeric_limits<double>::lowest(), 0,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(0, std::numeric_limits<double>::max(), 0,
+                  std::numeric_limits<double>::lowest()),
+      CubicBezier(0, std::numeric_limits<double>::lowest(), 0,
+                  std::numeric_limits<double>::lowest()),
+
+      CubicBezier(1, std::numeric_limits<double>::max(), 1,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(1, std::numeric_limits<double>::lowest(), 1,
+                  std::numeric_limits<double>::max()),
+      CubicBezier(1, std::numeric_limits<double>::max(), 1,
+                  std::numeric_limits<double>::lowest()),
+      CubicBezier(1, std::numeric_limits<double>::lowest(), 1,
+                  std::numeric_limits<double>::lowest()),
+
+      CubicBezier(0, 0, 0, std::numeric_limits<double>::max()),
+      CubicBezier(0, std::numeric_limits<double>::lowest(), 0, 0),
+      CubicBezier(1, 0, 0, std::numeric_limits<double>::lowest()),
+      CubicBezier(0, std::numeric_limits<double>::lowest(), 1, 1),
+
+  };
+
+  for (auto tc : test_cases) {
+    TestBezierFiniteRange(tc);
+  }
+}
+
 TEST(CubicBezierTest, Range) {
   double epsilon = 0.00015;
 
   // Derivative is a constant.
-  std::unique_ptr<CubicBezier> function(
-      new CubicBezier(0.25, (1.0 / 3.0), 0.75, (2.0 / 3.0)));
+  std::unique_ptr<CubicBezier> function =
+      std::make_unique<CubicBezier>(0.25, (1.0 / 3.0), 0.75, (2.0 / 3.0));
   EXPECT_EQ(0, function->range_min());
   EXPECT_EQ(1, function->range_max());
 
   // Derivative is linear.
-  function.reset(new CubicBezier(0.25, -0.5, 0.75, (-1.0 / 6.0)));
+  function = std::make_unique<CubicBezier>(0.25, -0.5, 0.75, (-1.0 / 6.0));
   EXPECT_NEAR(function->range_min(), -0.225, epsilon);
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has no real roots.
-  function.reset(new CubicBezier(0.25, 0.25, 0.75, 0.5));
+  function = std::make_unique<CubicBezier>(0.25, 0.25, 0.75, 0.5);
   EXPECT_EQ(0, function->range_min());
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has exactly one real root.
-  function.reset(new CubicBezier(0.0, 1.0, 1.0, 0.0));
+  function = std::make_unique<CubicBezier>(0.0, 1.0, 1.0, 0.0);
   EXPECT_EQ(0, function->range_min());
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has one root < 0 and one root > 1.
-  function.reset(new CubicBezier(0.25, 0.1, 0.75, 0.9));
+  function = std::make_unique<CubicBezier>(0.25, 0.1, 0.75, 0.9);
   EXPECT_EQ(0, function->range_min());
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has two roots in [0,1].
-  function.reset(new CubicBezier(0.25, 2.5, 0.75, 0.5));
+  function = std::make_unique<CubicBezier>(0.25, 2.5, 0.75, 0.5);
   EXPECT_EQ(0, function->range_min());
   EXPECT_NEAR(function->range_max(), 1.28818, epsilon);
-  function.reset(new CubicBezier(0.25, 0.5, 0.75, -1.5));
+  function = std::make_unique<CubicBezier>(0.25, 0.5, 0.75, -1.5);
   EXPECT_NEAR(function->range_min(), -0.28818, epsilon);
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has one root < 0 and one root in [0,1].
-  function.reset(new CubicBezier(0.25, 0.1, 0.75, 1.5));
+  function = std::make_unique<CubicBezier>(0.25, 0.1, 0.75, 1.5);
   EXPECT_EQ(0, function->range_min());
   EXPECT_NEAR(function->range_max(), 1.10755, epsilon);
 
   // Derivative has one root in [0,1] and one root > 1.
-  function.reset(new CubicBezier(0.25, -0.5, 0.75, 0.9));
+  function = std::make_unique<CubicBezier>(0.25, -0.5, 0.75, 0.9);
   EXPECT_NEAR(function->range_min(), -0.10755, epsilon);
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has two roots < 0.
-  function.reset(new CubicBezier(0.25, 0.3, 0.75, 0.633));
+  function = std::make_unique<CubicBezier>(0.25, 0.3, 0.75, 0.633);
   EXPECT_EQ(0, function->range_min());
   EXPECT_EQ(1, function->range_max());
 
   // Derivative has two roots > 1.
-  function.reset(new CubicBezier(0.25, 0.367, 0.75, 0.7));
+  function = std::make_unique<CubicBezier>(0.25, 0.367, 0.75, 0.7);
   EXPECT_EQ(0.f, function->range_min());
   EXPECT_EQ(1.f, function->range_max());
 }

@@ -1,9 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/button/radio_button.h"
 
+#include <memory>
+#include <utility>
+
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/base_event_utils.h"
@@ -20,6 +24,9 @@ class RadioButtonTest : public ViewsTestBase {
  public:
   RadioButtonTest() = default;
 
+  RadioButtonTest(const RadioButtonTest&) = delete;
+  RadioButtonTest& operator=(const RadioButtonTest&) = delete;
+
   void SetUp() override {
     ViewsTestBase::SetUp();
 
@@ -28,11 +35,10 @@ class RadioButtonTest : public ViewsTestBase {
     Widget::InitParams params =
         CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    widget_->Init(params);
+    widget_->Init(std::move(params));
     widget_->Show();
 
-    button_container_ = new View();
-    widget_->SetContentsView(button_container_);
+    button_container_ = widget_->SetContentsView(std::make_unique<View>());
   }
 
   void TearDown() override {
@@ -45,16 +51,14 @@ class RadioButtonTest : public ViewsTestBase {
   View& button_container() { return *button_container_; }
 
  private:
-  View* button_container_ = nullptr;
+  raw_ptr<View> button_container_ = nullptr;
   std::unique_ptr<Widget> widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(RadioButtonTest);
 };
 
 TEST_F(RadioButtonTest, Basics) {
-  RadioButton* button1 = new RadioButton(base::ASCIIToUTF16("Blah"), kGroup);
+  RadioButton* button1 = new RadioButton(u"Blah", kGroup);
   button_container().AddChildView(button1);
-  RadioButton* button2 = new RadioButton(base::ASCIIToUTF16("Blah"), kGroup);
+  RadioButton* button2 = new RadioButton(u"Blah", kGroup);
   button_container().AddChildView(button2);
 
   button1->SetChecked(true);
@@ -67,9 +71,9 @@ TEST_F(RadioButtonTest, Basics) {
 }
 
 TEST_F(RadioButtonTest, Focus) {
-  RadioButton* button1 = new RadioButton(base::ASCIIToUTF16("Blah"), kGroup);
+  RadioButton* button1 = new RadioButton(u"Blah", kGroup);
   button_container().AddChildView(button1);
-  RadioButton* button2 = new RadioButton(base::ASCIIToUTF16("Blah"), kGroup);
+  RadioButton* button2 = new RadioButton(u"Blah", kGroup);
   button_container().AddChildView(button2);
 
   // Tabbing through only focuses the checked button.
@@ -96,11 +100,11 @@ TEST_F(RadioButtonTest, Focus) {
 }
 
 TEST_F(RadioButtonTest, FocusOnClick) {
-  RadioButton* button1 = new RadioButton(base::string16(), kGroup);
+  RadioButton* button1 = new RadioButton(std::u16string(), kGroup);
   button1->SetSize(gfx::Size(10, 10));
   button_container().AddChildView(button1);
   button1->SetChecked(true);
-  RadioButton* button2 = new RadioButton(base::string16(), kGroup);
+  RadioButton* button2 = new RadioButton(std::u16string(), kGroup);
   button2->SetSize(gfx::Size(10, 10));
   button_container().AddChildView(button2);
 

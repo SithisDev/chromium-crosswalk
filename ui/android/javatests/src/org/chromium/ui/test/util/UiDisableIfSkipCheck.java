@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,8 @@ public class UiDisableIfSkipCheck extends DisableIfSkipCheck {
             return false;
         }
         return ThreadUtils.runOnUiThreadBlockingNoException(() -> {
-            return phoneOnly && !DeviceFormFactor.isTablet()
-                    || tabletOnly && DeviceFormFactor.isTablet()
+            boolean isTablet = DeviceFormFactor.isNonMultiDisplayContextOnTablet(mTargetContext);
+            return phoneOnly && !isTablet || tabletOnly && isTablet
                     || largeTabletOnly
                     && DeviceFormFactor.isNonMultiDisplayContextOnLargeTablet(mTargetContext);
         });

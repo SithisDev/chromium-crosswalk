@@ -1,6 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {reportPromise} from '../../common/js/test_error_reporting.js';
+
+import {SpinnerController} from './spinner_controller.js';
 
 /**
  * @type {Element}
@@ -22,7 +29,7 @@ function waitForMutation(target) {
   });
 }
 
-function setUp() {
+export function setUp() {
   spinner = document.createElement('div');
   spinner.id = 'spinner';
   spinner.textContent = 'LOADING...';
@@ -33,7 +40,7 @@ function setUp() {
   controller.setBlinkDurationForTesting(100);
 }
 
-function testBlink(callback) {
+export function testBlink(callback) {
   assertTrue(spinner.hidden);
   controller.blink();
 
@@ -49,7 +56,7 @@ function testBlink(callback) {
       callback);
 }
 
-function testShow(callback) {
+export function testShow(callback) {
   assertTrue(spinner.hidden);
   const hideCallback = controller.show();
 
@@ -73,7 +80,7 @@ function testShow(callback) {
       callback);
 }
 
-function testShowDuringBlink(callback) {
+export function testShowDuringBlink(callback) {
   assertTrue(spinner.hidden);
   controller.blink();
   const hideCallback = controller.show();
@@ -103,7 +110,7 @@ function testShowDuringBlink(callback) {
       callback);
 }
 
-function testStackedShows(callback) {
+export function testStackedShows(callback) {
   assertTrue(spinner.hidden);
 
   const hideCallbacks = [];

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,10 +46,6 @@ struct _AXPlatformAtkHyperlinkClass {
 GType ax_platform_atk_hyperlink_get_type(void) G_GNUC_CONST;
 void ax_platform_atk_hyperlink_set_object(AXPlatformAtkHyperlink* hyperlink,
                                           AXPlatformNodeAuraLinux* obj);
-void ax_platform_atk_hyperlink_set_indices(
-    AXPlatformAtkHyperlink* atk_hyperlink,
-    int start_index,
-    int end_index);
 
 G_END_DECLS
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,9 @@ DISPLAY_EXPORT DisplayPlacement CalculateDisplayPlacement(
 //                   |   |                            |    |
 //                   +---+                            +----+
 //
-// For rectangles that intersect each other, the distance is 0.
+// For rectangles that intersect each other, the distance is the negative value
+// of the overlapping area, so callers can distinguish different amounts of
+// overlap.
 //
 // The squared distance is used to avoid taking the square root as the common
 // usage is to compare distances greater than 1 unit.

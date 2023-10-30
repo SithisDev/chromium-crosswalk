@@ -1,19 +1,34 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/accessibility/platform/ax_platform_node_unittest.h"
+
 #include "ui/accessibility/ax_constants.mojom.h"
+#include "ui/accessibility/platform/ax_platform_node_base.h"
 #include "ui/accessibility/platform/test_ax_node_wrapper.h"
+#include "ui/accessibility/platform/test_ax_tree_update.h"
 
 namespace ui {
 
-AXPlatformNodeTest::AXPlatformNodeTest() {}
+AXPlatformNodeTest::AXPlatformNodeTest() = default;
 
-AXPlatformNodeTest::~AXPlatformNodeTest() {}
+AXPlatformNodeTest::~AXPlatformNodeTest() = default;
+
+void AXPlatformNodeTest::TearDown() {
+  // Destroy the tree and make sure we're not leaking any objects.
+  DestroyTree();
+
+#if BUILDFLAG_INTERNAL_HAS_NATIVE_ACCESSIBILITY()
+  TestAXNodeWrapper::SetGlobalIsWebContent(false);
+  TestAXNodeWrapper::ResetGlobalState();
+#endif  // BUILDFLAG_INTERNAL_HAS_NATIVE_ACCESSIBILITY()
+
+  ASSERT_EQ(0U, AXPlatformNodeBase::GetInstanceCountForTesting());
+}
 
 void AXPlatformNodeTest::Init(const AXTreeUpdate& initial_state) {
-  tree_.reset(new AXTree(initial_state));
+  SetTree(std::make_unique<AXTree>(initial_state));
 }
 
 void AXPlatformNodeTest::Init(
@@ -25,92 +40,45 @@ void AXPlatformNodeTest::Init(
     const ui::AXNodeData& node6 /* = ui::AXNodeData() */,
     const ui::AXNodeData& node7 /* = ui::AXNodeData() */,
     const ui::AXNodeData& node8 /* = ui::AXNodeData() */,
-    const ui::AXNodeData& node9 /* = ui::AXNodeData() */,
-    const ui::AXNodeData& node10 /* = ui::AXNodeData() */,
-    const ui::AXNodeData& node11 /* = ui::AXNodeData() */,
-    const ui::AXNodeData& node12 /* = ui::AXNodeData() */) {
-  static ui::AXNodeData empty_data;
-  int32_t no_id = empty_data.id;
+    const ui::AXNodeData& node9 /* = AXNodeData() */,
+    const ui::AXNodeData& node10 /* = AXNodeData() */,
+    const ui::AXNodeData& node11 /* = AXNodeData() */,
+    const ui::AXNodeData& node12 /* = AXNodeData() */) {
   AXTreeUpdate update;
   update.root_id = node1.id;
+  update.has_tree_data = true;
+  update.tree_data.tree_id = AXTreeID::CreateNewAXTreeID();
+  update.tree_data.title = "Dialog title";
   update.nodes.push_back(node1);
-  if (node2.id != no_id)
+  if (node2.id != kInvalidAXNodeID)
     update.nodes.push_back(node2);
-  if (node3.id != no_id)
+  if (node3.id != kInvalidAXNodeID)
     update.nodes.push_back(node3);
-  if (node4.id != no_id)
+  if (node4.id != kInvalidAXNodeID)
     update.nodes.push_back(node4);
-  if (node5.id != no_id)
+  if (node5.id != kInvalidAXNodeID)
     update.nodes.push_back(node5);
-  if (node6.id != no_id)
+  if (node6.id != kInvalidAXNodeID)
     update.nodes.push_back(node6);
-  if (node7.id != no_id)
+  if (node7.id != kInvalidAXNodeID)
     update.nodes.push_back(node7);
-  if (node8.id != no_id)
+  if (node8.id != kInvalidAXNodeID)
     update.nodes.push_back(node8);
-  if (node9.id != no_id)
+  if (node9.id != kInvalidAXNodeID)
     update.nodes.push_back(node9);
-  if (node10.id != no_id)
+  if (node10.id != kInvalidAXNodeID)
     update.nodes.push_back(node10);
-  if (node11.id != no_id)
+  if (node11.id != kInvalidAXNodeID)
     update.nodes.push_back(node11);
-  if (node12.id != no_id)
+  if (node12.id != kInvalidAXNodeID)
     update.nodes.push_back(node12);
   Init(update);
 }
 
-AXNode* AXPlatformNodeTest::GetNodeFromTree(const ui::AXTreeID tree_id,
-                                            const int32_t node_id) const {
-  if (GetTreeID() == tree_id)
-    return tree_->GetFromId(node_id);
-
-  return nullptr;
-}
-
-AXPlatformNodeDelegate* AXPlatformNodeTest::GetDelegate(
-    const ui::AXTreeID tree_id,
-    const int32_t node_id) const {
-  AXNode* node = GetNodeFromTree(tree_id, node_id);
-
-  if (node) {
-    TestAXNodeWrapper* wrapper =
-        TestAXNodeWrapper::GetOrCreate(tree_.get(), node);
-
-    return wrapper;
-  }
-
-  return nullptr;
-}
-
-AXPlatformNodeDelegate* AXPlatformNodeTest::GetRootDelegate(
-    const AXTreeID tree_id) const {
-  if (GetTreeID() == tree_id) {
-    AXNode* root_node = GetRootNode();
-
-    if (root_node) {
-      TestAXNodeWrapper* wrapper =
-          TestAXNodeWrapper::GetOrCreate(tree_.get(), root_node);
-      return wrapper;
-    }
-  }
-
-  return nullptr;
-}
-
-AXTreeID AXPlatformNodeTest::GetTreeID() const {
-  return tree_->data().tree_id;
-}
-
-AXTreeID AXPlatformNodeTest::GetParentTreeID() const {
-  return GetTreeID();
-}
-
-ui::AXNode* AXPlatformNodeTest::GetRootAsAXNode() const {
-  return GetRootNode();
-}
-
-ui::AXNode* AXPlatformNodeTest::GetParentNodeFromParentTreeAsAXNode() const {
-  return nullptr;
+AXTree* AXPlatformNodeTest::Init(const TestAXTreeUpdateNode& root) {
+  TestAXTreeUpdate update(root);
+  Init(update);
+  return GetTree();
 }
 
 AXTreeUpdate AXPlatformNodeTest::BuildTextField() {
@@ -118,6 +86,10 @@ AXTreeUpdate AXPlatformNodeTest::BuildTextField() {
   text_field_node.id = 1;
   text_field_node.role = ax::mojom::Role::kTextField;
   text_field_node.AddState(ax::mojom::State::kEditable);
+  text_field_node.AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag,
+                                     "input");
+  text_field_node.AddStringAttribute(ax::mojom::StringAttribute::kInputType,
+                                     "text");
   text_field_node.SetValue("How now brown cow.");
 
   AXTreeUpdate update;
@@ -133,6 +105,10 @@ AXTreeUpdate AXPlatformNodeTest::BuildTextFieldWithSelectionRange(
   text_field_node.id = 1;
   text_field_node.role = ax::mojom::Role::kTextField;
   text_field_node.AddState(ax::mojom::State::kEditable);
+  text_field_node.AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag,
+                                     "input");
+  text_field_node.AddStringAttribute(ax::mojom::StringAttribute::kInputType,
+                                     "text");
   text_field_node.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   text_field_node.AddIntAttribute(ax::mojom::IntAttribute::kTextSelStart,
                                   start);
@@ -149,9 +125,10 @@ AXTreeUpdate AXPlatformNodeTest::BuildContentEditable() {
   AXNodeData content_editable_node;
   content_editable_node.id = 1;
   content_editable_node.role = ax::mojom::Role::kGroup;
+  content_editable_node.AddState(ax::mojom::State::kEditable);
   content_editable_node.AddState(ax::mojom::State::kRichlyEditable);
   content_editable_node.AddBoolAttribute(
-      ax::mojom::BoolAttribute::kEditableRoot, true);
+      ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot, true);
   content_editable_node.SetValue("How now brown cow.");
 
   AXTreeUpdate update;
@@ -166,11 +143,12 @@ AXTreeUpdate AXPlatformNodeTest::BuildContentEditableWithSelectionRange(
   AXNodeData content_editable_node;
   content_editable_node.id = 1;
   content_editable_node.role = ax::mojom::Role::kGroup;
+  content_editable_node.AddState(ax::mojom::State::kEditable);
   content_editable_node.AddState(ax::mojom::State::kRichlyEditable);
   content_editable_node.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected,
                                          true);
   content_editable_node.AddBoolAttribute(
-      ax::mojom::BoolAttribute::kEditableRoot, true);
+      ax::mojom::BoolAttribute::kNonAtomicTextFieldRoot, true);
   content_editable_node.SetValue("How now brown cow.");
 
   AXTreeUpdate update;
@@ -409,34 +387,34 @@ AXTreeUpdate AXPlatformNodeTest::BuildListBox(
     bool option_1_is_selected,
     bool option_2_is_selected,
     bool option_3_is_selected,
-    ax::mojom::State additional_state /* ax::mojom::State::kNone */) {
+    const std::vector<ax::mojom::State>& additional_state) {
   AXNodeData listbox;
   listbox.id = 1;
-  listbox.SetName("ListBox");
   listbox.role = ax::mojom::Role::kListBox;
-  if (additional_state != ax::mojom::State::kNone)
-    listbox.AddState(additional_state);
+  listbox.SetName("ListBox");
+  for (auto state : additional_state)
+    listbox.AddState(state);
 
   AXNodeData option_1;
   option_1.id = 2;
-  option_1.SetName("Option1");
   option_1.role = ax::mojom::Role::kListBoxOption;
+  option_1.SetName("Option1");
   if (option_1_is_selected)
     option_1.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   listbox.child_ids.push_back(option_1.id);
 
   AXNodeData option_2;
   option_2.id = 3;
-  option_2.SetName("Option2");
   option_2.role = ax::mojom::Role::kListBoxOption;
+  option_2.SetName("Option2");
   if (option_2_is_selected)
     option_2.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   listbox.child_ids.push_back(option_2.id);
 
   AXNodeData option_3;
   option_3.id = 4;
-  option_3.SetName("Option3");
   option_3.role = ax::mojom::Role::kListBoxOption;
+  option_3.SetName("Option3");
   if (option_3_is_selected)
     option_3.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   listbox.child_ids.push_back(option_3.id);

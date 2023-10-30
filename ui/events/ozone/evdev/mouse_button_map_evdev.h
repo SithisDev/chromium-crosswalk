@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
-#include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
@@ -21,9 +20,13 @@ namespace ui {
 //
 // The mouse button map is shared between all input devices connected to the
 // system.
-class EVENTS_OZONE_EVDEV_EXPORT MouseButtonMapEvdev {
+class COMPONENT_EXPORT(EVDEV) MouseButtonMapEvdev {
  public:
   MouseButtonMapEvdev();
+
+  MouseButtonMapEvdev(const MouseButtonMapEvdev&) = delete;
+  MouseButtonMapEvdev& operator=(const MouseButtonMapEvdev&) = delete;
+
   ~MouseButtonMapEvdev();
 
   // Swaps left & right mouse buttons.
@@ -34,10 +37,8 @@ class EVENTS_OZONE_EVDEV_EXPORT MouseButtonMapEvdev {
 
  private:
   bool primary_button_right_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(MouseButtonMapEvdev);
 };
 
-}  // namspace ui
+}  // namespace ui
 
 #endif  // UI_EVENTS_OZONE_EVDEV_MOUSE_BUTTON_MAP_EVDEV_H_

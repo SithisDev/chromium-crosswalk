@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,25 +6,29 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <numeric>
+#include <utility>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/views/accessibility/accessibility_paint_checks.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/link.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/fill_layout.h"
-#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/box_layout_view.h"
 #include "ui/views/layout/layout_provider.h"
+#include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -43,16 +47,16 @@ constexpr int kDefaultMessageWidth = 400;
 // 001C..001E    ; B # Cc   [3] <control-001C>..<control-001E>
 // 0085          ; B # Cc       <control-0085>
 // 2029          ; B # Zp       PARAGRAPH SEPARATOR
-bool IsParagraphSeparator(base::char16 c) {
-  return ( c == 0x000A || c == 0x000D || c == 0x001C || c == 0x001D ||
-           c == 0x001E || c == 0x0085 || c == 0x2029);
+bool IsParagraphSeparator(char16_t c) {
+  return (c == 0x000A || c == 0x000D || c == 0x001C || c == 0x001D ||
+          c == 0x001E || c == 0x0085 || c == 0x2029);
 }
 
 // Splits |text| into a vector of paragraphs.
 // Given an example "\nabc\ndef\n\n\nhij\n", the split results should be:
 // "", "abc", "def", "", "", "hij", and "".
-void SplitStringIntoParagraphs(const base::string16& text,
-                               std::vector<base::string16>* paragraphs) {
+void SplitStringIntoParagraphs(const std::u16string& text,
+                               std::vector<std::u16string>* paragraphs) {
   paragraphs->clear();
 
   size_t start = 0;
@@ -72,75 +76,170 @@ namespace views {
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, public:
 
-MessageBoxView::InitParams::InitParams(const base::string16& message)
-    : options(NO_OPTIONS),
-      message(message),
-      message_width(kDefaultMessageWidth),
-      inter_row_vertical_spacing(LayoutProvider::Get()->GetDistanceMetric(
-          DISTANCE_RELATED_CONTROL_VERTICAL)) {}
+MessageBoxView::MessageBoxView(const std::u16string& message,
+                               bool detect_directionality)
+    : inter_row_vertical_spacing_(LayoutProvider::Get()->GetDistanceMetric(
+          DISTANCE_RELATED_CONTROL_VERTICAL)),
+      message_width_(kDefaultMessageWidth) {
+  const LayoutProvider* provider = LayoutProvider::Get();
 
-MessageBoxView::InitParams::~InitParams() = default;
+  auto horizontal_insets = GetHorizontalInsets(provider);
 
-MessageBoxView::MessageBoxView(const InitParams& params)
-    : inter_row_vertical_spacing_(params.inter_row_vertical_spacing),
-      message_width_(params.message_width) {
-  Init(params);
+  auto message_contents =
+      Builder<BoxLayoutView>()
+          .SetOrientation(BoxLayout::Orientation::kVertical)
+          // We explicitly set insets on the message contents instead of the
+          // scroll view so that the scroll view borders are not capped by
+          // dialog insets.
+          .SetBorder(CreateEmptyBorder(GetHorizontalInsets(provider)));
+
+  auto add_label = [&message_contents, this](
+                       const std::u16string& text,
+                       gfx::HorizontalAlignment alignment) {
+    message_contents.AddChild(
+        Builder<Label>()
+            .SetText(text)
+            .SetTextContext(style::CONTEXT_DIALOG_BODY_TEXT)
+            .SetMultiLine(!text.empty())
+            .SetAllowCharacterBreak(true)
+            .SetHorizontalAlignment(alignment)
+            .CustomConfigure(base::BindOnce(
+                [](std::vector<Label*>& message_labels, Label* message_label) {
+                  message_labels.push_back(message_label);
+                },
+                std::ref(message_labels_))));
+  };
+
+  if (detect_directionality) {
+    std::vector<std::u16string> texts;
+    SplitStringIntoParagraphs(message, &texts);
+    for (const auto& text : texts) {
+      // Avoid empty multi-line labels, which have a height of 0.
+      add_label(text, gfx::ALIGN_TO_HEAD);
+    }
+  } else {
+    add_label(message, gfx::ALIGN_LEFT);
+  }
+
+  Builder<MessageBoxView>(this)
+      .SetOrientation(BoxLayout::Orientation::kVertical)
+      .AddChildren(
+          Builder<ScrollView>()
+              .CopyAddressTo(&scroll_view_)
+              .ClipHeightTo(0, provider->GetDistanceMetric(
+                                   DISTANCE_DIALOG_SCROLLABLE_AREA_MAX_HEIGHT))
+              .SetContents(std::move(message_contents)),
+          // TODO(crbug.com/1218186): Remove this, this is in place temporarily
+          // to be able to submit accessibility checks, but this focusable View
+          // needs to add a name so that the screen reader knows what to
+          // announce.
+          Builder<Textfield>()
+              .CopyAddressTo(&prompt_field_)
+              .SetProperty(kSkipAccessibilityPaintChecks, true)
+              .SetProperty(kMarginsKey, horizontal_insets)
+              .SetAccessibleName(message)
+              .SetVisible(false)
+              .CustomConfigure(base::BindOnce([](Textfield* prompt_field) {
+                prompt_field->GetViewAccessibility().OverrideIsIgnored(true);
+              })),
+          Builder<Checkbox>()
+              .CopyAddressTo(&checkbox_)
+              .SetProperty(kMarginsKey, horizontal_insets)
+              .SetVisible(false),
+          Builder<Link>()
+              .CopyAddressTo(&link_)
+              .SetProperty(kMarginsKey, horizontal_insets)
+              .SetHorizontalAlignment(gfx::ALIGN_LEFT)
+              .SetVisible(false))
+      .BuildChildren();
+
+  // Don't enable text selection if multiple labels are used, since text
+  // selection can't span multiple labels.
+  if (message_labels_.size() == 1u)
+    message_labels_[0]->SetSelectable(true);
+
+  ResetLayoutManager();
 }
 
 MessageBoxView::~MessageBoxView() = default;
 
-base::string16 MessageBoxView::GetInputText() {
-  return prompt_field_ ? prompt_field_->text() : base::string16();
+views::Textfield* MessageBoxView::GetVisiblePromptField() {
+  return prompt_field_ && prompt_field_->GetVisible() ? prompt_field_.get()
+                                                      : nullptr;
+}
+
+std::u16string MessageBoxView::GetInputText() {
+  return prompt_field_ && prompt_field_->GetVisible() ? prompt_field_->GetText()
+                                                      : std::u16string();
+}
+
+bool MessageBoxView::HasVisibleCheckBox() const {
+  return checkbox_ && checkbox_->GetVisible();
 }
 
 bool MessageBoxView::IsCheckBoxSelected() {
-  return checkbox_ && checkbox_->GetChecked();
+  return checkbox_ && checkbox_->GetVisible() && checkbox_->GetChecked();
 }
 
-void MessageBoxView::SetCheckBoxLabel(const base::string16& label) {
-  if (checkbox_) {
-    checkbox_->SetText(label);
-  } else {
-    // First remove the existing layout manager since it will DCHECK
-    // if a view is added through AddChildView rather than
-    // GridLayout::AddView.
-    SetLayoutManager(nullptr);
-    checkbox_ = AddChildView(std::make_unique<Checkbox>(label));
-    ResetLayoutManager();
-  }
+void MessageBoxView::SetCheckBoxLabel(const std::u16string& label) {
+  DCHECK(checkbox_);
+  if (checkbox_->GetVisible() && checkbox_->GetText() == label)
+    return;
+
+  checkbox_->SetText(label);
+  checkbox_->SetVisible(true);
+  ResetLayoutManager();
 }
 
 void MessageBoxView::SetCheckBoxSelected(bool selected) {
-  if (!checkbox_)
+  // Only update the checkbox's state after the checkbox is shown.
+  if (!checkbox_->GetVisible())
     return;
   checkbox_->SetChecked(selected);
 }
 
-void MessageBoxView::SetLink(const base::string16& text,
-                             LinkListener* listener) {
-  size_t child_count = children().size();
-  if (text.empty()) {
-    DCHECK(!listener);
-    delete link_;
-    link_ = nullptr;
-  } else {
-    DCHECK(listener);
-    if (!link_) {
-      // See the comment above in SetCheckBoxLabel();
-      SetLayoutManager(nullptr);
-      link_ = AddChildView(std::make_unique<Link>(text));
-      link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    } else {
-      link_->SetText(text);
-    }
-    link_->set_listener(listener);
-  }
-  if (child_count != children().size())
-    ResetLayoutManager();
+void MessageBoxView::SetLink(const std::u16string& text,
+                             Link::ClickedCallback callback) {
+  DCHECK(!text.empty());
+  DCHECK(!callback.is_null());
+  DCHECK(link_);
+
+  link_->SetCallback(std::move(callback));
+  if (link_->GetVisible() && link_->GetText() == text)
+    return;
+  link_->SetText(text);
+  link_->SetVisible(true);
+  ResetLayoutManager();
 }
 
-void MessageBoxView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ax::mojom::Role::kAlertDialog;
+void MessageBoxView::SetInterRowVerticalSpacing(int spacing) {
+  if (inter_row_vertical_spacing_ == spacing)
+    return;
+
+  inter_row_vertical_spacing_ = spacing;
+  ResetLayoutManager();
+}
+
+void MessageBoxView::SetMessageWidth(int width) {
+  if (message_width_ == width)
+    return;
+
+  message_width_ = width;
+  ResetLayoutManager();
+}
+
+void MessageBoxView::SetPromptField(const std::u16string& default_prompt) {
+  DCHECK(prompt_field_);
+  if (prompt_field_->GetVisible() && prompt_field_->GetText() == default_prompt)
+    return;
+  prompt_field_->SetText(default_prompt);
+  prompt_field_->SetVisible(true);
+  prompt_field_->GetViewAccessibility().OverrideIsIgnored(false);
+  // The same text visible in the message box is used as an accessible name for
+  // the prompt. To prevent it from being announced twice, we hide the message
+  // to ATs.
+  scroll_view_->GetViewAccessibility().OverrideIsLeaf(true);
+  ResetLayoutManager();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -149,10 +248,8 @@ void MessageBoxView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
 void MessageBoxView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
   if (details.child == this && details.is_add) {
-    if (prompt_field_)
+    if (prompt_field_ && prompt_field_->GetVisible())
       prompt_field_->SelectAll(true);
-
-    NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
   }
 }
 
@@ -169,10 +266,10 @@ bool MessageBoxView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   if (message_labels_.size() == 1u && message_labels_[0]->GetSelectable())
     return false;
 
-  ui::ScopedClipboardWriter scw(ui::ClipboardType::kCopyPaste);
+  ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
   scw.WriteText(std::accumulate(message_labels_.cbegin(),
-                                message_labels_.cend(), base::string16(),
-                                [](base::string16& left, Label* right) {
+                                message_labels_.cend(), std::u16string(),
+                                [](const std::u16string& left, Label* right) {
                                   return left + right->GetText();
                                 }));
   return true;
@@ -181,123 +278,48 @@ bool MessageBoxView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, private:
 
-void MessageBoxView::Init(const InitParams& params) {
-  const LayoutProvider* provider = LayoutProvider::Get();
-
-  auto message_contents = std::make_unique<View>();
-  // We explicitly set insets on the message contents instead of the scroll view
-  // so that the scroll view borders are not capped by dialog insets.
-  message_contents->SetBorder(CreateEmptyBorder(GetHorizontalInsets(provider)));
-  message_contents->SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical));
-  auto add_label = [&message_contents, this](
-                       const base::string16& text, bool multi_line,
-                       gfx::HorizontalAlignment alignment) {
-    auto message_label =
-        std::make_unique<Label>(text, style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
-    message_label->SetMultiLine(!text.empty());
-    message_label->SetAllowCharacterBreak(true);
-    message_label->SetHorizontalAlignment(alignment);
-    message_labels_.push_back(
-        message_contents->AddChildView(std::move(message_label)));
-  };
-  if (params.options & DETECT_DIRECTIONALITY) {
-    std::vector<base::string16> texts;
-    SplitStringIntoParagraphs(params.message, &texts);
-    for (const auto& text : texts) {
-      // Avoid empty multi-line labels, which have a height of 0.
-      add_label(text, !text.empty(), gfx::ALIGN_TO_HEAD);
-    }
-  } else {
-    add_label(params.message, true, gfx::ALIGN_LEFT);
-  }
-  auto scroll_view = std::make_unique<ScrollView>();
-  scroll_view->ClipHeightTo(0, provider->GetDistanceMetric(
-                                   DISTANCE_DIALOG_SCROLLABLE_AREA_MAX_HEIGHT));
-  scroll_view->SetContents(std::move(message_contents));
-  scroll_view_ = AddChildView(std::move(scroll_view));
-  // Don't enable text selection if multiple labels are used, since text
-  // selection can't span multiple labels.
-  if (message_labels_.size() == 1u)
-    message_labels_[0]->SetSelectable(true);
-
-  if (params.options & HAS_PROMPT_FIELD) {
-    auto prompt_field = std::make_unique<Textfield>();
-    prompt_field->SetText(params.default_prompt);
-    prompt_field->SetAccessibleName(params.message);
-    prompt_field_ = AddChildView(std::move(prompt_field));
-  }
-
-  ResetLayoutManager();
-}
-
 void MessageBoxView::ResetLayoutManager() {
-  // Initialize the Grid Layout Manager used for this dialog box.
-  GridLayout* layout = SetLayoutManager(std::make_unique<views::GridLayout>());
+  SetBetweenChildSpacing(inter_row_vertical_spacing_);
+  SetMinimumCrossAxisSize(message_width_);
+  scroll_view_->SetPreferredSize(gfx::Size(message_width_, 0));
 
-  // Add the column set for the message displayed at the top of the dialog box.
-  constexpr int kMessageViewColumnSetId = 0;
-  ColumnSet* column_set = layout->AddColumnSet(kMessageViewColumnSetId);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                        GridLayout::FIXED, message_width_, 0);
+  views::DialogContentType trailing_content_type =
+      views::DialogContentType::kText;
+  if (prompt_field_->GetVisible())
+    trailing_content_type = views::DialogContentType::kControl;
+
+  bool checkbox_is_visible = checkbox_->GetVisible();
+  if (checkbox_is_visible)
+    trailing_content_type = views::DialogContentType::kText;
+
+  // Ignored views are not in the accessibility tree, but their children
+  // still can be exposed. Leaf views have no accessible children.
+  checkbox_->GetViewAccessibility().OverrideIsIgnored(!checkbox_is_visible);
+  checkbox_->GetViewAccessibility().OverrideIsLeaf(!checkbox_is_visible);
+
+  if (link_->GetVisible())
+    trailing_content_type = views::DialogContentType::kText;
 
   const LayoutProvider* provider = LayoutProvider::Get();
-
-  // Column set for extra elements, if any.
-  constexpr int kExtraViewColumnSetId = 1;
-  if (prompt_field_ || checkbox_ || link_) {
-    auto horizontal_insets = GetHorizontalInsets(provider);
-    column_set = layout->AddColumnSet(kExtraViewColumnSetId);
-    column_set->AddPaddingColumn(0, horizontal_insets.left());
-    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                          GridLayout::USE_PREF, 0, 0);
-    column_set->AddPaddingColumn(0, horizontal_insets.right());
-  }
-
-  layout->StartRow(0, kMessageViewColumnSetId);
-  layout->AddExistingView(scroll_view_);
-
-  views::DialogContentType trailing_content_type = views::TEXT;
-  if (prompt_field_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, kExtraViewColumnSetId);
-    layout->AddExistingView(prompt_field_);
-    trailing_content_type = views::CONTROL;
-  }
-
-  if (checkbox_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, kExtraViewColumnSetId);
-    layout->AddExistingView(checkbox_);
-    trailing_content_type = views::TEXT;
-  }
-
-  if (link_) {
-    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, kExtraViewColumnSetId);
-    layout->AddExistingView(link_);
-    trailing_content_type = views::TEXT;
-  }
-
   gfx::Insets border_insets = provider->GetDialogInsetsForContentType(
-      views::TEXT, trailing_content_type);
+      views::DialogContentType::kText, trailing_content_type);
   // Horizontal insets have already been applied to the message contents and
   // controls as padding columns. Only apply the missing vertical insets.
-  border_insets.Set(border_insets.top(), 0, border_insets.bottom(), 0);
+  border_insets.set_left_right(0, 0);
   SetBorder(CreateEmptyBorder(border_insets));
+
+  InvalidateLayout();
 }
 
 gfx::Insets MessageBoxView::GetHorizontalInsets(
     const LayoutProvider* provider) {
   gfx::Insets horizontal_insets =
       provider->GetInsetsMetric(views::INSETS_DIALOG);
-  horizontal_insets.Set(0, horizontal_insets.left(), 0,
-                        horizontal_insets.right());
+  horizontal_insets.set_top_bottom(0, 0);
   return horizontal_insets;
 }
 
-BEGIN_METADATA(MessageBoxView)
-METADATA_PARENT_CLASS(View)
-END_METADATA()
+BEGIN_METADATA(MessageBoxView, View)
+END_METADATA
 
 }  // namespace views

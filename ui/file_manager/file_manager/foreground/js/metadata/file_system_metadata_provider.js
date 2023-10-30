@@ -1,12 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {MetadataItem} from './metadata_item.js';
+import {MetadataProvider} from './metadata_provider.js';
 
 /**
  * Metadata provider for FileEntry#getMetadata.
  * @final
  */
-class FileSystemMetadataProvider extends MetadataProvider {
+export class FileSystemMetadataProvider extends MetadataProvider {
   constructor() {
     super(FileSystemMetadataProvider.PROPERTY_NAMES);
   }
@@ -34,7 +37,8 @@ class FileSystemMetadataProvider extends MetadataProvider {
                 // console.error causes them to fail because of JSErrorCount.
                 // This error is an acceptable condition.
                 console.warn(
-                    'getMetadata failure for: ' + request.entry.toURL(), error);
+                    `getMetadata error for '${request.entry.toURL()}':`,
+                    error.toString());
                 return new MetadataItem();
               });
     }));

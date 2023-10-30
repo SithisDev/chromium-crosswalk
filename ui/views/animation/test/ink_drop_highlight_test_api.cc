@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,8 @@ std::vector<ui::LayerAnimator*> InkDropHighlightTestApi::GetLayerAnimators() {
   return animators;
 }
 
-gfx::Transform InkDropHighlightTestApi::CalculateTransform(
-    const gfx::SizeF& size) {
-  return ink_drop_highlight()->CalculateTransform(size);
+gfx::Transform InkDropHighlightTestApi::CalculateTransform() {
+  return ink_drop_highlight()->CalculateTransform();
 }
 
 }  // namespace test

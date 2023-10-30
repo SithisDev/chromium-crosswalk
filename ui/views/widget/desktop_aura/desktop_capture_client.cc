@@ -1,9 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/widget/desktop_aura/desktop_capture_client.h"
 
+#include "base/containers/cxx20_erase.h"
+#include "base/observer_list.h"
 #include "ui/aura/client/capture_client_observer.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -53,8 +55,7 @@ void DesktopCaptureClient::SetCapture(aura::Window* new_capture_window) {
 
   // We should only ever be told to capture a child of |root_|. Otherwise
   // things are going to be really confused.
-  DCHECK(!new_capture_window ||
-         (new_capture_window->GetRootWindow() == root_));
+  DCHECK(!new_capture_window || (new_capture_window->GetRootWindow() == root_));
   DCHECK(!capture_window_ || capture_window_->GetRootWindow());
 
   aura::Window* old_capture_window = capture_window_;
@@ -89,9 +90,9 @@ void DesktopCaptureClient::SetCapture(aura::Window* new_capture_window) {
     ClientSet clients(*clients_);
     for (auto client : clients) {
       if (client && client.get() != this) {
-        aura::client::CaptureDelegate* delegate =
+        aura::client::CaptureDelegate* client_delegate =
             client->root_->GetHost()->dispatcher();
-        delegate->OnOtherRootGotCapture();
+        client_delegate->OnOtherRootGotCapture();
       }
     }
   }  // else case is capture is remaining in our root, nothing to do.

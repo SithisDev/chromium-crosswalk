@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 #define UI_VIEWS_CONTROLS_MENU_MENU_CONFIG_H_
 
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/controls/menu/menu_image_util.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/round_rect_painter.h"
 #include "ui/views/views_export.h"
 
@@ -22,6 +24,10 @@ struct VIEWS_EXPORT MenuConfig {
   MenuConfig();
   ~MenuConfig();
 
+  // Menus are the only place using kGroupingPropertyKey, so any value (other
+  // than 0) is fine.
+  static constexpr int kMenuControllerGroupingId = 1001;
+
   static const MenuConfig& instance();
 
   // Helper methods to simplify access to MenuConfig:
@@ -32,13 +38,10 @@ struct VIEWS_EXPORT MenuConfig {
   // Returns whether |item_view| should show accelerator text. If so, returns
   // the text to show.
   bool ShouldShowAcceleratorText(const MenuItemView* item_view,
-                                 base::string16* text) const;
+                                 std::u16string* text) const;
 
   // Font list used by menus.
   gfx::FontList font_list;
-
-  // Color for the arrow to scroll bookmarks.
-  SkColor arrow_color = SK_ColorBLACK;
 
   // Menu border sizes. The vertical border size does not apply to menus with
   // rounded corners - those menus always use the corner radius as the vertical
@@ -82,12 +85,6 @@ struct VIEWS_EXPORT MenuConfig {
 
   // Padding between the arrow and the edge.
   int arrow_to_edge_padding = 5;
-
-  // The icon size used for icons in touchable menu items.
-  int touchable_icon_size = 20;
-
-  // The color used for icons in touchable menu items.
-  SkColor touchable_icon_color = SkColorSetRGB(0x5F, 0x63, 0x60);
 
   // The space reserved for the check. The actual size of the image may be
   // different.
@@ -169,14 +166,17 @@ struct VIEWS_EXPORT MenuConfig {
   int show_delay = 400;
 
   // Radius of the rounded corners of the menu border. Must be >= 0.
-  int corner_radius = 0;
+  int corner_radius =
+      LayoutProvider::Get()->GetCornerRadiusMetric(Emphasis::kNone);
 
   // Radius of "auxiliary" rounded corners - comboboxes and context menus.
   // Must be >= 0.
-  int auxiliary_corner_radius = 0;
+  int auxiliary_corner_radius =
+      LayoutProvider::Get()->GetCornerRadiusMetric(Emphasis::kNone);
 
   // Radius of the rounded corners of the touchable menu border
-  int touchable_corner_radius = 8;
+  int touchable_corner_radius =
+      LayoutProvider::Get()->GetCornerRadiusMetric(Emphasis::kHigh);
 
   // Anchor offset for touchable menus created by a touch event.
   int touchable_anchor_offset = 8;
@@ -184,11 +184,17 @@ struct VIEWS_EXPORT MenuConfig {
   // Height of child MenuItemViews for touchable menus.
   int touchable_menu_height = 36;
 
-  // Width of touchable menus.
-  int touchable_menu_width = 256;
+  // Minimum width of touchable menus.
+  int touchable_menu_min_width = 256;
+
+  // Maximum width of touchable menus.
+  int touchable_menu_max_width = 352;
 
   // Shadow elevation of touchable menus.
   int touchable_menu_shadow_elevation = 12;
+
+  // Shadow elevation of touchable submenus.
+  int touchable_submenu_shadow_elevation = 16;
 
   // Vertical padding for touchable menus.
   int vertical_touchable_menu_item_padding = 8;
@@ -207,6 +213,11 @@ struct VIEWS_EXPORT MenuConfig {
 
   // Margins for footnotes (HIGHLIGHTED item at the end of a menu).
   int footnote_vertical_margin = 11;
+
+  // Should use Win11 style menus.
+  // TODO(kylixrd): This should not exist. Menus should be fully configurable
+  // without needing any platform specific metrics.
+  bool win11_style_menus = false;
 
  private:
   // Configures a MenuConfig as appropriate for the current platform.

@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,36 +8,24 @@ assert(is_chromeos, "Only ChromeOS components belong here.")
 
 group("closure_compile") {
   deps = [
-    ":chromeos_resources",
-    "cellular_setup:closure_compile",
-    "multidevice_setup:closure_compile",
-    "network:closure_compile",
-    "quick_unlock:closure_compile",
-    "smb_shares:closure_compile",
+    "bluetooth:closure_compile_module",
+    "cellular_setup:closure_compile_module",
+    "network:closure_compile_module",
+    "network_health:closure_compile_module",
+    "quick_unlock:closure_compile_module",
+    "smb_shares:closure_compile_module",
+    "traffic_counters:closure_compile_module",
   ]
 }
 
-js_type_check("chromeos_resources") {
-  deps = [
-    ":bluetooth_dialog",
-  ]
-}
-
-js_library("bluetooth_dialog") {
-  deps = [
-    "//third_party/polymer/v1_0/components-chromium/iron-resizable-behavior:iron-resizable-behavior-extracted",
-    "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog",
-    "//ui/webui/resources/cr_elements/cr_input:cr_input",
-    "//ui/webui/resources/js:assert",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:i18n_behavior",
-  ]
-  externs_list = [
-    "$externs_path/bluetooth.js",
-    "$externs_path/bluetooth_private.js",
-  ]
-  extra_sources = [
-    "$interfaces_path/bluetooth_interface.js",
-    "$interfaces_path/bluetooth_private_interface.js",
+group("web_components") {
+  public_deps = [
+    "bluetooth:web_components",
+    "cellular_setup:web_components",
+    "network:web_components",
+    "network_health:web_components",
+    "quick_unlock:web_components",
+    "smb_shares:web_components",
+    "traffic_counters:web_components",
   ]
 }

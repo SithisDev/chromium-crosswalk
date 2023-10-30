@@ -1,13 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/win/keyboard_hook_win_base.h"
 
+#include "base/logging.h"
+
 namespace ui {
 
 KeyboardHookWinBase::KeyboardHookWinBase(
-    base::Optional<base::flat_set<DomCode>> dom_codes,
+    absl::optional<base::flat_set<DomCode>> dom_codes,
     KeyEventCallback callback,
     bool enable_hook_registration)
     : KeyboardHookBase(std::move(dom_codes), std::move(callback)),

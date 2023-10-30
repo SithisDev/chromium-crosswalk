@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/ime/win/mock_tsf_bridge.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/base/ime/text_input_client.h"
 
 namespace ui {
@@ -40,18 +40,17 @@ void MockTSFBridge::SetFocusedClient(HWND focused_window,
 
 void MockTSFBridge::RemoveFocusedClient(TextInputClient* client) {
   ++remove_focused_client_call_count_;
-  DCHECK_EQ(client, text_input_client_);
   text_input_client_ = nullptr;
   focused_window_ = nullptr;
 }
 
-void MockTSFBridge::SetInputMethodDelegate(
-    internal::InputMethodDelegate* delegate) {
-  input_method_delegate_ = delegate;
+void MockTSFBridge::SetImeKeyEventDispatcher(
+    ImeKeyEventDispatcher* ime_key_event_dispatcher) {
+  ime_key_event_dispatcher_ = ime_key_event_dispatcher;
 }
 
-void MockTSFBridge::RemoveInputMethodDelegate() {
-  input_method_delegate_ = nullptr;
+void MockTSFBridge::RemoveImeKeyEventDispatcher() {
+  ime_key_event_dispatcher_ = nullptr;
 }
 
 Microsoft::WRL::ComPtr<ITfThreadMgr> MockTSFBridge::GetThreadManager() {
@@ -60,6 +59,10 @@ Microsoft::WRL::ComPtr<ITfThreadMgr> MockTSFBridge::GetThreadManager() {
 
 TextInputClient* MockTSFBridge::GetFocusedTextInputClient() const {
   return text_input_client_;
+}
+
+bool MockTSFBridge::IsInputLanguageCJK() {
+  return false;
 }
 
 void MockTSFBridge::Reset() {

@@ -1,8 +1,25 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {MockDriveSyncHandler} from '../../background/js/mock_drive_sync_handler.js';
+import {MockVolumeManager} from '../../background/js/mock_volume_manager.js';
+import {metrics} from '../../common/js/metrics.js';
+import {installMockChrome, MockCommandLinePrivate} from '../../common/js/mock_chrome.js';
+import {MockDirectoryEntry, MockFileEntry} from '../../common/js/mock_entry.js';
+import {reportPromise} from '../../common/js/test_error_reporting.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+
+import {ActionsModel} from './actions_model.js';
+import {FolderShortcutsDataModel} from './folder_shortcuts_data_model.js';
+import {MockMetadataModel} from './metadata/mock_metadata.js';
+import {ActionModelUI} from './ui/action_model_ui.js';
+import {FilesAlertDialog} from './ui/files_alert_dialog.js';
+import {ListContainer} from './ui/list_container.js';
 
 /**
  * @type {!MockVolumeManager}
@@ -29,7 +46,7 @@ let driveSyncHandler;
  * @returns {!FolderShortcutsDataModel}
  */
 function createFakeFolderShortcutsDataModel() {
-  class FakeFolderShortcutsModel extends cr.EventTarget {
+  class FakeFolderShortcutsModel extends EventTarget {
     constructor() {
       super();
       this.has = false;
@@ -65,7 +82,7 @@ class MockUI {
     this.listContainer = /** @type {!ListContainer} */ ({
       currentView: {
         updateListItemsMetadata: function() {},
-      }
+      },
     });
 
     this.alertDialog = /** @type {!FilesAlertDialog} */ ({
@@ -79,10 +96,10 @@ class MockUI {
  */
 let ui;
 
-function setUp() {
+export function setUp() {
   // Mock loadTimeData strings.
   window.loadTimeData.getString = id => id;
-  window.loadTimeData.data = {};
+  window.loadTimeData.resetForTesting({});
 
   // Mock Chrome APIs.
   const mockChrome = {
@@ -94,10 +111,34 @@ function setUp() {
       getCustomActions: null,
       executeCustomAction: null,
       pinDriveFile: null,
+      DriveConnectionStateType: {
+        ONLINE: 'ONLINE',
+        OFFLINE: 'OFFLINE',
+        METERED: 'METERED',
+      },
+      DriveOfflineReason: {
+        NOT_READY: 'NOT_READY',
+        NO_NETWORK: 'NO_NETWORK',
+        NO_SERVICE: 'NO_SERVICE',
+      },
     },
   };
   installMockChrome(mockChrome);
   new MockCommandLinePrivate();
+
+  /**
+   * Mock metrics.recordBoolean.
+   * @param {string} name Short metric name.
+   * @param {boolean} value The value to be recorded.
+   */
+  metrics.recordBoolean = (name, value) => {
+    metrics.calls[name]++;
+  };
+
+  metrics.calls = {
+    DrivePinSuccess: 0,
+    DriveHostedFilePinSuccess: 0,
+  };
 
   // Setup Drive file system.
   volumeManager = new MockVolumeManager();
@@ -120,9 +161,9 @@ function setUp() {
 /**
  * Tests that the correct actions are available for a Google Drive directory.
  */
-function testDriveDirectoryEntry(callback) {
+export function testDriveDirectoryEntry(callback) {
   driveFileSystem.entries['/test'] =
-      new MockDirectoryEntry(driveFileSystem, '/test');
+      MockDirectoryEntry.create(driveFileSystem, '/test');
 
   const metadataModel = new MockMetadataModel({
     canShare: true,
@@ -141,13 +182,15 @@ function testDriveDirectoryEntry(callback) {
       model.initialize()
           .then(() => {
             const actions = model.getActions();
-            assertEquals(3, Object.keys(actions).length);
+            assertEquals(5, Object.keys(actions).length);
 
             // 'Share' should be disabled in offline mode.
             const shareAction = actions[ActionsModel.CommonActionId.SHARE];
             assertTrue(!!shareAction);
             volumeManager.driveConnectionState = {
-              type: VolumeManagerCommon.DriveConnectionType.OFFLINE
+              type: chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE,
+              hasCellularNetworkAccess: false,
+              canPinHostedFiles: false,
             };
             assertFalse(shareAction.canExecute());
 
@@ -179,7 +222,7 @@ function testDriveDirectoryEntry(callback) {
           })
           .then(() => {
             const actions = model.getActions();
-            assertEquals(4, Object.keys(actions).length);
+            assertEquals(6, Object.keys(actions).length);
             assertTrue(!!actions[ActionsModel.CommonActionId.SHARE]);
             assertTrue(
                 !!actions[ActionsModel.InternalActionId.MANAGE_IN_DRIVE]);
@@ -199,13 +242,14 @@ function testDriveDirectoryEntry(callback) {
 /**
  * Tests that the correct actions are available for a Google Drive file.
  */
-function testDriveFileEntry(callback) {
+export function testDriveFileEntry(callback) {
   driveFileSystem.entries['/test.txt'] =
-      new MockFileEntry(driveFileSystem, '/test.txt');
+      MockFileEntry.create(driveFileSystem, '/test.txt');
 
   const metadataModel = new MockMetadataModel({
     hosted: false,
     pinned: false,
+    canPin: true,
   });
 
   let model = new ActionsModel(
@@ -252,6 +296,9 @@ function testDriveFileEntry(callback) {
           .then(() => {
             assertTrue(metadataModel.properties.pinned);
             assertEquals(1, invalidated);
+
+            assertEquals(1, metrics.calls['DrivePinSuccess']);
+            assertEquals(0, metrics.calls['DriveHostedFilePinSuccess']);
 
             // The model is invalidated, as list of actions have changed.
             // Recreated the model and check that the actions are updated.
@@ -300,11 +347,231 @@ function testDriveFileEntry(callback) {
 }
 
 /**
+ * Tests that the correct actions are available for a Google Drive hosted file.
+ */
+export function testDriveHostedFileEntry(callback) {
+  const testDocument = MockFileEntry.create(driveFileSystem, '/test.gdoc');
+  const testFile = MockFileEntry.create(driveFileSystem, '/test.txt');
+  driveFileSystem.entries['/test.gdoc'] = testDocument;
+  driveFileSystem.entries['/test.txt'] = testFile;
+
+  const metadataModel = new MockMetadataModel({});
+  metadataModel.set(testDocument, {hosted: true, pinned: false, canPin: true});
+  metadataModel.set(testFile, {hosted: false, pinned: false, canPin: true});
+  volumeManager.driveConnectionState = {
+    type: chrome.fileManagerPrivate.DriveConnectionStateType.ONLINE,
+    hasCellularNetworkAccess: false,
+    canPinHostedFiles: true,
+  };
+  chrome.fileManagerPrivate.pinDriveFile = (entry, pin, callback) => {
+    const metadata = metadataModel.getCache([entry])[0];
+    metadata.pinned = pin;
+    metadataModel.set(entry, metadata);
+    callback();
+  };
+
+  let model = new ActionsModel(
+      volumeManager, metadataModel, shortcutsModel, driveSyncHandler, ui,
+      [testDocument]);
+
+  return reportPromise(
+      model.initialize()
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Save for Offline' should be enabled.
+            const saveForOfflineAction =
+                actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+            assertTrue(!!saveForOfflineAction);
+            assertTrue(saveForOfflineAction.canExecute());
+
+            // Check the actions for multiple selection.
+            model = new ActionsModel(
+                volumeManager, metadataModel, shortcutsModel, driveSyncHandler,
+                ui, [testDocument, testFile]);
+            return model.initialize();
+          })
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Offline not Necessary' should not be enabled.
+            assertFalse(actions.hasOwnProperty(
+                ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY));
+
+            // 'Save for Offline' should be enabled.
+            const saveForOfflineAction =
+                actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+            assertTrue(!!saveForOfflineAction);
+            assertTrue(saveForOfflineAction.canExecute());
+
+            // For pinning, invalidating is done asynchronously, so we need to
+            // wait for it with a promise.
+            return new Promise((fulfill, reject) => {
+              model.addEventListener('invalidated', () => {
+                fulfill();
+              });
+              saveForOfflineAction.execute();
+            });
+          })
+          .then(() => {
+            assertTrue(!!metadataModel.getCache([testDocument])[0].pinned);
+            assertTrue(!!metadataModel.getCache([testFile])[0].pinned);
+
+            assertEquals(2, metrics.calls['DrivePinSuccess']);
+            assertEquals(1, metrics.calls['DriveHostedFilePinSuccess']);
+
+            model = new ActionsModel(
+                volumeManager, metadataModel, shortcutsModel, driveSyncHandler,
+                ui, [testDocument, testFile]);
+            return model.initialize();
+          })
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Offline not Necessary' should be enabled.
+            const offlineNotNecessaryAction =
+                actions[ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY];
+            assertTrue(!!offlineNotNecessaryAction);
+            assertTrue(offlineNotNecessaryAction.canExecute());
+
+            // 'Save for Offline' should not be enabled.
+            assertFalse(actions.hasOwnProperty(
+                ActionsModel.CommonActionId.SAVE_FOR_OFFLINE));
+
+            // For pinning, invalidating is done asynchronously, so we need to
+            // wait for it with a promise.
+            return new Promise((fulfill, reject) => {
+              model.addEventListener('invalidated', () => {
+                fulfill();
+              });
+              offlineNotNecessaryAction.execute();
+            });
+          })
+          .then(() => {
+            assertFalse(!!metadataModel.getCache([testDocument])[0].pinned);
+            assertFalse(!!metadataModel.getCache([testFile])[0].pinned);
+          }),
+      callback);
+}
+
+/**
+ * Tests that the correct actions are available for a Drive file that cannot be
+ * pinned.
+ */
+export function testUnpinnableDriveHostedFileEntry(callback) {
+  const testDocument = MockFileEntry.create(driveFileSystem, '/test.gdoc');
+  const testFile = MockFileEntry.create(driveFileSystem, '/test.txt');
+  driveFileSystem.entries['/test.gdoc'] = testDocument;
+  driveFileSystem.entries['/test.txt'] = testFile;
+
+  const metadataModel = new MockMetadataModel({});
+  metadataModel.set(testDocument, {hosted: true, pinned: false, canPin: false});
+  metadataModel.set(testFile, {hosted: false, pinned: false, canPin: true});
+  volumeManager.driveConnectionState = {
+    type: chrome.fileManagerPrivate.DriveConnectionStateType.ONLINE,
+    hasCellularNetworkAccess: false,
+    canPinHostedFiles: false,
+  };
+  chrome.fileManagerPrivate.pinDriveFile = (entry, pin, callback) => {
+    const metadata = metadataModel.getCache([entry])[0];
+    metadata.pinned = pin;
+    metadataModel.set(entry, metadata);
+    callback();
+  };
+
+  let model = new ActionsModel(
+      volumeManager, metadataModel, shortcutsModel, driveSyncHandler, ui,
+      [testDocument]);
+
+  return reportPromise(
+      model.initialize()
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Save for Offline' should be enabled, but not executable.
+            const saveForOfflineAction =
+                actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+            assertTrue(!!saveForOfflineAction);
+            assertFalse(saveForOfflineAction.canExecute());
+
+            // Check the actions for multiple selection.
+            model = new ActionsModel(
+                volumeManager, metadataModel, shortcutsModel, driveSyncHandler,
+                ui, [testDocument, testFile]);
+            return model.initialize();
+          })
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Offline not Necessary' should not be enabled.
+            assertFalse(actions.hasOwnProperty(
+                ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY));
+
+            // 'Save for Offline' should be enabled even though we can't pin
+            // hosted files as we've also selected a non-hosted file.
+            const saveForOfflineAction =
+                actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+            assertTrue(!!saveForOfflineAction);
+            assertTrue(saveForOfflineAction.canExecute());
+
+            // For pinning, invalidating is done asynchronously, so we need to
+            // wait for it with a promise.
+            return new Promise((fulfill, reject) => {
+              model.addEventListener('invalidated', () => {
+                fulfill();
+              });
+              saveForOfflineAction.execute();
+            });
+          })
+          .then(() => {
+            assertFalse(!!metadataModel.getCache([testDocument])[0].pinned);
+            assertTrue(!!metadataModel.getCache([testFile])[0].pinned);
+
+            assertEquals(1, metrics.calls['DrivePinSuccess']);
+            assertEquals(0, metrics.calls['DriveHostedFilePinSuccess']);
+
+            model = new ActionsModel(
+                volumeManager, metadataModel, shortcutsModel, driveSyncHandler,
+                ui, [testDocument, testFile]);
+            return model.initialize();
+          })
+          .then(() => {
+            const actions = model.getActions();
+
+            // 'Offline not Necessary' should be enabled.
+            const offlineNotNecessaryAction =
+                actions[ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY];
+            assertTrue(!!offlineNotNecessaryAction);
+            assertTrue(offlineNotNecessaryAction.canExecute());
+
+            // 'Save for Offline' should be enabled, but not executable.
+            const saveForOfflineAction =
+                actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+            assertTrue(!!saveForOfflineAction);
+            assertFalse(saveForOfflineAction.canExecute());
+
+            // For pinning, invalidating is done asynchronously, so we need to
+            // wait for it with a promise.
+            return new Promise((fulfill, reject) => {
+              model.addEventListener('invalidated', () => {
+                fulfill();
+              });
+              offlineNotNecessaryAction.execute();
+            });
+          })
+          .then(() => {
+            assertFalse(!!metadataModel.getCache([testDocument])[0].pinned);
+            assertFalse(!!metadataModel.getCache([testFile])[0].pinned);
+          }),
+      callback);
+}
+
+/**
  * Tests that a Team Drive Root entry has the correct actions available.
  */
-function testTeamDriveRootEntry(callback) {
+export function testTeamDriveRootEntry(callback) {
   driveFileSystem.entries['/team_drives/ABC Team'] =
-      new MockDirectoryEntry(driveFileSystem, '/team_drives/ABC Team');
+      MockDirectoryEntry.create(driveFileSystem, '/team_drives/ABC Team');
 
   const metadataModel = new MockMetadataModel({
     canShare: true,
@@ -317,18 +584,19 @@ function testTeamDriveRootEntry(callback) {
   return reportPromise(
       model.initialize().then(() => {
         const actions = model.getActions();
-        assertEquals(2, Object.keys(actions).length);
+        console.log(Object.keys(actions));
+        assertEquals(4, Object.keys(actions).length);
 
-        // "share" action is disabled for Team Drive Root entries.
+        // "share" action is enabled for Team Drive Root entries.
         const shareAction = actions[ActionsModel.CommonActionId.SHARE];
         assertTrue(!!shareAction);
-        assertFalse(shareAction.canExecute());
+        assertTrue(shareAction.canExecute());
 
         // "manage in drive" action is disabled for Team Drive Root entries.
         const manageAction =
             actions[ActionsModel.InternalActionId.MANAGE_IN_DRIVE];
         assertTrue(!!manageAction);
-        assertFalse(manageAction.canExecute());
+        assertTrue(manageAction.canExecute());
       }),
       callback);
 }
@@ -336,12 +604,14 @@ function testTeamDriveRootEntry(callback) {
 /**
  * Tests that a Team Drive directory entry has the correct actions available.
  */
-function testTeamDriveDirectoryEntry(callback) {
+export function testTeamDriveDirectoryEntry(callback) {
   driveFileSystem.entries['/team_drives/ABC Team/Folder 1'] =
-      new MockDirectoryEntry(driveFileSystem, '/team_drives/ABC Team/Folder 1');
+      MockDirectoryEntry.create(
+          driveFileSystem, '/team_drives/ABC Team/Folder 1');
 
   const metadataModel = new MockMetadataModel({
     canShare: true,
+    canPin: true,
   });
 
   const model = new ActionsModel(
@@ -351,12 +621,24 @@ function testTeamDriveDirectoryEntry(callback) {
   return reportPromise(
       model.initialize().then(() => {
         const actions = model.getActions();
-        assertEquals(3, Object.keys(actions).length);
+        assertEquals(5, Object.keys(actions).length);
 
         // "Share" is enabled for Team Drive directories.
         const shareAction = actions[ActionsModel.CommonActionId.SHARE];
         assertTrue(!!shareAction);
         assertTrue(shareAction.canExecute());
+
+        // "Available Offline" toggle is enabled for Team Drive directories.
+        const saveForOfflineAction =
+            actions[ActionsModel.CommonActionId.SAVE_FOR_OFFLINE];
+        assertTrue(!!saveForOfflineAction);
+        assertTrue(saveForOfflineAction.canExecute());
+
+        // "Available Offline" toggle is enabled for Team Drive directories.
+        const offlineNotNecessaryAction =
+            actions[ActionsModel.CommonActionId.OFFLINE_NOT_NECESSARY];
+        assertTrue(!!offlineNotNecessaryAction);
+        assertTrue(offlineNotNecessaryAction.canExecute());
 
         // "Manage in drive" is enabled for Team Drive directories.
         const manageAction =
@@ -376,14 +658,15 @@ function testTeamDriveDirectoryEntry(callback) {
 /**
  * Tests that a Team Drive file entry has the correct actions available.
  */
-function testTeamDriveFileEntry(callback) {
+export function testTeamDriveFileEntry(callback) {
   driveFileSystem.entries['/team_drives/ABC Team/Folder 1/test.txt'] =
-      new MockFileEntry(
+      MockFileEntry.create(
           driveFileSystem, '/team_drives/ABC Team/Folder 1/test.txt');
 
   const metadataModel = new MockMetadataModel({
     hosted: false,
     pinned: false,
+    canPin: true,
   });
 
   const model = new ActionsModel(
@@ -419,9 +702,9 @@ function testTeamDriveFileEntry(callback) {
  * Tests that if actions are provided with getCustomActions(), they appear
  * correctly for the file.
  */
-function testProvidedEntry(callback) {
+export function testProvidedEntry(callback) {
   providedFileSystem.entries['/test'] =
-      new MockDirectoryEntry(providedFileSystem, '/test');
+      MockDirectoryEntry.create(providedFileSystem, '/test');
 
   chrome.fileManagerPrivate.getCustomActions = (entries, callback) => {
     assertEquals(1, entries.length);
@@ -459,7 +742,9 @@ function testProvidedEntry(callback) {
         // Sharing on FSP is possible even if Drive is offline. Custom actions
         // are always executable, as we don't know the actions implementation.
         volumeManager.driveConnectionState = {
-          type: VolumeManagerCommon.DriveConnectionType.OFFLINE
+          type: chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE,
+          hasCellularNetworkAccess: false,
+          canPinHostedFiles: false,
         };
         assertTrue(shareAction.canExecute());
         assertEquals('Share it!', shareAction.getTitle());
@@ -496,9 +781,9 @@ function testProvidedEntry(callback) {
 /**
  * Tests that no actions are available when getCustomActions() throws an error.
  */
-function testProvidedEntryWithError(callback) {
+export function testProvidedEntryWithError(callback) {
   providedFileSystem.entries['/test'] =
-      new MockDirectoryEntry(providedFileSystem, '/test');
+      MockDirectoryEntry.create(providedFileSystem, '/test');
 
   chrome.fileManagerPrivate.getCustomActions = (entries, callback) => {
     chrome.runtime.lastError = {

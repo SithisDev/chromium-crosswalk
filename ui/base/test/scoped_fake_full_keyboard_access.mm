@@ -1,12 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ui/base/test/scoped_fake_full_keyboard_access.h"
 
 #import <Cocoa/Cocoa.h>
+#include <ostream>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
 
 namespace {

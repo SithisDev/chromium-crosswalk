@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
  * TODO(michaelpg): Since extensions can also control settings and be indicated,
  * rework the "policy" naming scheme throughout this directory.
  */
+
+import {assertNotReached} from '../../js/assert.m.js';
 
 /**
  * Strings required for policy indicators. These must be set at runtime.
@@ -27,8 +29,11 @@
 // eslint-disable-next-line no-var
 var CrPolicyStrings;
 
-/** @enum {string} */
-const CrPolicyIndicatorType = {
+/**
+ * Possible policy indicators that can be shown in settings.
+ * @enum {string}
+ */
+export const CrPolicyIndicatorType = {
   DEVICE_POLICY: 'devicePolicy',
   EXTENSION: 'extension',
   NONE: 'none',
@@ -41,7 +46,7 @@ const CrPolicyIndicatorType = {
 };
 
 /** @polymerBehavior */
-const CrPolicyIndicatorBehavior = {
+export const CrPolicyIndicatorBehavior = {
   // Properties exposed to all policy indicators.
   properties: {
     /**
@@ -81,8 +86,8 @@ const CrPolicyIndicatorBehavior = {
    * @return {boolean} True if the indicator should be shown.
    * @private
    */
-  getIndicatorVisible_: function(type) {
-    return type != CrPolicyIndicatorType.NONE;
+  getIndicatorVisible_(type) {
+    return type !== CrPolicyIndicatorType.NONE;
   },
 
   /**
@@ -90,7 +95,7 @@ const CrPolicyIndicatorBehavior = {
    * @return {string} The iron-icon icon name.
    * @private
    */
-  getIndicatorIcon_: function(type) {
+  getIndicatorIcon_(type) {
     switch (type) {
       case CrPolicyIndicatorType.EXTENSION:
         return 'cr:extension';
@@ -116,14 +121,16 @@ const CrPolicyIndicatorBehavior = {
    * @param {!CrPolicyIndicatorType} type
    * @param {string} name The name associated with the indicator. See
    *     chrome.settingsPrivate.PrefObject.controlledByName
-   * @param {boolean=} opt_matches For RECOMMENDED only, whether the indicator
+   * @param {boolean=} matches For RECOMMENDED only, whether the indicator
    *     value matches the recommended value.
    * @return {string} The tooltip text for |type|.
    */
-  getIndicatorTooltip: function(type, name, opt_matches) {
-    if (!CrPolicyStrings) {
+  getIndicatorTooltip(type, name, matches) {
+    if (!window['CrPolicyStrings']) {
       return '';
     }  // Tooltips may not be defined, e.g. in OOBE.
+
+    CrPolicyStrings = window['CrPolicyStrings'];
     switch (type) {
       case CrPolicyIndicatorType.EXTENSION:
         return name.length > 0 ?
@@ -139,9 +146,8 @@ const CrPolicyIndicatorBehavior = {
       case CrPolicyIndicatorType.DEVICE_POLICY:
         return CrPolicyStrings.controlledSettingPolicy;
       case CrPolicyIndicatorType.RECOMMENDED:
-        return opt_matches ?
-            CrPolicyStrings.controlledSettingRecommendedMatches :
-            CrPolicyStrings.controlledSettingRecommendedDiffers;
+        return matches ? CrPolicyStrings.controlledSettingRecommendedMatches :
+                         CrPolicyStrings.controlledSettingRecommendedDiffers;
       case CrPolicyIndicatorType.PARENT:
         return CrPolicyStrings.controlledSettingParent;
       case CrPolicyIndicatorType.CHILD_RESTRICTION:
@@ -150,3 +156,28 @@ const CrPolicyIndicatorBehavior = {
     return '';
   },
 };
+
+/** @interface */
+export class CrPolicyIndicatorBehaviorInterface {
+  constructor() {
+    /** @type {CrPolicyIndicatorType} */
+    this.indicatorType;
+
+    /** @type {string} */
+    this.indicatorSourceName;
+
+    /** @type {boolean} */
+    this.indicatorVisible;
+
+    /** @type {string} */
+    this.indicatorIcon;
+  }
+
+  /**
+   * @param {!CrPolicyIndicatorType} type
+   * @param {string} name
+   * @param {boolean=} matches
+   * @return {string}
+   */
+  getIndicatorTooltip(type, name, matches) {}
+}

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,18 @@
 #define UI_VIEWS_CONTROLS_EDITABLE_COMBOBOX_EDITABLE_COMBOBOX_H_
 
 #include <memory>
+#include <string>
+#include <utility>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/callback.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/layout/animating_layout_manager.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/view.h"
 #include "ui/views/view_observer.h"
@@ -29,17 +34,18 @@ class Event;
 }  // namespace ui
 
 namespace views {
+class Button;
 class EditableComboboxMenuModel;
-class EditableComboboxListener;
 class EditableComboboxPreTargetHandler;
 class MenuRunner;
 class Textfield;
 
 // Textfield that also shows a drop-down list with suggestions.
-class VIEWS_EXPORT EditableCombobox : public View,
-                                      public TextfieldController,
-                                      public ViewObserver,
-                                      public ButtonListener {
+class VIEWS_EXPORT EditableCombobox
+    : public View,
+      public TextfieldController,
+      public ViewObserver,
+      public views::AnimatingLayoutManager::Observer {
  public:
   METADATA_HEADER(EditableCombobox);
 
@@ -51,6 +57,8 @@ class VIEWS_EXPORT EditableCombobox : public View,
   static constexpr int kDefaultTextContext = style::CONTEXT_BUTTON;
   static constexpr int kDefaultTextStyle = style::STYLE_PRIMARY;
 
+  EditableCombobox();
+
   // |combobox_model|: The ComboboxModel that gives us the items to show in the
   // menu.
   // |filter_on_edit|: Whether to only show the items that are case-insensitive
@@ -61,24 +69,28 @@ class VIEWS_EXPORT EditableCombobox : public View,
   // |text_context| and |text_style|: Together these indicate the font to use.
   // |display_arrow|: Whether to display an arrow in the combobox to indicate
   // that there is a drop-down list.
-  EditableCombobox(std::unique_ptr<ui::ComboboxModel> combobox_model,
-                   bool filter_on_edit,
-                   bool show_on_empty,
-                   Type type = Type::kRegular,
-                   int text_context = kDefaultTextContext,
-                   int text_style = kDefaultTextStyle,
-                   bool display_arrow = true);
+  explicit EditableCombobox(std::unique_ptr<ui::ComboboxModel> combobox_model,
+                            bool filter_on_edit = false,
+                            bool show_on_empty = true,
+                            Type type = Type::kRegular,
+                            int text_context = kDefaultTextContext,
+                            int text_style = kDefaultTextStyle,
+                            bool display_arrow = true);
+
+  EditableCombobox(const EditableCombobox&) = delete;
+  EditableCombobox& operator=(const EditableCombobox&) = delete;
 
   ~EditableCombobox() override;
 
-  const base::string16& GetText() const;
-  void SetText(const base::string16& text);
+  void SetModel(std::unique_ptr<ui::ComboboxModel> model);
+
+  const std::u16string& GetText() const;
+  void SetText(const std::u16string& text);
 
   const gfx::FontList& GetFontList() const;
 
-  // Sets the listener that we will call when a selection is made.
-  void set_listener(EditableComboboxListener* listener) {
-    listener_ = listener;
+  void SetCallback(base::RepeatingClosure callback) {
+    content_changed_callback_ = std::move(callback);
   }
 
   // Selects the specified logical text range for the textfield.
@@ -86,7 +98,7 @@ class VIEWS_EXPORT EditableCombobox : public View,
 
   // Sets the accessible name. Use SetAssociatedLabel instead if there is a
   // label associated with this combobox.
-  void SetAccessibleName(const base::string16& name);
+  void SetAccessibleName(const std::u16string& name);
 
   // Sets the associated label; use this instead of SetAccessibleName if there
   // is a label associated with this combobox.
@@ -98,8 +110,9 @@ class VIEWS_EXPORT EditableCombobox : public View,
 
   // Accessors of private members for tests.
   ui::ComboboxModel* GetComboboxModelForTest() { return combobox_model_.get(); }
-  int GetItemCountForTest();
-  base::string16 GetItemForTest(int index);
+  size_t GetItemCountForTest();
+  std::u16string GetItemForTest(size_t index);
+  ui::ImageModel GetIconForTest(size_t index);
   MenuRunner* GetMenuRunnerForTest() { return menu_runner_.get(); }
   Textfield* GetTextfieldForTest() { return textfield_; }
 
@@ -110,33 +123,39 @@ class VIEWS_EXPORT EditableCombobox : public View,
   void CloseMenu();
 
   // Called when an item is selected from the menu.
-  void OnItemSelected(int index);
+  void OnItemSelected(size_t index);
 
   // Notifies listener of new content and updates the menu items to show.
-  void HandleNewContent(const base::string16& new_content);
+  void HandleNewContent(const std::u16string& new_content);
+
+  // Toggles the dropdown menu in response to |event|.
+  void ArrowButtonPressed(const ui::Event& event);
 
   // Shows the drop-down menu.
   void ShowDropDownMenu(ui::MenuSourceType source_type = ui::MENU_SOURCE_NONE);
 
   // Overridden from View:
   void Layout() override;
-  void OnThemeChanged() override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void RequestFocus() override;
+  bool GetNeedsNotificationWhenVisibleBoundsChange() const override;
+  void OnVisibleBoundsChanged() override;
 
   // Overridden from TextfieldController:
   void ContentsChanged(Textfield* sender,
-                       const base::string16& new_contents) override;
+                       const std::u16string& new_contents) override;
   bool HandleKeyEvent(Textfield* sender,
                       const ui::KeyEvent& key_event) override;
 
   // Overridden from ViewObserver:
   void OnViewBlurred(View* observed_view) override;
 
-  // Overridden from ButtonListener:
-  void ButtonPressed(Button* sender, const ui::Event& event) override;
+  // Overridden from views::AnimatingLayoutManager::Observer:
+  void OnLayoutIsAnimatingChanged(views::AnimatingLayoutManager* source,
+                                  bool is_animating) override;
 
-  Textfield* textfield_;
-  Button* arrow_ = nullptr;
+  raw_ptr<Textfield> textfield_;
+  raw_ptr<Button> arrow_ = nullptr;
   std::unique_ptr<ui::ComboboxModel> combobox_model_;
 
   // The EditableComboboxMenuModel used by |menu_runner_|.
@@ -157,17 +176,24 @@ class VIEWS_EXPORT EditableCombobox : public View,
 
   const Type type_;
 
+  // Whether to adapt the items shown to the textfield content.
+  bool filter_on_edit_;
+
+  // Whether to show options when the textfield is empty.
+  bool show_on_empty_;
+
   // Set while the drop-down is showing.
   std::unique_ptr<MenuRunner> menu_runner_;
 
-  // Our listener. Not owned. Notified when the selected index changes.
-  EditableComboboxListener* listener_ = nullptr;
+  base::RepeatingClosure content_changed_callback_;
 
   // Whether we are currently showing the passwords for type
   // Type::kPassword.
   bool showing_password_text_;
 
-  DISALLOW_COPY_AND_ASSIGN(EditableCombobox);
+  bool dropdown_blocked_for_animation_ = false;
+
+  base::ScopedObservation<View, ViewObserver> observation_{this};
 };
 
 }  // namespace views

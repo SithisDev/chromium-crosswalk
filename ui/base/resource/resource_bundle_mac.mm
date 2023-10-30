@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,12 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "ui/base/resource/resource_handle.h"
@@ -48,20 +51,20 @@ base::FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {
 }  // namespace
 
 void ResourceBundle::LoadCommonResources() {
-  AddDataPackFromPath(GetResourcesPakFilePath(@"chrome_100_percent",
-                        nil), SCALE_FACTOR_100P);
+  AddDataPackFromPath(GetResourcesPakFilePath(@"chrome_100_percent", nil),
+                      k100Percent);
 
   // On Mac we load 1x and 2x resources and we let the UI framework decide
   // which one to use.
-  if (IsScaleFactorSupported(SCALE_FACTOR_200P)) {
+  if (IsScaleFactorSupported(k200Percent)) {
     AddDataPackFromPath(GetResourcesPakFilePath(@"chrome_200_percent", nil),
-                        SCALE_FACTOR_200P);
+                        k200Percent);
   }
 }
 
 // static
-base::FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
-                                                 bool test_file_exists) {
+base::FilePath ResourceBundle::GetLocaleFilePath(
+    const std::string& app_locale) {
   NSString* mac_locale = base::SysUTF8ToNSString(app_locale);
 
   // Mac OS X uses "_" instead of "-", so swap to get a Mac-style value.
@@ -80,30 +83,16 @@ base::FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale,
         locale_file_path, app_locale);
   }
 
-  // Don't try to load empty values or values that are not absolute paths.
-  if (locale_file_path.empty() || !locale_file_path.IsAbsolute())
-    return base::FilePath();
-
-  if (test_file_exists && !base::PathExists(locale_file_path))
-    return base::FilePath();
-
-  return locale_file_path;
+  // Don't try to load from paths that are not absolute.
+  return locale_file_path.IsAbsolute() ? locale_file_path : base::FilePath();
 }
 
 gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Check to see if the image is already in the cache.
-  auto found = images_.find(resource_id);
-  if (found != images_.end()) {
-    if (!found->second.HasRepresentation(gfx::Image::kImageRepCocoa)) {
-      DLOG(WARNING)
-          << "ResourceBundle::GetNativeImageNamed() is returning a"
-          << " cached gfx::Image that isn't backed by an NSImage. The image"
-          << " will be converted, rather than going through the NSImage loader."
-          << " resource_id = " << resource_id;
-    }
+  if (auto found = images_.find(resource_id); found != images_.end())
     return found->second;
-  }
 
   gfx::Image image;
   if (delegate_)
@@ -111,9 +100,10 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
 
   if (image.IsEmpty()) {
     base::scoped_nsobject<NSImage> ns_image;
-    for (size_t i = 0; i < data_packs_.size(); ++i) {
+    for (const auto& resource_handle : resource_handles_) {
       scoped_refptr<base::RefCountedStaticMemory> data(
-          data_packs_[i]->GetStaticMemory(resource_id));
+          resource_handle->GetStaticMemory(
+              base::checked_cast<uint16_t>(resource_id)));
       if (!data.get())
         continue;
 
@@ -137,9 +127,7 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
     image = gfx::Image(ns_image);
   }
 
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  auto inserted = images_.insert(std::make_pair(resource_id, image));
+  auto inserted = images_.emplace(resource_id, image);
   DCHECK(inserted.second);
   return inserted.first->second;
 }

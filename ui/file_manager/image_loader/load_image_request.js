@@ -1,27 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {ImageOrientation, ImageTransformParam} from './image_orientation.js';
 
-/**
- * Color space.
- *
- * @enum {string}
- */
-const ColorSpace = {
-  SRGB: 'sRgb',
-  ADOBE_RGB: 'adobeRgb'
-};
 
 /**
  * Response status.
  *
  * @enum {string}
  */
-const LoadImageResponseStatus = {
+export const LoadImageResponseStatus = {
   SUCCESS: 'success',
-  ERROR: 'error'
+  ERROR: 'error',
 };
 
 /**
@@ -30,7 +22,7 @@ const LoadImageResponseStatus = {
  *
  * @struct
  */
-class LoadImageResponse {
+export class LoadImageResponse {
   /**
    * @param {!LoadImageResponseStatus} status
    * @param {?number} taskId or null if fulfilled by the client-side cache.
@@ -106,7 +98,7 @@ class LoadImageResponse {
  *
  * @struct
  */
-class LoadImageRequest {
+export class LoadImageRequest {
   constructor() {
     // Parts that uniquely identify the request.
 
@@ -143,13 +135,6 @@ class LoadImageRequest {
     this.cache;
     /** @type {number|undefined} */
     this.priority;
-
-    /**
-     * ColorSpace, only used for piex images.
-     *
-     * @type{ColorSpace|undefined}
-     */
-    this.colorSpace;
   }
 
   /**
@@ -169,7 +154,7 @@ class LoadImageRequest {
       width: request.width,
       height: request.height,
       maxWidth: request.maxWidth,
-      maxHeight: request.maxHeight
+      maxHeight: request.maxHeight,
     });
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "ui/gfx/animation/animation_export.h"
@@ -34,6 +34,9 @@ class ANIMATION_EXPORT AnimationContainer
  public:
   AnimationContainer();
 
+  AnimationContainer(const AnimationContainer&) = delete;
+  AnimationContainer& operator=(const AnimationContainer&) = delete;
+
   // Invoked by Animation when it needs to start. Starts the timer if necessary.
   // NOTE: This is invoked by Animation for you, you shouldn't invoke this
   // directly.
@@ -56,6 +59,7 @@ class ANIMATION_EXPORT AnimationContainer
   bool is_running() const { return !elements_.empty(); }
 
   void SetAnimationRunner(std::unique_ptr<AnimationRunner> runner);
+  AnimationRunner* animation_runner_for_testing() { return runner_.get(); }
   bool has_custom_animation_runner() const {
     return has_custom_animation_runner_;
   }
@@ -79,6 +83,10 @@ class ANIMATION_EXPORT AnimationContainer
 
   // Sets min_timer_interval_ and restarts the timer.
   void SetMinTimerInterval(base::TimeDelta delta);
+
+  // Restarts the timer, assuming |elapsed| has already elapsed out of the timer
+  // interval.
+  void RestartTimer(base::TimeDelta elapsed);
 
   // Returns the min timer interval of all the timers, and the count of timers
   // at that interval.
@@ -106,9 +114,7 @@ class ANIMATION_EXPORT AnimationContainer
       AnimationRunner::CreateDefaultAnimationRunner();
   bool has_custom_animation_runner_ = false;
 
-  AnimationContainerObserver* observer_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(AnimationContainer);
+  raw_ptr<AnimationContainerObserver> observer_ = nullptr;
 };
 
 }  // namespace gfx

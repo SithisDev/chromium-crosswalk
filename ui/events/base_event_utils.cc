@@ -1,15 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/base_event_utils.h"
 
 #include "base/atomic_sequence_num.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
 
@@ -17,14 +18,14 @@ namespace ui {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const int kSystemKeyModifierMask = EF_ALT_DOWN | EF_COMMAND_DOWN;
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_APPLE)
 // Alt modifier is used to input extended characters on Mac.
 const int kSystemKeyModifierMask = EF_COMMAND_DOWN;
 #else
 const int kSystemKeyModifierMask = EF_ALT_DOWN;
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#endif
 
 }  // namespace
 
@@ -64,7 +65,23 @@ double EventTimeStampToSeconds(base::TimeTicks time_stamp) {
 }
 
 base::TimeTicks EventTimeStampFromSeconds(double time_stamp_seconds) {
-  return base::TimeTicks() + base::TimeDelta::FromSecondsD(time_stamp_seconds);
+  return base::TimeTicks() + base::Seconds(time_stamp_seconds);
+}
+
+bool IsValidTimebase(base::TimeTicks now, base::TimeTicks timestamp) {
+  int64_t delta = (now - timestamp).InMilliseconds();
+  return delta >= 0 && delta <= 60 * 1000;
+}
+
+void ValidateEventTimeClock(base::TimeTicks* timestamp) {
+  // Some fraction of devices, across all platforms provide bogus event
+  // timestamps. See https://crbug.com/650338#c1. Correct timestamps which are
+  // clearly bogus.
+  // TODO(861855): Replace this with an approach that doesn't require an extra
+  // read of the current time per event.
+  base::TimeTicks now = EventTimeForNow();
+  if (!IsValidTimebase(now, *timestamp))
+    *timestamp = now;
 }
 
 }  // namespace ui

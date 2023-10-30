@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 
 #else  // !BUILDFLAG(USE_XKBCOMMON)
 
-#include "ui/gfx/x/x11.h"
+#include "ui/gfx/x/keysyms/keysyms.h"
 
 using xkb_keysym_t = uint32_t;
 

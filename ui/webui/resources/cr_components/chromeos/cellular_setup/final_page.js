@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,48 @@
  * message depending on the outcome of the flow. This element contains an image
  * asset and description that indicates that the setup flow has completed.
  */
+import './base_page.js';
+
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {I18nBehavior} from '../../../cr_elements/i18n_behavior.js';
+
+import {CellularSetupDelegate} from './cellular_setup_delegate.js';
+
 Polymer({
+  _template: html`{__html_template__}`,
   is: 'final-page',
 
   behaviors: [I18nBehavior],
 
   properties: {
+    /** @type {!CellularSetupDelegate} */
+    delegate: Object,
+
     /**
      * Whether error state should be shown.
      * @type {boolean}
      */
     showError: Boolean,
+
+    /** @type {string} */
+    message: String,
+
+    /** @type {string} */
+    errorMessage: String,
+  },
+
+  /**
+   * @param {boolean} showError
+   * @return {?string}
+   * @private
+   */
+  getTitle_(showError) {
+    if (this.delegate.shouldShowPageTitle()) {
+      return showError ? this.i18n('finalPageErrorTitle') :
+                         this.i18n('finalPageTitle');
+    }
+    return null;
   },
 
   /**
@@ -25,9 +56,8 @@ Polymer({
    * @return {string}
    * @private
    */
-  getTitle_: function(showError) {
-    return showError ? this.i18n('finalPageErrorTitle') :
-                       this.i18n('finalPageTitle');
+  getMessage_(showError) {
+    return showError ? this.errorMessage : this.message;
   },
 
   /**
@@ -35,17 +65,7 @@ Polymer({
    * @return {string}
    * @private
    */
-  getMessage_: function(showError) {
-    return showError ? this.i18n('finalPageErrorMessage') :
-                       this.i18n('finalPageMessage');
-  },
-
-  /**
-   * @param {boolean} showError
-   * @return {string}
-   * @private
-   */
-  getPageBodyClass_: function(showError) {
+  getPageBodyClass_(showError) {
     return showError ? 'error' : '';
   },
 });

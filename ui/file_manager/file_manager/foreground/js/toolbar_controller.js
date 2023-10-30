@@ -1,28 +1,41 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assert, assertInstanceof} from 'chrome://resources/js/assert.m.js';
+import {Command} from './ui/command.js';
+
+import {str, strf, util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {FileOperationManager} from '../../externs/background/file_operation_manager.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+
+import {DirectoryModel} from './directory_model.js';
+import {FileSelectionHandler} from './file_selection.js';
+import {A11yAnnounce} from './ui/a11y_announce.js';
+import {FileListSelectionModel} from './ui/file_list_selection_model.js';
+import {ListContainer} from './ui/list_container.js';
 
 /**
  * This class controls wires toolbar UI and selection model. When selection
  * status is changed, this class changes the view of toolbar. If cancel
  * selection button is pressed, this class clears the selection.
  */
-class ToolbarController {
+export class ToolbarController {
   /**
    * @param {!HTMLElement} toolbar Toolbar element which contains controls.
    * @param {!HTMLElement} navigationList Navigation list on the left pane. The
    *     position of silesSelectedLabel depends on the navitaion list's width.
    * @param {!ListContainer} listContainer List container.
-   * @param {!LocationLine} locationLine Location line shown on the left side of
-   *     the toolbar.
    * @param {!FileSelectionHandler} selectionHandler
    * @param {!DirectoryModel} directoryModel
    * @param {!VolumeManager} volumeManager
+   * @param {!FileOperationManager} fileOperationManager
    * @param {!A11yAnnounce} a11y
    */
   constructor(
-      toolbar, navigationList, listContainer, locationLine, selectionHandler,
-      directoryModel, volumeManager, a11y) {
+      toolbar, navigationList, listContainer, selectionHandler, directoryModel,
+      volumeManager, fileOperationManager, a11y) {
     /**
      * @private {!HTMLElement}
      * @const
@@ -34,59 +47,142 @@ class ToolbarController {
      * @const
      */
     this.cancelSelectionButton_ =
-        queryRequiredElement('#cancel-selection-button', this.toolbar_);
+        util.queryRequiredElement('#cancel-selection-button', this.toolbar_);
 
     /**
      * @private {!HTMLElement}
      * @const
      */
-    this.cancelSelectionButtonWrapper_ =
-        queryRequiredElement('#cancel-selection-button-wrapper', this.toolbar_);
+    this.cancelSelectionButtonWrapper_ = util.queryRequiredElement(
+        '#cancel-selection-button-wrapper', this.toolbar_);
 
     /**
      * @private {!HTMLElement}
      * @const
      */
     this.filesSelectedLabel_ =
-        queryRequiredElement('#files-selected-label', this.toolbar_);
+        util.queryRequiredElement('#files-selected-label', this.toolbar_);
 
     /**
      * @private {!HTMLElement}
      * @const
      */
-    this.deleteButton_ = queryRequiredElement('#delete-button', this.toolbar_);
+    this.deleteButton_ =
+        util.queryRequiredElement('#delete-button', this.toolbar_);
+
+    /**
+     * @private {!HTMLElement}
+     * @const
+     */
+    this.moveToTrashButton_ =
+        util.queryRequiredElement('#move-to-trash-button', this.toolbar_);
+
+    /**
+     * @private {!HTMLElement}
+     * @const
+     */
+    this.restoreFromTrashButton_ =
+        util.queryRequiredElement('#restore-from-trash-button', this.toolbar_);
+
+    /**
+     * @private {!HTMLElement}
+     * @const
+     */
+    this.sharesheetButton_ =
+        util.queryRequiredElement('#sharesheet-button', this.toolbar_);
 
     /**
      * @private {!HTMLElement}
      * @const
      */
     this.readOnlyIndicator_ =
-        queryRequiredElement('#read-only-indicator', this.toolbar_);
+        util.queryRequiredElement('#read-only-indicator', this.toolbar_);
 
     /**
-     * @private {!cr.ui.Command}
+     * @private {!HTMLElement}
+     * @const
+     */
+    this.pinnedToggleWrapper_ =
+        util.queryRequiredElement('#pinned-toggle-wrapper', this.toolbar_);
+
+    /**
+     * @private {!HTMLElement}
+     * @const
+     */
+    this.pinnedToggle_ =
+        util.queryRequiredElement('#pinned-toggle', this.toolbar_);
+
+    /**
+     * @private {!Command}
      * @const
      */
     this.deleteCommand_ = assertInstanceof(
-        queryRequiredElement('#delete', assert(this.toolbar_.ownerDocument)),
-        cr.ui.Command);
+        util.queryRequiredElement(
+            '#delete', assert(this.toolbar_.ownerDocument.body)),
+        Command);
 
     /**
-     * @private {!cr.ui.Command}
+     * @private {!Command}
+     * @const
+     */
+    this.moveToTrashCommand_ = assertInstanceof(
+        util.queryRequiredElement(
+            '#move-to-trash', assert(this.toolbar_.ownerDocument.body)),
+        Command);
+
+    /**
+     * @private {!Command}
+     * @const
+     */
+    this.restoreFromTrashCommand_ = assertInstanceof(
+        util.queryRequiredElement(
+            '#restore-from-trash', assert(this.toolbar_.ownerDocument.body)),
+        Command);
+
+    /**
+     * @private {!Command}
+     * @const
+     */
+    this.emptyTrashCommand_ = assertInstanceof(
+        util.queryRequiredElement(
+            '#empty-trash', assert(this.toolbar_.ownerDocument.body)),
+        Command);
+
+    /**
+     * @private {!Command}
      * @const
      */
     this.refreshCommand_ = assertInstanceof(
-        queryRequiredElement('#refresh', assert(this.toolbar_.ownerDocument)),
-        cr.ui.Command);
+        util.queryRequiredElement(
+            '#refresh', assert(this.toolbar_.ownerDocument.body)),
+        Command);
 
     /**
-     * @private {!cr.ui.Command}
+     * @private {!Command}
      * @const
      */
     this.newFolderCommand_ = assertInstanceof(
-        queryRequiredElement(
-            '#new-folder', assert(this.toolbar_.ownerDocument)),
-        cr.ui.Command);
+        util.queryRequiredElement(
+            '#new-folder', assert(this.toolbar_.ownerDocument.body)),
+        Command);
+
+    /**
+     * @private {!Command}
+     * @const
+     */
+    this.invokeSharesheetCommand_ = assertInstanceof(
+        util.queryRequiredElement(
+            '#invoke-sharesheet', assert(this.toolbar_.ownerDocument.body)),
+        Command);
+
+    /**
+     * @private {!Command}
+     * @const
+     */
+    this.togglePinnedCommand_ = assertInstanceof(
+        util.queryRequiredElement(
+            '#toggle-pinned', assert(this.toolbar_.ownerDocument.body)),
+        Command);
 
     /**
      * @private {!HTMLElement}
@@ -99,12 +195,6 @@ class ToolbarController {
      * @const
      */
     this.listContainer_ = listContainer;
-
-    /**
-     * @private {!LocationLine}
-     * @const
-     */
-    this.locationLine_ = locationLine;
 
     /**
      * @private {!FileSelectionHandler}
@@ -125,6 +215,12 @@ class ToolbarController {
     this.volumeManager_ = volumeManager;
 
     /**
+     * @private {!FileOperationManager}
+     * @const
+     */
+    this.fileOperationManager_ = fileOperationManager;
+
+    /**
      * @private {!A11yAnnounce}
      * @const
      */
@@ -134,28 +230,45 @@ class ToolbarController {
         FileSelectionHandler.EventType.CHANGE,
         this.onSelectionChanged_.bind(this));
 
+    // Using CHANGE_THROTTLED because updateSharesheetCommand_() uses async
+    // API and can update the state out-of-order specially when updating to
+    // an empty selection.
+    this.selectionHandler_.addEventListener(
+        FileSelectionHandler.EventType.CHANGE_THROTTLED,
+        this.updateSharesheetCommand_.bind(this));
+
+    chrome.fileManagerPrivate.onAppsUpdated.addListener(
+        this.updateSharesheetCommand_.bind(this));
+
     this.cancelSelectionButton_.addEventListener(
         'click', this.onCancelSelectionButtonClicked_.bind(this));
 
     this.deleteButton_.addEventListener(
         'click', this.onDeleteButtonClicked_.bind(this));
 
-    this.navigationList_.addEventListener(
-        'relayout', this.onNavigationListRelayout_.bind(this));
+    this.moveToTrashButton_.addEventListener(
+        'click', this.onMoveToTrashButtonClicked_.bind(this));
+
+    this.restoreFromTrashButton_.addEventListener(
+        'click', this.onRestoreFromTrashButtonClicked_.bind(this));
+
+    this.sharesheetButton_.addEventListener(
+        'click', this.onSharesheetButtonClicked_.bind(this));
+
+    this.togglePinnedCommand_.addEventListener(
+        'checkedChange', this.updatePinnedToggle_.bind(this));
+
+    this.togglePinnedCommand_.addEventListener(
+        'disabledChange', this.updatePinnedToggle_.bind(this));
+
+    this.togglePinnedCommand_.addEventListener(
+        'hiddenChange', this.updatePinnedToggle_.bind(this));
+
+    this.pinnedToggle_.addEventListener(
+        'change', this.onPinnedToggleChanged_.bind(this));
 
     this.directoryModel_.addEventListener(
         'directory-changed', this.updateCurrentDirectoryButtons_.bind(this));
-
-    // Watch visibility of toolbar buttons to update the width of location line.
-    const observer =
-        new MutationObserver(this.onToolbarButtonsMutated_.bind(this));
-    const toolbarButtons =
-        this.toolbar_.querySelectorAll('.icon-button, .combobutton');
-    for (let i = 0; i < toolbarButtons.length; i++) {
-      observer.observe(
-          toolbarButtons[i],
-          /** @type MutationObserverInit */ ({attributes: true}));
-    }
   }
 
   /**
@@ -170,7 +283,17 @@ class ToolbarController {
     const currentDirectory = this.directoryModel_.getCurrentDirEntry();
     const locationInfo = currentDirectory &&
         this.volumeManager_.getLocationInfo(currentDirectory);
-    this.readOnlyIndicator_.hidden = !(locationInfo && locationInfo.isReadOnly);
+    // Normally, isReadOnly can be used to show the label. This property
+    // is always true for fake volumes (eg. Google Drive root). However, "Linux
+    // files" and GuestOS volumes are fake volume on first access until the VM
+    // is loaded and the mount point is initialised. The volume is technically
+    // read-only since the temporary fake volume can (and should) not be
+    // written to. However, showing the read only label is not appropriate since
+    // the volume will become read-write once all loading has completed.
+    this.readOnlyIndicator_.hidden =
+        !(locationInfo && locationInfo.isReadOnly &&
+          locationInfo.rootType !== VolumeManagerCommon.RootType.CROSTINI &&
+          locationInfo.rootType !== VolumeManagerCommon.RootType.GUEST_OS);
   }
 
   /** @private */
@@ -208,12 +331,28 @@ class ToolbarController {
     }
     this.filesSelectedLabel_.textContent = text;
 
-    // Update visibility of the delete button.
+    // Update visibility of the delete and move to trash buttons.
     this.deleteButton_.hidden =
-        (selection.totalCount === 0 || this.directoryModel_.isReadOnly() ||
+        (selection.totalCount === 0 ||
+         !this.directoryModel_.canDeleteEntries() ||
          selection.hasReadOnlyEntry() ||
          selection.entries.some(
              entry => util.isNonModifiable(this.volumeManager_, entry)));
+    // Show 'Move to Trash' rather than 'Delete' if possible.
+    this.moveToTrashButton_.hidden = true;
+    if (!this.deleteButton_.hidden && util.isTrashEnabled() &&
+        this.fileOperationManager_.willUseTrash(
+            this.volumeManager_, selection.entries)) {
+      this.deleteButton_.hidden = true;
+      this.moveToTrashButton_.hidden = false;
+    }
+
+    // Update visibility of the restore-from-trash button.
+    this.restoreFromTrashButton_.hidden = (selection.totalCount == 0) ||
+        this.directoryModel_.getCurrentRootType() !==
+            VolumeManagerCommon.RootType.TRASH;
+
+    this.togglePinnedCommand_.canExecuteChange(this.listContainer_.currentList);
 
     // Set .selecting class to containing element to change the view
     // accordingly.
@@ -229,9 +368,6 @@ class ToolbarController {
           /** @type {!FileListSelectionModel} */
           (this.directoryModel_.getFileListSelection()).getCheckSelectMode()) {
         bodyClassList.toggle('check-select');
-        // Some custom styles depend on |check-select| class. We need to
-        // re-evaluate the custom styles when the class value is changed.
-        Polymer.updateStyles();
       }
     }
   }
@@ -250,29 +386,61 @@ class ToolbarController {
    * @private
    */
   onDeleteButtonClicked_() {
-    this.deleteButton_.blur();
     this.deleteCommand_.canExecuteChange(this.listContainer_.currentList);
     this.deleteCommand_.execute(this.listContainer_.currentList);
   }
 
   /**
-   * Handles the relayout event occurred on the navigation list.
+   * Handles click event for move to trash button to execute the move to trash
+   * command.
    * @private
    */
-  onNavigationListRelayout_() {
-    // Make the width of spacer same as the width of navigation list.
-    const navWidth =
-        parseFloat(window.getComputedStyle(this.navigationList_).width);
-    this.cancelSelectionButtonWrapper_.style.width = navWidth + 'px';
+  onMoveToTrashButtonClicked_() {
+    this.moveToTrashCommand_.canExecuteChange(this.listContainer_.currentList);
+    this.moveToTrashCommand_.execute(this.listContainer_.currentList);
   }
 
   /**
-   * Handles the mutation event occurred on attributes of toolbar buttons.
-   * Toolbar buttons visibility can affect the available width for location
-   * line.
+   * Handles click event for restore from trash button to execute the restore
+   * command.
    * @private
    */
-  onToolbarButtonsMutated_() {
-    this.locationLine_.truncate();
+  onRestoreFromTrashButtonClicked_() {
+    this.restoreFromTrashCommand_.canExecuteChange(
+        this.listContainer_.currentList);
+    this.restoreFromTrashCommand_.execute(this.listContainer_.currentList);
+  }
+
+  /**
+   * Handles click event for sharesheet button to set button background color.
+   * @private
+   */
+  onSharesheetButtonClicked_() {
+    this.sharesheetButton_.setAttribute('menu-shown', '');
+    this.toolbar_.ownerDocument.body.addEventListener('focusin', (e) => {
+      this.sharesheetButton_.removeAttribute('menu-shown');
+    }, {once: true});
+  }
+
+  /** @private */
+  updateSharesheetCommand_() {
+    this.invokeSharesheetCommand_.canExecuteChange(
+        this.listContainer_.currentList);
+  }
+
+  /** @private */
+  updatePinnedToggle_() {
+    this.pinnedToggleWrapper_.hidden = this.togglePinnedCommand_.hidden;
+    this.pinnedToggle_.checked = this.togglePinnedCommand_.checked;
+    this.pinnedToggle_.disabled = this.togglePinnedCommand_.disabled;
+  }
+
+  /** @private */
+  onPinnedToggleChanged_() {
+    this.togglePinnedCommand_.execute(this.listContainer_.currentList);
+
+    // Optimistally update the command's properties so we get notified if they
+    // change back.
+    this.togglePinnedCommand_.checked = this.pinnedToggle_.checked;
   }
 }

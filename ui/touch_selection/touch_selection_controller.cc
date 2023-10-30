@@ -1,20 +1,23 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/touch_selection/touch_selection_controller.h"
 
+#include <memory>
+
 #include "base/auto_reset.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 
 namespace ui {
 namespace {
 
 gfx::Vector2dF ComputeLineOffsetFromBottom(const gfx::SelectionBound& bound) {
   gfx::Vector2dF line_offset =
-      gfx::ScaleVector2d(bound.edge_top() - bound.edge_bottom(), 0.5f);
+      gfx::ScaleVector2d(bound.edge_start() - bound.edge_end(), 0.5f);
   // An offset of 8 DIPs is sufficient for most line sizes. For small lines,
   // using half the line height avoids synthesizing a point on a line above
   // (or below) the intended line.
@@ -43,7 +46,7 @@ TouchHandleOrientation ToTouchHandleOrientation(
 }  // namespace
 
 TouchSelectionController::Config::Config()
-    : max_tap_duration(base::TimeDelta::FromMilliseconds(300)),
+    : max_tap_duration(base::Milliseconds(300)),
       tap_slop(8),
       enable_adaptive_handle_orientation(false),
       enable_longpress_drag_selection(false),
@@ -90,9 +93,9 @@ void TouchSelectionController::OnSelectionBoundsChanged(
   if (active_status_ == SELECTION_ACTIVE) {
     // Bounds have the same orientation.
     bool need_swap = (start_selection_handle_->IsActive() &&
-                      end_.edge_bottom() == start.edge_bottom()) ||
+                      end_.edge_end() == start.edge_end()) ||
                      (end_selection_handle_->IsActive() &&
-                      end.edge_bottom() == start_.edge_bottom());
+                      end.edge_end() == start_.edge_end());
 
     // Bounds have different orientation.
     // Specifically, for writing-mode: vertical-*, selection bounds are
@@ -104,16 +107,24 @@ void TouchSelectionController::OnSelectionBoundsChanged(
     //   - start bound is from left to right,
     //   - end bound is from right to left.
     // So when previous start/end bound become current end/start bound,
-    // edge_top() and edge_bottom() are swapped. Therefore, we are comparing
-    // edge_bottom() with edge_top() here.
+    // edge_start() and edge_end() are swapped. Therefore, we are comparing
+    // edge_end() with edge_start() here.
     need_swap |= (start_selection_handle_->IsActive() &&
-                  end_.edge_bottom() == start.edge_top()) ||
+                  end_.edge_end() == start.edge_start()) ||
                  (end_selection_handle_->IsActive() &&
-                  end.edge_bottom() == start_.edge_top());
+                  end.edge_end() == start_.edge_start());
 
     if (need_swap)
       start_selection_handle_.swap(end_selection_handle_);
   }
+
+  // Update |anchor_drag_to_selection_start_| for long press drag selector.
+  // Since selection can be updated with only one end at a time, if one end is
+  // equal to the previous value, the updated end is the other.
+  if (start_ == start)
+    anchor_drag_to_selection_start_ = false;
+  else if (end_ == end)
+    anchor_drag_to_selection_start_ = true;
 
   start_ = start;
   end_ = end;
@@ -253,14 +264,31 @@ gfx::RectF TouchSelectionController::GetRectBetweenBounds() const {
   if (active_status_ == INACTIVE)
     return gfx::RectF();
 
-  if (start_.visible() && !end_.visible())
-    return gfx::BoundingRect(start_.edge_top(), start_.edge_bottom());
+  if (start_.visible() && !end_.visible()) {
+    // This BoundingRect is actually a line unless the selection is rotated.
+    return gfx::BoundingRect(start_.edge_start(), start_.edge_end());
+  }
 
-  if (end_.visible() && !start_.visible())
-    return gfx::BoundingRect(end_.edge_top(), end_.edge_bottom());
+  if (end_.visible() && !start_.visible()) {
+    // This BoundingRect is actually a line unless the selection is rotated.
+    return gfx::BoundingRect(end_.edge_start(), end_.edge_end());
+  }
 
   // If both handles are visible, or both are invisible, use the entire rect.
+  // Specifically, if both handles are on the same horizontal line for
+  // writing-mode: vertical-*, or both are on the same vertical line for
+  // writing-mode: horizontal, the entire rect is actually a line unless the
+  // selection is rotated.
   return RectFBetweenSelectionBounds(start_, end_);
+}
+
+gfx::RectF TouchSelectionController::GetVisibleRectBetweenBounds() const {
+  // Short-circuit for efficiency.
+  if (active_status_ == INACTIVE)
+    return gfx::RectF();
+
+  // Returns the rect of the entire visible selection rect.
+  return RectFBetweenVisibleSelectionBounds(start_, end_);
 }
 
 gfx::RectF TouchSelectionController::GetStartHandleRect() const {
@@ -304,15 +332,15 @@ float TouchSelectionController::GetActiveHandleMiddleY() const {
 
   if (!bound)
     return 0.f;
-  return (bound->edge_top().y() + bound->edge_bottom().y()) / 2.f;
+  return (bound->edge_start().y() + bound->edge_end().y()) / 2.f;
 }
 
 const gfx::PointF& TouchSelectionController::GetStartPosition() const {
-  return start_.edge_bottom();
+  return start_.edge_end();
 }
 
 const gfx::PointF& TouchSelectionController::GetEndPosition() const {
-  return end_.edge_bottom();
+  return end_.edge_end();
 }
 
 bool TouchSelectionController::WillHandleTouchEventImpl(
@@ -346,6 +374,23 @@ bool TouchSelectionController::WillHandleTouchEventImpl(
   }
 
   return false;
+}
+
+void TouchSelectionController::OnSwipeToMoveCursorBegin() {
+  if (config_.hide_active_handle) {
+    // Hide the handle when magnifier is showing since it can confuse the user.
+    SetTemporarilyHidden(true);
+
+    // If the user has typed something, the insertion handle might be hidden.
+    // Prepare to show touch handles on end.
+    show_touch_handles_ = true;
+  }
+}
+
+void TouchSelectionController::OnSwipeToMoveCursorEnd() {
+  // Show the handle at the end if magnifier was showing.
+  if (config_.hide_active_handle)
+    SetTemporarilyHidden(false);
 }
 
 void TouchSelectionController::OnDragBegin(
@@ -411,11 +456,20 @@ void TouchSelectionController::OnDragUpdate(
   else
     client_->MoveRangeSelectionExtent(line_position);
 
-  // We use the bound middle point to restrict the ability to move up and down,
-  // but let user move it more freely in horizontal direction.
-  if (&draggable != &longpress_drag_selector_) {
-    float y = GetActiveHandleMiddleY();
-    client_->OnDragUpdate(gfx::PointF(drag_position.x(), y));
+  // We use the bound middle point to restrict the ability to move up and
+  // down, but let user move it more freely in horizontal direction.
+  if (&draggable == &longpress_drag_selector_) {
+    // Show magnifier at the selection edge.
+    const gfx::SelectionBound* bound =
+        anchor_drag_to_selection_start_ ? &start_ : &end_;
+    const float x = bound->edge_start().x();
+    const float y = (bound->edge_start().y() + bound->edge_end().y()) / 2.f;
+    client_->OnDragUpdate(TouchSelectionDraggable::Type::kLongpress,
+                          gfx::PointF(x, y));
+  } else {
+    const float y = GetActiveHandleMiddleY();
+    client_->OnDragUpdate(TouchSelectionDraggable::Type::kTouchHandle,
+                          gfx::PointF(drag_position.x(), y));
   }
 }
 
@@ -475,7 +529,7 @@ void TouchSelectionController::OnInsertionChanged() {
   const bool activated = ActivateInsertionIfNecessary();
 
   const TouchHandle::AnimationStyle animation = GetAnimationStyle(!activated);
-  insertion_handle_->SetFocus(start_.edge_top(), start_.edge_bottom());
+  insertion_handle_->SetFocus(start_.edge_start(), start_.edge_end());
   insertion_handle_->SetVisible(GetStartVisible(), animation);
 
   UpdateHandleLayoutIfNecessary();
@@ -491,8 +545,8 @@ void TouchSelectionController::OnSelectionChanged() {
 
   const TouchHandle::AnimationStyle animation = GetAnimationStyle(!activated);
 
-  start_selection_handle_->SetFocus(start_.edge_top(), start_.edge_bottom());
-  end_selection_handle_->SetFocus(end_.edge_top(), end_.edge_bottom());
+  start_selection_handle_->SetFocus(start_.edge_start(), start_.edge_end());
+  end_selection_handle_->SetFocus(end_.edge_start(), end_.edge_end());
 
   start_selection_handle_->SetOrientation(start_orientation_);
   end_selection_handle_->SetOrientation(end_orientation_);
@@ -510,8 +564,8 @@ bool TouchSelectionController::ActivateInsertionIfNecessary() {
   DCHECK_NE(SELECTION_ACTIVE, active_status_);
 
   if (!insertion_handle_) {
-    insertion_handle_.reset(
-        new TouchHandle(this, TouchHandleOrientation::CENTER, viewport_rect_));
+    insertion_handle_ = std::make_unique<TouchHandle>(
+        this, TouchHandleOrientation::CENTER, viewport_rect_);
   }
 
   if (active_status_ == INACTIVE || response_pending_input_event_ == TAP ||
@@ -538,16 +592,16 @@ bool TouchSelectionController::ActivateSelectionIfNecessary() {
   DCHECK_NE(INSERTION_ACTIVE, active_status_);
 
   if (!start_selection_handle_) {
-    start_selection_handle_.reset(
-        new TouchHandle(this, start_orientation_, viewport_rect_));
+    start_selection_handle_ =
+        std::make_unique<TouchHandle>(this, start_orientation_, viewport_rect_);
   } else {
     start_selection_handle_->SetEnabled(true);
     start_selection_handle_->SetViewportRect(viewport_rect_);
   }
 
   if (!end_selection_handle_) {
-    end_selection_handle_.reset(
-        new TouchHandle(this, end_orientation_, viewport_rect_));
+    end_selection_handle_ =
+        std::make_unique<TouchHandle>(this, end_orientation_, viewport_rect_);
   } else {
     end_selection_handle_->SetEnabled(true);
     end_selection_handle_->SetViewportRect(viewport_rect_);
@@ -649,10 +703,8 @@ void TouchSelectionController::LogSelectionEnd() {
   if (selection_handle_dragged_) {
     base::TimeDelta duration = base::TimeTicks::Now() - selection_start_time_;
     UMA_HISTOGRAM_CUSTOM_TIMES("Event.TouchSelection.WasDraggedDuration",
-                               duration,
-                               base::TimeDelta::FromMilliseconds(500),
-                               base::TimeDelta::FromSeconds(60),
-                               60);
+                               duration, base::Milliseconds(500),
+                               base::Seconds(60), 60);
   }
 }
 

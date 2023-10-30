@@ -1,11 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/ozone/platform/drm/gpu/drm_gpu_util.h"
 
+#include <fcntl.h>
+#include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "base/files/scoped_file.h"
+#include "base/logging.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/display/types/gamma_ramp_rgb_entry.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
@@ -71,8 +75,8 @@ ScopedDrmColorCtmPtr CreateCTMBlob(const std::vector<float>& color_matrix) {
 
   ScopedDrmColorCtmPtr ctm(
       static_cast<drm_color_ctm*>(malloc(sizeof(drm_color_ctm))));
-  DCHECK_EQ(color_matrix.size(), base::size(ctm->matrix));
-  for (size_t i = 0; i < base::size(ctm->matrix); ++i) {
+  DCHECK_EQ(color_matrix.size(), std::size(ctm->matrix));
+  for (size_t i = 0; i < std::size(ctm->matrix); ++i) {
     if (color_matrix[i] < 0) {
       ctm->matrix[i] = static_cast<uint64_t>(-color_matrix[i] * (1ull << 32));
       ctm->matrix[i] |= static_cast<uint64_t>(1) << 63;
@@ -115,6 +119,27 @@ std::vector<display::GammaRampRGBEntry> ResampleLut(
   }
 
   return result;
+}
+
+HardwareDisplayControllerInfoList GetDisplayInfosAndUpdateCrtcs(int fd) {
+  auto [displays, invalid_crtcs] = GetDisplayInfosAndInvalidCrtcs(fd);
+  // Disable invalid CRTCs to allow the preferred CRTCs to be enabled later
+  // instead.
+  for (uint32_t crtc : invalid_crtcs) {
+    drmModeSetCrtc(fd, crtc, 0, 0, 0, nullptr, 0, nullptr);
+    VLOG(1) << "Disabled unpreferred CRTC " << crtc;
+  }
+  return std::move(displays);
+}
+
+void DrmAsValueIntoHelper(const drmModeModeInfo& mode_info,
+                          base::trace_event::TracedValue* value) {
+  value->SetString("name", mode_info.name);
+  value->SetInteger("type", mode_info.type);
+  value->SetInteger("flags", mode_info.flags);
+  value->SetInteger("clock", mode_info.clock);
+  value->SetInteger("hdisplay", mode_info.hdisplay);
+  value->SetInteger("vdisplay", mode_info.vdisplay);
 }
 
 }  // namespace ui

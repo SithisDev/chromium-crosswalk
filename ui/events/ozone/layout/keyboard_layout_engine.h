@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_H_
-#define UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_H_
+#ifndef UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_H_
+#define UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_H_
 
 #include <string>
 
-#include "base/strings/string16.h"
+#include "base/callback.h"
+#include "base/component_export.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/events/ozone/layout/events_ozone_layout_export.h"
 
 namespace ui {
 
@@ -24,7 +24,7 @@ enum class DomCode;
 // This interface does not expose individual layouts because it must support
 // platforms that only provide for one active system layout, and/or platforms
 // where layouts have no accessible representation.
-class EVENTS_OZONE_LAYOUT_EXPORT KeyboardLayoutEngine {
+class COMPONENT_EXPORT(EVENTS_OZONE_LAYOUT) KeyboardLayoutEngine {
  public:
   KeyboardLayoutEngine() {}
   virtual ~KeyboardLayoutEngine() {}
@@ -71,8 +71,13 @@ class EVENTS_OZONE_LAYOUT_EXPORT KeyboardLayoutEngine {
                       int event_flags,
                       DomKey* dom_key,
                       KeyboardCode* key_code) const = 0;
+
+  // Tests may need to wait for the keyboard layout to be fully initialised.
+  // The implementation should run |closure| when it is ready to handle calls to
+  // Lookup().
+  virtual void SetInitCallbackForTest(base::OnceClosure closure) = 0;
 };
 
 }  // namespace ui
 
-#endif  // UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_H_
+#endif  // UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_H_

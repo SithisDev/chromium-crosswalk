@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 #define UI_BASE_MODELS_TREE_NODE_ITERATOR_H_
 
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/containers/stack.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 
 namespace ui {
 
@@ -22,7 +22,7 @@ namespace ui {
 template <class NodeType>
 class TreeNodeIterator {
  public:
-  typedef base::Callback<bool(NodeType*)> PruneCallback;
+  typedef base::RepeatingCallback<bool(NodeType*)> PruneCallback;
 
   // This constructor accepts an optional filter function |prune| which could be
   // used to prune complete branches of the tree. The filter function will be
@@ -47,6 +47,9 @@ class TreeNodeIterator {
     if (!node->children().empty())
       positions_.emplace(node, 0);
   }
+
+  TreeNodeIterator(const TreeNodeIterator&) = delete;
+  TreeNodeIterator& operator=(const TreeNodeIterator&) = delete;
 
   // Returns true if there are more descendants.
   bool has_next() const { return !positions_.empty(); }
@@ -88,14 +91,12 @@ class TreeNodeIterator {
   struct Position {
     Position(PositionNodeType* node, size_t index) : node(node), index(index) {}
 
-    PositionNodeType* node;
+    raw_ptr<PositionNodeType> node;
     size_t index;
   };
 
   base::stack<Position<NodeType>> positions_;
   PruneCallback prune_;
-
-  DISALLOW_COPY_AND_ASSIGN(TreeNodeIterator);
 };
 
 }  // namespace ui

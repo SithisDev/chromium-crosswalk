@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <wrl/event.h>
 
 #include "base/lazy_instance.h"
+#include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_checker.h"
 #include "base/win/core_winrt_util.h"
@@ -162,7 +163,7 @@ class UwpTextScaleFactorImpl : public UwpTextScaleFactor {
     // equal to 1. Let's make sure that's the case - if we don't, we could get
     // bizarre behavior and divide-by-zeros later on.
     DCHECK_GE(result, 1.0);
-    return float{result};
+    return static_cast<float>(result);
   }
 
  private:

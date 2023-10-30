@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,12 @@ class Event;
 // We are trying to fix both of these issues, but in the meantime we
 // define NativeEvent == ui::Event.
 //
-EVENTS_EXPORT void DispatchEventFromNativeUiEvent(
+// Returns true iff the event was handled.
+EVENTS_EXPORT bool DispatchEventFromNativeUiEvent(
     const PlatformEvent& native_event,
     base::OnceCallback<void(ui::Event*)> callback);
+
+EVENTS_EXPORT void DisableNativeUiEventDispatchForTest();
 
 }  // namespace ui
 

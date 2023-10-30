@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -26,8 +27,7 @@ GlRenderer::GlRenderer(gfx::AcceleratedWidget widget,
                        const gfx::Size& size)
     : RendererBase(widget, size),
       window_surface_(std::move(window_surface)),
-      gl_surface_(gl_surface),
-      weak_ptr_factory_(this) {}
+      gl_surface_(gl_surface) {}
 
 GlRenderer::~GlRenderer() {}
 
@@ -39,15 +39,15 @@ bool GlRenderer::Initialize() {
     return false;
   }
 
-  gl_surface_->Resize(size_, 1.f, gl::GLSurface::ColorSpace::UNSPECIFIED, true);
-
   if (!context_->MakeCurrent(gl_surface_.get())) {
     LOG(ERROR) << "Failed to make GL context current";
     return false;
   }
 
+  gl_surface_->Resize(size_, 1.f, gfx::ColorSpace(), true);
+
   // Schedule the initial render.
-  PostRenderFrameTask(gfx::SwapResult::SWAP_ACK, nullptr);
+  PostRenderFrameTask(gfx::SwapCompletionResult(gfx::SwapResult::SWAP_ACK));
   return true;
 }
 
@@ -70,16 +70,14 @@ void GlRenderer::RenderFrame() {
                        weak_ptr_factory_.GetWeakPtr()));
   } else {
     PostRenderFrameTask(
-        gl_surface_->SwapBuffers(base::BindOnce(
-            &GlRenderer::OnPresentation, weak_ptr_factory_.GetWeakPtr())),
-        nullptr);
+        gfx::SwapCompletionResult(gl_surface_->SwapBuffers(base::BindOnce(
+            &GlRenderer::OnPresentation, weak_ptr_factory_.GetWeakPtr()))));
   }
 }
 
-void GlRenderer::PostRenderFrameTask(gfx::SwapResult result,
-                                     std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  if (gpu_fence)
-    gpu_fence->Wait();
+void GlRenderer::PostRenderFrameTask(gfx::SwapCompletionResult result) {
+  if (!result.release_fence.is_null())
+    gfx::GpuFence(std::move(result.release_fence)).Wait();
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,

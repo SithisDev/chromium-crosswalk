@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -97,6 +97,11 @@ Mock_eglExportDMABUFImageQueryMESA(EGLDisplay dpy,
                                    int* num_planes,
                                    EGLuint64KHR* modifiers);
 static EGLBoolean GL_BINDING_CALL
+Mock_eglExportVkImageANGLE(EGLDisplay dpy,
+                           EGLImageKHR image,
+                           void* vk_image,
+                           void* vk_image_create_info);
+static EGLBoolean GL_BINDING_CALL
 Mock_eglGetCompositorTimingANDROID(EGLDisplay dpy,
                                    EGLSurface surface,
                                    EGLint numTimestamps,
@@ -131,6 +136,10 @@ Mock_eglGetFrameTimestampsANDROID(EGLDisplay dpy,
                                   EGLint numTimestamps,
                                   EGLint* timestamps,
                                   EGLnsecsANDROID* values);
+static EGLBoolean GL_BINDING_CALL Mock_eglGetMscRateANGLE(EGLDisplay dpy,
+                                                          EGLSurface surface,
+                                                          EGLint* numerator,
+                                                          EGLint* denominator);
 static EGLClientBuffer GL_BINDING_CALL Mock_eglGetNativeClientBufferANDROID(
     const struct AHardwareBuffer* ahardwarebuffer);
 static EGLBoolean GL_BINDING_CALL
@@ -153,6 +162,7 @@ Mock_eglGetSyncValuesCHROMIUM(EGLDisplay dpy,
                               EGLuint64CHROMIUM* ust,
                               EGLuint64CHROMIUM* msc,
                               EGLuint64CHROMIUM* sbc);
+static void GL_BINDING_CALL Mock_eglHandleGPUSwitchANGLE(EGLDisplay dpy);
 static EGLBoolean GL_BINDING_CALL
 Mock_eglImageFlushExternalEXT(EGLDisplay dpy,
                               EGLImageKHR image,
@@ -182,9 +192,34 @@ static EGLBoolean GL_BINDING_CALL Mock_eglQueryContext(EGLDisplay dpy,
 static EGLBoolean GL_BINDING_CALL Mock_eglQueryDebugKHR(EGLint attribute,
                                                         EGLAttrib* value);
 static EGLBoolean GL_BINDING_CALL
+Mock_eglQueryDeviceAttribEXT(EGLDeviceEXT device,
+                             EGLint attribute,
+                             EGLAttrib* value);
+static const char* GL_BINDING_CALL
+Mock_eglQueryDeviceStringEXT(EGLDeviceEXT device, EGLint name);
+static EGLBoolean GL_BINDING_CALL Mock_eglQueryDevicesEXT(EGLint max_devices,
+                                                          EGLDeviceEXT* devices,
+                                                          EGLint* num_devices);
+static EGLBoolean GL_BINDING_CALL
 Mock_eglQueryDisplayAttribANGLE(EGLDisplay dpy,
                                 EGLint attribute,
                                 EGLAttrib* value);
+static EGLBoolean GL_BINDING_CALL
+Mock_eglQueryDisplayAttribEXT(EGLDisplay dpy,
+                              EGLint attribute,
+                              EGLAttrib* value);
+static EGLBoolean GL_BINDING_CALL
+Mock_eglQueryDmaBufFormatsEXT(EGLDisplay dpy,
+                              EGLint max_formats,
+                              EGLint* formats,
+                              EGLint* num_formats);
+static EGLBoolean GL_BINDING_CALL
+Mock_eglQueryDmaBufModifiersEXT(EGLDisplay dpy,
+                                EGLint format,
+                                EGLint max_modifiers,
+                                EGLuint64KHR* modifiers,
+                                EGLBoolean* external_only,
+                                EGLint* num_modifiers);
 static EGLBoolean GL_BINDING_CALL Mock_eglQueryStreamKHR(EGLDisplay dpy,
                                                          EGLStreamKHR stream,
                                                          EGLenum attribute,
@@ -208,6 +243,10 @@ Mock_eglQuerySurfacePointerANGLE(EGLDisplay dpy,
                                  EGLSurface surface,
                                  EGLint attribute,
                                  void** value);
+static void GL_BINDING_CALL Mock_eglReacquireHighPowerGPUANGLE(EGLDisplay dpy,
+                                                               EGLContext ctx);
+static void GL_BINDING_CALL Mock_eglReleaseHighPowerGPUANGLE(EGLDisplay dpy,
+                                                             EGLContext ctx);
 static EGLBoolean GL_BINDING_CALL Mock_eglReleaseTexImage(EGLDisplay dpy,
                                                           EGLSurface surface,
                                                           EGLint buffer);

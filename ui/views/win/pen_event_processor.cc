@@ -1,9 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "pen_event_processor.h"
+#include "ui/views/win/pen_event_processor.h"
 
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "ui/events/event_utils.h"
 
@@ -35,21 +37,22 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateEvent(
     UINT32 pointer_id,
     const POINTER_PEN_INFO& pointer_pen_info,
     const gfx::Point& point) {
-  unsigned int mapped_pointer_id = id_generator_->GetGeneratedID(pointer_id);
+  auto mapped_pointer_id =
+      static_cast<ui::PointerId>(id_generator_->GetGeneratedID(pointer_id));
 
   // We are now creating a fake mouse event with pointer type of pen from
   // the WM_POINTER message and then setting up an associated pointer
   // details in the MouseEvent which contains the pen's information.
-  ui::EventPointerType input_type = ui::EventPointerType::POINTER_TYPE_PEN;
+  ui::EventPointerType input_type = ui::EventPointerType::kPen;
   // For the pointerup event, the penFlags is not set to PEN_FLAG_ERASER, so we
   // have to check if previously the pointer type is an eraser.
   if (pointer_pen_info.penFlags & PEN_FLAG_ERASER) {
-    input_type = ui::EventPointerType::POINTER_TYPE_ERASER;
+    input_type = ui::EventPointerType::kEraser;
     DCHECK(!eraser_pointer_id_ || *eraser_pointer_id_ == mapped_pointer_id);
     eraser_pointer_id_ = mapped_pointer_id;
   } else if (eraser_pointer_id_ && *eraser_pointer_id_ == mapped_pointer_id &&
              (message == WM_POINTERUP || message == WM_NCPOINTERUP)) {
-    input_type = ui::EventPointerType::POINTER_TYPE_ERASER;
+    input_type = ui::EventPointerType::kEraser;
     eraser_pointer_id_.reset();
   }
 
@@ -78,18 +81,20 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateEvent(
   // we read |send_touch_for_pen_| before we process the event as we want to
   // ensure a TouchRelease is sent appropriately at the end when the stylus is
   // no longer in contact with the digitizer.
-  bool send_touch = send_touch_for_pen_;
+  bool send_touch = send_touch_for_pen_.count(pointer_id) == 0
+                        ? false
+                        : send_touch_for_pen_[pointer_id];
   if (pointer_pen_info.pointerInfo.pointerFlags & POINTER_FLAG_INCONTACT) {
-    if (!pen_in_contact_) {
-      send_touch = send_touch_for_pen_ =
+    if (!pen_in_contact_[pointer_id]) {
+      send_touch = send_touch_for_pen_[pointer_id] =
           (pointer_pen_info.pointerInfo.pointerFlags &
            (POINTER_FLAG_SECONDBUTTON | POINTER_FLAG_THIRDBUTTON |
             POINTER_FLAG_FOURTHBUTTON | POINTER_FLAG_FIFTHBUTTON)) == 0;
     }
-    pen_in_contact_ = true;
+    pen_in_contact_[pointer_id] = true;
   } else {
-    pen_in_contact_ = false;
-    send_touch_for_pen_ = false;
+    pen_in_contact_.erase(pointer_id);
+    send_touch_for_pen_.erase(pointer_id);
   }
 
   if (is_pointer_event || !send_touch) {
@@ -120,7 +125,7 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateMouseEvent(
       else
         changed_flag = ui::EF_RIGHT_MOUSE_BUTTON;
       click_count = 1;
-      sent_mouse_down_ = true;
+      sent_mouse_down_[pointer_id] = true;
       break;
     case WM_POINTERUP:
     case WM_NCPOINTERUP:
@@ -134,9 +139,10 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateMouseEvent(
       }
       id_generator_->ReleaseNumber(pointer_id);
       click_count = 1;
-      if (!sent_mouse_down_)
+      if (sent_mouse_down_.count(pointer_id) == 0 ||
+          !sent_mouse_down_[pointer_id])
         return nullptr;
-      sent_mouse_down_ = false;
+      sent_mouse_down_[pointer_id] = false;
       break;
     case WM_POINTERUPDATE:
     case WM_NCPOINTERUPDATE:
@@ -174,15 +180,16 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateTouchEvent(
     case WM_POINTERDOWN:
     case WM_NCPOINTERDOWN:
       event_type = ui::ET_TOUCH_PRESSED;
-      sent_touch_start_ = true;
+      sent_touch_start_[pointer_id] = true;
       break;
     case WM_POINTERUP:
     case WM_NCPOINTERUP:
       event_type = ui::ET_TOUCH_RELEASED;
       id_generator_->ReleaseNumber(pointer_id);
-      if (!sent_touch_start_)
+      if (sent_touch_start_.count(pointer_id) == 0 ||
+          !sent_touch_start_[pointer_id])
         return nullptr;
-      sent_touch_start_ = false;
+      sent_touch_start_[pointer_id] = false;
       break;
     case WM_POINTERUPDATE:
     case WM_NCPOINTERUPDATE:
@@ -197,6 +204,8 @@ std::unique_ptr<ui::Event> PenEventProcessor::GenerateTouchEvent(
   std::unique_ptr<ui::TouchEvent> event = std::make_unique<ui::TouchEvent>(
       event_type, point, event_time, pointer_details,
       flags | ui::GetModifiersFromKeyState());
+  ui::ComputeEventLatencyOSFromPOINTER_INFO(event_type, pointer_info,
+                                            event_time);
   event->set_hovering(event_type == ui::ET_TOUCH_RELEASED);
   event->latency()->AddLatencyNumberWithTimestamp(
       ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, event_time);

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@ namespace ui {
 
 DrmNativeDisplayDelegate::DrmNativeDisplayDelegate(
     DrmDisplayHostManager* display_manager)
-    : display_manager_(display_manager) {
-}
+    : display_manager_(display_manager) {}
 
 DrmNativeDisplayDelegate::~DrmNativeDisplayDelegate() {
   display_manager_->RemoveDelegate(this);
@@ -51,12 +50,12 @@ void DrmNativeDisplayDelegate::GetDisplays(
   display_manager_->UpdateDisplays(std::move(callback));
 }
 
-void DrmNativeDisplayDelegate::Configure(const display::DisplaySnapshot& output,
-                                         const display::DisplayMode* mode,
-                                         const gfx::Point& origin,
-                                         display::ConfigureCallback callback) {
-  DrmDisplayHost* display = display_manager_->GetDisplay(output.display_id());
-  display->Configure(mode, origin, std::move(callback));
+void DrmNativeDisplayDelegate::Configure(
+    const std::vector<display::DisplayConfigurationParams>& config_requests,
+    display::ConfigureCallback callback,
+    uint32_t modeset_flag) {
+  display_manager_->ConfigureDisplays(config_requests, std::move(callback),
+                                      modeset_flag);
 }
 
 void DrmNativeDisplayDelegate::GetHDCPState(
@@ -69,9 +68,10 @@ void DrmNativeDisplayDelegate::GetHDCPState(
 void DrmNativeDisplayDelegate::SetHDCPState(
     const display::DisplaySnapshot& output,
     display::HDCPState state,
+    display::ContentProtectionMethod protection_method,
     display::SetHDCPStateCallback callback) {
   DrmDisplayHost* display = display_manager_->GetDisplay(output.display_id());
-  display->SetHDCPState(state, std::move(callback));
+  display->SetHDCPState(state, protection_method, std::move(callback));
 }
 
 bool DrmNativeDisplayDelegate::SetColorMatrix(
@@ -89,6 +89,14 @@ bool DrmNativeDisplayDelegate::SetGammaCorrection(
   DrmDisplayHost* display = display_manager_->GetDisplay(display_id);
   display->SetGammaCorrection(degamma_lut, gamma_lut);
   return true;
+}
+
+void DrmNativeDisplayDelegate::SetPrivacyScreen(
+    int64_t display_id,
+    bool enabled,
+    display::SetPrivacyScreenCallback callback) {
+  DrmDisplayHost* display = display_manager_->GetDisplay(display_id);
+  display->SetPrivacyScreen(enabled, std::move(callback));
 }
 
 void DrmNativeDisplayDelegate::AddObserver(

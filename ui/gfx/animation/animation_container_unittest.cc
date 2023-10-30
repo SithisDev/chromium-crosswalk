@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/animation/animation_container_observer.h"
+#include "ui/gfx/animation/animation_test_api.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/animation/test_animation_delegate.h"
 
@@ -24,6 +24,11 @@ class FakeAnimationContainerObserver : public AnimationContainerObserver {
       : progressed_count_(0),
         empty_(false) {
   }
+
+  FakeAnimationContainerObserver(const FakeAnimationContainerObserver&) =
+      delete;
+  FakeAnimationContainerObserver& operator=(
+      const FakeAnimationContainerObserver&) = delete;
 
   int progressed_count() const { return progressed_count_; }
   bool empty() const { return empty_; }
@@ -42,19 +47,19 @@ class FakeAnimationContainerObserver : public AnimationContainerObserver {
 
   int progressed_count_;
   bool empty_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeAnimationContainerObserver);
 };
 
 class TestAnimation : public LinearAnimation {
  public:
   explicit TestAnimation(AnimationDelegate* delegate)
-      : LinearAnimation(base::TimeDelta::FromMilliseconds(20), 20, delegate) {}
+      : LinearAnimation(base::Milliseconds(20), 20, delegate) {}
+
+  TestAnimation(const TestAnimation&) = delete;
+  TestAnimation& operator=(const TestAnimation&) = delete;
 
   void AnimateToState(double state) override {}
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestAnimation);
+  using LinearAnimation::duration;
 };
 
 }  // namespace
@@ -62,11 +67,11 @@ class TestAnimation : public LinearAnimation {
 class AnimationContainerTest: public testing::Test {
  protected:
   AnimationContainerTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI) {}
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 // Makes sure the animation ups the ref count of the container and releases it
@@ -141,6 +146,29 @@ TEST_F(AnimationContainerTest, Observer) {
   EXPECT_FALSE(container->is_running());
 
   container->set_observer(NULL);
+}
+
+// Tests that calling SetAnimationRunner() keeps running animations at their
+// current point.
+TEST_F(AnimationContainerTest, AnimationsRunAcrossRunnerChange) {
+  TestAnimationDelegate delegate;
+  auto container = base::MakeRefCounted<AnimationContainer>();
+  AnimationContainerTestApi test_api(container.get());
+  TestAnimation animation(&delegate);
+  animation.SetContainer(container.get());
+
+  animation.Start();
+  test_api.IncrementTime(animation.duration() / 2);
+  EXPECT_FALSE(delegate.finished());
+
+  container->SetAnimationRunner(nullptr);
+  AnimationRunner* runner = container->animation_runner_for_testing();
+  ASSERT_TRUE(runner);
+  ASSERT_FALSE(runner->step_is_null_for_testing());
+  EXPECT_FALSE(delegate.finished());
+
+  test_api.IncrementTime(animation.duration() / 2);
+  EXPECT_TRUE(delegate.finished());
 }
 
 }  // namespace gfx

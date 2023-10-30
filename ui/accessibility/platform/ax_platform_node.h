@@ -1,15 +1,19 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_H_
 #define UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_H_
 
+#include <ostream>
+#include <string>
+
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/lazy_instance.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/accessibility/ax_mode_observer.h"
@@ -41,6 +45,10 @@ class AX_EXPORT AXPlatformNode {
   // Return the AXPlatformNode at the root of the tree for a native window.
   static AXPlatformNode* FromNativeWindow(gfx::NativeWindow native_window);
 
+  virtual ~AXPlatformNode();
+  AXPlatformNode(const AXPlatformNode&) = delete;
+  AXPlatformNode& operator=(const AXPlatformNode&) = delete;
+
   // Provide a function that returns the AXPlatformNode at the root of the
   // tree for a native window.
   static void RegisterNativeWindowHandler(NativeWindowHandlerCallback handler);
@@ -57,21 +65,10 @@ class AX_EXPORT AXPlatformNode {
   // the addition of an AXMode flag.
   static void NotifyAddAXModeFlags(AXMode mode_flags);
 
-  // Must be called by native suggestion code when there are suggestions which
-  // could be presented in a popup, even if the popup is not presently visible.
-  // The availability of the popup changes the interactions that will occur
-  // (down arrow will move the focus into the suggestion popup). An example of a
-  // suggestion popup is seen in the Autofill feature.
-  // TODO(crbug.com/865101) Remove this once the autofill state works.
-  static void OnInputSuggestionsAvailable();
-  // Must be called when the system goes from a state of having an available
-  // suggestion popup to none available. If the suggestion popup is still
-  // available but just hidden, this method should not be called.
-  // TODO(crbug.com/865101) Remove this once the autofill state works.
-  static void OnInputSuggestionsUnavailable();
-
-  // TODO(crbug.com/865101) Remove this once the autofill state works.
-  static bool HasInputSuggestions();
+  // Helper static function to update the AXMode. This is called when flags
+  // are removed. It doesn't currently notify global observers.
+  // *** Do not use! Use BrowserAccessibilityStateImpl instead. ***
+  static void SetAXMode(AXMode new_mode);
 
   // Return the focused object in any UI popup overlaying content, or null.
   static gfx::NativeViewAccessible GetPopupFocusOverride();
@@ -94,9 +91,9 @@ class AX_EXPORT AXPlatformNode {
   // this object.
   virtual void NotifyAccessibilityEvent(ax::mojom::Event event_type) = 0;
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
   // Fire a platform-specific notification to announce |text|.
-  virtual void AnnounceText(const base::string16& text) = 0;
+  virtual void AnnounceText(const std::u16string& text) = 0;
 #endif
 
   // Return this object's delegate.
@@ -105,14 +102,37 @@ class AX_EXPORT AXPlatformNode {
   // Return true if this object is equal to or a descendant of |ancestor|.
   virtual bool IsDescendantOf(AXPlatformNode* ancestor) const = 0;
 
-  // Return the unique ID
+  // Set |this| as the primary web contents for the window.
+  void SetIsPrimaryWebContentsForWindow(bool is_primary);
+  bool IsPrimaryWebContentsForWindow() const;
+
+  // Return the unique ID.
   int32_t GetUniqueId() const;
+
+  // Creates a string representation of this node's data.
+  std::string ToString();
+
+  // Returns a string representation of the subtree of nodes rooted at this
+  // node.
+  std::string SubtreeToString();
+
+  friend std::ostream& operator<<(std::ostream& stream, AXPlatformNode& node);
 
  protected:
   AXPlatformNode();
-  virtual ~AXPlatformNode();
+
+  // Associates a node delegate object to the platform node.
+  // Keep it protected. Only AXPlatformNode::Create should be calling this.
+  // Note: it would make a nicer design if initialization was integrated into
+  // the platform node constructor, but platform node implementation on Windows
+  // (AXPlatformNodeWin) relies on CComObject::CreateInstance() in order to
+  // create a platform node instance, and it doesn't allow to pass arguments to
+  // the constructor.
+  virtual void Init(AXPlatformNodeDelegate* delegate) = 0;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AtkUtilAuraLinuxTest, KeySnooping);
+
   // Global ObserverList for AXMode changes.
   static base::LazyInstance<
       base::ObserverList<AXModeObserver>::Unchecked>::Leaky ax_mode_observers_;
@@ -122,14 +142,12 @@ class AX_EXPORT AXPlatformNode {
 
   static AXMode ax_mode_;
 
-  static bool has_input_suggestions_;
-
   // This allows UI menu popups like to act as if they are focused in the
   // exposed platform accessibility API, even though actual focus remains in
   // underlying content.
   static gfx::NativeViewAccessible popup_focus_override_;
 
-  DISALLOW_COPY_AND_ASSIGN(AXPlatformNode);
+  bool is_primary_web_contents_for_window_ = false;
 };
 
 }  // namespace ui

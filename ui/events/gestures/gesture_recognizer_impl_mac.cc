@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ bool GestureRecognizerImplMac::ProcessTouchEventPreDispatch(
 GestureRecognizer::Gestures GestureRecognizerImplMac::AckTouchEvent(
     uint32_t unique_event_id,
     ui::EventResult result,
-    bool is_source_touch_event_set_non_blocking,
+    bool is_source_touch_event_set_blocking,
     GestureConsumer* consumer) {
   return {};
 }
@@ -50,6 +50,15 @@ void GestureRecognizerImplMac::TransferEventsTo(
     GestureConsumer* new_consumer,
     TransferTouchesBehavior transfer_touches_behavior) {}
 
+std::vector<std::unique_ptr<ui::TouchEvent>>
+GestureRecognizerImplMac::ExtractTouches(GestureConsumer* consumer) {
+  return std::vector<std::unique_ptr<ui::TouchEvent>>();
+}
+
+void GestureRecognizerImplMac::TransferTouches(
+    GestureConsumer* consumer,
+    const std::vector<std::unique_ptr<ui::TouchEvent>>& touch_events) {}
+
 bool GestureRecognizerImplMac::GetLastTouchPointForTarget(
     GestureConsumer* consumer,
     gfx::PointF* point) {
@@ -65,5 +74,13 @@ void GestureRecognizerImplMac::AddGestureEventHelper(
 
 void GestureRecognizerImplMac::RemoveGestureEventHelper(
     GestureEventHelper* helper) {}
+
+bool GestureRecognizerImplMac::DoesConsumerHaveActiveTouch(
+    GestureConsumer* consumer) const {
+  return false;
+}
+
+void GestureRecognizerImplMac::SendSynthesizedEndEvents(
+    GestureConsumer* consumer) {}
 
 }  // namespace ui

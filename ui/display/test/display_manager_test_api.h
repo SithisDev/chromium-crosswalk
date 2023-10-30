@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "ui/display/display.h"
 #include "ui/display/display_export.h"
 #include "ui/display/display_layout.h"
@@ -30,6 +29,10 @@ namespace test {
 class DISPLAY_EXPORT DisplayManagerTestApi {
  public:
   explicit DisplayManagerTestApi(DisplayManager* display_manager);
+
+  DisplayManagerTestApi(const DisplayManagerTestApi&) = delete;
+  DisplayManagerTestApi& operator=(const DisplayManagerTestApi&) = delete;
+
   virtual ~DisplayManagerTestApi();
 
   void set_maximum_display(size_t maximum_display_num) {
@@ -39,8 +42,8 @@ class DISPLAY_EXPORT DisplayManagerTestApi {
 
   // Update the display configuration as given in |display_specs|. The format of
   // |display_spec| is a list of comma separated spec for each displays. Please
-  // refer to the comment in |ash::DisplayInfo::CreateFromSpec| for the format
-  // of the display spec.
+  // refer to the comment in |display::ManagedDisplayInfo::CreateFromSpec| for
+  // the format of the display spec.
   void UpdateDisplay(const std::string& display_specs);
 
   // Set the 1st display as an internal display and returns the display Id for
@@ -56,6 +59,11 @@ class DISPLAY_EXPORT DisplayManagerTestApi {
   // Sets the touch support for |display_id|.
   void SetTouchSupport(int64_t display_id, Display::TouchSupport touch_support);
 
+  // Returns a Display object for a secondary display. If multiple displays
+  // exist, returns a Display object that is next to the current primary
+  // display in active_display_list_
+  const Display& GetSecondaryDisplay() const;
+
  private:
   friend class ScopedSetInternalDisplayId;
   // Sets the display id for internal display and
@@ -66,17 +74,17 @@ class DISPLAY_EXPORT DisplayManagerTestApi {
   static size_t maximum_support_display_;
 
   DisplayManager* display_manager_;  // not owned
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayManagerTestApi);
 };
 
 class DISPLAY_EXPORT ScopedSetInternalDisplayId {
  public:
   ScopedSetInternalDisplayId(DisplayManager* test_api, int64_t id);
-  ~ScopedSetInternalDisplayId();
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScopedSetInternalDisplayId);
+  ScopedSetInternalDisplayId(const ScopedSetInternalDisplayId&) = delete;
+  ScopedSetInternalDisplayId& operator=(const ScopedSetInternalDisplayId&) =
+      delete;
+
+  ~ScopedSetInternalDisplayId();
 };
 
 // Sets the display mode that matches the |resolution| for |display_id|.
@@ -96,7 +104,9 @@ DISPLAY_EXPORT std::unique_ptr<DisplayLayout> CreateDisplayLayout(
 
 // Creates the DisplayIdList from ints.
 DISPLAY_EXPORT DisplayIdList CreateDisplayIdList2(int64_t id1, int64_t id2);
-DISPLAY_EXPORT DisplayIdList CreateDisplayIdListN(size_t count, ...);
+
+// Create the N number of DisplayIdList starting from |start_id},
+DISPLAY_EXPORT DisplayIdList CreateDisplayIdListN(int64_t start_id, size_t N);
 
 }  // namespace test
 }  // namespace display

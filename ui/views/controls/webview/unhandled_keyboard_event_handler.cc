@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "ui/content_accelerators/accelerator_util.h"
 #include "ui/views/focus/focus_manager.h"
 
@@ -23,7 +24,7 @@ bool UnhandledKeyboardEventHandler::HandleKeyboardEvent(
   // Previous calls to TranslateMessage can generate Char events as well as
   // RawKeyDown events, even if the latter triggered an accelerator.  In these
   // cases, we discard the Char events.
-  if (event.GetType() == blink::WebInputEvent::kChar &&
+  if (event.GetType() == blink::WebInputEvent::Type::kChar &&
       ignore_next_char_event_) {
     ignore_next_char_event_ = false;
     return false;
@@ -32,7 +33,7 @@ bool UnhandledKeyboardEventHandler::HandleKeyboardEvent(
   // always generate a Char event.
   ignore_next_char_event_ = false;
 
-  if (event.GetType() == blink::WebInputEvent::kRawKeyDown) {
+  if (event.GetType() == blink::WebInputEvent::Type::kRawKeyDown) {
     ui::Accelerator accelerator =
         ui::GetAcceleratorFromNativeWebKeyboardEvent(event);
 
@@ -50,8 +51,8 @@ bool UnhandledKeyboardEventHandler::HandleKeyboardEvent(
     ignore_next_char_event_ = false;
   }
 
-  if (event.os_event && !event.skip_in_browser)
-    return HandleNativeKeyboardEvent(event.os_event, focus_manager);
+  if (event.os_event)
+    return HandleNativeKeyboardEvent(event, focus_manager);
 
   return false;
 }

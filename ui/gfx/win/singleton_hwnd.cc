@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/win/singleton_hwnd.h"
 
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/task/current_thread.h"
 #include "ui/gfx/win/singleton_hwnd_observer.h"
 
 namespace gfx {
@@ -21,7 +21,7 @@ BOOL SingletonHwnd::ProcessWindowMessage(HWND window,
                                          LPARAM lparam,
                                          LRESULT& result,
                                          DWORD msg_map_id) {
-  if (!base::MessageLoopCurrentForUI::IsSet()) {
+  if (!base::CurrentUIThread::IsSet()) {
     // If there is no MessageLoop and SingletonHwnd is receiving messages, this
     // means it is receiving messages via an external message pump such as COM
     // uninitialization.
@@ -37,7 +37,7 @@ BOOL SingletonHwnd::ProcessWindowMessage(HWND window,
 }
 
 SingletonHwnd::SingletonHwnd() {
-  if (!base::MessageLoopCurrentForUI::IsSet()) {
+  if (!base::CurrentUIThread::IsSet()) {
     // Creating this window in (e.g.) a renderer inhibits shutdown on
     // Windows. See http://crbug.com/230122 and http://crbug.com/236039.
     return;

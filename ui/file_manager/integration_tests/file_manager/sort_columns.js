@@ -1,7 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-'use strict';
+
+import {ENTRIES, RootPath, TestEntryInfo} from '../test_util.js';
+import {testcase} from '../testcase.js';
+
+import {remoteCall, setupAndWaitUntilReady} from './background.js';
 
 /**
  * Tests the order is sorted correctly for each of the columns.
@@ -72,12 +76,18 @@ testcase.sortColumns = async () => {
   ]);
 
   const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  const iconSortedAsc =
+      '.table-header-cell .sorted [iron-icon="files16:arrow_up_small"]';
+  const iconSortedDesc =
+      '.table-header-cell .sorted [iron-icon="files16:arrow_down_small"]';
+
   let a11yMessages;
 
   // Click the 'Name' column header and check the list.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(1)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, NAME_ASC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -86,10 +96,14 @@ testcase.sortColumns = async () => {
   chrome.test.assertEq(1, a11yMessages.length, 'Missing a11y message');
   console.log(a11yMessages[0]);
 
+  // Check: sort-button has aria-haspopup set to true
+  const sortButton = await remoteCall.waitForElement(appId, '#sort-button');
+  chrome.test.assertEq(sortButton.attributes['aria-haspopup'], 'true');
+
   // Click the 'Name' again and check the list.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(1)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-desc');
+  await remoteCall.waitForElement(appId, iconSortedDesc);
   await remoteCall.waitForFiles(appId, NAME_DESC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -100,7 +114,7 @@ testcase.sortColumns = async () => {
   // Click the 'Size' column header and check the list.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(2)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-desc');
+  await remoteCall.waitForElement(appId, iconSortedDesc);
   await remoteCall.waitForFiles(appId, SIZE_DESC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -116,7 +130,7 @@ testcase.sortColumns = async () => {
   // Click the 'Size' column header again and check the list.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(2)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, SIZE_ASC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -132,8 +146,8 @@ testcase.sortColumns = async () => {
 
   // Click the 'Type' column header and check the list.
   await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(3)']);
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, TYPE_ASC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -143,8 +157,8 @@ testcase.sortColumns = async () => {
 
   // Click the 'Type' column header again and check the list.
   await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-desc');
+      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(3)']);
+  await remoteCall.waitForElement(appId, iconSortedDesc);
   await remoteCall.waitForFiles(appId, TYPE_DESC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -160,8 +174,8 @@ testcase.sortColumns = async () => {
 
   // Click the 'Date modified' column header and check the list.
   await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(5)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-desc');
+      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
+  await remoteCall.waitForElement(appId, iconSortedDesc);
   await remoteCall.waitForFiles(appId, DATE_DESC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -171,8 +185,8 @@ testcase.sortColumns = async () => {
 
   // Click the 'Date modified' column header again and check the list.
   await remoteCall.callRemoteTestUtil(
-      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(5)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+      'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, DATE_ASC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -188,7 +202,7 @@ testcase.sortColumns = async () => {
   // Click 'Name' in the sort menu and check the result.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['#sort-menu-sort-by-name']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, NAME_ASC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -199,7 +213,7 @@ testcase.sortColumns = async () => {
   // Click the 'Name' again to reverse the order (to descending order).
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(1)']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-desc');
+  await remoteCall.waitForElement(appId, iconSortedDesc);
   await remoteCall.waitForFiles(appId, NAME_DESC, {orderCheck: true});
 
   // Fetch A11y messages.
@@ -211,7 +225,7 @@ testcase.sortColumns = async () => {
   // ascending order.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['#sort-menu-sort-by-name']);
-  await remoteCall.waitForElement(appId, '.table-header-sort-image-asc');
+  await remoteCall.waitForElement(appId, iconSortedAsc);
   await remoteCall.waitForFiles(appId, NAME_ASC, {orderCheck: true});
 
   // Fetch A11y messages.

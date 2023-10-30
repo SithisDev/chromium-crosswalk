@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <stdint.h>
 
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "third_party/libpng/png.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -17,7 +18,6 @@
 #include "third_party/zlib/zlib.h"
 #include "ui/gfx/codec/vector_wstream.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/skia_util.h"
 
 namespace gfx {
 
@@ -39,13 +39,12 @@ class PngDecoderState {
   PngDecoderState(PNGCodec::ColorFormat ofmt, std::vector<unsigned char>* o)
       : output_format(ofmt),
         output_channels(0),
-        bitmap(NULL),
+        bitmap(nullptr),
         is_opaque(true),
         output(o),
         width(0),
         height(0),
-        done(false) {
-  }
+        done(false) {}
 
   // Output is an SkBitmap.
   explicit PngDecoderState(SkBitmap* skbitmap)
@@ -53,17 +52,19 @@ class PngDecoderState {
         output_channels(0),
         bitmap(skbitmap),
         is_opaque(true),
-        output(NULL),
+        output(nullptr),
         width(0),
         height(0),
-        done(false) {
-  }
+        done(false) {}
+
+  PngDecoderState(const PngDecoderState&) = delete;
+  PngDecoderState& operator=(const PngDecoderState&) = delete;
 
   PNGCodec::ColorFormat output_format;
   int output_channels;
 
   // An incoming SkBitmap to write to. If NULL, we write to output instead.
-  SkBitmap* bitmap;
+  raw_ptr<SkBitmap> bitmap;
 
   // Used during the reading of an SkBitmap. Defaults to true until we see a
   // pixel with anything other than an alpha of 255.
@@ -71,7 +72,7 @@ class PngDecoderState {
 
   // The other way to decode output, where we write into an intermediary buffer
   // instead of directly to an SkBitmap.
-  std::vector<unsigned char>* output;
+  raw_ptr<std::vector<unsigned char>> output;
 
   // Size of the image, set in the info callback.
   int width;
@@ -79,9 +80,6 @@ class PngDecoderState {
 
   // Set to true when we've found the end of the data.
   bool done;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PngDecoderState);
 };
 
 // User transform (passed to libpng) which converts a row decoded by libpng to
@@ -221,7 +219,11 @@ void DecodeInfoCallback(png_struct* png_ptr, png_info* info_ptr) {
   png_read_update_info(png_ptr, info_ptr);
 
   if (state->bitmap) {
-    state->bitmap->allocN32Pixels(state->width, state->height);
+    if (!state->bitmap->tryAllocN32Pixels(state->width, state->height)) {
+      png_error(png_ptr, "Could not allocate bitmap.");
+      NOTREACHED() << "png_error should not return.";
+      return;
+    }
   } else if (state->output) {
     state->output->resize(
         state->width * state->output_channels * state->height);
@@ -265,6 +267,10 @@ class PngReadStructInfo {
  public:
   PngReadStructInfo(): png_ptr_(nullptr), info_ptr_(nullptr) {
   }
+
+  PngReadStructInfo(const PngReadStructInfo&) = delete;
+  PngReadStructInfo& operator=(const PngReadStructInfo&) = delete;
+
   ~PngReadStructInfo() {
     png_destroy_read_struct(&png_ptr_, &info_ptr_, NULL);
   }
@@ -291,8 +297,6 @@ class PngReadStructInfo {
 
   png_struct* png_ptr_;
   png_info* info_ptr_;
- private:
-  DISALLOW_COPY_AND_ASSIGN(PngReadStructInfo);
 };
 
 // Holds png struct and info ensuring the proper destruction.
@@ -301,14 +305,15 @@ class PngWriteStructInfo {
   PngWriteStructInfo() : png_ptr_(nullptr), info_ptr_(nullptr) {
   }
 
+  PngWriteStructInfo(const PngWriteStructInfo&) = delete;
+  PngWriteStructInfo& operator=(const PngWriteStructInfo&) = delete;
+
   ~PngWriteStructInfo() {
     png_destroy_write_struct(&png_ptr_, &info_ptr_);
   }
 
   png_struct* png_ptr_;
   png_info* info_ptr_;
- private:
-  DISALLOW_COPY_AND_ASSIGN(PngWriteStructInfo);
 };
 
 // Libpng user error and warning functions which allows us to print libpng

@@ -1,36 +1,43 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_
-#define UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_
+#ifndef UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_
+#define UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_
 
-#include <memory>
 
-#include "base/macros.h"
-#include "ui/events/ozone/layout/events_ozone_layout_export.h"
+#include "base/check.h"
+#include "base/component_export.h"
 
 namespace ui {
 
 class KeyboardLayoutEngine;
 
-class EVENTS_OZONE_LAYOUT_EXPORT KeyboardLayoutEngineManager {
+class COMPONENT_EXPORT(EVENTS_OZONE_LAYOUT) KeyboardLayoutEngineManager {
  public:
+  KeyboardLayoutEngineManager(const KeyboardLayoutEngineManager&) = delete;
+  KeyboardLayoutEngineManager& operator=(const KeyboardLayoutEngineManager&) =
+      delete;
+
   virtual ~KeyboardLayoutEngineManager();
 
   static void SetKeyboardLayoutEngine(
-      std::unique_ptr<KeyboardLayoutEngine> engine);
-  static KeyboardLayoutEngine* GetKeyboardLayoutEngine();
+      KeyboardLayoutEngine* keyboard_layout_engine);
+
+  static void ResetKeyboardLayoutEngine();
+
+  static KeyboardLayoutEngine* GetKeyboardLayoutEngine() {
+    // Must run in a context with a KeyboardLayoutEngine.
+    // Hint: Tests can use ui::ScopedKeyboardLayout to create one.
+    // (production code should instead call InitializeForUI).
+    DCHECK(keyboard_layout_engine_);
+    return keyboard_layout_engine_;
+  }
 
  private:
-  KeyboardLayoutEngineManager(KeyboardLayoutEngine* engine);
-
-  static KeyboardLayoutEngineManager* instance_;
-  std::unique_ptr<KeyboardLayoutEngine> keyboard_layout_engine_;
-
-  DISALLOW_COPY_AND_ASSIGN(KeyboardLayoutEngineManager);
+  static KeyboardLayoutEngine* keyboard_layout_engine_;
 };
 
 }  // namespace ui
 
-#endif  // UI_OZONE_PUBLIC_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_
+#endif  // UI_EVENTS_OZONE_LAYOUT_KEYBOARD_LAYOUT_ENGINE_MANAGER_H_

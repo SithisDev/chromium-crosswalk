@@ -1,15 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/animation/ink_drop_host_view.h"
@@ -27,6 +25,10 @@ enum InkDropType { INK_DROP_STUB, INK_DROP_IMPL };
 class InkDropTest : public testing::TestWithParam<testing::tuple<InkDropType>> {
  public:
   InkDropTest();
+
+  InkDropTest(const InkDropTest&) = delete;
+  InkDropTest& operator=(const InkDropTest&) = delete;
+
   ~InkDropTest() override;
 
  protected:
@@ -44,8 +46,6 @@ class InkDropTest : public testing::TestWithParam<testing::tuple<InkDropType>> {
 
   // Required by base::Timer's.
   std::unique_ptr<base::ThreadTaskRunnerHandle> thread_task_runner_handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(InkDropTest);
 };
 
 InkDropTest::InkDropTest() : ink_drop_(nullptr) {
@@ -57,8 +57,9 @@ InkDropTest::InkDropTest() : ink_drop_(nullptr) {
       ink_drop_ = std::make_unique<InkDropStub>();
       break;
     case INK_DROP_IMPL:
-      ink_drop_ =
-          std::make_unique<InkDropImpl>(&test_ink_drop_host_, gfx::Size());
+      ink_drop_ = std::make_unique<InkDropImpl>(
+          InkDrop::Get(&test_ink_drop_host_), gfx::Size(),
+          InkDropImpl::AutoHighlightMode::NONE);
       // The Timer's used by the InkDropImpl class require a
       // base::ThreadTaskRunnerHandle instance.
       scoped_refptr<base::TestMockTimeTaskRunner> task_runner(
@@ -77,7 +78,7 @@ InkDropType InkDropTest::GetInkDropType() const {
 
 // Note: First argument is optional and intentionally left blank.
 // (it's a prefix for the generated test cases)
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          InkDropTest,
                          testing::Values(INK_DROP_STUB, INK_DROP_IMPL));
 

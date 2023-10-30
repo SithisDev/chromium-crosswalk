@@ -1,9 +1,16 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.js';
+
+import {AsyncUtil} from '../../common/js/async_util.js';
+import {util} from '../../common/js/util.js';
+import {FilesAppEntry} from '../../externs/files_app_entry_interfaces.js';
+
 /** Watches for changes in the tracked directory. */
-class FileWatcher extends cr.EventTarget {
+export class FileWatcher extends EventTarget {
   constructor() {
     super();
 
@@ -48,7 +55,7 @@ class FileWatcher extends cr.EventTarget {
 
       if (eventURL === watchedDirURL) {
         fireWatcherDirectoryChanged(event.changedFiles);
-      } else if (watchedDirURL.match(new RegExp('^' + eventURL))) {
+      } else if (watchedDirURL.startsWith(eventURL)) {
         // When watched directory is deleted by the change in parent directory,
         // notify it as watcher directory changed.
         this.watchedDirectoryEntry_.getDirectory(
@@ -89,7 +96,7 @@ class FileWatcher extends cr.EventTarget {
           chrome.fileManagerPrivate.removeFileWatch(
               this.watchedDirectoryEntry_, result => {
                 if (chrome.runtime.lastError) {
-                  console.error(
+                  console.warn(
                       'Failed to remove the watcher because of: ' +
                       chrome.runtime.lastError.message);
                 }

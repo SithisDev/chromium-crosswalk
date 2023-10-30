@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,14 @@ namespace test {
 ////////////////////////////////////////////////////////////////////////////////
 // TestFocusClient, public:
 
-TestFocusClient::TestFocusClient()
-    : focused_window_(NULL),
-      observer_manager_(this) {
+TestFocusClient::TestFocusClient(Window* root_window)
+    : root_window_(root_window) {
+  DCHECK(root_window_);
+  client::SetFocusClient(root_window_, this);
 }
 
 TestFocusClient::~TestFocusClient() {
+  client::SetFocusClient(root_window_, nullptr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -36,12 +38,14 @@ void TestFocusClient::FocusWindow(Window* window) {
   if (window && !window->CanFocus())
     return;
 
-  if (focused_window_)
-    observer_manager_.Remove(focused_window_);
+  if (focused_window_) {
+    DCHECK(observation_manager_.IsObservingSource(focused_window_.get()));
+    observation_manager_.Reset();
+  }
   aura::Window* old_focused_window = focused_window_;
   focused_window_ = window;
   if (focused_window_)
-    observer_manager_.Add(focused_window_);
+    observation_manager_.Observe(focused_window_.get());
 
   for (aura::client::FocusChangeObserver& observer : focus_observers_)
     observer.OnWindowFocused(focused_window_, old_focused_window);

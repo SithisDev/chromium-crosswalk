@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_BASE_WINDOW_H_
 #define UI_BASE_BASE_WINDOW_H_
 
-#include "base/compiler_specific.h"
+#include "base/component_export.h"
 #include "build/build_config.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
@@ -18,7 +18,7 @@ namespace ui {
 
 // Provides an interface to perform actions on windows, and query window
 // state.
-class UI_BASE_EXPORT BaseWindow {
+class COMPONENT_EXPORT(UI_BASE) BaseWindow {
  public:
   // Returns true if the window is currently the active/focused window.
   virtual bool IsActive() const = 0;

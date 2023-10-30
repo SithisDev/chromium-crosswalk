@@ -1,12 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/events/keycodes/keyboard_code_conversion_android.h"
 
 #include <android/keycodes.h>
-
-#include "build/build_config.h"
 
 namespace ui {
 namespace {
@@ -75,11 +73,6 @@ DomKey GetDomKeyFromAndroidKeycode(int keycode) {
     default:
     case AKEYCODE_UNKNOWN:
       return DomKey::NONE;
-#if defined(OS_ANDROID)
-#define ANDROID_KEYCODE_TO_DOM_KEY
-#include "ui/events/keycodes/dom/keycode_conversion_data_android_generated.inc"
-#undef ANDROID_KEYCODE_TO_DOM_KEY
-#endif
     case AKEYCODE_HOME:
       return DomKey::GO_HOME;
     case AKEYCODE_BACK:
@@ -542,11 +535,6 @@ DomKey GetDomKeyFromAndroidEvent(int keycode, int unicode_character) {
 KeyboardCode KeyboardCodeFromAndroidKeyCode(int keycode) {
   // Does not provide all key codes, and does not handle all keys.
   switch (keycode) {
-#if defined(OS_ANDROID)
-#define ANDROID_KEYCODE_TO_KB_CODE
-#include "ui/events/keycodes/dom/keycode_conversion_data_android_generated.inc"
-#undef ANDROID_KEYCODE_TO_KB_CODE
-#endif
     case AKEYCODE_DEL:
       return VKEY_BACK;
     case AKEYCODE_TAB:

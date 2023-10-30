@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <Cocoa/Cocoa.h>
 #include <stddef.h>
 
-#include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_png_rep.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/image/image_unittest_util.h"
 
@@ -80,8 +79,8 @@ class ImageMacTest : public testing::Test {
     gfx::ImageSkia::SetSupportedScales(gfx::test::Get1xAnd2xScales());
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ImageMacTest);
+  ImageMacTest(const ImageMacTest&) = delete;
+  ImageMacTest& operator=(const ImageMacTest&) = delete;
 };
 
 namespace gt = gfx::test;
@@ -200,10 +199,10 @@ TEST_F(ImageMacTest, MultiResolutionPNGToNSImage) {
   // Convert to ImageSkia to check pixel contents of NSImageReps.
   gfx::ImageSkia image_skia = gfx::ImageSkiaFromNSImage(ns_image);
   EXPECT_TRUE(gt::ArePNGBytesCloseToBitmap(
-      bytes1x, image_skia.GetRepresentation(1.0f).GetBitmap(),
+      *bytes1x, image_skia.GetRepresentation(1.0f).GetBitmap(),
       gt::MaxColorSpaceConversionColorShift()));
   EXPECT_TRUE(gt::ArePNGBytesCloseToBitmap(
-      bytes2x, image_skia.GetRepresentation(2.0f).GetBitmap(),
+      *bytes2x, image_skia.GetRepresentation(2.0f).GetBitmap(),
       gt::MaxColorSpaceConversionColorShift()));
 }
 

@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GFX_ANIMATION_THROB_ANIMATION_H_
 #define UI_GFX_ANIMATION_THROB_ANIMATION_H_
 
-#include "base/macros.h"
 #include "ui/gfx/animation/slide_animation.h"
 
 namespace gfx {
@@ -20,6 +19,10 @@ namespace gfx {
 class ANIMATION_EXPORT ThrobAnimation : public SlideAnimation {
  public:
   explicit ThrobAnimation(AnimationDelegate* target);
+
+  ThrobAnimation(const ThrobAnimation&) = delete;
+  ThrobAnimation& operator=(const ThrobAnimation&) = delete;
+
   ~ThrobAnimation() override {}
 
   // Starts throbbing. cycles_til_stop gives the number of cycles to do before
@@ -27,7 +30,9 @@ class ANIMATION_EXPORT ThrobAnimation : public SlideAnimation {
   void StartThrobbing(int cycles_til_stop);
 
   // Sets the duration of the slide animation when throbbing.
-  void SetThrobDuration(int duration) { throb_duration_ = duration; }
+  void SetThrobDuration(base::TimeDelta duration) {
+    throb_duration_ = duration;
+  }
 
   // Overridden to reset to the slide duration.
   void Reset(double value = 0) override;
@@ -35,7 +40,7 @@ class ANIMATION_EXPORT ThrobAnimation : public SlideAnimation {
   void Hide() override;
 
   // Overridden to maintain the slide duration.
-  void SetSlideDuration(int duration) override;
+  void SetSlideDuration(base::TimeDelta duration) override;
 
   // The number of cycles remaining until the animation stops.
   void set_cycles_remaining(int value) { cycles_remaining_ = value; }
@@ -49,19 +54,17 @@ class ANIMATION_EXPORT ThrobAnimation : public SlideAnimation {
   // Stops throbbing; as a result this will behave like a SlideAnimation.
   void StopThrobbing();
 
-  // Duration of the slide animation, in ms.
-  int slide_duration_ = GetSlideDuration();
+  // Duration of the slide animation.
+  base::TimeDelta slide_duration_ = GetSlideDuration();
 
-  // Duration of the slide animation, in ms, when throbbing.
-  int throb_duration_ = 400;
+  // Duration of the slide animation when throbbing.
+  base::TimeDelta throb_duration_ = base::Milliseconds(400);
 
   // If throbbing, this is the number of cycles left.
   int cycles_remaining_ = 0;
 
   // Are we throbbing?
   bool throbbing_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ThrobAnimation);
 };
 
 }  // namespace gfx

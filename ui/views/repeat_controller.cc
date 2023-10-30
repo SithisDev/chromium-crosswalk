@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,27 +6,20 @@
 
 #include <utility>
 
-using base::TimeDelta;
-
 namespace views {
-
-// The delay before the first and then subsequent repeats. Values taken from
-// XUL code: http://mxr.mozilla.org/seamonkey/source/layout/xul/base/src/nsRepeatService.cpp#52
-constexpr int kInitialRepeatDelay = 250;
-constexpr int kRepeatDelay = 50;
 
 ///////////////////////////////////////////////////////////////////////////////
 // RepeatController, public:
 
-RepeatController::RepeatController(base::RepeatingClosure callback)
-    : callback_(std::move(callback)) {}
+RepeatController::RepeatController(base::RepeatingClosure callback,
+                                   const base::TickClock* tick_clock)
+    : timer_(tick_clock), callback_(std::move(callback)) {}
 
 RepeatController::~RepeatController() = default;
 
 void RepeatController::Start() {
   // The first timer is slightly longer than subsequent repeats.
-  timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(kInitialRepeatDelay),
-               this, &RepeatController::Run);
+  timer_.Start(FROM_HERE, kInitialWait, this, &RepeatController::Run);
 }
 
 void RepeatController::Stop() {
@@ -36,9 +29,14 @@ void RepeatController::Stop() {
 ///////////////////////////////////////////////////////////////////////////////
 // RepeatController, private:
 
+// static
+constexpr base::TimeDelta RepeatController::kInitialWait;
+
+// static
+constexpr base::TimeDelta RepeatController::kRepeatingWait;
+
 void RepeatController::Run() {
-  timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(kRepeatDelay), this,
-               &RepeatController::Run);
+  timer_.Start(FROM_HERE, kRepeatingWait, this, &RepeatController::Run);
   callback_.Run();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,42 @@
 #import <utility>
 
 namespace views {
+namespace {
+
+// Returns the global notification filter.
+MacNotificationFilter& NotificationFilterInternal() {
+  static MacNotificationFilter filter =
+      MacNotificationFilter::DontIgnoreNotifications;
+  return filter;
+}
+
+// Returns YES if `notification` should be ignored based on the current value of
+// the notification filter.
+BOOL ShouldIgnoreNotification(NSNotification* notification) {
+  switch (NotificationFilterInternal()) {
+    case MacNotificationFilter::DontIgnoreNotifications:
+      return NO;
+    case MacNotificationFilter::IgnoreWorkspaceNotifications:
+      return [[notification name]
+          isEqualToString:NSWorkspaceDidActivateApplicationNotification];
+    case MacNotificationFilter::IgnoreAllNotifications:
+      return YES;
+  }
+
+  return NO;
+}
+}  // namespace
 
 MenuCocoaWatcherMac::MenuCocoaWatcherMac(base::OnceClosure callback)
     : callback_(std::move(callback)) {
   observer_token_other_menu_ = [[NSNotificationCenter defaultCenter]
       addObserverForName:NSMenuDidBeginTrackingNotification
-                  object:[NSApp mainMenu]
+                  object:nil
                    queue:nil
               usingBlock:^(NSNotification* notification) {
+                if (ShouldIgnoreNotification(notification))
+                  return;
+
                 ExecuteCallback();
               }];
   observer_token_new_window_focus_ = [[NSNotificationCenter defaultCenter]
@@ -25,6 +53,9 @@ MenuCocoaWatcherMac::MenuCocoaWatcherMac(base::OnceClosure callback)
                   object:nil
                    queue:nil
               usingBlock:^(NSNotification* notification) {
+                if (ShouldIgnoreNotification(notification))
+                  return;
+
                 ExecuteCallback();
               }];
   observer_token_app_change_ =
@@ -33,7 +64,16 @@ MenuCocoaWatcherMac::MenuCocoaWatcherMac(base::OnceClosure callback)
                       object:nil
                        queue:nil
                   usingBlock:^(NSNotification* notification) {
-                    ExecuteCallback();
+                    if (ShouldIgnoreNotification(notification))
+                      return;
+
+                    // Only destroy menus if the browser is losing focus, not if
+                    // it's gaining focus. This is to ensure that we can invoke
+                    // a context menu while focused on another app, and still be
+                    // able to click on menu items without dismissing the menu.
+                    if (![[NSRunningApplication currentApplication] isActive]) {
+                      ExecuteCallback();
+                    }
                   }];
 }
 
@@ -44,6 +84,11 @@ MenuCocoaWatcherMac::~MenuCocoaWatcherMac() {
       removeObserver:observer_token_new_window_focus_];
   [[[NSWorkspace sharedWorkspace] notificationCenter]
       removeObserver:observer_token_app_change_];
+}
+
+void MenuCocoaWatcherMac::SetNotificationFilterForTesting(
+    MacNotificationFilter filter) {
+  NotificationFilterInternal() = filter;
 }
 
 void MenuCocoaWatcherMac::ExecuteCallback() {

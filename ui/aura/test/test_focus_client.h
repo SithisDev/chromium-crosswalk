@@ -1,14 +1,13 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_AURA_TEST_TEST_FOCUS_CLIENT_H_
 #define UI_AURA_TEST_TEST_FOCUS_CLIENT_H_
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window_observer.h"
 
@@ -18,7 +17,11 @@ namespace test {
 class TestFocusClient : public client::FocusClient,
                         public WindowObserver {
  public:
-  TestFocusClient();
+  explicit TestFocusClient(Window* root_window);
+
+  TestFocusClient(const TestFocusClient&) = delete;
+  TestFocusClient& operator=(const TestFocusClient&) = delete;
+
   ~TestFocusClient() override;
 
  private:
@@ -32,12 +35,11 @@ class TestFocusClient : public client::FocusClient,
   // Overridden from WindowObserver:
   void OnWindowDestroying(Window* window) override;
 
-  Window* focused_window_;
-  ScopedObserver<Window, WindowObserver> observer_manager_;
+  raw_ptr<Window> root_window_;
+  raw_ptr<Window> focused_window_ = nullptr;
+  base::ScopedObservation<Window, WindowObserver> observation_manager_{this};
   base::ObserverList<aura::client::FocusChangeObserver>::Unchecked
       focus_observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestFocusClient);
 };
 
 }  // namespace test

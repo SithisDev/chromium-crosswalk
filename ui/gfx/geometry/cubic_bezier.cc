@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/cxx17_backports.h"
 
 namespace gfx {
 
@@ -18,6 +20,17 @@ const int kMaxNewtonIterations = 4;
 }  // namespace
 
 static const double kBezierEpsilon = 1e-7;
+
+double CubicBezier::ToFinite(double value) {
+  // TODO(crbug.com/1275541): We can clamp this in numeric operation helper
+  // function like ClampedNumeric.
+  if (std::isinf(value)) {
+    if (value > 0)
+      return std::numeric_limits<double>::max();
+    return std::numeric_limits<double>::lowest();
+  }
+  return value;
+}
 
 CubicBezier::CubicBezier(double p1x, double p1y, double p2x, double p2y) {
   InitCoefficients(p1x, p1y, p2x, p2y);
@@ -38,9 +51,9 @@ void CubicBezier::InitCoefficients(double p1x,
   bx_ = 3.0 * (p2x - p1x) - cx_;
   ax_ = 1.0 - cx_ - bx_;
 
-  cy_ = 3.0 * p1y;
-  by_ = 3.0 * (p2y - p1y) - cy_;
-  ay_ = 1.0 - cy_ - by_;
+  cy_ = ToFinite(3.0 * p1y);
+  by_ = ToFinite(3.0 * (p2y - p1y) - cy_);
+  ay_ = ToFinite(1.0 - cy_ - by_);
 
 #ifndef NDEBUG
   // Bezier curves with x-coordinates outside the range [0,1] for internal
@@ -150,8 +163,8 @@ void CubicBezier::InitRange(double p1y, double p2y) {
   if (0 < t2 && t2 < 1)
     sol2 = SampleCurveY(t2);
 
-  range_min_ = std::min(std::min(range_min_, sol1), sol2);
-  range_max_ = std::max(std::max(range_max_, sol1), sol2);
+  range_min_ = std::min({range_min_, sol1, sol2});
+  range_max_ = std::max({range_max_, sol1, sol2});
 }
 
 void CubicBezier::InitSpline() {
@@ -228,11 +241,15 @@ double CubicBezier::Solve(double x) const {
 }
 
 double CubicBezier::SlopeWithEpsilon(double x, double epsilon) const {
-  x = std::min(std::max(x, 0.0), 1.0);
+  x = base::clamp(x, 0.0, 1.0);
   double t = SolveCurveX(x, epsilon);
   double dx = SampleCurveDerivativeX(t);
   double dy = SampleCurveDerivativeY(t);
-  return dy / dx;
+  // TODO(crbug.com/1275534): We should clamp NaN to a proper value.
+  // Please see the issue for detail.
+  if (!dx && !dy)
+    return 0;
+  return ToFinite(dy / dx);
 }
 
 double CubicBezier::Slope(double x) const {

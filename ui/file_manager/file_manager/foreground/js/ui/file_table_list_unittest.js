@@ -1,20 +1,27 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {assertArrayEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {MockVolumeManager} from '../../../background/js/mock_volume_manager.js';
+import {FakeEntryImpl} from '../../../common/js/files_app_entry_types.js';
+import {VolumeManagerCommon} from '../../../common/js/volume_manager_types.js';
+import {FileListModel} from '../file_list_model.js';
+import {MetadataModel} from '../metadata/metadata_model.js';
+import {MockMetadataModel} from '../metadata/mock_metadata.js';
+
+import {A11yAnnounce} from './a11y_announce.js';
+import {FileListSelectionModel} from './file_list_selection_model.js';
+import {FileTable} from './file_table.js';
+import {FileTableList} from './file_table_list.js';
 
 /** @type {!MockVolumeManager} */
 let volumeManager;
 
-/** @type {!DirectoryModel} */
-let directoryModel;
-
 /** @type {!MetadataModel} */
 let metadataModel;
-
-/** @type {!importer.HistoryLoader} */
-let historyLoader;
 
 /** @type {!HTMLElement} */
 let element;
@@ -23,19 +30,14 @@ let element;
 let a11y;
 
 // Set up test components.
-function setUp() {
+export function setUp() {
   // Mock LoadTimeData strings.
-  window.loadTimeData.getString = id => id;
-  window.loadTimeData.data = {};
+  loadTimeData.getString = id => id;
+  loadTimeData.resetForTesting({});
 
   // Setup mock components.
   volumeManager = new MockVolumeManager();
   metadataModel = new MockMetadataModel({});
-  historyLoader = /** @type {!importer.HistoryLoader} */ ({
-    getHistory: () => {
-      return Promise.resolve();
-    },
-  });
 
   const a11Messages = [];
   a11y = /** @type {!A11yAnnounce} */ ({
@@ -103,11 +105,10 @@ function ctrlAndKey(keyName, code) {
 /**
  * Tests that the keyboard can be used to navigate the FileTableList.
  */
-function testMultipleSelectionWithKeyboard() {
+export function testMultipleSelectionWithKeyboard() {
   // Render the FileTable on |element|.
   const fullPage = true;
-  FileTable.decorate(
-      element, metadataModel, volumeManager, historyLoader, a11y, fullPage);
+  FileTable.decorate(element, metadataModel, volumeManager, a11y, fullPage);
 
   // Overwrite the selectionModel of the FileTable class (since events
   // would be handled by cr.ui.ListSelectionModel otherwise).
@@ -117,9 +118,9 @@ function testMultipleSelectionWithKeyboard() {
 
   // Add FileTableList file entries, then draw and focus the table list.
   const entries = [
-    new FakeEntry('entry1-label', VolumeManagerCommon.RootType.CROSTINI),
-    new FakeEntry('entry2-label', VolumeManagerCommon.RootType.CROSTINI),
-    new FakeEntry('entry3-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry1-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry2-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry3-label', VolumeManagerCommon.RootType.CROSTINI),
   ];
   const dataModel = new FileListModel(metadataModel);
   dataModel.splice(0, 0, ...entries);
@@ -234,11 +235,10 @@ function testMultipleSelectionWithKeyboard() {
   }
 }
 
-function testKeyboardOperations() {
+export function testKeyboardOperations() {
   // Render the FileTable on |element|.
   const fullPage = true;
-  FileTable.decorate(
-      element, metadataModel, volumeManager, historyLoader, a11y, fullPage);
+  FileTable.decorate(element, metadataModel, volumeManager, a11y, fullPage);
 
   // Overwrite the selectionModel of the FileTable class (since events
   // would be handled by cr.ui.ListSelectionModel otherwise).
@@ -248,9 +248,9 @@ function testKeyboardOperations() {
 
   // Add FileTableList file entries, then draw and focus the table list.
   const entries = [
-    new FakeEntry('entry1-label', VolumeManagerCommon.RootType.CROSTINI),
-    new FakeEntry('entry2-label', VolumeManagerCommon.RootType.CROSTINI),
-    new FakeEntry('entry3-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry1-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry2-label', VolumeManagerCommon.RootType.CROSTINI),
+    new FakeEntryImpl('entry3-label', VolumeManagerCommon.RootType.CROSTINI),
   ];
   const dataModel = new FileListModel(metadataModel);
   dataModel.splice(0, 0, ...entries);
@@ -311,4 +311,268 @@ function testKeyboardOperations() {
   tableList.dispatchEvent(new KeyboardEvent('keydown', key('ArrowRight')));
   assertEquals(1, sm.selectedIndexes.length);
   assertEquals(0, sm.selectedIndexes[0]);
+}
+
+
+// Force round number heights to simplify the math in the test.
+const ITEM_HEIGHT = 40;
+const GROUP_HEADING_HEIGHT = 20;
+
+/**
+ * @return {!FileTableList}
+ */
+function setupFileTableList() {
+  FileTable.decorate(element, metadataModel, volumeManager, a11y, true);
+
+  // Add 10 fake files.
+  const entries = [];
+  for (let i = 1; i <= 10; i++) {
+    entries.push(
+        new FakeEntryImpl(`${i}.txt`, VolumeManagerCommon.RootType.RECENT));
+  }
+  const dataModel = new FileListModel(metadataModel);
+  // Disable group by.
+  dataModel.shouldShowGroupHeading = () => false;
+  dataModel.splice(0, 0, ...entries);
+  const tableList = /** @type {FileTableList} */ (element.list);
+  tableList.dataModel = dataModel;
+  // Mock item size.
+  /** @suppress {accessControls} modify protected method in test. */
+  tableList.getDefaultItemHeight_ = () => ITEM_HEIGHT;
+  tableList.getGroupHeadingHeight_ = () => GROUP_HEADING_HEIGHT;
+  return tableList;
+}
+
+/**
+ * @param {!FileListModel} fileListModel
+ */
+function enableGroupByForDataModel(fileListModel) {
+  // Mock group by information.
+  fileListModel.shouldShowGroupHeading = () => true;
+  fileListModel.getGroupBySnapshot = () => {
+    return [
+      {startIndex: 0, endIndex: 1, label: 'today', group: 'today'},
+      {startIndex: 2, endIndex: 2, label: 'yesterday', group: 'yesterday'},
+      {
+        startIndex: 3,
+        endIndex: 4,
+        label: 'earlier_this_week',
+        group: 'earlier_this_week',
+      },
+      {
+        startIndex: 5,
+        endIndex: 6,
+        label: 'earlier_this_month',
+        group: 'earlier_this_month',
+      },
+      {
+        startIndex: 7,
+        endIndex: 8,
+        label: 'earlier_this_year',
+        group: 'earlier_this_year',
+      },
+      {startIndex: 9, endIndex: 9, label: 'older', group: 'older'},
+    ];
+  };
+}
+
+export function testGetItemTop() {
+  const tableList = setupFileTableList();
+  // No group heading, so only the item height is used.
+  for (let i = 0; i < tableList.dataModel.length; i++) {
+    assertEquals(tableList.getItemTop(i), i * ITEM_HEIGHT);
+  }
+
+  // Enable group by.
+  enableGroupByForDataModel(tableList.dataModel);
+  // Item 0 is in group #1/today, nothing is above it.
+  assertEquals(tableList.getItemTop(0), 0);
+  // Item 1 is in group #1/today, 1 item above + 1 header.
+  assertEquals(tableList.getItemTop(1), 1 * ITEM_HEIGHT + GROUP_HEADING_HEIGHT);
+  // Item 2 is in group #2/yesterday, 2 items above + 1 header.
+  assertEquals(tableList.getItemTop(2), 2 * ITEM_HEIGHT + GROUP_HEADING_HEIGHT);
+  // Item 3 is in group #3/earlier_this_week, 3 items above + 2 headers.
+  assertEquals(
+      tableList.getItemTop(3), 3 * ITEM_HEIGHT + 2 * GROUP_HEADING_HEIGHT);
+  // Item 4 is in group #3/earlier_this_week, 4 items above + 3 headers.
+  assertEquals(
+      tableList.getItemTop(4), 4 * ITEM_HEIGHT + 3 * GROUP_HEADING_HEIGHT);
+  // Item 5 is in group #4/earlier_this_month, 5 items above + 3 headers.
+  assertEquals(
+      tableList.getItemTop(5), 5 * ITEM_HEIGHT + 3 * GROUP_HEADING_HEIGHT);
+  // Item 6 is in group #4/earlier_this_month, 6 items above + 4 headers.
+  assertEquals(
+      tableList.getItemTop(6), 6 * ITEM_HEIGHT + 4 * GROUP_HEADING_HEIGHT);
+  // Item 7 is in group #5/earlier_this_year, 7 items above + 4 headers.
+  assertEquals(
+      tableList.getItemTop(7), 7 * ITEM_HEIGHT + 4 * GROUP_HEADING_HEIGHT);
+  // Item 8 is in group #5/earlier_this_year, 8 items above + 5 headers.
+  assertEquals(
+      tableList.getItemTop(8), 8 * ITEM_HEIGHT + 5 * GROUP_HEADING_HEIGHT);
+  // Item 9 is in group #6/older, 9 items above + 5 headers.
+  assertEquals(
+      tableList.getItemTop(9), 9 * ITEM_HEIGHT + 5 * GROUP_HEADING_HEIGHT);
+}
+
+export function testGetAfterFillerHeight() {
+  const tableList = setupFileTableList();
+
+  // No group heading, so only the item height is used.
+  const totalLength = tableList.dataModel.length;
+  for (let i = 0; i < totalLength; i++) {
+    assertEquals(
+        tableList.getAfterFillerHeight(i),
+        i === 0 ? 1 : (totalLength - i) * ITEM_HEIGHT);
+  }
+
+  // Enable group by.
+  enableGroupByForDataModel(tableList.dataModel);
+  // A special case handled in file_table.js.
+  assertEquals(tableList.getAfterFillerHeight(0), 1);
+  // Item 1 is in group #1/today, 9 items below + 5 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(1),
+      9 * ITEM_HEIGHT + 5 * GROUP_HEADING_HEIGHT);
+  // Item 1 is in group #2/yesterday, 8 items below + 4 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(2),
+      8 * ITEM_HEIGHT + 4 * GROUP_HEADING_HEIGHT);
+  // Item 1 is in group #3/earlier_this_week, 7 items below + 3 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(3),
+      7 * ITEM_HEIGHT + 3 * GROUP_HEADING_HEIGHT);
+  // Item 1 is in group #3/earlier_this_week, 6 items below + 3 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(4),
+      6 * ITEM_HEIGHT + 3 * GROUP_HEADING_HEIGHT);
+  // Item 1 is in group #4/earlier_this_month, 5 items below + 2 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(5),
+      5 * ITEM_HEIGHT + 2 * GROUP_HEADING_HEIGHT);
+  // Item 1 is in group #4/earlier_this_month, 4 items below + 2 headers.
+  assertEquals(
+      tableList.getAfterFillerHeight(6),
+      4 * ITEM_HEIGHT + 2 * GROUP_HEADING_HEIGHT);
+  // Item 7 is in group #5/earlier_this_year, 3 items below + 1 header.
+  assertEquals(
+      tableList.getAfterFillerHeight(7),
+      3 * ITEM_HEIGHT + 1 * GROUP_HEADING_HEIGHT);
+  // Item 8 is in group #5/earlier_this_year, 2 items below + 1 header.
+  assertEquals(
+      tableList.getAfterFillerHeight(8),
+      2 * ITEM_HEIGHT + 1 * GROUP_HEADING_HEIGHT);
+  // Item 9 is in group #6/older, 1 item below.
+  assertEquals(tableList.getAfterFillerHeight(9), 1 * ITEM_HEIGHT);
+}
+
+/**
+ * @suppress {accessControls} test the previate method here.
+ */
+export function testGetIndexForListOffset() {
+  const tableList = setupFileTableList();
+
+  // No group heading.
+  // index      height      total height
+  // -----------------------------------
+  // Item 0       40            40
+  // Item 1       40            80
+  // Item 2       40            120
+  // Item 3       40            160
+  // Item 4       40            200
+  // Item 5       40            240
+  // Item 6       40            280
+  // Item 7       40            320
+  // Item 8       40            360
+  // Item 9       40            400
+  assertEquals(tableList.getIndexForListOffset_(0), 0);
+  assertEquals(tableList.getIndexForListOffset_(40), 1);
+  assertEquals(tableList.getIndexForListOffset_(100), 2);
+  assertEquals(tableList.getIndexForListOffset_(200), 5);
+  assertEquals(tableList.getIndexForListOffset_(240), 6);
+  assertEquals(tableList.getIndexForListOffset_(300), 7);
+  // Note: The returned index could be an invalid array index, which is
+  // expected e.g. 10 here is larger than the largest index 9 in the array.
+  assertEquals(tableList.getIndexForListOffset_(400), 10);
+
+  // Enable group by.
+  enableGroupByForDataModel(tableList.dataModel);
+  // index      height      total height
+  // -----------------------------------
+  // Heading 1    20            20
+  // Item 0       40            60
+  // Item 1       40            100
+  // Heading 2    20            120
+  // Item 2       40            160
+  // Heading 3    20            180
+  // Item 3       40            220
+  // Item 4       40            260
+  // Heading 4    20            280
+  // Item 5       40            320
+  // Item 6       40            360
+  // Heading 5    20            380
+  // Item 7       40            420
+  // Item 8       40            460
+  // Heading 6    20            480
+  // Item 9       40            520
+  assertEquals(tableList.getIndexForListOffset_(0), 0);
+  assertEquals(tableList.getIndexForListOffset_(40), 0);
+  assertEquals(tableList.getIndexForListOffset_(100), 2);
+  assertEquals(tableList.getIndexForListOffset_(200), 3);
+  assertEquals(tableList.getIndexForListOffset_(240), 4);
+  assertEquals(tableList.getIndexForListOffset_(300), 5);
+  assertEquals(tableList.getIndexForListOffset_(400), 7);
+  assertEquals(tableList.getIndexForListOffset_(500), 9);
+}
+
+export function testGetHitElements() {
+  const tableList = setupFileTableList();
+
+  // No group heading.
+  // index      height      total height
+  // -----------------------------------
+  // Item 0       40            40
+  // Item 1       40            80
+  // Item 2       40            120
+  // Item 3       40            160
+  // Item 4       40            200
+  // Item 5       40            240
+  // Item 6       40            280
+  // Item 7       40            320
+  // Item 8       40            360
+  // Item 9       40            400
+
+  // Passing -1 for 1st/3rd parameter because we don't care the x coordinates
+  // and the width of the drag selection.
+  assertArrayEquals(tableList.getHitElements(-1, 10), [0]);
+  assertArrayEquals(
+      tableList.getHitElements(-1, 50, -1, 200), [1, 2, 3, 4, 5, 6]);
+  assertArrayEquals(tableList.getHitElements(-1, 240, -1, 100), [5, 6, 7, 8]);
+
+  // Enable group by.
+  enableGroupByForDataModel(tableList.dataModel);
+  // index      height      total height
+  // -----------------------------------
+  // Heading 1    20            20
+  // Item 0       40            60
+  // Item 1       40            100
+  // Heading 2    20            120
+  // Item 2       40            160
+  // Heading 3    20            180
+  // Item 3       40            220
+  // Item 4       40            260
+  // Heading 4    20            280
+  // Item 5       40            320
+  // Item 6       40            360
+  // Heading 5    20            380
+  // Item 7       40            420
+  // Item 8       40            460
+  // Heading 6    20            480
+  // Item 9       40            520
+
+  // Passing -1 for 1st/3rd parameter because we don't care the x coordinates
+  // and the width of the drag selection.
+  assertArrayEquals(tableList.getHitElements(-1, 10), []);
+  assertArrayEquals(tableList.getHitElements(-1, 40), [0]);
+  assertArrayEquals(tableList.getHitElements(-1, 50, -1, 200), [0, 1, 2, 3, 4]);
+  assertArrayEquals(tableList.getHitElements(-1, 220, -1, 100), [3, 4, 5]);
 }

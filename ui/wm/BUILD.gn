@@ -1,12 +1,15 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
-jumbo_component("wm") {
+assert(use_aura)
+
+component("wm") {
+  output_name = "ui_wm"
   sources = [
     "core/accelerator_delegate.h",
     "core/accelerator_filter.cc",
@@ -19,8 +22,16 @@ jumbo_component("wm") {
     "core/compound_event_filter.h",
     "core/coordinate_conversion.cc",
     "core/coordinate_conversion.h",
+    "core/cursor_loader.cc",
+    "core/cursor_loader.h",
+    "core/cursor_lookup.cc",
+    "core/cursor_lookup.h",
     "core/cursor_manager.cc",
     "core/cursor_manager.h",
+    "core/cursor_util.cc",
+    "core/cursor_util.h",
+    "core/cursors_aura.cc",
+    "core/cursors_aura.h",
     "core/default_activation_client.cc",
     "core/default_activation_client.h",
     "core/default_screen_position_client.cc",
@@ -54,7 +65,6 @@ jumbo_component("wm") {
     "core/window_properties.h",
     "core/window_util.cc",
     "core/window_util.h",
-    "core/wm_core_export.h",
     "core/wm_core_switches.cc",
     "core/wm_core_switches.h",
     "core/wm_state.cc",
@@ -62,34 +72,33 @@ jumbo_component("wm") {
   ]
 
   configs += [ "//build/config:precompiled_headers" ]
-  defines = [ "WM_CORE_IMPLEMENTATION" ]
+  defines = [ "IS_UI_WM_IMPL" ]
 
-  deps = [
+  public_deps = [
     "//base",
-    "//skia",
+    "//build:chromeos_buildflags",
     "//ui/aura",
     "//ui/base",
-    "//ui/base/ime",
+    "//ui/base/cursor",
+    "//ui/base/cursor/mojom:cursor_type",
     "//ui/compositor",
-    "//ui/compositor_extra",
     "//ui/display",
     "//ui/events",
-    "//ui/events:events_base",
-    "//ui/events/devices",
-    "//ui/events/platform",
     "//ui/gfx",
-    "//ui/gfx/animation",
     "//ui/gfx/geometry",
-    "//ui/resources",
     "//ui/wm/public",
   ]
 
-  if (use_x11) {
-    configs += [ "//build/config/linux:x11" ]
-    deps += [ "//ui/events/devices/x11" ]
-  }
+  deps = [
+    "//skia",
+    "//ui/base/ime",
+    "//ui/compositor_extra",
+    "//ui/events/platform",
+    "//ui/gfx/animation",
+    "//ui/resources",
+  ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [
       "core/ime_util_chromeos.cc",
       "core/ime_util_chromeos.h",
@@ -97,14 +106,21 @@ jumbo_component("wm") {
   }
 }
 
-jumbo_static_library("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "test/testing_cursor_client_observer.cc",
     "test/testing_cursor_client_observer.h",
-    "test/wm_test_helper.cc",
-    "test/wm_test_helper.h",
   ]
+
+  if (is_chromeos_ash) {
+    sources += [
+      "test/wm_test_helper.cc",
+      "test/wm_test_helper.h",
+    ]
+  }
+
+  public_deps = [ "//ui/base/cursor" ]
 
   deps = [
     ":wm",
@@ -120,11 +136,15 @@ jumbo_static_library("test_support") {
 }
 
 test("wm_unittests") {
+  use_xvfb = use_xvfb_in_this_config
+
   sources = [
     "core/capture_controller_unittest.cc",
     "core/compound_event_filter_unittest.cc",
     "core/coordinate_conversion_unittest.cc",
+    "core/cursor_loader_unittest.cc",
     "core/cursor_manager_unittest.cc",
+    "core/cursor_util_unittest.cc",
     "core/focus_controller_unittest.cc",
     "core/shadow_controller_unittest.cc",
     "core/transient_window_manager_unittest.cc",
@@ -140,17 +160,22 @@ test("wm_unittests") {
     ":wm",
     "//base",
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
     "//mojo/core/embedder",
     "//skia",
     "//testing/gtest",
     "//ui/aura:test_support",
+    "//ui/base",
     "//ui/base:test_support",
+    "//ui/base/cursor",
+    "//ui/base/cursor/mojom:cursor_type",
     "//ui/base/ime",
     "//ui/compositor:test_support",
     "//ui/compositor_extra",
     "//ui/events:test_support",
     "//ui/events/platform",
     "//ui/gfx",
+    "//ui/gfx:gfx_skia",
     "//ui/gfx/animation",
     "//ui/gfx/geometry",
     "//ui/gl:test_support",
@@ -159,11 +184,17 @@ test("wm_unittests") {
     "//ui/wm/public",
   ]
 
-  data_deps = [
-    "//ui/resources:ui_test_pak_data",
-  ]
+  data_deps = [ "//ui/resources:ui_test_pak_data" ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [ "core/ime_util_chromeos_unittest.cc" ]
+  }
+
+  if (is_fuchsia) {
+    use_cfv1 = false
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/present_view.shard.test-cml",
+      "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
+    ]
   }
 }

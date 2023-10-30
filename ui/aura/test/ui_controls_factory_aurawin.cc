@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/callback.h"
+#include "base/check.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/aura/test/ui_controls_factory_aura.h"
 #include "ui/aura/window.h"
@@ -24,11 +24,13 @@ using ui_controls::MouseButton;
 using ui_controls::RIGHT;
 using ui_controls::UIControlsAura;
 using ui_controls::UP;
-using namespace ui_controls::internal;
 
 class UIControlsWin : public UIControlsAura {
  public:
   UIControlsWin() {}
+
+  UIControlsWin(const UIControlsWin&) = delete;
+  UIControlsWin& operator=(const UIControlsWin&) = delete;
 
   // UIControlsAura overrides:
   bool SendKeyPress(gfx::NativeWindow native_window,
@@ -40,8 +42,8 @@ class UIControlsWin : public UIControlsAura {
     DCHECK(!command);  // No command key on Aura
     HWND window =
         native_window->GetHost()->GetAcceleratedWidget();
-    return SendKeyPressImpl(window, key, control, shift, alt,
-                            base::OnceClosure());
+    return ui_controls::internal::SendKeyPressImpl(window, key, control, shift,
+                                                   alt, base::OnceClosure());
   }
   bool SendKeyPressNotifyWhenDone(gfx::NativeWindow native_window,
                                   ui::KeyboardCode key,
@@ -53,38 +55,38 @@ class UIControlsWin : public UIControlsAura {
     DCHECK(!command);  // No command key on Aura
     HWND window =
         native_window->GetHost()->GetAcceleratedWidget();
-    return SendKeyPressImpl(window, key, control, shift, alt, std::move(task));
+    return ui_controls::internal::SendKeyPressImpl(window, key, control, shift,
+                                                   alt, std::move(task));
   }
-  bool SendMouseMove(long screen_x, long screen_y) override {
-    return SendMouseMoveImpl(screen_x, screen_y, base::OnceClosure());
+  bool SendMouseMove(int screen_x, int screen_y) override {
+    return ui_controls::internal::SendMouseMoveImpl(screen_x, screen_y,
+                                                    base::OnceClosure());
   }
-  bool SendMouseMoveNotifyWhenDone(long screen_x,
-                                   long screen_y,
+  bool SendMouseMoveNotifyWhenDone(int screen_x,
+                                   int screen_y,
                                    base::OnceClosure task) override {
-    return SendMouseMoveImpl(screen_x, screen_y, std::move(task));
+    return ui_controls::internal::SendMouseMoveImpl(screen_x, screen_y,
+                                                    std::move(task));
   }
   bool SendMouseEvents(MouseButton type,
                        int button_state,
                        int accelerator_state) override {
-    return SendMouseEventsImpl(type, button_state, base::OnceClosure(),
-                               accelerator_state);
+    return ui_controls::internal::SendMouseEventsImpl(
+        type, button_state, base::OnceClosure(), accelerator_state);
   }
   bool SendMouseEventsNotifyWhenDone(MouseButton type,
                                      int button_state,
                                      base::OnceClosure task,
                                      int accelerator_state) override {
-    return SendMouseEventsImpl(type, button_state, std::move(task),
-                               accelerator_state);
+    return ui_controls::internal::SendMouseEventsImpl(
+        type, button_state, std::move(task), accelerator_state);
   }
   bool SendMouseClick(MouseButton type) override {
     return SendMouseEvents(type, UP | DOWN, ui_controls::kNoAccelerator);
   }
   bool SendTouchEvents(int action, int num, int x, int y) override {
-    return SendTouchEventsImpl(action, num, x, y);
+    return ui_controls::internal::SendTouchEventsImpl(action, num, x, y);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UIControlsWin);
 };
 
 }  // namespace

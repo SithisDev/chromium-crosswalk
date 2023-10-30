@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,17 @@ public interface Resource {
     Bitmap getBitmap();
 
     /**
-     * @return The size of the bitmap.
+     * Called when {@link getBitmap} returns null, if this returns true we will inform the CC layer
+     * to remove this resource as its no longer correct. This can be used when the Bitmap is
+     * produced asynchronously and something about the previous bitmap (like layout size) has
+     * changed and the CC layer should not fall back on the stale bitmap.
+     */
+    boolean shouldRemoveResourceOnNullBitmap();
+
+    /**
+     * Returns the size the bitmap should be drawn to, but not necessarily the dimensions or number
+     * if pixels in the bitmap. When down sampling, this size will be larger than the bitmap, and
+     * the expectation is the bitmap will then be interpolated over this area.
      */
     Rect getBitmapSize();
 

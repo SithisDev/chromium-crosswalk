@@ -1,8 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/test/views_test_base.h"
@@ -15,27 +15,31 @@ namespace views {
 class ScopedTestWidget {
  public:
   explicit ScopedTestWidget(internal::NativeWidgetPrivate* native_widget)
-      : native_widget_(native_widget) {
-  }
+      : native_widget_(native_widget) {}
+
+  ScopedTestWidget(const ScopedTestWidget&) = delete;
+  ScopedTestWidget& operator=(const ScopedTestWidget&) = delete;
+
   ~ScopedTestWidget() {
     // |CloseNow| deletes both |native_widget_| and its associated
     // |Widget|.
     native_widget_->GetWidget()->CloseNow();
   }
 
-  internal::NativeWidgetPrivate* operator->() const  {
-    return native_widget_;
-  }
+  internal::NativeWidgetPrivate* operator->() const { return native_widget_; }
   internal::NativeWidgetPrivate* get() const { return native_widget_; }
 
  private:
-  internal::NativeWidgetPrivate* native_widget_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedTestWidget);
+  raw_ptr<internal::NativeWidgetPrivate> native_widget_;
 };
 
 class NativeWidgetTest : public ViewsTestBase {
  public:
   NativeWidgetTest() = default;
+
+  NativeWidgetTest(const NativeWidgetTest&) = delete;
+  NativeWidgetTest& operator=(const NativeWidgetTest&) = delete;
+
   ~NativeWidgetTest() override = default;
 
   internal::NativeWidgetPrivate* CreateNativeWidgetOfType(
@@ -44,7 +48,7 @@ class NativeWidgetTest : public ViewsTestBase {
     Widget::InitParams params = CreateParams(type);
     params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
     params.bounds = gfx::Rect(10, 10, 200, 200);
-    widget->Init(params);
+    widget->Init(std::move(params));
     return widget->native_widget_private();
   }
 
@@ -55,9 +59,6 @@ class NativeWidgetTest : public ViewsTestBase {
   internal::NativeWidgetPrivate* CreateNativeSubWidget() {
     return CreateNativeWidgetOfType(Widget::InitParams::TYPE_CONTROL);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NativeWidgetTest);
 };
 
 TEST_F(NativeWidgetTest, CreateNativeWidget) {
@@ -87,8 +88,8 @@ TEST_F(NativeWidgetTest, GetTopLevelNativeWidget2) {
     ScopedTestWidget toplevel_widget(CreateNativeWidget());
 
     // |toplevel_widget| owns |child_host|.
-    NativeViewHost* child_host = new NativeViewHost;
-    toplevel_widget->GetWidget()->SetContentsView(child_host);
+    NativeViewHost* child_host = toplevel_widget->GetWidget()->SetContentsView(
+        std::make_unique<NativeViewHost>());
 
     // |child_host| hosts |child_widget|'s NativeView.
     child_host->Attach(child_widget->GetWidget()->GetNativeView());

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 
 namespace ui {
 
-// Test to ensure closed caption styling from system settings is used on
-// Windows 10.
+// Test to ensure closed caption styling from system settings can be obtained
+// (we obtain a CaptionStyle) on Windows 10.
 TEST(CaptionStyleWinTest, TestWinCaptionStyle) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(features::kSystemCaptionStyle);
@@ -22,13 +22,18 @@ TEST(CaptionStyleWinTest, TestWinCaptionStyle) {
     base::win::ScopedCOMInitializer com_initializer;
     ASSERT_TRUE(com_initializer.Succeeded());
 
-    base::Optional<ui::CaptionStyle> caption_style =
+    absl::optional<ui::CaptionStyle> caption_style =
         ui::CaptionStyle::FromSystemSettings();
-    // Other caption style properties can be empty and shouldn't be checked.
+    // On Windows out of the box, all caption style properties are set to
+    // Default. In which case, each of these should be empty.
     ASSERT_TRUE(caption_style.has_value());
-    EXPECT_TRUE(!caption_style->background_color.empty());
-    EXPECT_TRUE(!caption_style->text_color.empty());
-    EXPECT_TRUE(!caption_style->font_variant.empty());
+    EXPECT_TRUE(caption_style->background_color.empty());
+    EXPECT_TRUE(caption_style->font_family.empty());
+    EXPECT_TRUE(caption_style->font_variant.empty());
+    EXPECT_TRUE(caption_style->text_color.empty());
+    EXPECT_TRUE(caption_style->text_shadow.empty());
+    EXPECT_TRUE(caption_style->text_size.empty());
+    EXPECT_TRUE(caption_style->window_color.empty());
   }
 }
 

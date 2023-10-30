@@ -1,21 +1,37 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {assert} from 'chrome://resources/js/assert.m.js';
+
+import {util} from '../../../common/js/util.js';
+import {VolumeManagerCommon} from '../../../common/js/volume_manager_types.js';
+import {VolumeManager} from '../../../externs/volume_manager.js';
+
+import {ContentMetadataProvider} from './content_metadata_provider.js';
+import {DlpMetadataProvider} from './dlp_metadata_provider.js';
+import {ExternalMetadataProvider} from './external_metadata_provider.js';
+import {FileSystemMetadataProvider} from './file_system_metadata_provider.js';
+import {MetadataItem} from './metadata_item.js';
+import {MetadataProvider} from './metadata_provider.js';
+import {MetadataRequest} from './metadata_request.js';
+
 /** @final */
-class MultiMetadataProvider extends MetadataProvider {
+export class MultiMetadataProvider extends MetadataProvider {
   /**
    * @param {!FileSystemMetadataProvider} fileSystemMetadataProvider
    * @param {!ExternalMetadataProvider} externalMetadataProvider
    * @param {!ContentMetadataProvider} contentMetadataProvider
+   * @param {!DlpMetadataProvider} dlpMetadataProvider
    * @param {!VolumeManager} volumeManager
    */
   constructor(
       fileSystemMetadataProvider, externalMetadataProvider,
-      contentMetadataProvider, volumeManager) {
+      contentMetadataProvider, dlpMetadataProvider, volumeManager) {
     super(FileSystemMetadataProvider.PROPERTY_NAMES
               .concat(ExternalMetadataProvider.PROPERTY_NAMES)
-              .concat(ContentMetadataProvider.PROPERTY_NAMES));
+              .concat(ContentMetadataProvider.PROPERTY_NAMES)
+              .concat(DlpMetadataProvider.PROPERTY_NAMES));
 
     /** @private @const {!FileSystemMetadataProvider} */
     this.fileSystemMetadataProvider_ = fileSystemMetadataProvider;
@@ -25,6 +41,9 @@ class MultiMetadataProvider extends MetadataProvider {
 
     /** @private @const {!ContentMetadataProvider} */
     this.contentMetadataProvider_ = contentMetadataProvider;
+
+    /** @private @const {!DlpMetadataProvider} */
+    this.dlpMetadataProvider_ = dlpMetadataProvider;
 
     /** @private @const {!VolumeManager} */
     this.volumeManager_ = volumeManager;
@@ -40,12 +59,14 @@ class MultiMetadataProvider extends MetadataProvider {
     const externalRequests = [];
     const contentRequests = [];
     const fallbackContentRequests = [];
+    const dlpRequests = [];
     requests.forEach(request => {
       // Group property names.
       const fileSystemPropertyNames = [];
       const externalPropertyNames = [];
       const contentPropertyNames = [];
       const fallbackContentPropertyNames = [];
+      const dlpPropertyNames = [];
       for (let i = 0; i < request.names.length; i++) {
         const name = request.names[i];
         const isFileSystemProperty =
@@ -54,7 +75,11 @@ class MultiMetadataProvider extends MetadataProvider {
             ExternalMetadataProvider.PROPERTY_NAMES.indexOf(name) !== -1;
         const isContentProperty =
             ContentMetadataProvider.PROPERTY_NAMES.indexOf(name) !== -1;
-        assert(isFileSystemProperty || isExternalProperty || isContentProperty);
+        const isDlpProperty =
+            DlpMetadataProvider.PROPERTY_NAMES.indexOf(name) !== -1;
+        assert(
+            isFileSystemProperty || isExternalProperty || isContentProperty ||
+            isDlpProperty);
         assert(!(isFileSystemProperty && isContentProperty));
         // If the property can be obtained both from ExternalProvider and from
         // ContentProvider, we can obtain the property from ExternalProvider
@@ -75,6 +100,9 @@ class MultiMetadataProvider extends MetadataProvider {
         if (isContentProperty) {
           contentPropertyNames.push(name);
         }
+        if (isDlpProperty) {
+          dlpPropertyNames.push(name);
+        }
       }
       const volumeInfo = this.volumeManager_.getVolumeInfo(request.entry);
       const addRequests = (list, names) => {
@@ -82,7 +110,7 @@ class MultiMetadataProvider extends MetadataProvider {
           list.push(new MetadataRequest(request.entry, names));
         }
       };
-      if (volumeInfo &&
+      if (volumeInfo && !util.isTrashEntry(request.entry) &&
           (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.DRIVE ||
            volumeInfo.volumeType === VolumeManagerCommon.VolumeType.PROVIDED)) {
         // Because properties can be out of sync just after sync completion
@@ -99,10 +127,13 @@ class MultiMetadataProvider extends MetadataProvider {
           volumeInfo &&
           volumeInfo.volumeType ===
               VolumeManagerCommon.VolumeType.DOCUMENTS_PROVIDER) {
-        // We need to discard content requests when using a documents provider
-        // since the content sniffing code can't resolve the file path in the
-        // MediaGallery API. See crbug.com/942417
-        addRequests(fileSystemRequests, fileSystemPropertyNames);
+        // When using a documents provider, we need to discard:
+        // - contentRequests: since the content sniffing code
+        //   can't resolve the file path in the MediaGallery API. See
+        //   crbug.com/942417
+        // - fileSystemRequests: because it does not correctly handle unknown
+        //   file size, which DocumentsProvider files may report (all filesystem
+        //   request fields are retrieved using external requests instead).
         addRequests(
             externalRequests,
             MultiMetadataProvider.DOCUMENTS_PROVIDER_EXTERNAL_PROPERTY_NAMES);
@@ -112,6 +143,7 @@ class MultiMetadataProvider extends MetadataProvider {
             contentRequests,
             contentPropertyNames.concat(fallbackContentPropertyNames));
       }
+      addRequests(dlpRequests, dlpPropertyNames);
     });
 
     const get = (provider, inRequests) => {
@@ -140,6 +172,7 @@ class MultiMetadataProvider extends MetadataProvider {
             return dirtyMap[request.entry.toURL()];
           }));
     });
+    const dlpPromise = get(this.dlpMetadataProvider_, dlpRequests);
 
     // Merge results.
     return Promise
@@ -148,6 +181,7 @@ class MultiMetadataProvider extends MetadataProvider {
           externalPromise,
           contentPromise,
           fallbackContentPromise,
+          dlpPromise,
         ])
         .then(resultsList => {
           const integratedResults = {};
@@ -190,4 +224,6 @@ MultiMetadataProvider.DOCUMENTS_PROVIDER_EXTERNAL_PROPERTY_NAMES = [
   'canDelete',
   'canRename',
   'canAddChildren',
+  'modificationTime',
+  'size',
 ];

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,6 +46,11 @@ public class StaticResource implements Resource {
         Bitmap bitmap = mBitmap;
         mBitmap = null;
         return bitmap;
+    }
+
+    @Override
+    public boolean shouldRemoveResourceOnNullBitmap() {
+        return false;
     }
 
     @Override

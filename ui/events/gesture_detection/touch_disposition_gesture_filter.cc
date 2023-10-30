@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <stddef.h>
 
 #include "base/auto_reset.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "ui/events/gesture_event_details.h"
 
 namespace ui {
@@ -78,6 +79,8 @@ DispositionHandlingInfo GetDispositionHandlingInfo(EventType type) {
     case ET_GESTURE_SHOW_PRESS:
       return Info(RT_START);
     case ET_GESTURE_LONG_PRESS:
+      return Info(RT_START);
+    case ET_GESTURE_SHORT_PRESS:
       return Info(RT_START);
     case ET_GESTURE_LONG_TAP:
       return Info(RT_START | RT_CURRENT);
@@ -193,7 +196,7 @@ TouchDispositionGestureFilter::OnGesturePacket(
 void TouchDispositionGestureFilter::OnTouchEventAck(
     uint32_t unique_touch_event_id,
     bool event_consumed,
-    bool is_source_touch_event_set_non_blocking) {
+    bool is_source_touch_event_set_blocking) {
   // Spurious asynchronous acks should not trigger a crash.
   if (IsEmpty() || (Head().empty() && sequences_.size() == 1))
     return;
@@ -206,13 +209,13 @@ void TouchDispositionGestureFilter::OnTouchEventAck(
   if (!Tail().empty() &&
       Tail().back().unique_touch_event_id() == unique_touch_event_id &&
       Tail().back().gesture_source() != GestureEventDataPacket::TOUCH_TIMEOUT) {
-    Tail().back().Ack(event_consumed, is_source_touch_event_set_non_blocking);
+    Tail().back().Ack(event_consumed, is_source_touch_event_set_blocking);
     if (sequences_.size() == 1 && Tail().size() == 1)
       SendAckedEvents();
   } else {
     DCHECK(!Head().empty());
     DCHECK_EQ(Head().front().unique_touch_event_id(), unique_touch_event_id);
-    Head().front().Ack(event_consumed, is_source_touch_event_set_non_blocking);
+    Head().front().Ack(event_consumed, is_source_touch_event_set_blocking);
     SendAckedEvents();
   }
 }
@@ -278,6 +281,10 @@ void TouchDispositionGestureFilter::FilterAndSendPacket(
     DCHECK_GE(gesture.details.type(), ET_GESTURE_TYPE_START);
     DCHECK_LE(gesture.details.type(), ET_GESTURE_TYPE_END);
     if (state_.Filter(gesture.details.type())) {
+      CancelTapIfNecessary(packet);
+      continue;
+    }
+    if (gesture.type() == ET_GESTURE_TAP_CANCEL) {
       CancelTapIfNecessary(packet);
       continue;
     }

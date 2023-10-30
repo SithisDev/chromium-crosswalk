@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #import <Cocoa/Cocoa.h>
 #include <vector>
 
+#include "base/component_export.h"
 #include "base/mac/scoped_nsobject.h"
-#include "ui/base/ui_base_export.h"
 
 @interface NSAccessibilityRemoteUIElement : NSObject
++ (void)setRemoteUIApp:(BOOL)flag;
 + (void)registerRemoteUIProcessIdentifier:(int)pid;
 + (NSData*)remoteTokenForLocalUIElement:(id)element;
 - (id)initWithRemoteToken:(NSData*)token;
@@ -23,7 +24,7 @@ namespace ui {
 
 // Helper functions to implement the above functions using std::vectors intsead
 // of NSData.
-class UI_BASE_EXPORT RemoteAccessibility {
+class COMPONENT_EXPORT(UI_BASE) RemoteAccessibility {
  public:
   static std::vector<uint8_t> GetTokenForLocalElement(id element);
   static base::scoped_nsobject<NSAccessibilityRemoteUIElement>

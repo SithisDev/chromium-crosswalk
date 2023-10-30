@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,12 +24,6 @@
 // so existing key values should not be changed.
 
 DOM_KEY_MAP_DECLARATION {
-
-#if defined(OS_ANDROID)
-#define DOM_KEY_MAP_ANDROID
-#include "ui/events/keycodes/dom/keycode_conversion_data_android_generated.inc"
-#undef DOM_KEY_MAP_ANDROID
-#endif
 
   // To avoid ambiguities, a small number of .key values that do have
   // standard names are encoded identical to corresponding Unicode characters;

@@ -1,11 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_NATIVE_THEME_NATIVE_THEME_AURA_H_
 #define UI_NATIVE_THEME_NATIVE_THEME_AURA_H_
 
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "ui/native_theme/native_theme_base.h"
 
@@ -18,68 +17,56 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
   friend class NativeThemeAuraTest;
   friend class base::NoDestructor<NativeThemeAura>;
 
-  explicit NativeThemeAura(bool use_overlay_scrollbars);
+  NativeThemeAura(bool use_overlay_scrollbars,
+                  bool should_only_use_dark_colors,
+                  ui::SystemTheme system_theme = ui::SystemTheme::kDefault);
+
+  NativeThemeAura(const NativeThemeAura&) = delete;
+  NativeThemeAura& operator=(const NativeThemeAura&) = delete;
+
   ~NativeThemeAura() override;
 
-  static NativeThemeAura* instance();
   static NativeThemeAura* web_instance();
 
+  // Overridden from NativeTheme:
+  SkColor FocusRingColorForBaseColor(SkColor base_color) const override;
+
   // NativeThemeBase:
-  SkColor GetSystemColor(ColorId color_id) const override;
   void PaintMenuPopupBackground(
       cc::PaintCanvas* canvas,
+      const ColorProvider* color_provider,
       const gfx::Size& size,
-      const MenuBackgroundExtraParams& menu_background) const override;
-  void PaintMenuItemBackground(
-      cc::PaintCanvas* canvas,
-      State state,
-      const gfx::Rect& rect,
-      const MenuItemExtraParams& menu_item) const override;
+      const MenuBackgroundExtraParams& menu_background,
+      ColorScheme color_scheme) const override;
+  void PaintMenuItemBackground(cc::PaintCanvas* canvas,
+                               const ColorProvider* color_provider,
+                               State state,
+                               const gfx::Rect& rect,
+                               const MenuItemExtraParams& menu_item,
+                               ColorScheme color_scheme) const override;
   void PaintArrowButton(cc::PaintCanvas* gc,
                         const gfx::Rect& rect,
                         Part direction,
-                        State state) const override;
+                        State state,
+                        ColorScheme color_scheme,
+                        const ScrollbarArrowExtraParams& arrow) const override;
   void PaintScrollbarTrack(cc::PaintCanvas* canvas,
                            Part part,
                            State state,
                            const ScrollbarTrackExtraParams& extra_params,
-                           const gfx::Rect& rect) const override;
+                           const gfx::Rect& rect,
+                           ColorScheme color_scheme) const override;
   void PaintScrollbarThumb(cc::PaintCanvas* canvas,
+                           const ColorProvider* color_provider,
                            Part part,
                            State state,
                            const gfx::Rect& rect,
-                           ScrollbarOverlayColorTheme theme) const override;
+                           ScrollbarOverlayColorTheme theme,
+                           ColorScheme color_scheme) const override;
   void PaintScrollbarCorner(cc::PaintCanvas* canvas,
                             State state,
-                            const gfx::Rect& rect) const override;
-  void PaintCheckbox(cc::PaintCanvas* canvas,
-                     State state,
-                     const gfx::Rect& rect,
-                     const ButtonExtraParams& button) const override;
-  void PaintRadio(cc::PaintCanvas* canvas,
-                  State state,
-                  const gfx::Rect& rect,
-                  const ButtonExtraParams& button) const override;
-  void PaintTextField(cc::PaintCanvas* canvas,
-                      State state,
-                      const gfx::Rect& rect,
-                      const TextFieldExtraParams& text) const override;
-  void PaintButton(cc::PaintCanvas* canvas,
-                   State state,
-                   const gfx::Rect& rect,
-                   const ButtonExtraParams& button) const override;
-  void PaintSliderTrack(cc::PaintCanvas* canvas,
-                        State state,
-                        const gfx::Rect& rect,
-                        const SliderExtraParams& slider) const override;
-  void PaintSliderThumb(cc::PaintCanvas* canvas,
-                        State state,
-                        const gfx::Rect& rect,
-                        const SliderExtraParams& slider) const override;
-  void PaintMenuList(cc::PaintCanvas* canvas,
-                     State state,
-                     const gfx::Rect& rect,
-                     const MenuListExtraParams& menu_list) const override;
+                            const gfx::Rect& rect,
+                            ColorScheme color_scheme) const override;
   gfx::Size GetPartSize(Part part,
                         State state,
                         const ExtraParams& extra) const override;
@@ -88,16 +75,15 @@ class NATIVE_THEME_EXPORT NativeThemeAura : public NativeThemeBase {
   gfx::Rect GetNinePatchAperture(Part part) const override;
 
  private:
-  // Paint the common parts of the checkboxes and radio buttons.
-  // borderRadius specifies how rounded the corners should be.
-  SkRect PaintCheckboxRadioCommon(cc::PaintCanvas* canvas,
-                                  State state,
-                                  const gfx::Rect& rect,
-                                  const SkScalar borderRadius) const;
+  static void DrawPartiallyRoundRect(cc::PaintCanvas* canvas,
+                                     const gfx::Rect& rect,
+                                     const SkScalar upper_left_radius,
+                                     const SkScalar upper_right_radius,
+                                     const SkScalar lower_right_radius,
+                                     const SkScalar lower_left_radius,
+                                     const cc::PaintFlags& flags);
 
   bool use_overlay_scrollbars_;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeThemeAura);
 };
 
 }  // namespace ui

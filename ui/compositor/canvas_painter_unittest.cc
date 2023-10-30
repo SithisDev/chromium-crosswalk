@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/compositor/canvas_painter.h"
 
-#include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/canvas.h"
@@ -36,6 +35,9 @@ void CheckPaintedShape(const SkBitmap& bitmap,
 class CanvasPainterTest : public ::testing::TestWithParam<float> {
  public:
   CanvasPainterTest() : device_scale_factor_(GetParam()) {}
+
+  CanvasPainterTest(const CanvasPainterTest&) = delete;
+  CanvasPainterTest& operator=(const CanvasPainterTest&) = delete;
 
   float device_scale_factor() const { return device_scale_factor_; }
 
@@ -71,8 +73,6 @@ class CanvasPainterTest : public ::testing::TestWithParam<float> {
 
  private:
   float device_scale_factor_;
-
-  DISALLOW_COPY_AND_ASSIGN(CanvasPainterTest);
 };
 
 TEST_P(CanvasPainterTest, Initialization) {
@@ -115,7 +115,7 @@ TEST_P(CanvasPainterTest, PaintPixelCanvasEnabled) {
   CheckPaintedShape(bitmap, shape_bounds, shape_color, device_scale_factor());
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          CanvasPainterTest,
                          ::testing::Values(1.f, 1.25f, 1.5f, 1.6f, 2.f, 2.25f));
 }  // namespace ui

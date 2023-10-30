@@ -1,114 +1,112 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * Empty folder controller.
- * @param {!EmptyFolder} emptyFolder Empty folder ui.
- * @param {!DirectoryModel} directoryModel Directory model.
- * @param {!FilesAlertDialog} alertDialog Alert dialog.
- * @constructor
- * @struct
- */
-function EmptyFolderController(emptyFolder, directoryModel, alertDialog) {
-  /**
-   * @private {!EmptyFolder}
-   */
-  this.emptyFolder_ = emptyFolder;
+import {assert} from 'chrome://resources/js/assert.m.js';
 
-  /**
-   * @private {!DirectoryModel}
-   */
-  this.directoryModel_ = directoryModel;
+import {str, util} from '../../common/js/util.js';
+import {FakeEntry} from '../../externs/files_app_entry_interfaces.js';
 
-  /**
-   * @private {!FilesAlertDialog}
-   */
-  this.alertDialog_ = alertDialog;
-
-  /**
-   * @private {!FileListModel}
-   */
-  this.dataModel_ = assert(this.directoryModel_.getFileList());
-
-  /**
-   * @private {boolean}
-   */
-  this.isScanning_ = false;
-
-  this.directoryModel_.addEventListener(
-      'scan-started', this.onScanStarted_.bind(this));
-  this.directoryModel_.addEventListener(
-      'scan-failed', this.onScanFailed_.bind(this));
-  this.directoryModel_.addEventListener(
-      'scan-cancelled', this.onScanFinished_.bind(this));
-  this.directoryModel_.addEventListener(
-      'scan-completed', this.onScanFinished_.bind(this));
-  this.directoryModel_.addEventListener(
-      'rescan-completed', this.onScanFinished_.bind(this));
-
-  this.dataModel_.addEventListener('splice', this.onSplice_.bind(this));
-}
+import {DirectoryModel} from './directory_model.js';
+import {FileListModel} from './file_list_model.js';
 
 /**
- * Handles splice event.
- * @private
+ * Empty folder controller which controls the empty folder element inside
+ * the file list container.
  */
-EmptyFolderController.prototype.onSplice_ = function() {
-  this.update_();
-};
+export class EmptyFolderController {
+  /**
+   * @param {!HTMLElement} emptyFolder Empty folder element.
+   * @param {!DirectoryModel} directoryModel Directory model.
+   * @param {!FakeEntry} recentEntry Entry represents Recent view.
+   */
+  constructor(emptyFolder, directoryModel, recentEntry) {
+    /**
+     * @private {!HTMLElement}
+     */
+    this.emptyFolder_ = emptyFolder;
 
-/**
- * Handles scan start.
- * @private
- */
-EmptyFolderController.prototype.onScanStarted_ = function() {
-  this.isScanning_ = true;
-  this.update_();
-};
+    /**
+     * @private {!DirectoryModel}
+     */
+    this.directoryModel_ = directoryModel;
 
-/**
- * Handles scan fail.
- * @param {Event} event Event may contain error field containing DOMError for
- *   alert.
- * @private
- */
-EmptyFolderController.prototype.onScanFailed_ = function(event) {
-  this.isScanning_ = false;
-  // Show alert for crostini connection error.
-  if (event.error.name == DirectoryModel.CROSTINI_CONNECT_ERR) {
-    this.alertDialog_.showWithTitle(
-        str('ERROR_LINUX_FILES_CONNECTION'), event.error.message);
+    /**
+     * @private {!FakeEntry}
+     * @const
+     */
+    this.recentEntry_ = recentEntry;
+
+    /**
+     * @private {!HTMLElement}
+     */
+    this.label_ = util.queryRequiredElement('.label', emptyFolder);
+
+    /**
+     * @private {boolean}
+     */
+    this.isScanning_ = false;
+
+    this.directoryModel_.addEventListener(
+        'scan-started', this.onScanStarted_.bind(this));
+    this.directoryModel_.addEventListener(
+        'scan-failed', this.onScanFinished_.bind(this));
+    this.directoryModel_.addEventListener(
+        'scan-cancelled', this.onScanFinished_.bind(this));
+    this.directoryModel_.addEventListener(
+        'scan-completed', this.onScanFinished_.bind(this));
+    this.directoryModel_.addEventListener(
+        'rescan-completed', this.onScanFinished_.bind(this));
   }
-  this.update_();
-};
 
-/**
- * Handles scan finish.
- * @private
- */
-EmptyFolderController.prototype.onScanFinished_ = function() {
-  this.isScanning_ = false;
-  this.update_();
-};
+  /**
+   * Handles scan start.
+   * @private
+   */
+  onScanStarted_() {
+    this.isScanning_ = true;
+    this.updateUI_();
+  }
 
-/**
- * Updates visibility of empty folder UI.
- * @private
- */
-EmptyFolderController.prototype.update_ = function() {
-  if (!this.isScanning_ && this.dataModel_.length === 0) {
-    const query = this.directoryModel_.getLastSearchQuery();
-    let html = '';
-    if (query) {
-      html = strf('SEARCH_NO_MATCHING_FILES_HTML', util.htmlEscape(query));
-    } else {
-      html = str('EMPTY_FOLDER');
+  /**
+   * Handles scan finish.
+   * @private
+   */
+  onScanFinished_() {
+    this.isScanning_ = false;
+    this.updateUI_();
+  }
+
+  /**
+   * Updates visibility of empty folder UI.
+   * @private
+   */
+  updateUI_() {
+    const isRecent =
+        util.isRecentRootType(this.directoryModel_.getCurrentRootType());
+    const fileListModel = assert(this.directoryModel_.getFileList());
+    if (!isRecent || this.isScanning_ || fileListModel.length > 0) {
+      this.emptyFolder_.hidden = true;
+      this.label_.innerText = '';
+      return;
     }
 
-    this.emptyFolder_.setMessage(html);
-    this.emptyFolder_.show();
-  } else {
-    this.emptyFolder_.hide();
+    this.emptyFolder_.hidden = false;
+    switch (this.recentEntry_.recentFileType) {
+      case chrome.fileManagerPrivate.RecentFileType.AUDIO:
+        this.label_.innerText = str('RECENT_EMPTY_AUDIO_FOLDER');
+        break;
+      case chrome.fileManagerPrivate.RecentFileType.DOCUMENT:
+        this.label_.innerText = str('RECENT_EMPTY_DOCUMENTS_FOLDER');
+        break;
+      case chrome.fileManagerPrivate.RecentFileType.IMAGE:
+        this.label_.innerText = str('RECENT_EMPTY_IMAGES_FOLDER');
+        break;
+      case chrome.fileManagerPrivate.RecentFileType.VIDEO:
+        this.label_.innerText = str('RECENT_EMPTY_VIDEOS_FOLDER');
+        break;
+      default:
+        this.label_.innerText = str('RECENT_EMPTY_FOLDER');
+    }
   }
-};
+}

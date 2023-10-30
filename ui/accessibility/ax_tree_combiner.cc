@@ -1,9 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_combiner.h"
+
+#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_tree.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace ui {
@@ -15,6 +17,11 @@ AXTreeCombiner::~AXTreeCombiner() {
 }
 
 void AXTreeCombiner::AddTree(const AXTreeUpdate& tree, bool is_root) {
+  if (tree.tree_data.tree_id == AXTreeIDUnknown()) {
+    LOG(WARNING) << "Skipping AXTreeID because its tree ID is unknown";
+    return;
+  }
+
   trees_.push_back(tree);
   if (is_root) {
     DCHECK_EQ(root_tree_id_, AXTreeIDUnknown());
@@ -71,7 +78,7 @@ bool AXTreeCombiner::Combine() {
   return true;
 }
 
-int32_t AXTreeCombiner::MapId(AXTreeID tree_id, int32_t node_id) {
+AXNodeID AXTreeCombiner::MapId(AXTreeID tree_id, AXNodeID node_id) {
   auto tree_id_node_id = std::make_pair(tree_id, node_id);
   if (tree_id_node_id_map_[tree_id_node_id] == 0)
     tree_id_node_id_map_[tree_id_node_id] = next_id_++;

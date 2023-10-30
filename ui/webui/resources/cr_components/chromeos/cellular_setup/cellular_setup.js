@@ -1,101 +1,157 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('cellular_setup', function() {
-  /** @enum{string} */
-  const PageName = {
-    SIM_DETECT: 'sim-detect-page',
-    PROVISIONING: 'provisioning-page',
-    FINAL: 'final-page',
-  };
-
-  return {PageName: PageName};
-});
-
 /**
- * Root element for the cellular setup flow. This element interacts with the
- * CellularSetup service to carry out the activation flow. It contains
- * navigation buttons and sub-pages corresponding to each step of the flow.
+ * @fileoverview Root element for the cellular setup flow. This element wraps
+ * the psim setup flow, esim setup flow, and setup flow selection page.
  */
+import './button_bar.js';
+import './psim_flow_ui.js';
+import './esim_flow_ui.js';
+
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {I18nBehavior} from '../../../cr_elements/i18n_behavior.js';
+
+import {CellularSetupDelegate} from './cellular_setup_delegate.js';
+import {ButtonBarState, CellularSetupPageName} from './cellular_types.js';
+
 Polymer({
+  _template: html`{__html_template__}`,
   is: 'cellular-setup',
 
   behaviors: [I18nBehavior],
 
   properties: {
+    /** @type {!CellularSetupDelegate} */
+    delegate: Object,
+
     /**
-     * Element name of the current selected sub-page.
-     * @private {!cellular_setup.PageName}
+     * Title of the flow, shown at the top of the dialog. No title shown if the
+     * string is empty.
      */
-    selectedPageName_: {
+    flowTitle: {
       type: String,
-      value: cellular_setup.PageName.SIM_DETECT,
+      notify: true,
+      value: '',
+    },
+
+    /**
+     * Header for the flow, shown below the title. No header shown if the string
+     * is empty.
+     */
+    flowHeader: {
+      type: String,
+      notify: true,
+      value: '',
+    },
+
+    /**
+     * Name of the currently displayed sub-page.
+     * @private {!CellularSetupPageName|null}
+     */
+    currentPageName: String,
+
+    /**
+     * Current user selected setup flow page name.
+     * @private {!CellularSetupPageName|null}
+     */
+    selectedFlow_: {
+      type: String,
+      value: null,
+    },
+
+    /**
+     * Button bar button state.
+     * @private {!ButtonBarState}
+     */
+    buttonState_: {
+      type: Object,
       notify: true,
     },
 
     /**
-     * DOM Element for the current selected sub-page.
-     * @private {!SimDetectPageElement|!ProvisioningPageElement|
-     *           !FinalPageElement}
+     * DOM Element corresponding to the visible page.
+     *
+     * @private {!PsimFlowUiElement|!EsimFlowUiElement}
      */
-    selectedPage_: Object,
+    currentPage_: {
+      type: Object,
+      observer: 'onPageChange_',
+    },
 
     /**
-     * Whether error state should be shown for the current page.
-     * @private {boolean}
+     * Text for the button_bar's 'Forward' button.
+     * @private {string}
      */
-    showError_: {type: Boolean, value: false},
-
-    /**
-     * Whether try again should be shown in the button bar.
-     * @private {boolean}
-     */
-    showTryAgainButton_: {type: Boolean, value: false},
-
-    /**
-     * Whether finish button should be shown in the button bar.
-     * @private {boolean}
-     */
-    showFinishButton_: {type: Boolean, value: false},
-
-    /**
-     * Whether cancel button should be shown in the button bar.
-     * @private {boolean}
-     */
-    showCancelButton_: {type: Boolean, value: false}
+    forwardButtonLabel_: {
+      type: String,
+    },
   },
 
   listeners: {
     'backward-nav-requested': 'onBackwardNavRequested_',
     'retry-requested': 'onRetryRequested_',
-    'complete-flow-requested': 'onCompleteFlowRequested_',
+    'forward-nav-requested': 'onForwardNavRequested_',
+    'cancel-requested': 'onCancelRequested_',
+    'focus-default-button': 'onFocusDefaultButton_',
+  },
+
+
+  /** @override */
+  attached() {
+    // By default eSIM flow is selected.
+    if (!this.currentPageName) {
+      this.currentPageName = CellularSetupPageName.ESIM_FLOW_UI;
+    }
+  },
+
+  /** @private */
+  onPageChange_() {
+    if (this.currentPage_) {
+      this.flowTitle = '';
+      this.currentPage_.initSubflow();
+    }
+  },
+
+  /** @private */
+  onBackwardNavRequested_() {
+    this.currentPage_.navigateBackward();
+  },
+
+  onCancelRequested_() {
+    this.fire('exit-cellular-setup');
+  },
+
+  /** @private */
+  onRetryRequested_() {
+    // TODO(crbug.com/1093185): Add try again logic.
+  },
+
+  /** @private */
+  onForwardNavRequested_() {
+    this.currentPage_.navigateForward();
+  },
+
+  /** @private */
+  onFocusDefaultButton_() {
+    this.$.buttonBar.focusDefaultButton();
   },
 
   /**
-   * Provides an interface to the CellularSetup Mojo service.
-   * @private {?cellular_setup.MojoInterfaceProvider}
+   * @param {string} currentPage
+   * @private
    */
-  mojoInterfaceProvider_: null,
-
-  /** @override */
-  created: function() {
-    this.mojoInterfaceProvider_ =
-        cellular_setup.MojoInterfaceProviderImpl.getInstance();
+  shouldShowPsimFlow_(currentPage) {
+    return currentPage === CellularSetupPageName.PSIM_FLOW_UI;
   },
 
-  /** @private */
-  onBackwardNavRequested_: function() {
-    // TODO(azeemarshad): Add back navigation.
-  },
-
-  /** @private */
-  onRetryRequested_: function() {
-    // TODO(azeemarshad): Add try again logic.
-  },
-
-  /** @private */
-  onCompleteFlowRequested__: function() {
-    // TODO(azeemarshad): Add completion logic.
+  /**
+   * @param {string} currentPage
+   * @private
+   */
+  shouldShowEsimFlow_(currentPage) {
+    return currentPage === CellularSetupPageName.ESIM_FLOW_UI;
   },
 });

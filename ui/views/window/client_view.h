@@ -1,16 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_WINDOW_CLIENT_VIEW_H_
 #define UI_VIEWS_WINDOW_CLIENT_VIEW_H_
 
+#include "base/memory/raw_ptr.h"
+#include "ui/views/metadata/view_factory.h"
 #include "ui/views/view.h"
 
 namespace views {
 
-class DialogClientView;
 class Widget;
+enum class CloseRequestResult;
 
 ///////////////////////////////////////////////////////////////////////////////
 // ClientView
@@ -18,8 +20,7 @@ class Widget;
 //  A ClientView is a View subclass that is used to occupy the "client area"
 //  of a widget. It provides basic information to the widget that contains it
 //  such as non-client hit testing information, sizing etc. Sub-classes of
-//  ClientView are used to create more elaborate contents, e.g.
-//  "DialogClientView".
+//  ClientView are used to create more elaborate contents.
 class VIEWS_EXPORT ClientView : public View {
  public:
   METADATA_HEADER(ClientView);
@@ -31,15 +32,11 @@ class VIEWS_EXPORT ClientView : public View {
   ClientView(Widget* widget, View* contents_view);
   ~ClientView() override = default;
 
-  // Manual RTTI ftw.
-  virtual DialogClientView* AsDialogClientView();
-  virtual const DialogClientView* AsDialogClientView() const;
-
-  // Returns true to signal that the Widget can be closed. Specialized
+  // Returned value signals whether the Widget can be closed. Specialized
   // ClientView subclasses can override this default behavior to allow the
   // close to be blocked until the user corrects mistakes, accepts a warning
   // dialog, etc.
-  virtual bool CanClose();
+  virtual CloseRequestResult OnWindowCloseRequested();
 
   // Notification that the widget is closing.
   virtual void WidgetClosing();
@@ -57,9 +54,9 @@ class VIEWS_EXPORT ClientView : public View {
 
   // Overridden from View:
   gfx::Size CalculatePreferredSize() const override;
+  int GetHeightForWidth(int width) const override;
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
-  void Layout() override;
 
  protected:
   // Overridden from View:
@@ -76,9 +73,14 @@ class VIEWS_EXPORT ClientView : public View {
 
  private:
   // The View that this ClientView contains.
-  View* contents_view_;
+  raw_ptr<View, DanglingUntriaged> contents_view_;
 };
 
+BEGIN_VIEW_BUILDER(VIEWS_EXPORT, ClientView, View)
+END_VIEW_BUILDER
+
 }  // namespace views
+
+DEFINE_VIEW_BUILDER(VIEWS_EXPORT, ClientView)
 
 #endif  // UI_VIEWS_WINDOW_CLIENT_VIEW_H_

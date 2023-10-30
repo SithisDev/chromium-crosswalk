@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "ui/gfx/vsync_provider.h"
@@ -66,12 +67,13 @@ bool GLSurfacePresentationHelper::GetFrameTimestampInfoIfAvailable(
     const Frame& frame,
     base::TimeTicks* timestamp,
     base::TimeDelta* interval,
+    base::TimeTicks* writes_done,
     uint32_t* flags) {
   DCHECK(frame.timer || frame.fence || egl_timestamp_client_);
 
   if (egl_timestamp_client_) {
     bool result = egl_timestamp_client_->GetFrameTimestampInfoIfAvailable(
-        timestamp, interval, flags, frame.frame_id);
+        timestamp, interval, writes_done, flags, frame.frame_id);
 
     // Workaround null timestamp by setting it to TimeTicks::Now() snapped to
     // the next vsync interval. See
@@ -94,7 +96,7 @@ bool GLSurfacePresentationHelper::GetFrameTimestampInfoIfAvailable(
     int64_t start = 0;
     int64_t end = 0;
     frame.timer->GetStartEndTimestamps(&start, &end);
-    *timestamp = base::TimeTicks() + base::TimeDelta::FromMicroseconds(start);
+    *timestamp = base::TimeTicks() + base::Microseconds(start);
   } else {
     if (!frame.fence->HasCompleted())
       return false;
@@ -213,7 +215,7 @@ void GLSurfacePresentationHelper::OnMakeCurrent(GLContext* context,
 
 // https://crbug.com/854298 : disable GLFence on Android as they seem to cause
 // issues on some devices.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   gl_fence_supported_ = GLFence::IsSupported();
 #endif
 }
@@ -253,10 +255,9 @@ void GLSurfacePresentationHelper::CheckPendingFrames() {
       vsync_timebase_ = base::TimeTicks();
       vsync_interval_ = base::TimeDelta();
       static unsigned int count = 0;
-      ++count;
       // GetVSyncParametersIfAvailable() could be called and failed frequently,
       // so we have to limit the LOG to avoid flooding the log.
-      LOG_IF(ERROR, count < 20 || !(count & 0xff))
+      LOG_IF(ERROR, ++count < 4 || !(count & 0xffff))
           << "GetVSyncParametersIfAvailable() failed for " << count
           << " times!";
     }
@@ -275,7 +276,6 @@ void GLSurfacePresentationHelper::CheckPendingFrames() {
     return;
   }
 
-  bool need_update_vsync = false;
   bool disjoint_occurred =
       gpu_timing_client_ && gpu_timing_client_->CheckAndResetTimerErrors();
   if (disjoint_occurred ||
@@ -299,13 +299,6 @@ void GLSurfacePresentationHelper::CheckPendingFrames() {
         std::move(frame.callback).Run(gfx::PresentationFeedback::Failure());
     }
     pending_frames_.clear();
-    // We want to update VSync, if we can not get VSync parameters
-    // synchronously. Otherwise we will update the VSync parameters with the
-    // next SwapBuffers.
-    if (vsync_provider_ &&
-        !vsync_provider_->SupportGetVSyncParametersIfAvailable()) {
-      need_update_vsync = true;
-    }
   }
 
   while (!pending_frames_.empty()) {
@@ -327,19 +320,21 @@ void GLSurfacePresentationHelper::CheckPendingFrames() {
 
     base::TimeTicks timestamp;
     base::TimeDelta interval;
+    base::TimeTicks writes_done;
     uint32_t flags = 0;
     // Get timestamp info for a frame if available. If timestamp is not
     // available, it means this frame is not yet done.
-    if (!GetFrameTimestampInfoIfAvailable(frame, &timestamp, &interval, &flags))
+    if (!GetFrameTimestampInfoIfAvailable(frame, &timestamp, &interval,
+                                          &writes_done, &flags))
       break;
 
-    frame_presentation_callback(
-        gfx::PresentationFeedback(timestamp, interval, flags));
+    gfx::PresentationFeedback feedback(timestamp, interval, flags);
+    feedback.writes_done_timestamp = writes_done;
+    frame_presentation_callback(feedback);
   }
 
-  if (pending_frames_.empty() && !need_update_vsync)
-    return;
-  ScheduleCheckPendingFrames(true /* align_with_next_vsync */);
+  if (!pending_frames_.empty())
+    ScheduleCheckPendingFrames(true /* align_with_next_vsync */);
 }
 
 void GLSurfacePresentationHelper::CheckPendingFramesCallback() {
@@ -349,20 +344,41 @@ void GLSurfacePresentationHelper::CheckPendingFramesCallback() {
 }
 
 void GLSurfacePresentationHelper::UpdateVSyncCallback(
+    bool should_check_pending_frames,
     const base::TimeTicks timebase,
     const base::TimeDelta interval) {
-  DCHECK(check_pending_frame_scheduled_);
-  check_pending_frame_scheduled_ = false;
+  DCHECK(update_vsync_pending_);
+  update_vsync_pending_ = false;
   vsync_timebase_ = timebase;
   vsync_interval_ = interval;
-  CheckPendingFrames();
+  if (should_check_pending_frames) {
+    DCHECK(check_pending_frame_scheduled_);
+    check_pending_frame_scheduled_ = false;
+    CheckPendingFrames();
+  }
 }
 
 void GLSurfacePresentationHelper::ScheduleCheckPendingFrames(
     bool align_with_next_vsync) {
+  // Always GetVSyncParameters to minimize clock-skew in vsync_timebase_.
+  bool vsync_provider_schedules_check = false;
+  if (vsync_provider_ &&
+      !vsync_provider_->SupportGetVSyncParametersIfAvailable() &&
+      !update_vsync_pending_) {
+    update_vsync_pending_ = true;
+    vsync_provider_schedules_check =
+        !check_pending_frame_scheduled_ && !align_with_next_vsync;
+    vsync_provider_->GetVSyncParameters(base::BindOnce(
+        &GLSurfacePresentationHelper::UpdateVSyncCallback,
+        weak_ptr_factory_.GetWeakPtr(), vsync_provider_schedules_check));
+  }
+
   if (check_pending_frame_scheduled_)
     return;
   check_pending_frame_scheduled_ = true;
+
+  if (vsync_provider_schedules_check)
+    return;
 
   if (!align_with_next_vsync) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -372,22 +388,11 @@ void GLSurfacePresentationHelper::ScheduleCheckPendingFrames(
     return;
   }
 
-  if (vsync_provider_ &&
-      !vsync_provider_->SupportGetVSyncParametersIfAvailable()) {
-    // In this case, the |vsync_provider_| will call the callback when the next
-    // VSync is received.
-    vsync_provider_->GetVSyncParameters(
-        base::BindRepeating(&GLSurfacePresentationHelper::UpdateVSyncCallback,
-                            weak_ptr_factory_.GetWeakPtr()));
-    return;
-  }
-
   // If the |vsync_provider_| can not notify us for the next VSync
   // asynchronically, we have to compute the next VSync time and post a delayed
   // task so we can check the VSync later.
-  base::TimeDelta interval = vsync_interval_.is_zero()
-                                 ? base::TimeDelta::FromSeconds(1) / 60
-                                 : vsync_interval_;
+  base::TimeDelta interval =
+      vsync_interval_.is_zero() ? base::Seconds(1) / 60 : vsync_interval_;
   auto now = base::TimeTicks::Now();
   auto next_vsync = now.SnappedToNextTick(vsync_timebase_, interval);
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(

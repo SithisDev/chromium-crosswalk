@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/files/file_path_watcher.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
 
 #include "ui/events/ozone/device/device_manager.h"
@@ -25,6 +24,10 @@ namespace ui {
 class DeviceManagerManual : public DeviceManager {
  public:
   DeviceManagerManual();
+
+  DeviceManagerManual(const DeviceManagerManual&) = delete;
+  DeviceManagerManual& operator=(const DeviceManagerManual&) = delete;
+
   ~DeviceManagerManual() override;
 
  private:
@@ -50,9 +53,7 @@ class DeviceManagerManual : public DeviceManager {
   const scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   std::unique_ptr<base::FilePathWatcher, base::OnTaskRunnerDeleter> watcher_;
 
-  base::WeakPtrFactory<DeviceManagerManual> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceManagerManual);
+  base::WeakPtrFactory<DeviceManagerManual> weak_ptr_factory_{this};
 };
 
 }  // namespace ui

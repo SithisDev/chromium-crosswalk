@@ -1,13 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {MetadataParserLogger} from '../../../externs/metadata_worker_window.js';
+
+import {ByteReader} from './byte_reader.js';
+import {ImageParser, MetadataParser} from './metadata_parser.js';
 
 /**
  * Base class for image metadata parsers that only need to look at a short
  * fragment at the start of the file.
  * @abstract
  */
-class SimpleImageParser extends ImageParser {
+export class SimpleImageParser extends ImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent object.
    * @param {string} type Image type.
@@ -51,7 +56,7 @@ class SimpleImageParser extends ImageParser {
  * Parser for the header of png files.
  * @final
  */
-class PngParser extends SimpleImageParser {
+export class PngParser extends SimpleImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent object.
    */
@@ -85,7 +90,7 @@ class PngParser extends SimpleImageParser {
  * Parser for the header of bmp files.
  * @final
  */
-class BmpParser extends SimpleImageParser {
+export class BmpParser extends SimpleImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent object.
    */
@@ -114,7 +119,7 @@ class BmpParser extends SimpleImageParser {
  * Parser for the header of gif files.
  * @final
  */
-class GifParser extends SimpleImageParser {
+export class GifParser extends SimpleImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent object.
    */
@@ -142,7 +147,7 @@ class GifParser extends SimpleImageParser {
  * Parser for the header of webp files.
  * @final
  */
-class WebpParser extends SimpleImageParser {
+export class WebpParser extends SimpleImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent object.
    */
@@ -177,9 +182,11 @@ class WebpParser extends SimpleImageParser {
           throw new Error(
               'Invalid VP8 lossy bitstream signature: ' + lossySignature);
         }
-        var dimensionBits = br.readScalar(4);
-        metadata.width = dimensionBits & 0x3fff;
-        metadata.height = (dimensionBits >> 16) & 0x3fff;
+        {
+          const dimensionBits = br.readScalar(4);
+          metadata.width = dimensionBits & 0x3fff;
+          metadata.height = (dimensionBits >> 16) & 0x3fff;
+        }
         break;
 
       // VP8 lossless bitstream format.
@@ -190,14 +197,16 @@ class WebpParser extends SimpleImageParser {
           throw new Error(
               'Invalid VP8 lossless bitstream signature: ' + losslessSignature);
         }
-        var dimensionBits = br.readScalar(4);
-        metadata.width = (dimensionBits & 0x3fff) + 1;
-        metadata.height = ((dimensionBits >> 14) & 0x3fff) + 1;
+        {
+          const dimensionBits = br.readScalar(4);
+          metadata.width = (dimensionBits & 0x3fff) + 1;
+          metadata.height = ((dimensionBits >> 14) & 0x3fff) + 1;
+        }
         break;
 
       // VP8 extended file format.
       case 'VP8X':
-        br.seek(20);
+        br.seek(24);
         // Read 24-bit value. ECMAScript assures left-to-right evaluation order.
         metadata.width = (br.readScalar(2) | (br.readScalar(1) << 16)) + 1;
         metadata.height = (br.readScalar(2) | (br.readScalar(1) << 16)) + 1;
@@ -213,7 +222,7 @@ class WebpParser extends SimpleImageParser {
  * Parser for the header of .ico icon files.
  * @final
  */
-class IcoParser extends SimpleImageParser {
+export class IcoParser extends SimpleImageParser {
   /**
    * @param {!MetadataParserLogger} parent Parent metadata dispatcher object.
    */

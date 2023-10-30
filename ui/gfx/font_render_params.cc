@@ -1,46 +1,31 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/font_render_params.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 
 namespace gfx {
 
 // static
-SkFontLCDConfig::LCDOrder FontRenderParams::SubpixelRenderingToSkiaLCDOrder(
+SkPixelGeometry FontRenderParams::SubpixelRenderingToSkiaPixelGeometry(
     FontRenderParams::SubpixelRendering subpixel_rendering) {
   switch (subpixel_rendering) {
     case gfx::FontRenderParams::SUBPIXEL_RENDERING_NONE:
+      return kRGB_H_SkPixelGeometry;  // why not kUnknown_SkPixelGeometry ??
     case gfx::FontRenderParams::SUBPIXEL_RENDERING_RGB:
+      return kRGB_H_SkPixelGeometry;
     case gfx::FontRenderParams::SUBPIXEL_RENDERING_VRGB:
-      return SkFontLCDConfig::kRGB_LCDOrder;
+      return kRGB_V_SkPixelGeometry;
     case gfx::FontRenderParams::SUBPIXEL_RENDERING_BGR:
+      return kBGR_H_SkPixelGeometry;
     case gfx::FontRenderParams::SUBPIXEL_RENDERING_VBGR:
-      return SkFontLCDConfig::kBGR_LCDOrder;
+      return kBGR_V_SkPixelGeometry;
   }
 
   NOTREACHED();
-  return SkFontLCDConfig::kRGB_LCDOrder;
-}
-
-// static
-SkFontLCDConfig::LCDOrientation
-FontRenderParams::SubpixelRenderingToSkiaLCDOrientation(
-    FontRenderParams::SubpixelRendering subpixel_rendering) {
-  switch (subpixel_rendering) {
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_NONE:
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_RGB:
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_BGR:
-      return SkFontLCDConfig::kHorizontal_LCDOrientation;
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_VRGB:
-    case gfx::FontRenderParams::SUBPIXEL_RENDERING_VBGR:
-      return SkFontLCDConfig::kVertical_LCDOrientation;
-  }
-
-  NOTREACHED();
-  return SkFontLCDConfig::kHorizontal_LCDOrientation;
+  return kRGB_H_SkPixelGeometry;
 }
 
 FontRenderParamsQuery::FontRenderParamsQuery()

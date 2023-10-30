@@ -1,38 +1,43 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/dragdrop/os_exchange_data_provider_factory.h"
 
+#include "base/notreached.h"
 #include "build/build_config.h"
 
-#if defined(USE_X11)
-#include "ui/base/dragdrop/os_exchange_data_provider_aurax11.h"
-#elif defined(OS_LINUX)
-#include "ui/base/dragdrop/os_exchange_data_provider_aura.h"
-#elif defined(OS_MACOSX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+#include "ui/base/dragdrop/os_exchange_data_provider_factory_ozone.h"
+#include "ui/base/dragdrop/os_exchange_data_provider_non_backed.h"
+#elif BUILDFLAG(IS_APPLE)
 #include "ui/base/dragdrop/os_exchange_data_provider_builder_mac.h"
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #endif
 
 namespace ui {
 
-//static
-std::unique_ptr<OSExchangeData::Provider>
+// static
+std::unique_ptr<OSExchangeDataProvider>
 OSExchangeDataProviderFactory::CreateProvider() {
-#if defined(USE_X11)
-  return std::make_unique<OSExchangeDataProviderAuraX11>();
-#elif defined(OS_LINUX)
-  return std::make_unique<OSExchangeDataProviderAura>();
-#elif defined(OS_MACOSX)
-  return ui::BuildOSExchangeDataProviderMac();
-#elif defined(OS_WIN)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  // The instance can be nullptr in tests that do not instantiate the platform,
+  // or on platforms that do not implement specific drag'n'drop.  For them,
+  // falling back to the Aura provider should be fine.
+  if (auto* factory = OSExchangeDataProviderFactoryOzone::Instance()) {
+    auto provider = factory->CreateProvider();
+    if (provider)
+      return provider;
+  }
+  return std::make_unique<OSExchangeDataProviderNonBacked>();
+#elif BUILDFLAG(IS_APPLE)
+  return BuildOSExchangeDataProviderMac();
+#elif BUILDFLAG(IS_WIN)
   return std::make_unique<OSExchangeDataProviderWin>();
-#elif defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_FUCHSIA)
   // TODO(crbug.com/980371): Implement OSExchangeDataProvider for Fuchsia.
-  NOTIMPLEMENTED();
-  return nullptr;
+  return std::make_unique<OSExchangeDataProviderNonBacked>();
 #else
 #error "Unknown operating system"
 #endif

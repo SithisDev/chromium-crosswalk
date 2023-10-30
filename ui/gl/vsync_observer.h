@@ -1,9 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_GL_VSYNC_OBSERVER_H_
 #define UI_GL_VSYNC_OBSERVER_H_
+
+#include "base/time/time.h"
 
 namespace gl {
 class GL_EXPORT VSyncObserver {

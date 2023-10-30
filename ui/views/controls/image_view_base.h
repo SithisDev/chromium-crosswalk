@@ -1,17 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_VIEWS_CONTROLS_IMAGE_VIEW_BASE_H_
 #define UI_VIEWS_CONTROLS_IMAGE_VIEW_BASE_H_
 
-#include "base/macros.h"
-#include "base/optional.h"
-#include "ui/views/view.h"
+#include <string>
 
-namespace gfx {
-class Canvas;
-}
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/views/metadata/view_factory.h"
+#include "ui/views/view.h"
 
 namespace views {
 
@@ -22,6 +23,8 @@ class VIEWS_EXPORT ImageViewBase : public View {
   enum class Alignment { kLeading, kCenter, kTrailing };
 
   ImageViewBase();
+  ImageViewBase(const ImageViewBase&) = delete;
+  ImageViewBase& operator=(const ImageViewBase&) = delete;
   ~ImageViewBase() override;
 
   // Set the desired image size for the receiving ImageView.
@@ -42,18 +45,16 @@ class VIEWS_EXPORT ImageViewBase : public View {
   Alignment GetVerticalAlignment() const;
 
   // Set the tooltip text.
-  void set_tooltip_text(const base::string16& tooltip) {
-    tooltip_text_ = tooltip;
-  }
+  void SetTooltipText(const std::u16string& tooltip);
+  const std::u16string& GetTooltipText() const;
 
   // Set / Get the accessible name text.
-  void SetAccessibleName(const base::string16& name);
-  const base::string16& GetAccessibleName() const;
+  void SetAccessibleName(const std::u16string& name);
+  const std::u16string& GetAccessibleName() const;
 
   // Overridden from View:
-  void OnPaint(gfx::Canvas* canvas) override = 0;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
-  base::string16 GetTooltipText(const gfx::Point& p) const override;
+  std::u16string GetTooltipText(const gfx::Point& p) const override;
   gfx::Size CalculatePreferredSize() const override;
   views::PaintInfo::ScaleType GetPaintScaleType() const override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
@@ -64,7 +65,7 @@ class VIEWS_EXPORT ImageViewBase : public View {
   virtual gfx::Size GetImageSize() const = 0;
 
   // The requested image size.
-  base::Optional<gfx::Size> image_size_;
+  absl::optional<gfx::Size> image_size_;
 
  private:
   friend class ImageViewTest;
@@ -82,14 +83,22 @@ class VIEWS_EXPORT ImageViewBase : public View {
   Alignment vertical_alignment_ = Alignment::kCenter;
 
   // The current tooltip text.
-  base::string16 tooltip_text_;
+  std::u16string tooltip_text_;
 
   // The current accessible name text.
-  base::string16 accessible_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(ImageViewBase);
+  std::u16string accessible_name_;
 };
 
+BEGIN_VIEW_BUILDER(VIEWS_EXPORT, ImageViewBase, View)
+VIEW_BUILDER_PROPERTY(gfx::Size, ImageSize)
+VIEW_BUILDER_PROPERTY(ImageViewBase::Alignment, HorizontalAlignment)
+VIEW_BUILDER_PROPERTY(ImageViewBase::Alignment, VerticalAlignment)
+VIEW_BUILDER_PROPERTY(std::u16string, AccessibleName)
+VIEW_BUILDER_PROPERTY(std::u16string, TooltipText)
+END_VIEW_BUILDER
+
 }  // namespace views
+
+DEFINE_VIEW_BUILDER(VIEWS_EXPORT, ImageViewBase)
 
 #endif  // UI_VIEWS_CONTROLS_IMAGE_VIEW_BASE_H_

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,24 +6,18 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/no_destructor.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 
 namespace ui {
 
-namespace {
-
-// Tells us if WebKit was the last to write to the pasteboard. There's no
-// actual data associated with this type.
-NSString* const kWebSmartPastePboardType = @"NeXT smart paste pasteboard type";
-
-// Pepper custom data format type.
-NSString* const kPepperCustomDataPboardType =
-    @"org.chromium.pepper-custom-data";
-
-}  // namespace
-
 // ClipboardFormatType implementation.
+// MacOS formats are implemented via Uniform Type Identifiers, documented here:
+// https://developer.apple.com/library/archive/documentation/General/Conceptual/DevPedia-CocoaCore/UniformTypeIdentifier.html#//apple_ref/doc/uid/TP40008195-CH60
 ClipboardFormatType::ClipboardFormatType() : data_(nil) {}
 
 ClipboardFormatType::ClipboardFormatType(NSString* native_format)
@@ -41,7 +35,7 @@ ClipboardFormatType& ClipboardFormatType::operator=(
   return *this;
 }
 
-bool ClipboardFormatType::Equals(const ClipboardFormatType& other) const {
+bool ClipboardFormatType::operator==(const ClipboardFormatType& other) const {
   return [data_ isEqualToString:other.data_];
 }
 
@@ -59,8 +53,36 @@ ClipboardFormatType ClipboardFormatType::Deserialize(
   return ClipboardFormatType(base::SysUTF8ToNSString(serialization));
 }
 
+std::string ClipboardFormatType::GetName() const {
+  return Serialize();
+}
+
 bool ClipboardFormatType::operator<(const ClipboardFormatType& other) const {
   return [data_ compare:other.data_] == NSOrderedAscending;
+}
+
+// static
+std::string ClipboardFormatType::WebCustomFormatName(int index) {
+  return base::StrCat({"com.web.custom.format", base::NumberToString(index)});
+}
+
+// static
+std::string ClipboardFormatType::WebCustomFormatMapName() {
+  return "com.web.custom.format.map";
+}
+
+// static
+const ClipboardFormatType& ClipboardFormatType::WebCustomFormatMap() {
+  static base::NoDestructor<ClipboardFormatType> type(
+      base::SysUTF8ToNSString(ClipboardFormatType::WebCustomFormatMapName()));
+  return *type;
+}
+
+// static
+ClipboardFormatType ClipboardFormatType::CustomPlatformType(
+    const std::string& format_string) {
+  DCHECK(base::IsStringASCII(format_string));
+  return ClipboardFormatType::Deserialize(format_string);
 }
 
 // Various predefined ClipboardFormatTypes.
@@ -72,72 +94,61 @@ ClipboardFormatType ClipboardFormatType::GetType(
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetUrlType() {
-  static base::NoDestructor<ClipboardFormatType> type(NSURLPboardType);
-  return *type;
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetUrlWType() {
-  return ClipboardFormatType::GetUrlType();
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetPlainTextType() {
-  static base::NoDestructor<ClipboardFormatType> type(NSPasteboardTypeString);
-  return *type;
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetPlainTextWType() {
-  return ClipboardFormatType::GetPlainTextType();
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetFilenameType() {
+const ClipboardFormatType& ClipboardFormatType::FilenamesType() {
   static base::NoDestructor<ClipboardFormatType> type(NSFilenamesPboardType);
   return *type;
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetFilenameWType() {
-  return ClipboardFormatType::GetFilenameType();
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetHtmlType() {
-  static base::NoDestructor<ClipboardFormatType> type(NSHTMLPboardType);
+const ClipboardFormatType& ClipboardFormatType::UrlType() {
+  static base::NoDestructor<ClipboardFormatType> type(NSURLPboardType);
   return *type;
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetRtfType() {
+const ClipboardFormatType& ClipboardFormatType::PlainTextType() {
+  static base::NoDestructor<ClipboardFormatType> type(NSPasteboardTypeString);
+  return *type;
+}
+
+// static
+const ClipboardFormatType& ClipboardFormatType::HtmlType() {
+  static base::NoDestructor<ClipboardFormatType> type(NSHTMLPboardType);
+  return *type;
+}
+
+const ClipboardFormatType& ClipboardFormatType::SvgType() {
+  static base::NoDestructor<ClipboardFormatType> type(kImageSvg);
+  return *type;
+}
+
+// static
+const ClipboardFormatType& ClipboardFormatType::RtfType() {
   static base::NoDestructor<ClipboardFormatType> type(NSRTFPboardType);
   return *type;
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetBitmapType() {
-  static base::NoDestructor<ClipboardFormatType> type(NSTIFFPboardType);
+const ClipboardFormatType& ClipboardFormatType::PngType() {
+  static base::NoDestructor<ClipboardFormatType> type(NSPasteboardTypePNG);
   return *type;
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetWebKitSmartPasteType() {
+const ClipboardFormatType& ClipboardFormatType::BitmapType() {
+  static base::NoDestructor<ClipboardFormatType> type(NSPasteboardTypeTIFF);
+  return *type;
+}
+
+// static
+const ClipboardFormatType& ClipboardFormatType::WebKitSmartPasteType() {
   static base::NoDestructor<ClipboardFormatType> type(kWebSmartPastePboardType);
   return *type;
 }
 
 // static
-const ClipboardFormatType& ClipboardFormatType::GetWebCustomDataType() {
+const ClipboardFormatType& ClipboardFormatType::WebCustomDataType() {
   static base::NoDestructor<ClipboardFormatType> type(kWebCustomDataPboardType);
-  return *type;
-}
-
-// static
-const ClipboardFormatType& ClipboardFormatType::GetPepperCustomDataType() {
-  static base::NoDestructor<ClipboardFormatType> type(
-      kPepperCustomDataPboardType);
   return *type;
 }
 

@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">ሁሉንም የምስል እነማ አሰናክል።</translation>
 <translation id="1703735871906654364">Caret Browsing</translation>
 <translation id="1791496371305830581">ሁሉንም እነማ ምስሎች ፍቀድ።</translation>
+<translation id="1974060860693918893">የላቀ</translation>
 <translation id="1996252509865389616">ይንቃ?</translation>
 <translation id="2079545284768500474">ቀልብስ</translation>
 <translation id="2179565792157161713">ረዥም ማብራሪያን በአዲስ ትር ክፈት</translation>
@@ -23,7 +24,7 @@
 <translation id="3410969471888629217">የጣቢያ ብጁ ማድረጎችን እርሳ</translation>
 <translation id="3435896845095436175">አንቃ</translation>
 <translation id="3622586652998721735">እንደ ነባሪ ገጽታ አዘጋጅ</translation>
-<translation id="3812541808639806898">የምስል ምትክ ጽሑፍ ተመልካች</translation>
+<translation id="3812541808639806898">የምስል ምትክ ጽሁፍ ተመልካች</translation>
 <translation id="381767806621926835">ረጅም መግለጫውን ለመድረስ የ«longdesc» ወይም የ«aria-describedat» አይነታ ያለው ማንኛውም ነገር በቀኝ ጠቅ ያድርጉ።</translation>
 <translation id="4023902424053835668">የድር ገጾችን ጹሑፍ የቀስት ቁልፎችን በመጠቀም ያስሱ።</translation>
 <translation id="4388820049312272371">የጠቋሚውን አቀማመጥ ከፈጣን ብልጭታ ጋር አድምቅ።</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">ምስሌች በተለዋጭ ጽሑፋቸው ተተክተዋል።</translation>
 <translation id="4896660567607030658">ምንም ግብረ መልስ የለም፣ ጠቋሚውን ብቻ አሳይ።</translation>
 <translation id="4937901943818762779">እነማ ምስሎችን ፍቀድ፣ ነገር ግን አንድ ጊዜ ብቻ።</translation>
+<translation id="4949131196216960195">Caret Browsingን ለማብራት &lt;span class='key'&gt;ፍለጋ&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (የብሩህነት መጨመሪያ ቁልፉን፣ ወይም F7) ይጫኑ። ለማጥፋት እንደገና ይጫኑት።</translation>
 <translation id="4954450790315188152">Caret Browsing በሚነቃበት ጊዜ፦</translation>
 <translation id="5041932793799765940">የቀለም ማስተካከያ</translation>
 <translation id="5094574508723441140">የጨመረ ንፅፅር</translation>
@@ -50,6 +52,7 @@
 <translation id="6170146920149900756">የቀለም ማሻሻያ</translation>
 <translation id="633394792577263429">ቃል በቃል ለማንቀሳቀስ &lt;span class='key'&gt;Control&lt;/span&gt;ን  ይዘው ይቆዩ።</translation>
 <translation id="6550675742724504774">አማራጮች</translation>
+<translation id="6699630355767768222">ደረጃ 3፦ ለእርማት የቀለም ዘንግ ይሻሩ።</translation>
 <translation id="6838518108677880446">አዋቅር፦</translation>
 <translation id="690628312087070417">caret በሰፊ ርቀት በሚዘልበት ጊዜ፦</translation>
 <translation id="6965382102122355670">እሺ</translation>
@@ -60,10 +63,10 @@
 <translation id="7658239707568436148">ይቅር</translation>
 <translation id="786423340267544509">የaria-describedat ወይም የlongdesc አይነታዎች ባላቸው አባላት ላይ ክፈፍ አክል</translation>
 <translation id="7942349550061667556">ቀይ</translation>
-<translation id="8254860724243898966">Caret Browsingን ለማብራት &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (የብሩህነት መጨመሪያ ቁልፉን፣ ወይም F7) ይጫኑ። ለማጥፋት እንደገና ይጫኑት።</translation>
 <translation id="8260673944985561857">የካሬት የአሰሳ አማራጭ</translation>
 <translation id="8321034316479930120">የእነማ መመሪያ</translation>
 <translation id="8480209185614411573">ከፍተኛ ንፅፅር</translation>
 <translation id="8609925175482059018">Caret Browsingን ለማብራት &lt;span class='key'&gt;F7&lt;/span&gt;ን ይጫኑ። ለማጥፋት እንደገና ይጫኑት።</translation>
+<translation id="8798099450830957504">እንደወረደ</translation>
 <translation id="894241283505723656">በነገር አገባብ ምናሌ ላይ ረዥም ማብራሪያ</translation>
 </translationbundle>

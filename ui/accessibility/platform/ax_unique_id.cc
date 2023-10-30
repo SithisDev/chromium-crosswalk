@@ -1,20 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/accessibility/platform/ax_unique_id.h"
 
 #include <memory>
-#include <unordered_set>
 
+#include "base/containers/contains.h"
+#include "base/containers/flat_set.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
+#include "base/logging.h"
 
 namespace ui {
 
 namespace {
 
-base::LazyInstance<std::unordered_set<int32_t>>::Leaky g_assigned_ids =
+base::LazyInstance<base::flat_set<int32_t>>::Leaky g_assigned_ids =
     LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -45,7 +46,7 @@ int32_t AXUniqueId::GetNextAXUniqueId(const int32_t max_id) {
 
   const int32_t prev_id = current_id;
   do {
-    if (current_id == max_id) {
+    if (current_id >= max_id) {
       current_id = 1;
       has_wrapped = true;
     } else {

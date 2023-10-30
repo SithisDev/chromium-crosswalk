@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,11 @@ namespace ui {
 GamepadEvent::GamepadEvent(int device_id,
                            GamepadEventType type,
                            uint16_t code,
-                           uint16_t raw_code,
                            double value,
                            base::TimeTicks timestamp)
     : device_id_(device_id),
       type_(type),
       code_(code),
-      raw_code_(raw_code),
       value_(value),
       timestamp_(timestamp) {}
 

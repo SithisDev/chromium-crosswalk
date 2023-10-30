@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,15 @@
 #include <string>
 #include <vector>
 
+#include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_fallback_skia_impl.h"
+#include "ui/gfx/font_render_params.h"
+#include "ui/gfx/platform_font.h"
 
 namespace gfx {
 
@@ -28,14 +32,18 @@ bool GetFallbackFont(const Font& font,
   if (text.empty())
     return false;
 
-  std::string skia_family_name =
-      GetFallbackFontFamilyNameSkia(font, locale, text);
+  sk_sp<SkTypeface> fallback_typeface =
+      GetSkiaFallbackTypeface(font, locale, text);
 
-  if (skia_family_name.empty())
+  if (!fallback_typeface)
     return false;
 
-  *result = Font(std::string(skia_family_name.c_str(), skia_family_name.size()),
-                 font.GetFontSize());
+  // Fallback needs to keep the exact SkTypeface, as re-matching the font using
+  // family name and styling information loses access to the underlying platform
+  // font handles and is not guaranteed to result in the correct typeface, see
+  // https://crbug.com/1003829
+  *result = Font(PlatformFont::CreateFromSkTypeface(
+      std::move(fallback_typeface), font.GetFontSize(), absl::nullopt));
   return true;
 }
 

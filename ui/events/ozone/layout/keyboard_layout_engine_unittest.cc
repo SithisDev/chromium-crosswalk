@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,11 @@
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
+#include "ui/events/ozone/layout/scoped_keyboard_layout_engine.h"
 #include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
 #include "ui/events/ozone/layout/xkb/xkb_evdev_codes.h"
 #include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
+#include "ui/events/types/event_type.h"
 
 namespace ui {
 
@@ -184,7 +185,7 @@ void TestLookup(const char* name, KeyboardLayoutEngine* engine) {
     int input_flags;
     DomKey::Base output_dom_key;
     KeyboardCode output_keycode;
-    base::char16 output_character;
+    char16_t output_character;
   } kTestCases[] = {
       {DomCode::US_A, EF_NONE, DomKey::Constant<'a'>::Character, VKEY_A, 'a'},
       {DomCode::US_A, EF_SHIFT_DOWN, DomKey::Constant<'A'>::Character, VKEY_A,
@@ -195,15 +196,12 @@ void TestLookup(const char* name, KeyboardLayoutEngine* engine) {
        VKEY_ASSISTANT, 0},
   };
 
-  KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
-      base::WrapUnique(engine));
-
   for (const auto& t : kTestCases) {
     DomKey dom_key;
     KeyboardCode keycode;
     SCOPED_TRACE(base::StringPrintf(
         "%s(%s, 0x%X)", name,
-        KeycodeConverter::DomCodeToCodeString(t.input_dom_code),
+        KeycodeConverter::DomCodeToCodeString(t.input_dom_code).c_str(),
         t.input_flags));
     EXPECT_TRUE(
         engine->Lookup(t.input_dom_code, t.input_flags, &dom_key, &keycode));
@@ -218,15 +216,21 @@ void TestLookup(const char* name, KeyboardLayoutEngine* engine) {
 }  // anonymous namespace
 
 TEST(LayoutEngineTest, Lookup) {
-  // Test StubKeyboardLayoutEngine
-  TestLookup("StubKeyboardLayoutEngine", new StubKeyboardLayoutEngine());
+  {
+    // Test StubKeyboardLayoutEngine
+    auto stub_engine = std::make_unique<StubKeyboardLayoutEngine>();
+    TestLookup("StubKeyboardLayoutEngine", stub_engine.get());
+  }
 
-  XkbEvdevCodes xkb_evdev_code_converter;
-  XkbKeyboardLayoutEngine* xkb_engine =
-      new XkbKeyboardLayoutEngine(xkb_evdev_code_converter);
-  xkb_engine->SetCurrentLayoutFromBuffer(kUsLayoutXkbKeymap,
-                                         strlen(kUsLayoutXkbKeymap));
-  TestLookup("XkbKeyboardLayoutEngine", xkb_engine);
+  {
+    // Test XkbKeyboardLayoutEngine
+    XkbEvdevCodes xkb_evdev_code_converter;
+    auto xkb_engine =
+        std::make_unique<XkbKeyboardLayoutEngine>(xkb_evdev_code_converter);
+    xkb_engine->SetCurrentLayoutFromBuffer(kUsLayoutXkbKeymap,
+                                           strlen(kUsLayoutXkbKeymap));
+    TestLookup("XkbKeyboardLayoutEngine", xkb_engine.get());
+  }
 }
 
 }  // namespace ui

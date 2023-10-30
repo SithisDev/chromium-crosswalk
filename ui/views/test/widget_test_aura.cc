@@ -1,22 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/test/widget_test.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/test/aura_test_helper.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/compositor/layer.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/shadow_controller.h"
 
-#if defined(USE_X11)
-#include "ui/gfx/x/x11.h"        // nogncheck
-#include "ui/gfx/x/x11_types.h"  // nogncheck
-#include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
+#if BUILDFLAG(ENABLE_DESKTOP_AURA)
+#include "ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h"
 #endif
 
 namespace views {
@@ -51,7 +51,7 @@ bool FindLayersInOrder(const std::vector<ui::Layer*>& children,
   return false;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 struct FindAllWindowsData {
   std::vector<aura::Window*>* windows;
@@ -65,27 +65,27 @@ BOOL CALLBACK FindAllWindowsCallback(HWND hwnd, LPARAM param) {
   return TRUE;
 }
 
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 std::vector<aura::Window*> GetAllTopLevelWindows() {
   std::vector<aura::Window*> roots;
-#if defined(USE_X11)
-  roots = DesktopWindowTreeHostX11::GetAllOpenWindows();
-#elif defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   {
     FindAllWindowsData data = {&roots};
     EnumThreadWindows(GetCurrentThreadId(), FindAllWindowsCallback,
                       reinterpret_cast<LPARAM>(&data));
   }
+#elif BUILDFLAG(ENABLE_DESKTOP_AURA)
+  roots = DesktopWindowTreeHostPlatform::GetAllOpenWindows();
 #endif
   aura::test::AuraTestHelper* aura_test_helper =
       aura::test::AuraTestHelper::GetInstance();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Chrome OS browser tests must use ash::Shell::GetAllRootWindows.
   DCHECK(aura_test_helper) << "Can't find all widgets without a test helper";
 #endif
   if (aura_test_helper)
-    roots.push_back(aura_test_helper->root_window());
+    roots.push_back(aura_test_helper->GetContext());
   return roots;
 }
 
@@ -120,36 +120,31 @@ gfx::Size WidgetTest::GetNativeWidgetMinimumContentSize(Widget* widget) {
   // the window manager is interested in knowing the size constraints. On
   // ChromeOS, it's handled internally. Elsewhere, the size constraints need to
   // be pushed to the window server when they change.
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#if !BUILDFLAG(ENABLE_DESKTOP_AURA) || BUILDFLAG(IS_WIN)
   return widget->GetNativeWindow()->delegate()->GetMinimumSize();
-#elif defined(USE_X11)
-  XSizeHints hints;
-  long supplied_return;
-  XGetWMNormalHints(
-      gfx::GetXDisplay(),
-      widget->GetNativeWindow()->GetHost()->GetAcceleratedWidget(), &hints,
-      &supplied_return);
-  return gfx::Size(hints.min_width, hints.min_height);
-#else
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  return widget->GetNativeWindow()->delegate()->GetMinimumSize();
+#endif
   NOTREACHED();
   return gfx::Size();
-#endif
 }
 
 // static
 ui::EventSink* WidgetTest::GetEventSink(Widget* widget) {
-  return widget->GetNativeWindow()->GetHost()->event_sink();
+  return widget->GetNativeWindow()->GetHost()->GetEventSink();
 }
 
 // static
-ui::internal::InputMethodDelegate* WidgetTest::GetInputMethodDelegateForWidget(
+ui::ImeKeyEventDispatcher* WidgetTest::GetImeKeyEventDispatcherForWidget(
     Widget* widget) {
   return widget->GetNativeWindow()->GetRootWindow()->GetHost();
 }
 
 // static
 bool WidgetTest::IsNativeWindowTransparent(gfx::NativeWindow window) {
-  return window->transparent();
+  return window->GetTransparent();
 }
 
 // static
@@ -174,6 +169,9 @@ Widget::Widgets WidgetTest::GetAllWidgets() {
     Widget::GetAllChildWidgets(window->GetRootWindow(), &all_widgets);
   return all_widgets;
 }
+
+// static
+void WidgetTest::WaitForSystemAppActivation() {}
 
 }  // namespace test
 }  // namespace views

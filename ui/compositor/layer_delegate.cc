@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,11 @@ void LayerDelegate::OnLayerOpacityChanged(PropertyChangeReason reason) {}
 
 void LayerDelegate::OnLayerAlphaShapeChanged() {}
 
-void LayerDelegate::OnLayerFillsBoundsOpaquelyChanged() {}
+void LayerDelegate::OnLayerFillsBoundsOpaquelyChanged(
+    PropertyChangeReason reason) {}
+
+void LayerDelegate::OnLayerClipRectChanged(const gfx::Rect& old_rect,
+                                           PropertyChangeReason reason) {}
 
 void LayerDelegate::UpdateVisualState() {}
 

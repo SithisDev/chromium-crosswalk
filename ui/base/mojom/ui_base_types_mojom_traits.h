@@ -1,16 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_BASE_MOJOM_UI_BASE_TYPES_MOJOM_TRAITS_H_
 #define UI_BASE_MOJOM_UI_BASE_TYPES_MOJOM_TRAITS_H_
 
-#if defined(OS_WIN)
-#include <windows.h>
-#else
-#include "ui/base/hit_test.h"
-#endif
-
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/enum_traits.h"
 #include "ui/base/mojom/ui_base_types.mojom.h"
@@ -93,208 +88,71 @@ struct EnumTraits<ui::mojom::ModalType, ui::ModalType> {
 };
 
 template <>
-struct EnumTraits<ui::mojom::HitTest, int> {
-  static ui::mojom::HitTest ToMojom(int hit_test) {
-    switch (hit_test) {
-      case HTNOWHERE:
-        return ui::mojom::HitTest::kNowhere;
-      case HTBORDER:
-        return ui::mojom::HitTest::kBorder;
-      case HTBOTTOM:
-        return ui::mojom::HitTest::kBottom;
-      case HTBOTTOMLEFT:
-        return ui::mojom::HitTest::kBottomLeft;
-      case HTBOTTOMRIGHT:
-        return ui::mojom::HitTest::kBottomRight;
-      case HTCAPTION:
-        return ui::mojom::HitTest::kCaption;
-      case HTCLIENT:
-        return ui::mojom::HitTest::kClient;
-      case HTCLOSE:
-        return ui::mojom::HitTest::kClose;
-      case HTERROR:
-        return ui::mojom::HitTest::kError;
-#if !defined(OS_WIN)
-      // On Windows, HTGROWBOX is same as HTSIZE, this case never appears.
-      case HTGROWBOX:
-        return ui::mojom::HitTest::kGrowbox;
-#endif
-      case HTHELP:
-        return ui::mojom::HitTest::kHelp;
-      case HTHSCROLL:
-        return ui::mojom::HitTest::kHScroll;
-      case HTLEFT:
-        return ui::mojom::HitTest::kLeft;
-      case HTMENU:
-        return ui::mojom::HitTest::kMenu;
-      case HTMAXBUTTON:
-        return ui::mojom::HitTest::kMaxButton;
-      case HTMINBUTTON:
-        return ui::mojom::HitTest::kMinButton;
-#if !defined(OS_WIN)
-      // On Windows, HTREDUCE is same as HTMINBUTTON, this case never appears.
-      case HTREDUCE:
-        return ui::mojom::HitTest::kReduce;
-#endif
-      case HTRIGHT:
-        return ui::mojom::HitTest::kRight;
-      case HTSIZE:
-        return ui::mojom::HitTest::kSize;
-      case HTSYSMENU:
-        return ui::mojom::HitTest::kSysMenu;
-      case HTTOP:
-        return ui::mojom::HitTest::kTop;
-      case HTTOPLEFT:
-        return ui::mojom::HitTest::kTopLeft;
-      case HTTOPRIGHT:
-        return ui::mojom::HitTest::kTopRight;
-      case HTTRANSPARENT:
-        return ui::mojom::HitTest::kTransparent;
-      case HTVSCROLL:
-        return ui::mojom::HitTest::kVScroll;
-#if !defined(OS_WIN)
-      // On Windows, HTZOOM is same as HTMAXBUTTON, this case never appears.
-      case HTZOOM:
-        return ui::mojom::HitTest::kZoom;
-#endif
-      default:
-        NOTREACHED();
-        return ui::mojom::HitTest::kNowhere;
-    }
-  }
-
-  static bool FromMojom(ui::mojom::HitTest hit_test, int* out) {
-    switch (hit_test) {
-      case ui::mojom::HitTest::kNowhere:
-        *out = HTNOWHERE;
-        return true;
-      case ui::mojom::HitTest::kBorder:
-        *out = HTBORDER;
-        return true;
-      case ui::mojom::HitTest::kBottom:
-        *out = HTBOTTOM;
-        return true;
-      case ui::mojom::HitTest::kBottomLeft:
-        *out = HTBOTTOMLEFT;
-        return true;
-      case ui::mojom::HitTest::kBottomRight:
-        *out = HTBOTTOMRIGHT;
-        return true;
-      case ui::mojom::HitTest::kCaption:
-        *out = HTCAPTION;
-        return true;
-      case ui::mojom::HitTest::kClient:
-        *out = HTCLIENT;
-        return true;
-      case ui::mojom::HitTest::kClose:
-        *out = HTCLOSE;
-        return true;
-      case ui::mojom::HitTest::kError:
-        *out = HTERROR;
-        return true;
-      case ui::mojom::HitTest::kGrowbox:
-        *out = HTGROWBOX;
-        return true;
-      case ui::mojom::HitTest::kHelp:
-        *out = HTHELP;
-        return true;
-      case ui::mojom::HitTest::kHScroll:
-        *out = HTHSCROLL;
-        return true;
-      case ui::mojom::HitTest::kLeft:
-        *out = HTLEFT;
-        return true;
-      case ui::mojom::HitTest::kMenu:
-        *out = HTMENU;
-        return true;
-      case ui::mojom::HitTest::kMaxButton:
-        *out = HTMAXBUTTON;
-        return true;
-      case ui::mojom::HitTest::kMinButton:
-        *out = HTMINBUTTON;
-        return true;
-      case ui::mojom::HitTest::kReduce:
-        *out = HTREDUCE;
-        return true;
-      case ui::mojom::HitTest::kRight:
-        *out = HTRIGHT;
-        return true;
-      case ui::mojom::HitTest::kSize:
-        *out = HTSIZE;
-        return true;
-      case ui::mojom::HitTest::kSysMenu:
-        *out = HTSYSMENU;
-        return true;
-      case ui::mojom::HitTest::kTop:
-        *out = HTTOP;
-        return true;
-      case ui::mojom::HitTest::kTopLeft:
-        *out = HTTOPLEFT;
-        return true;
-      case ui::mojom::HitTest::kTopRight:
-        *out = HTTOPRIGHT;
-        return true;
-      case ui::mojom::HitTest::kTransparent:
-        *out = HTTRANSPARENT;
-        return true;
-      case ui::mojom::HitTest::kVScroll:
-        *out = HTVSCROLL;
-        return true;
-      case ui::mojom::HitTest::kZoom:
-        *out = HTZOOM;
-        return true;
-      default:
-        NOTREACHED();
-        *out = HTNOWHERE;
-        return false;
-    }
-  }
-};
-
-template <>
-struct EnumTraits<ui::mojom::WindowShowState, ui::WindowShowState> {
-  static ui::mojom::WindowShowState ToMojom(ui::WindowShowState modal_type) {
+struct EnumTraits<ui::mojom::MenuSourceType, ui::MenuSourceType> {
+  static ui::mojom::MenuSourceType ToMojom(ui::MenuSourceType modal_type) {
     switch (modal_type) {
-      case ui::SHOW_STATE_DEFAULT:
-        return ui::mojom::WindowShowState::kDefault;
-      case ui::SHOW_STATE_NORMAL:
-        return ui::mojom::WindowShowState::kNormal;
-      case ui::SHOW_STATE_MINIMIZED:
-        return ui::mojom::WindowShowState::kMinimized;
-      case ui::SHOW_STATE_MAXIMIZED:
-        return ui::mojom::WindowShowState::kMaximized;
-      case ui::SHOW_STATE_INACTIVE:
-        return ui::mojom::WindowShowState::kInactive;
-      case ui::SHOW_STATE_FULLSCREEN:
-        return ui::mojom::WindowShowState::kFullscreen;
-      case ui::SHOW_STATE_END:
-        NOTREACHED();
-        break;
+      case ui::MENU_SOURCE_NONE:
+        return ui::mojom::MenuSourceType::NONE;
+      case ui::MENU_SOURCE_MOUSE:
+        return ui::mojom::MenuSourceType::MOUSE;
+      case ui::MENU_SOURCE_KEYBOARD:
+        return ui::mojom::MenuSourceType::KEYBOARD;
+      case ui::MENU_SOURCE_TOUCH:
+        return ui::mojom::MenuSourceType::TOUCH;
+      case ui::MENU_SOURCE_TOUCH_EDIT_MENU:
+        return ui::mojom::MenuSourceType::TOUCH_EDIT_MENU;
+      case ui::MENU_SOURCE_LONG_PRESS:
+        return ui::mojom::MenuSourceType::LONG_PRESS;
+      case ui::MENU_SOURCE_LONG_TAP:
+        return ui::mojom::MenuSourceType::LONG_TAP;
+      case ui::MENU_SOURCE_TOUCH_HANDLE:
+        return ui::mojom::MenuSourceType::TOUCH_HANDLE;
+      case ui::MENU_SOURCE_STYLUS:
+        return ui::mojom::MenuSourceType::STYLUS;
+      case ui::MENU_SOURCE_ADJUST_SELECTION:
+        return ui::mojom::MenuSourceType::ADJUST_SELECTION;
+      case ui::MENU_SOURCE_ADJUST_SELECTION_RESET:
+        return ui::mojom::MenuSourceType::ADJUST_SELECTION_RESET;
     }
     NOTREACHED();
-    return ui::mojom::WindowShowState::kDefault;
+    return ui::mojom::MenuSourceType::NONE;
   }
 
-  static bool FromMojom(ui::mojom::WindowShowState modal_type,
-                        ui::WindowShowState* out) {
+  static bool FromMojom(ui::mojom::MenuSourceType modal_type,
+                        ui::MenuSourceType* out) {
     switch (modal_type) {
-      case ui::mojom::WindowShowState::kDefault:
-        *out = ui::SHOW_STATE_DEFAULT;
+      case ui::mojom::MenuSourceType::NONE:
+        *out = ui::MENU_SOURCE_NONE;
         return true;
-      case ui::mojom::WindowShowState::kNormal:
-        *out = ui::SHOW_STATE_NORMAL;
+      case ui::mojom::MenuSourceType::MOUSE:
+        *out = ui::MENU_SOURCE_MOUSE;
         return true;
-      case ui::mojom::WindowShowState::kMinimized:
-        *out = ui::SHOW_STATE_MINIMIZED;
+      case ui::mojom::MenuSourceType::KEYBOARD:
+        *out = ui::MENU_SOURCE_KEYBOARD;
         return true;
-      case ui::mojom::WindowShowState::kMaximized:
-        *out = ui::SHOW_STATE_MAXIMIZED;
+      case ui::mojom::MenuSourceType::TOUCH:
+        *out = ui::MENU_SOURCE_TOUCH;
         return true;
-      case ui::mojom::WindowShowState::kInactive:
-        *out = ui::SHOW_STATE_INACTIVE;
+      case ui::mojom::MenuSourceType::TOUCH_EDIT_MENU:
+        *out = ui::MENU_SOURCE_TOUCH_EDIT_MENU;
         return true;
-      case ui::mojom::WindowShowState::kFullscreen:
-        *out = ui::SHOW_STATE_FULLSCREEN;
+      case ui::mojom::MenuSourceType::LONG_PRESS:
+        *out = ui::MENU_SOURCE_LONG_PRESS;
+        return true;
+      case ui::mojom::MenuSourceType::LONG_TAP:
+        *out = ui::MENU_SOURCE_LONG_TAP;
+        return true;
+      case ui::mojom::MenuSourceType::TOUCH_HANDLE:
+        *out = ui::MENU_SOURCE_TOUCH_HANDLE;
+        return true;
+      case ui::mojom::MenuSourceType::STYLUS:
+        *out = ui::MENU_SOURCE_STYLUS;
+        return true;
+      case ui::mojom::MenuSourceType::ADJUST_SELECTION:
+        *out = ui::MENU_SOURCE_ADJUST_SELECTION;
+        return true;
+      case ui::mojom::MenuSourceType::ADJUST_SELECTION_RESET:
+        *out = ui::MENU_SOURCE_ADJUST_SELECTION_RESET;
         return true;
     }
     NOTREACHED();

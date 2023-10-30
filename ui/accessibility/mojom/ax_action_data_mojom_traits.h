@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/mojom/ax_action_data.mojom-shared.h"
 #include "ui/accessibility/mojom/ax_tree_id_mojom_traits.h"
-#include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
+#include "ui/gfx/geometry/mojom/geometry_mojom_traits.h"
 
 namespace mojo {
 
@@ -60,6 +60,9 @@ struct StructTraits<ax::mojom::AXActionDataDataView, ui::AXActionData> {
   static ax::mojom::ScrollAlignment vertical_scroll_alignment(
       const ui::AXActionData& a) {
     return a.vertical_scroll_alignment;
+  }
+  static ax::mojom::ScrollBehavior scroll_behavior(const ui::AXActionData& a) {
+    return a.scroll_behavior;
   }
 
   static bool Read(ax::mojom::AXActionDataDataView data, ui::AXActionData* out);

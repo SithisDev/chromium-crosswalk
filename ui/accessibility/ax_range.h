@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,46 @@
 #define UI_ACCESSIBILITY_AX_RANGE_H_
 
 #include <memory>
+#include <ostream>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/accessibility/ax_clipping_behavior.h"
+#include "ui/accessibility/ax_node.h"
+#include "ui/accessibility/ax_node_position.h"
+#include "ui/accessibility/ax_offscreen_result.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/ax_tree_manager_map.h"
-#include "ui/accessibility/platform/ax_platform_node_delegate.h"
 
 namespace ui {
 
-// Specifies how AXRange::GetText treats line breaks introduced by layout.
-// For example, consider the following HTML snippet: "A<div>B</div>C".
+// Specifies how AXRange::GetText treats any formatting changes, such as
+// paragraph breaks, that have been introduced by layout. For example, consider
+// the following HTML snippet: "A<div>B</div>C".
 enum class AXTextConcatenationBehavior {
-  // Preserve any introduced line breaks, e.g. GetText = "A\nB\nC".
-  kAsInnerText,
-  // Ignore any introduced line breaks, e.g. GetText = "ABC".
-  kAsTextContent
+  // Preserve any introduced formatting, such as paragraph breaks, e.g. GetText
+  // = "A\nB\nC".
+  kWithParagraphBreaks,
+  // Ignore any introduced formatting, such as paragraph breaks, e.g. GetText =
+  // "ABC".
+  kWithoutParagraphBreaks
+};
+
+class AXRangeRectDelegate {
+ public:
+  virtual gfx::Rect GetInnerTextRangeBoundsRect(
+      AXTreeID tree_id,
+      AXNodeID node_id,
+      int start_offset,
+      int end_offset,
+      ui::AXClippingBehavior clipping_behavior,
+      AXOffscreenResult* offscreen_result) = 0;
+  virtual gfx::Rect GetBoundsRect(AXTreeID tree_id,
+                                  AXNodeID node_id,
+                                  AXOffscreenResult* offscreen_result) = 0;
 };
 
 // A range delimited by two positions in the AXTree.
@@ -33,6 +56,15 @@ template <class AXPositionType>
 class AXRange {
  public:
   using AXPositionInstance = std::unique_ptr<AXPositionType>;
+
+  // Creates an `AXRange` encompassing the contents of the given `AXNode`.
+  static AXRange RangeOfContents(const AXNode& node) {
+    AXPositionInstance start_position = AXNodePosition::CreatePosition(
+        node, /* child_index_or_text_offset */ 0);
+    AXPositionInstance end_position =
+        start_position->CreatePositionAtEndOfAnchor();
+    return AXRange(std::move(start_position), std::move(end_position));
+  }
 
   AXRange()
       : anchor_(AXPositionType::CreateNullPosition()),
@@ -50,7 +82,7 @@ class AXRange {
     focus_.swap(other.focus_);
   }
 
-  virtual ~AXRange() {}
+  virtual ~AXRange() = default;
 
   AXPositionType* anchor() const {
     DCHECK(anchor_);
@@ -62,15 +94,10 @@ class AXRange {
     return focus_.get();
   }
 
-  bool IsNull() const {
-    DCHECK(anchor_ && focus_);
-    return anchor_->IsNullPosition() || focus_->IsNullPosition();
-  }
-
   AXRange& operator=(const AXRange& other) = delete;
 
-  AXRange& operator=(const AXRange&& other) {
-    if (this != other) {
+  AXRange& operator=(AXRange&& other) {
+    if (this != &other) {
       anchor_ = AXPositionType::CreateNullPosition();
       focus_ = AXPositionType::CreateNullPosition();
       anchor_.swap(other.anchor_);
@@ -88,25 +115,60 @@ class AXRange {
 
   bool operator!=(const AXRange& other) const { return !(*this == other); }
 
-  AXRange GetForwardRange() const {
-    // When we have a range with an empty text representation, its endpoints
-    // would be considered equal as text positions, but they could be located in
-    // different anchors of the AXTree. Compare them as tree positions first to
-    // preserve their relative order from the pre-order traversal of the tree,
-    // so that AXRange::Iterator behaves correctly.
-    AXPositionInstance anchor_tree_position = anchor_->AsTreePosition();
-    AXPositionInstance focus_tree_position = focus_->AsTreePosition();
+  // Given a pair of AXPosition, determines how the first compares with the
+  // second, relative to the order they would be iterated over by using
+  // AXRange::Iterator to traverse all leaf text ranges in a tree.
+  //
+  // Notice that this method is different from using AXPosition::CompareTo since
+  // the following logic takes into account BOTH tree pre-order traversal and
+  // text offsets when both positions are located within the same anchor.
+  //
+  // Returns:
+  //         0 - If both positions are equivalent.
+  //        <0 - If the first position would come BEFORE the second.
+  //        >0 - If the first position would come AFTER the second.
+  //   nullopt - If positions are not comparable (see AXPosition::CompareTo).
+  static absl::optional<int> CompareEndpoints(const AXPositionType* first,
+                                              const AXPositionType* second) {
+    absl::optional<int> tree_position_comparison =
+        first->AsTreePosition()->CompareTo(*second->AsTreePosition());
 
-    return (*focus_tree_position < *anchor_tree_position || *focus_ < *anchor_)
+    // When the tree comparison is nullopt, using value_or(1) forces a default
+    // value of 1, making the following statement return nullopt as well.
+    return (tree_position_comparison.value_or(1) != 0)
+               ? tree_position_comparison
+               : first->CompareTo(*second);
+  }
+
+  AXRange AsForwardRange() const {
+    return (CompareEndpoints(anchor(), focus()).value_or(0) > 0)
                ? AXRange(focus_->Clone(), anchor_->Clone())
                : AXRange(anchor_->Clone(), focus_->Clone());
   }
+
+  AXRange AsBackwardRange() const {
+    return (CompareEndpoints(anchor(), focus()).value_or(0) < 0)
+               ? AXRange(focus_->Clone(), anchor_->Clone())
+               : AXRange(anchor_->Clone(), focus_->Clone());
+  }
+
+  bool IsCollapsed() const { return !IsNull() && *anchor_ == *focus_; }
 
   // We define a "leaf text range" as an AXRange whose endpoints are leaf text
   // positions located within the same anchor of the AXTree.
   bool IsLeafTextRange() const {
     return !IsNull() && anchor_->GetAnchor() == focus_->GetAnchor() &&
            anchor_->IsLeafTextPosition() && focus_->IsLeafTextPosition();
+  }
+
+  bool IsNull() const {
+    DCHECK(anchor_ && focus_);
+    return anchor_->IsNullPosition() || focus_->IsNullPosition();
+  }
+
+  std::string ToString() const {
+    return "Range\nAnchor:" + anchor_->ToString() +
+           "\nFocus:" + focus_->ToString();
   }
 
   // We can decompose any given AXRange into multiple "leaf text ranges".
@@ -142,8 +204,14 @@ class AXRange {
   //
   // This class allows AXRange to be iterated through all "leaf text ranges"
   // contained between its endpoints, composing the entire range.
-  class Iterator : public std::iterator<std::input_iterator_tag, AXRange> {
+  class Iterator {
    public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = AXRange;
+    using difference_type = std::ptrdiff_t;
+    using pointer = AXRange*;
+    using reference = AXRange&;
+
     Iterator()
         : current_start_(AXPositionType::CreateNullPosition()),
           iterator_end_(AXPositionType::CreateNullPosition()) {}
@@ -182,8 +250,7 @@ class AXRange {
       if (current_start_->GetAnchor() == iterator_end_->GetAnchor()) {
         current_start_ = AXPositionType::CreateNullPosition();
       } else {
-        current_start_ =
-            current_start_->CreateNextAnchorPosition()->AsLeafTextPosition();
+        current_start_ = current_start_->CreateNextLeafTreePosition();
         DCHECK_LE(*current_start_, *iterator_end_);
       }
       return *this;
@@ -197,8 +264,8 @@ class AXRange {
               : iterator_end_->Clone();
       DCHECK_LE(*current_end, *iterator_end_);
 
-      AXRange current_leaf_text_range(current_start_->Clone(),
-                                      std::move(current_end));
+      AXRange current_leaf_text_range(current_start_->AsTextPosition(),
+                                      current_end->AsTextPosition());
       DCHECK(current_leaf_text_range.IsLeafTextRange());
       return std::move(current_leaf_text_range);
     }
@@ -209,116 +276,213 @@ class AXRange {
   };
 
   Iterator begin() const {
-    AXRange forward_range = GetForwardRange();
+    if (IsNull())
+      return Iterator(nullptr, nullptr);
+    AXRange forward_range = AsForwardRange();
     return Iterator(std::move(forward_range.anchor_),
                     std::move(forward_range.focus_));
   }
 
   Iterator end() const {
-    AXRange forward_range = GetForwardRange();
+    if (IsNull())
+      return Iterator(nullptr, nullptr);
+    AXRange forward_range = AsForwardRange();
     return Iterator(nullptr, std::move(forward_range.focus_));
   }
 
   // Returns the concatenation of the accessible names of all text nodes
   // contained between this AXRange's endpoints.
-  base::string16 GetText(
+  // Pass a |max_count| of -1 to retrieve all text in the AXRange.
+  // Note that if this AXRange has its anchor or focus located at an ignored
+  // position, we shrink the range to the closest unignored positions.
+  std::u16string GetText(
       AXTextConcatenationBehavior concatenation_behavior =
-          AXTextConcatenationBehavior::kAsTextContent) const {
-    base::string16 range_text;
-    bool should_append_newline = false;
-    for (const AXRange& leaf_text_range : *this) {
-      AXPositionType* start = leaf_text_range.anchor();
-      AXPositionType* end = leaf_text_range.focus();
+          AXTextConcatenationBehavior::kWithoutParagraphBreaks,
+      AXEmbeddedObjectBehavior embedded_object_behavior =
+          AXEmbeddedObjectBehavior::kExposeCharacter,
+      int max_count = -1,
+      bool include_ignored = false,
+      size_t* appended_newlines_count = nullptr) const {
+    if (max_count == 0 || IsNull())
+      return std::u16string();
 
+    absl::optional<int> endpoint_comparison =
+        CompareEndpoints(anchor(), focus());
+    if (!endpoint_comparison)
+      return std::u16string();
+
+    AXPositionInstance start = (endpoint_comparison.value() < 0)
+                                   ? anchor_->AsLeafTextPosition()
+                                   : focus_->AsLeafTextPosition();
+    AXPositionInstance end = (endpoint_comparison.value() < 0)
+                                 ? focus_->AsLeafTextPosition()
+                                 : anchor_->AsLeafTextPosition();
+
+    std::u16string range_text;
+    size_t computed_newlines_count = 0;
+    bool is_first_non_whitespace_leaf = true;
+    bool crossed_paragraph_boundary = false;
+    bool is_first_included_leaf = true;
+    bool found_trailing_newline = false;
+
+    while (!start->IsNullPosition()) {
+      DCHECK(start->IsLeafTextPosition());
       DCHECK_GE(start->text_offset(), 0);
-      DCHECK_LE(start->text_offset(), end->text_offset());
+      const bool start_is_unignored = !start->IsIgnored();
+      const bool start_is_in_white_space = start->IsInWhiteSpace();
 
-      if (should_append_newline)
-        range_text += base::ASCIIToUTF16("\n");
+      if (include_ignored || start_is_unignored) {
+        if (concatenation_behavior ==
+                AXTextConcatenationBehavior::kWithParagraphBreaks &&
+            !start_is_in_white_space) {
+          if (is_first_non_whitespace_leaf && !is_first_included_leaf) {
+            // The first non-whitespace leaf in the range could be preceded by
+            // whitespace spanning even before the start of this range, we need
+            // to check such positions in order to correctly determine if this
+            // is a paragraph's start (see |AXPosition::AtStartOfParagraph|).
+            // However, if the first paragraph boundary in the range is ignored,
+            // e.g. <div aria-hidden="true"></div>, we do not take it into
+            // consideration even when `include_ignored` == true, because the
+            // beginning of the text range, as experienced by the user, is after
+            // any trailing ignored nodes.
+            crossed_paragraph_boundary =
+                start_is_unignored && start->AtStartOfParagraph();
+          }
 
-      bool current_leaf_is_line_break = false;
-      base::string16 current_anchor_text = start->GetText();
-      int current_leaf_text_length = end->text_offset() - start->text_offset();
+          // When preserving layout line breaks, don't append `\n` next if the
+          // previous leaf position was a <br> (already ending with a newline).
+          if (crossed_paragraph_boundary && !found_trailing_newline) {
+            range_text += u"\n";
+            computed_newlines_count++;
+          }
 
-      if (current_leaf_text_length > 0) {
-        current_leaf_is_line_break = start->IsInLineBreak();
-        range_text += current_anchor_text.substr(start->text_offset(),
-                                                 current_leaf_text_length);
+          is_first_non_whitespace_leaf = false;
+          crossed_paragraph_boundary = false;
+        }
+
+        int current_end_offset =
+            (start->GetAnchor() != end->GetAnchor())
+                ? start->MaxTextOffset(embedded_object_behavior)
+                : end->text_offset();
+
+        if (current_end_offset > start->text_offset()) {
+          int characters_to_append =
+              (max_count > 0)
+                  ? std::min(max_count - static_cast<int>(range_text.length()),
+                             current_end_offset - start->text_offset())
+                  : current_end_offset - start->text_offset();
+
+          std::u16string position_text =
+              start->GetText(embedded_object_behavior);
+          if (start->text_offset() < static_cast<int>(position_text.length())) {
+            range_text += position_text.substr(start->text_offset(),
+                                               characters_to_append);
+          }
+
+          // To minimize user confusion, collapse all whitespace following any
+          // line break unless it is a hard line break (<br> or a text node with
+          // a single '\n' character), or an empty object such as an empty text
+          // field.
+          found_trailing_newline =
+              start->GetAnchor()->IsLineBreak() ||
+              (found_trailing_newline && start_is_in_white_space);
+        }
+
+        DCHECK(max_count < 0 ||
+               static_cast<int>(range_text.length()) <= max_count);
+        is_first_included_leaf = false;
       }
 
-      // When preserving layout line breaks, don't append a newline next if the
-      // current leaf range is a <br> (already ending with a '\n' character) or
-      // its respective anchor is invisible to the text representation.
-      if (concatenation_behavior == AXTextConcatenationBehavior::kAsInnerText)
-        should_append_newline = current_anchor_text.length() > 0 &&
-                                !current_leaf_is_line_break &&
-                                end->AtEndOfParagraph();
+      if (start->GetAnchor() == end->GetAnchor() ||
+          static_cast<int>(range_text.length()) == max_count) {
+        break;
+      }
+
+      start = start->CreateNextLeafTextPosition();
+      if (concatenation_behavior ==
+              AXTextConcatenationBehavior::kWithParagraphBreaks &&
+          !crossed_paragraph_boundary && !is_first_non_whitespace_leaf) {
+        crossed_paragraph_boundary = start->AtStartOfParagraph();
+      }
     }
+
+    if (appended_newlines_count)
+      *appended_newlines_count = computed_newlines_count;
     return range_text;
   }
 
-  // Appends rects in screen coordinates of all anchor nodes that span between
-  // anchor_ and focus_. Rects outside of the viewport are skipped.
-  std::vector<gfx::Rect> GetScreenRects() const {
+  // Appends rects of all anchor nodes that span between anchor_ and focus_.
+  // Rects outside of the viewport are skipped.
+  // Coordinate system is determined by the passed-in delegate.
+  std::vector<gfx::Rect> GetRects(AXRangeRectDelegate* delegate) const {
     std::vector<gfx::Rect> rects;
 
-    for (const AXRange& leaf_text_range : *this) {
-      DCHECK(!leaf_text_range.IsNull());
-      AXPositionInstance current_end =
-          leaf_text_range.focus()->AsLeafTextPosition();
-      AXPositionInstance current_line_start =
-          leaf_text_range.anchor()->AsLeafTextPosition();
+    AXPositionInstance range_start = anchor()->AsLeafTextPosition();
+    AXPositionInstance range_end = focus()->AsLeafTextPosition();
 
-      while (current_line_start->GetAnchor() == current_end->GetAnchor() &&
-             *current_line_start <= *current_end) {
-        AXPositionInstance current_line_end =
-            current_line_start->CreateNextLineEndPosition(
-                ui::AXBoundaryBehavior::CrossBoundary);
-
-        if (current_line_end->GetAnchor() != current_end->GetAnchor() ||
-            *current_line_end > *current_end)
-          current_line_end = current_end->Clone();
-
-        DCHECK_LE(*current_line_start, *current_line_end);
-        DCHECK_LE(*current_line_end, *current_end);
-
-        if (current_line_start->GetAnchor()->data().role ==
-            ax::mojom::Role::kInlineTextBox) {
-          current_line_start = current_line_start->CreateParentPosition();
-          current_line_end = current_line_end->CreateParentPosition();
-        }
-
-        AXTreeID current_tree_id = current_line_start->tree_id();
-        AXTreeManager* manager =
-            AXTreeManagerMap::GetInstance().GetManager(current_tree_id);
-        AXPlatformNodeDelegate* current_anchor_delegate = manager->GetDelegate(
-            current_tree_id, current_line_start->anchor_id());
-
-        // For text anchors, we retrieve the bounding rectangles of its text
-        // content. For non-text anchors (such as checkboxes, images, etc.), we
-        // want to directly retrieve their bounding rectangles.
-        gfx::Rect current_rect =
-            (current_line_start->IsInLineBreak() ||
-             current_line_start->IsInTextObject())
-                ? current_anchor_delegate->GetInnerTextRangeBoundsRect(
-                      current_line_start->text_offset(),
-                      current_line_end->text_offset(),
-                      ui::AXCoordinateSystem::kScreen,
-                      ui::AXClippingBehavior::kClipped)
-                : current_anchor_delegate->GetBoundsRect(
-                      ui::AXCoordinateSystem::kScreen,
-                      ui::AXClippingBehavior::kClipped);
-
-        // We only add rects that are visible within the current viewport.
-        // If the bounding rectangle is outside the viewport, the kClipped
-        // parameter from the bounds APIs will result in returning an empty
-        // rect, which we should omit from the final result.
-        if (!current_rect.IsEmpty())
-          rects.push_back(current_rect);
-
-        current_line_start = current_line_end->CreateNextLineStartPosition(
-            ui::AXBoundaryBehavior::CrossBoundary);
+    // For a degenerate range, we want to fetch unclipped bounding rect, because
+    // text with the same start and end off set (i.e. degenerate) will have an
+    // inner text bounding rect with height of the character and width of 0,
+    // which the browser platform will consider as an empty rect and ends up
+    // clipping it, resulting in size 0x1 rect.
+    // After we retrieve the unclipped bounding rect, we want to set its width
+    // to 1 to represent a caret/insertion point.
+    //
+    // Note: The caller of this function is only UIA TextPattern, so displaying
+    // bounding rects for degenerate range is only limited for UIA currently.
+    if (IsCollapsed() && range_start->IsInTextObject()) {
+      AXOffscreenResult offscreen_result;
+      gfx::Rect degenerate_range_rect = delegate->GetInnerTextRangeBoundsRect(
+          range_start->tree_id(), range_start->anchor_id(),
+          range_start->text_offset(), range_end->text_offset(),
+          ui::AXClippingBehavior::kUnclipped, &offscreen_result);
+      if (offscreen_result == AXOffscreenResult::kOnscreen) {
+        DCHECK(degenerate_range_rect.width() == 0);
+        degenerate_range_rect.set_width(1);
+        rects.push_back(degenerate_range_rect);
       }
+
+      return rects;
+    }
+
+    for (const AXRange& leaf_text_range : *this) {
+      DCHECK(leaf_text_range.IsLeafTextRange());
+      AXPositionType* current_line_start = leaf_text_range.anchor();
+      AXPositionType* current_line_end = leaf_text_range.focus();
+
+      // We want to skip ranges from ignored nodes.
+      if (current_line_start->IsIgnored())
+        continue;
+
+      // For text anchors, we retrieve the bounding rectangles of its text
+      // content. For non-text anchors (such as checkboxes, images, etc.), we
+      // want to directly retrieve their bounding rectangles.
+      AXOffscreenResult offscreen_result;
+      gfx::Rect current_rect =
+          (current_line_start->GetAnchor()->IsLineBreak() ||
+           current_line_start->IsInTextObject())
+              ? delegate->GetInnerTextRangeBoundsRect(
+                    current_line_start->tree_id(),
+                    current_line_start->anchor_id(),
+                    current_line_start->text_offset(),
+                    current_line_end->text_offset(),
+                    ui::AXClippingBehavior::kClipped, &offscreen_result)
+              : delegate->GetBoundsRect(current_line_start->tree_id(),
+                                        current_line_start->anchor_id(),
+                                        &offscreen_result);
+
+      // If the bounding box of the current range is clipped because it lies
+      // outside an ancestor’s bounds, then the bounding box is pushed to the
+      // nearest edge of such ancestor's bounds, with its width and height
+      // forced to be 1, and the node will be marked as "offscreen".
+      //
+      // Only add rectangles that are not empty and not marked as "offscreen".
+      //
+      // See the documentation for how bounding boxes are calculated in AXTree:
+      // https://chromium.googlesource.com/chromium/src/+/HEAD/docs/accessibility/offscreen.md
+      if (!current_rect.IsEmpty() &&
+          offscreen_result == AXOffscreenResult::kOnscreen)
+        rects.push_back(current_rect);
     }
     return rects;
   }
@@ -327,6 +491,12 @@ class AXRange {
   AXPositionInstance anchor_;
   AXPositionInstance focus_;
 };
+
+template <class AXPositionType>
+std::ostream& operator<<(std::ostream& stream,
+                         const AXRange<AXPositionType>& range) {
+  return stream << range.ToString();
+}
 
 }  // namespace ui
 

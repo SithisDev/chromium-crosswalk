@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/views/controls/menu/menu_item_view.h"
@@ -67,12 +68,12 @@ void MenuClosureAnimationMac::AdvanceAnimation() {
   if (step_ == AnimationStep::kUnselected ||
       step_ == AnimationStep::kSelected) {
     item_->SetForcedVisualSelection(step_ == AnimationStep::kSelected);
-    timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(80),
+    timer_.Start(FROM_HERE, base::Milliseconds(80),
                  base::BindRepeating(&MenuClosureAnimationMac::AdvanceAnimation,
                                      base::Unretained(this)));
   } else if (step_ == AnimationStep::kFading) {
     auto fade = std::make_unique<gfx::LinearAnimation>(this);
-    fade->SetDuration(base::TimeDelta::FromMilliseconds(200));
+    fade->SetDuration(base::Milliseconds(200));
     fade_animation_ = std::move(fade);
     fade_animation_->Start();
   } else if (step_ == AnimationStep::kFinish) {
@@ -87,8 +88,17 @@ void MenuClosureAnimationMac::DisableAnimationsForTesting() {
 
 void MenuClosureAnimationMac::AnimationProgressed(
     const gfx::Animation* animation) {
-  NSWindow* window = menu_->GetWidget()->GetNativeWindow().GetNativeNSWindow();
-  [window setAlphaValue:animation->CurrentValueBetween(1.0, 0.0)];
+  // Walk up the menu from |menu_|, fading the NSWindows for all its ancestor
+  // menus in lockstep.
+  SubmenuView* submenu = menu_;
+  while (submenu) {
+    NSWindow* window =
+        submenu->GetWidget()->GetNativeWindow().GetNativeNSWindow();
+    [window setAlphaValue:animation->CurrentValueBetween(1.0, 0.0)];
+
+    MenuItemView* parent = submenu->GetMenuItem()->GetParentMenuItem();
+    submenu = parent ? parent->GetSubmenu() : nullptr;
+  }
 }
 
 void MenuClosureAnimationMac::AnimationEnded(const gfx::Animation* animation) {

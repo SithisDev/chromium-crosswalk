@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <limits>
 
-#include "base/stl_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkScalar.h"
@@ -16,10 +16,10 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/scoped_canvas.h"
-#include "ui/gfx/skia_util.h"
 
 namespace gfx {
 
@@ -52,8 +52,8 @@ void Fill(Canvas* c,
 }  // namespace
 
 NineImagePainter::NineImagePainter(const std::vector<ImageSkia>& images) {
-  DCHECK_EQ(base::size(images_), images.size());
-  for (size_t i = 0; i < base::size(images_); ++i)
+  DCHECK_EQ(std::size(images_), images.size());
+  for (size_t i = 0; i < std::size(images_); ++i)
     images_[i] = images[i];
 }
 
@@ -99,10 +99,10 @@ void NineImagePainter::Paint(Canvas* canvas,
 
   // Since the drawing from the following Fill() calls assumes the mapped origin
   // is at (0,0), we need to translate the canvas to the mapped origin.
-  const int left_in_pixels = ToRoundedInt(bounds.x() * scale);
-  const int top_in_pixels = ToRoundedInt(bounds.y() * scale);
-  const int right_in_pixels = ToRoundedInt(bounds.right() * scale);
-  const int bottom_in_pixels = ToRoundedInt(bounds.bottom() * scale);
+  const int left_in_pixels = base::ClampRound(bounds.x() * scale);
+  const int top_in_pixels = base::ClampRound(bounds.y() * scale);
+  const int right_in_pixels = base::ClampRound(bounds.right() * scale);
+  const int bottom_in_pixels = base::ClampRound(bounds.bottom() * scale);
 
   const int width_in_pixels = right_in_pixels - left_in_pixels;
   const int height_in_pixels = bottom_in_pixels - top_in_pixels;
@@ -112,8 +112,8 @@ void NineImagePainter::Paint(Canvas* canvas,
   canvas->Translate(gfx::Vector2d(left_in_pixels, top_in_pixels));
 
   ImageSkiaRep image_reps[9];
-  static_assert(base::size(image_reps) == std::extent<decltype(images_)>(), "");
-  for (size_t i = 0; i < base::size(image_reps); ++i) {
+  static_assert(std::size(image_reps) == std::extent<decltype(images_)>(), "");
+  for (size_t i = 0; i < std::size(image_reps); ++i) {
     image_reps[i] = images_[i].GetRepresentation(scale);
     DCHECK(image_reps[i].is_null() || image_reps[i].scale() == scale);
   }
@@ -150,12 +150,10 @@ void NineImagePainter::Paint(Canvas* canvas,
   i7h = std::min(i7h, height_in_pixels - i1h);
   i8h = std::min(i8h, height_in_pixels - i2h);
 
-  int i4x = std::min(std::min(i0w, i3w), i6w);
-  int i4y = std::min(std::min(i0h, i1h), i2h);
-  int i4w =
-      std::max(width_in_pixels - i4x - std::min(std::min(i2w, i5w), i8w), 0);
-  int i4h =
-      std::max(height_in_pixels - i4y - std::min(std::min(i6h, i7h), i8h), 0);
+  int i4x = std::min({i0w, i3w, i6w});
+  int i4y = std::min({i0h, i1h, i2h});
+  int i4w = std::max(width_in_pixels - i4x - std::min({i2w, i5w, i8w}), 0);
+  int i4h = std::max(height_in_pixels - i4y - std::min({i6h, i7h, i8h}), 0);
 
   cc::PaintFlags flags;
   flags.setAlpha(alpha);

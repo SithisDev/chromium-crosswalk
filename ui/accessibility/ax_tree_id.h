@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 #include <string>
 
 #include "base/unguessable_token.h"
-#include "ui/accessibility/ax_enums.mojom-shared.h"
-#include "ui/accessibility/ax_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/accessibility/ax_base_export.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 
 namespace mojo {
 template <typename DataViewType, typename T>
@@ -25,7 +26,7 @@ class AXTreeIDDataView;
 namespace ui {
 
 // A unique ID representing an accessibility tree.
-class AX_EXPORT AXTreeID {
+class AX_BASE_EXPORT AXTreeID {
  public:
   // Create an Unknown AXTreeID.
   AXTreeID();
@@ -42,10 +43,15 @@ class AX_EXPORT AXTreeID {
   // automation API.
   static AXTreeID FromString(const std::string& string);
 
+  // Convenience method to unserialize an AXTreeID from an UnguessableToken.
+  static AXTreeID FromToken(const base::UnguessableToken& token);
+
+  AXTreeID& operator=(const AXTreeID& other);
+
   std::string ToString() const;
 
   ax::mojom::AXTreeIDType type() const { return type_; }
-  const base::Optional<base::UnguessableToken>& token() const { return token_; }
+  const absl::optional<base::UnguessableToken>& token() const { return token_; }
 
   bool operator==(const AXTreeID& rhs) const;
   bool operator!=(const AXTreeID& rhs) const;
@@ -59,24 +65,23 @@ class AX_EXPORT AXTreeID {
   explicit AXTreeID(const std::string& string);
 
   friend struct mojo::UnionTraits<ax::mojom::AXTreeIDDataView, ui::AXTreeID>;
-  friend class base::NoDestructor<AXTreeID>;
+  friend AX_BASE_EXPORT const AXTreeID& AXTreeIDUnknown();
+  friend void swap(AXTreeID& first, AXTreeID& second);
 
-  ax::mojom::AXTreeIDType type_ = ax::mojom::AXTreeIDType::kUnknown;
-  base::Optional<base::UnguessableToken> token_;
+  ax::mojom::AXTreeIDType type_;
+  absl::optional<base::UnguessableToken> token_ = absl::nullopt;
 };
 
 // For use in std::unordered_map.
-struct AXTreeIDHash {
-  size_t operator()(const ui::AXTreeID& tree_id) const {
-    DCHECK(tree_id.type() == ax::mojom::AXTreeIDType::kToken);
-    return base::UnguessableTokenHash()(tree_id.token().value());
-  }
+struct AX_BASE_EXPORT AXTreeIDHash {
+  size_t operator()(const ui::AXTreeID& tree_id) const;
 };
 
-AX_EXPORT std::ostream& operator<<(std::ostream& stream, const AXTreeID& value);
+AX_BASE_EXPORT std::ostream& operator<<(std::ostream& stream,
+                                        const AXTreeID& value);
 
 // The value to use when an AXTreeID is unknown.
-AX_EXPORT extern const AXTreeID& AXTreeIDUnknown();
+AX_BASE_EXPORT const AXTreeID& AXTreeIDUnknown();
 
 }  // namespace ui
 

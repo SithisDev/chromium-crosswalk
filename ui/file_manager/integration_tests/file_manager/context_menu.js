@@ -1,8 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {addEntries, ENTRIES, RootPath, sendTestMessage, TestEntryInfo} from '../test_util.js';
+import {testcase} from '../testcase.js';
+
+import {navigateWithDirectoryTree, openNewWindow, remoteCall, setupAndWaitUntilReady} from './background.js';
+import {COMPLEX_DOCUMENTS_PROVIDER_ENTRY_SET, COMPLEX_DRIVE_ENTRY_SET, RECENT_ENTRY_SET} from './test_data.js';
 
 /**
  * Tests that check the context menu displays the right options (enabled and
@@ -22,12 +26,39 @@ async function maybeCopyToClipboard(appId, commandId, file = 'hello.txt') {
   if (!/^paste/.test(commandId)) {
     return;
   }
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil('selectFile', appId, [file]),
-      'selectFile failed');
+  await remoteCall.waitUntilSelected(appId, file);
   chrome.test.assertTrue(
       !!await remoteCall.callRemoteTestUtil('execCommand', appId, ['copy']),
       'execCommand failed');
+}
+
+/**
+ * Selects a file in the file list.
+ *
+ * @param {string} appId ID of the app window.
+ * @param {string} path Path to the file to be selected.
+ */
+async function selectFile(appId, path) {
+  // Select the file |path|.
+  await remoteCall.waitUntilSelected(appId, path);
+
+  // Wait for the file to be selected.
+  await remoteCall.waitForElement(appId, '.table-row[selected]');
+}
+
+/**
+ * Right clicks the currently selected file in the file list and waits for its
+ * context menu to appear.
+ *
+ * @param {string} appId ID of the app window.
+ */
+async function rightClickSelectedFile(appId) {
+  // Right-click the selected file.
+  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
+      'fakeMouseRightClick', appId, ['.table-row[selected]']));
+
+  // Wait for the file context menu to appear.
+  await remoteCall.waitForElement(appId, '#file-context-menu:not([hidden])');
 }
 
 /**
@@ -37,9 +68,13 @@ async function maybeCopyToClipboard(appId, commandId, file = 'hello.txt') {
  * @param {string} commandId ID of the command in the context menu to check.
  * @param {string} path Path to the file to open the context menu for.
  * @param {boolean} expectedEnabledState True if the command should be enabled
- *     in the context menu, false if not.
+ *     in the context menu, false if not. Only checked if the command isn't
+ * hidden.
+ * @param {boolean} expectedHiddenState True if the command should be hidden
+ *     in the context menu, false if not. Defaults to false.
  */
-async function checkContextMenu(commandId, path, expectedEnabledState) {
+async function checkContextMenu(
+    commandId, path, expectedEnabledState, expectedHiddenState = false) {
   // Open Files App on Drive.
   const appId =
       await setupAndWaitUntilReady(RootPath.DRIVE, [], COMPLEX_DRIVE_ENTRY_SET);
@@ -48,8 +83,7 @@ async function checkContextMenu(commandId, path, expectedEnabledState) {
   await maybeCopyToClipboard(appId, commandId);
 
   // Select the file |path|.
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil('selectFile', appId, [path]));
+  await remoteCall.waitUntilSelected(appId, path);
 
   // Wait for the file to be selected.
   await remoteCall.waitForElement(appId, '.table-row[selected]');
@@ -63,11 +97,16 @@ async function checkContextMenu(commandId, path, expectedEnabledState) {
 
   // Wait for the command option to appear.
   let query = '#file-context-menu:not([hidden])';
-  if (expectedEnabledState) {
-    query += ` [command="#${commandId}"]:not([hidden]):not([disabled])`;
+  if (expectedHiddenState) {
+    query += ` [command="#${commandId}"][hidden]`;
   } else {
-    query += ` [command="#${commandId}"][disabled]:not([hidden])`;
+    if (expectedEnabledState) {
+      query += ` [command="#${commandId}"]:not([hidden]):not([disabled])`;
+    } else {
+      query += ` [command="#${commandId}"][disabled]:not([hidden])`;
+    }
   }
+
   await remoteCall.waitForElement(appId, query);
 }
 
@@ -230,6 +269,15 @@ testcase.checkCutDisabledForReadOnlyFile = () => {
 };
 
 /**
+ * Tests that the Restriction details menu item is hidden if DLP is disabled.
+ */
+testcase.checkDlpRestrictionDetailsDisabledForNonDlpFiles = () => {
+  return checkContextMenu(
+      'dlp-restriction-details', 'hello.txt', /*expectedEnabledState=*/ false,
+      /*expectedHiddenState=*/ true);
+};
+
+/**
  * Tests that the Cut menu item is disabled if a read-only folder is
  * selected.
  */
@@ -254,6 +302,93 @@ testcase.checkPasteIntoFolderDisabledForReadOnlyFolder = () => {
 };
 
 /**
+ * Tests that the "Install with Linux" file context menu item is hidden for a
+ * Debian file if Crostini root access is disabled.
+ */
+testcase.checkInstallWithLinuxDisabledForDebianFile = async () => {
+  const optionHidden = '#file-context-menu:not([hidden]) ' +
+      '[command="#default-task"][hidden]';
+
+  // Open FilesApp on Downloads with deb file.
+  const appId = await setupAndWaitUntilReady(
+      RootPath.DOWNLOADS, [ENTRIES.debPackage], []);
+
+  // Disallow root access.
+  await sendTestMessage({name: 'setCrostiniRootAccessAllowed', enabled: false});
+
+  // Select and right click the deb file to show its context menu.
+  await selectFile(appId, 'package.deb');
+  await rightClickSelectedFile(appId);
+
+  // Check: the "Install with Linux" context menu item should be hidden.
+  await remoteCall.waitForElement(appId, optionHidden);
+};
+
+/**
+ * Tests that the "Install with Linux" file context menu item is shown for a
+ * Debian file if Crostini root access is enabled.
+ */
+testcase.checkInstallWithLinuxEnabledForDebianFile = async () => {
+  const optionShown = '#file-context-menu:not([hidden]) ' +
+      '[command="#default-task"]:not([hidden])';
+
+  // Open FilesApp on Downloads with deb file.
+  const appId = await setupAndWaitUntilReady(
+      RootPath.DOWNLOADS, [ENTRIES.debPackage], []);
+
+  // Select and right click the deb file to show its context menu.
+  await selectFile(appId, 'package.deb');
+  await rightClickSelectedFile(appId);
+
+  // Check: the "Install with Linux" context menu item should be shown.
+  await remoteCall.waitForElement(appId, optionShown);
+};
+
+/**
+ * Tests that the "Replace your Linux apps and files" file context menu item is
+ * hidden for a *.tini file if Crostini backup is disabled.
+ */
+testcase.checkImportCrostiniImageDisabled = async () => {
+  const optionHidden = '#file-context-menu:not([hidden]) ' +
+      '[command="#default-task"][hidden]';
+
+  // Open FilesApp on Downloads with test.tini file.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.tiniFile], []);
+
+  // Disable Crostini backup.
+  await sendTestMessage(
+      {name: 'setCrostiniExportImportAllowed', enabled: false});
+
+  // Select and right click the tini file to show its context menu.
+  await selectFile(appId, 'test.tini');
+  await rightClickSelectedFile(appId);
+
+  // Check: the context menu item should be hidden.
+  await remoteCall.waitForElement(appId, optionHidden);
+};
+
+/**
+ * Tests that the "Replace your Linux apps and files" file context menu item is
+ * shown for a *.tini file if Crostini backup is enabled.
+ */
+testcase.checkImportCrostiniImageEnabled = async () => {
+  const optionShown = '#file-context-menu:not([hidden]) ' +
+      '[command="#default-task"]:not([hidden])';
+
+  // Open FilesApp on Downloads with test.tini file.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.tiniFile], []);
+
+  // Select and right click the tini file to show its context menu.
+  await selectFile(appId, 'test.tini');
+  await rightClickSelectedFile(appId);
+
+  // Check: the context menu item should be shown.
+  await remoteCall.waitForElement(appId, optionShown);
+};
+
+/**
  * Tests that text selection context menus are disabled in tablet mode.
  */
 testcase.checkContextMenusForInputElements = async () => {
@@ -270,16 +405,16 @@ testcase.checkContextMenusForInputElements = async () => {
 
   // Focus the search box.
   chrome.test.assertEq(2, elements.length);
-  for (let element of elements) {
-    chrome.test.assertEq('#text-context-menu', element.attributes.contextmenu);
+  for (const element of elements) {
+    chrome.test.assertEq(
+        '#text-context-menu', element.attributes['contextmenu']);
   }
 
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
       'fakeEvent', appId, ['#search-box cr-input', 'focus']));
 
   // Input a text.
-  await remoteCall.callRemoteTestUtil(
-      'inputText', appId, ['#search-box cr-input', 'test.pdf']);
+  await remoteCall.inputText(appId, '#search-box cr-input', 'test.pdf');
 
   // Notify the element of the input.
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
@@ -301,11 +436,56 @@ testcase.checkContextMenusForInputElements = async () => {
 };
 
 /**
+ * Tests that opening context menu in the rename input won't commit the
+ * renaming.
+ */
+testcase.checkContextMenuForRenameInput = async () => {
+  const textInput = '#file-list .table-row[renaming] input.rename';
+  const contextMenu = '#text-context-menu:not([hidden])';
+
+  // Open FilesApp on Downloads.
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Select the file.
+  await remoteCall.waitUntilSelected(appId, 'hello.txt');
+
+  // Press Ctrl+Enter key to rename the file.
+  const key = ['#file-list', 'Enter', true, false, false];
+  chrome.test.assertTrue(
+      await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, key));
+
+  // Check: the renaming text input should be shown in the file list.
+  await remoteCall.waitForElement(appId, textInput);
+
+  // Type new file name.
+  await remoteCall.inputText(appId, textInput, 'NEW NAME');
+
+  // Right click to show the context menu.
+  await remoteCall.waitAndRightClick(appId, textInput);
+
+  // Context menu must be visible.
+  await remoteCall.waitForElement(appId, contextMenu);
+
+  // Dismiss the context menu.
+  const escKey = [contextMenu, 'Escape', false, false, false];
+  await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, escKey);
+
+  // Check: The rename input should be still be visible and with the same
+  // content.
+  const inputElement = await remoteCall.waitForElement(appId, textInput);
+  chrome.test.assertEq('NEW NAME', inputElement.value);
+
+  // Check: The rename input should be the focused element.
+  const focusedElement =
+      await remoteCall.callRemoteTestUtil('getActiveElement', appId, []);
+  chrome.test.assertEq(inputElement, focusedElement);
+};
+
+/**
  * Tests that the specified menu item is in |expectedEnabledState| when the
  * context menu is opened from the file list inside the folder called
  * |folderName|. The folder is opened and the white area inside the folder is
  * selected. |folderName| must be inside the Google Drive root.
- * TODO(sashab): Allow specifying a generic path to any folder in the tree.
  *
  * @param {string} commandId ID of the command in the context menu to check.
  * @param {string} folderName Path to the file to open the context menu for.
@@ -321,28 +501,8 @@ async function checkContextMenuInDriveFolder(
   // Optionally copy hello.txt into the clipboard if needed.
   await maybeCopyToClipboard(appId, commandId);
 
-  // Focus the file list.
-  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
-      'focus', appId, ['#file-list:not([hidden])']));
-
-  // Select 'My Drive'.
-  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
-      'selectFolderInTree', appId, ['My Drive']));
-
-  // Wait for My Drive to load.
-  await remoteCall.waitUntilCurrentDirectoryIsChanged(appId, '/My Drive');
-
-  // Expand 'My Drive'.
-  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
-      'expandSelectedFolderInTree', appId, []));
-
-  // Select the folder.
-  await remoteCall.callRemoteTestUtil(
-      'selectFolderInTree', appId, [folderName]);
-
-  // Wait the folder to load.
-  await remoteCall.waitUntilCurrentDirectoryIsChanged(
-      appId, '/My Drive/' + folderName);
+  // Navigate to folder.
+  await navigateWithDirectoryTree(appId, '/My Drive/' + folderName);
 
   // Right-click inside the file list.
   chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
@@ -411,7 +571,7 @@ async function checkMyFilesRootItemContextMenu(itemName, commandStates) {
 
   const enabledCmds = [];
   const disabledCmds = [];
-  for (let [cmd, enabled] of Object.entries(commandStates)) {
+  for (const [cmd, enabled] of Object.entries(commandStates)) {
     chrome.test.assertTrue(cmd in validCmds, cmd + ' is not a valid command.');
     if (enabled) {
       enabledCmds.push(cmd);
@@ -425,7 +585,7 @@ async function checkMyFilesRootItemContextMenu(itemName, commandStates) {
       await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.photos], []);
 
   // Navigate to My files.
-  await remoteCall.waitAndClickElement(appId, '#breadcrumb-path-0');
+  await navigateWithDirectoryTree(appId, '/My files');
 
   // Wait for the navigation to complete.
   const expectedRows = [
@@ -438,8 +598,7 @@ async function checkMyFilesRootItemContextMenu(itemName, commandStates) {
       {ignoreFileSize: true, ignoreLastModifiedTime: true});
 
   // Select the item.
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil('selectFile', appId, [itemName]));
+  await remoteCall.waitUntilSelected(appId, itemName);
 
   // Wait for the file to be selected.
   await remoteCall.waitForElement(appId, '.table-row[selected]');
@@ -453,14 +612,14 @@ async function checkMyFilesRootItemContextMenu(itemName, commandStates) {
 
   // Check the enabled commands.
   for (const commandId of enabledCmds) {
-    let query = `#file-context-menu:not([hidden]) [command="#${
+    const query = `#file-context-menu:not([hidden]) [command="#${
         commandId}"]:not([disabled])`;
     await remoteCall.waitForElement(appId, query);
   }
 
   // Check the disabled commands.
   for (const commandId of disabledCmds) {
-    let query =
+    const query =
         `#file-context-menu:not([hidden]) [command="#${commandId}"][disabled]`;
     await remoteCall.waitForElement(appId, query);
   }
@@ -529,12 +688,12 @@ async function checkDocumentsProviderContextMenu(
   const documentsProviderVolumeQuery =
       '[has-children="true"] [volume-type-icon="documents_provider"]';
 
-  // Open Files app.
-  const appId = await openNewWindow(RootPath.DOWNLOADS);
-
   // Add files to the DocumentsProvider volume.
   await addEntries(
       ['documents_provider'], COMPLEX_DOCUMENTS_PROVIDER_ENTRY_SET);
+
+  // Open Files app.
+  const appId = await openNewWindow(RootPath.DOWNLOADS);
 
   // Wait for the DocumentsProvider volume to mount.
   await remoteCall.waitForElement(appId, documentsProviderVolumeQuery);
@@ -551,8 +710,7 @@ async function checkDocumentsProviderContextMenu(
   await remoteCall.waitForFiles(appId, files, {ignoreLastModifiedTime: true});
 
   // Select the file |path|.
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil('selectFile', appId, [path]));
+  await remoteCall.waitUntilSelected(appId, path);
 
   // Wait for the file to be selected.
   await remoteCall.waitForElement(appId, '.table-row[selected]');
@@ -611,6 +769,88 @@ testcase.checkRenameEnabledInDocProvider = () => {
 };
 
 /**
+ * Tests that the specified menu item is in |expectedEnabledState| when the
+ * entry at |path| is selected.
+ *
+ * @param {string} commandId ID of the command in the context menu to check.
+ * @param {string} fileName Name of the file to open the context menu for.
+ * @param {boolean} expectedEnabledState True if the command should be enabled
+ *     in the context menu, false if not.
+ * @param {boolean=} opt_selectMultiple True if multiple file should be selected
+ *     before the context menu is shown.
+ */
+async function checkRecentsContextMenu(
+    commandId, fileName, expectedEnabledState, opt_selectMultiple) {
+  // Populate both downloads and drive with disjoint sets of files.
+  const appId = await setupAndWaitUntilReady(
+      RootPath.DOWNLOADS, [ENTRIES.beautiful, ENTRIES.hello, ENTRIES.photos],
+      [ENTRIES.desktop, ENTRIES.world, ENTRIES.testDocument]);
+
+  // Navigate to Recents.
+  await navigateWithDirectoryTree(appId, '/Recent');
+
+  // Wait for the navigation to complete.
+  const expectedRows = TestEntryInfo.getExpectedRows(RECENT_ENTRY_SET);
+  await remoteCall.waitForFiles(appId, expectedRows);
+
+  if (opt_selectMultiple) {
+    // Select all the files.
+    const ctrlA = ['#file-list', 'a', true, false, false];
+    await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, ctrlA);
+
+    // Check: the file-list should be selected.
+    await remoteCall.waitForElement(appId, '#file-list li[selected]');
+  } else {
+    // Select the item.
+    await remoteCall.waitUntilSelected(appId, fileName);
+
+    // Wait for the file to be selected.
+    await remoteCall.waitForElement(appId, '.table-row[selected]');
+  }
+
+  // Right-click the selected file.
+  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
+      'fakeMouseRightClick', appId, ['.table-row[selected]']));
+
+  // Wait for the context menu to appear.
+  await remoteCall.waitForElement(appId, '#file-context-menu:not([hidden])');
+
+  // Wait for the command option to appear.
+  let query = '#file-context-menu:not([hidden])';
+  if (expectedEnabledState) {
+    query += ` [command="#${commandId}"]:not([hidden]):not([disabled])`;
+  } else {
+    query += ` [command="#${commandId}"][disabled]`;
+  }
+  await remoteCall.waitForElement(appId, query);
+}
+
+/**
+ * Tests that the Delete menu item is disabled for files in Recents.
+ */
+testcase.checkDeleteDisabledInRecents = () => {
+  return checkRecentsContextMenu('delete', 'My Desktop Background.png', false);
+};
+
+/**
+ * Tests that the "Go to file location" menu item is enabled for files in
+ * Recents.
+ */
+testcase.checkGoToFileLocationEnabledInRecents = () => {
+  return checkRecentsContextMenu(
+      'go-to-file-location', 'My Desktop Background.png', true);
+};
+
+/**
+ * Tests that the "Go to file location" menu item is disabled when multiple
+ * files are selected in Recents.
+ */
+testcase.checkGoToFileLocationDisabledInMultipleSelection = () => {
+  return checkRecentsContextMenu(
+      'go-to-file-location', 'My Desktop Background.png', false, true);
+};
+
+/**
  * Tests that context menu in file list gets the focus, so ChromeVox can
  * announce it.
  */
@@ -619,8 +859,7 @@ testcase.checkContextMenuFocus = async () => {
   const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
 
   // Select the file |path|.
-  chrome.test.assertTrue(!!await remoteCall.callRemoteTestUtil(
-      'selectFile', appId, ['hello.txt']));
+  await remoteCall.waitUntilSelected(appId, 'hello.txt');
 
   // Wait for the file to be selected.
   await remoteCall.waitForElement(appId, '.table-row[selected]');
@@ -639,5 +878,5 @@ testcase.checkContextMenuFocus = async () => {
   // Check currently focused element.
   const focusedElement =
       await remoteCall.callRemoteTestUtil('getActiveElement', appId, []);
-  chrome.test.assertEq('menuitem', focusedElement.attributes.role);
+  chrome.test.assertEq('menuitem', focusedElement.attributes['role']);
 };

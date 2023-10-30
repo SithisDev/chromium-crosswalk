@@ -9,6 +9,7 @@
 <translation id="1591070050619849194">停用所有圖片動畫。</translation>
 <translation id="1703735871906654364">鍵盤瀏覽</translation>
 <translation id="1791496371305830581">允許所有動畫圖片。</translation>
+<translation id="1974060860693918893">進階</translation>
 <translation id="1996252509865389616">啟用？</translation>
 <translation id="2079545284768500474">復原</translation>
 <translation id="2179565792157161713">在新分頁中開啟詳細說明</translation>
@@ -31,6 +32,7 @@
 <translation id="4769065380738716500">圖片已被 alt 文字取代。</translation>
 <translation id="4896660567607030658">無回饋，僅顯示游標。</translation>
 <translation id="4937901943818762779">允許動畫圖片 (僅限一次)。</translation>
+<translation id="4949131196216960195">按下&lt;span class='key'&gt;搜尋&lt;/span&gt;鍵 + &lt;img src='increase_brightness.png'&gt; (調高亮度鍵或 F7 鍵) 可開啟鍵盤瀏覽功能。再按一次即可關閉。</translation>
 <translation id="4954450790315188152">啟用鍵盤瀏覽功能時：</translation>
 <translation id="5041932793799765940">色彩調整</translation>
 <translation id="5094574508723441140">增加對比</translation>
@@ -50,6 +52,7 @@
 <translation id="6170146920149900756">Color Enhancer</translation>
 <translation id="633394792577263429">按住 &lt;span class='key'&gt;Control&lt;/span&gt; 鍵可逐字移動。</translation>
 <translation id="6550675742724504774">選項</translation>
+<translation id="6699630355767768222">步驟 3：覆寫色彩軸以進行校正。</translation>
 <translation id="6838518108677880446">設定：</translation>
 <translation id="690628312087070417">當插入點跳躍距離極大時：</translation>
 <translation id="6965382102122355670">確定</translation>
@@ -60,10 +63,10 @@
 <translation id="7658239707568436148">取消</translation>
 <translation id="786423340267544509">為含有 aria-describedat 或 longdesc 屬性的元素加上框線。</translation>
 <translation id="7942349550061667556">紅色</translation>
-<translation id="8254860724243898966">按下 &lt;span class='key'&gt;Alt&lt;/span&gt; 鍵 + &lt;img src='increase_brightness.png'&gt; (調高亮度鍵或 F7 鍵) 可開啟鍵盤瀏覽功能，再按一下則可關閉。</translation>
 <translation id="8260673944985561857">鍵盤瀏覽選項</translation>
 <translation id="8321034316479930120">動畫政策</translation>
 <translation id="8480209185614411573">高對比</translation>
 <translation id="8609925175482059018">按下 &lt;span class='key'&gt;F7&lt;/span&gt; 鍵可開啟鍵盤瀏覽功能，再按一下則可關閉。</translation>
+<translation id="8798099450830957504">預設</translation>
 <translation id="894241283505723656">內容選單中的詳細說明</translation>
 </translationbundle>

@@ -1,40 +1,66 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-let mockChrome;
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 
-function setUp() {
-  window.loadTimeData.getString = id => id;
-  window.loadTimeData.data = {};
+import {installMockChrome, MockCommandLinePrivate} from '../../common/js/mock_chrome.js';
+import {MockDirectoryEntry, MockFileEntry, MockFileSystem} from '../../common/js/mock_entry.js';
+import {assertRejected, reportPromise, waitUntil} from '../../common/js/test_error_reporting.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+
+import {VolumeInfoImpl} from './volume_info_impl.js';
+import {volumeManagerFactory} from './volume_manager_factory.js';
+import {VolumeManagerImpl} from './volume_manager_impl.js';
+import {volumeManagerUtil} from './volume_manager_util.js';
+
+let mockChrome;
+let createVolumeInfoOriginal;
+
+export function setUp() {
+  loadTimeData.getString = id => id;
+  loadTimeData.resetForTesting({});
 
   // Set up mock of chrome.fileManagerPrivate APIs.
   mockChrome = {
     runtime: {lastError: undefined},
-    fileSystem: {
-      requestFileSystem: function(options, callback) {
-        if (!(options.volumeId in chrome.fileManagerPrivate.fileSystemMap_)) {
-          chrome.runtime.lastError = {message: 'Not found.'};
-        }
-        callback(chrome.fileManagerPrivate.fileSystemMap_[options.volumeId]);
-      },
-    },
     fileManagerPrivate: {
+      DriveConnectionStateType: {
+        ONLINE: 'ONLINE',
+        OFFLINE: 'OFFLINE',
+        METERED: 'METERED',
+      },
+      DriveOfflineReason: {
+        NOT_READY: 'NOT_READY',
+        NO_NETWORK: 'NO_NETWORK',
+        NO_SERVICE: 'NO_SERVICE',
+      },
       mountSourcePath_: null,
       onMountCompletedListeners_: [],
       onDriveConnectionStatusChangedListeners_: [],
-      driveConnectionState_: VolumeManagerCommon.DriveConnectionType.ONLINE,
+      driveConnectionState_: 'ONLINE',
       volumeMetadataList_: [],
-      addMount: function(fileUrl, callback) {
+      password: undefined,
+      addMount: function(fileUrl, password, callback) {
+        mockChrome.fileManagerPrivate.password = password;
         callback(mockChrome.fileManagerPrivate.mountSourcePath_);
       },
-      removeMount: function(volumeId) {
+      getVolumeRoot: function(options, callback) {
+        if (!(options.volumeId in chrome.fileManagerPrivate.fileSystemMap_)) {
+          chrome.runtime.lastError = {message: 'Not found.'};
+        }
+        callback(
+            chrome.fileManagerPrivate.fileSystemMap_[options.volumeId].root);
+      },
+      removeMount: function(volumeId, callback) {
         const event = {
           eventType: 'unmount',
           status: 'success',
-          volumeMetadata: {volumeId: volumeId}
+          volumeMetadata: {volumeId: volumeId},
         };
         mockChrome.fileManagerPrivate.onMountCompleted.dispatchEvent(event);
+        callback();
       },
       onDriveConnectionStatusChanged: {
         addListener: function(listener) {
@@ -46,7 +72,7 @@ function setUp() {
               .forEach(listener => {
                 listener(event);
               });
-        }
+        },
       },
       onMountCompleted: {
         addListener: function(listener) {
@@ -58,7 +84,7 @@ function setUp() {
               listener => {
                 listener(event);
               });
-        }
+        },
       },
       getDriveConnectionState: function(callback) {
         callback(mockChrome.fileManagerPrivate.driveConnectionState_);
@@ -66,15 +92,12 @@ function setUp() {
       getVolumeMetadataList: function(callback) {
         callback(mockChrome.fileManagerPrivate.volumeMetadataList_);
       },
-      resolveIsolatedEntries: function(entries, callback) {
-        callback(entries);
-      },
       set driveConnectionState(state) {
         mockChrome.fileManagerPrivate.driveConnectionState_ = state;
         mockChrome.fileManagerPrivate.onDriveConnectionStatusChanged
             .dispatchEvent(null);
       },
-    }
+    },
   };
   installMockChrome(mockChrome);
   new MockCommandLinePrivate();
@@ -87,7 +110,7 @@ function setUp() {
       profile: getMockProfile(),
       configurable: false,
       watchable: true,
-      source: VolumeManagerCommon.Source.SYSTEM
+      source: VolumeManagerCommon.Source.SYSTEM,
     },
     {
       volumeId: 'drive:drive-foobar%40chromium.org-hash',
@@ -97,7 +120,7 @@ function setUp() {
       profile: getMockProfile(),
       configurable: false,
       watchable: true,
-      source: VolumeManagerCommon.Source.NETWORK
+      source: VolumeManagerCommon.Source.NETWORK,
     },
     {
       volumeId: 'android_files:0',
@@ -107,21 +130,31 @@ function setUp() {
       provile: getMockProfile(),
       configurable: false,
       watchable: true,
-      source: VolumeManagerCommon.Source.SYSTEM
-    }
+      source: VolumeManagerCommon.Source.SYSTEM,
+    },
   ];
   chrome.fileManagerPrivate.fileSystemMap_ = {
     'download:Downloads': new MockFileSystem('download:Downloads'),
     'drive:drive-foobar%40chromium.org-hash':
         new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-    'android_files:0': new MockFileSystem('android_files:0')
+    'android_files:0': new MockFileSystem('android_files:0'),
   };
+
+  createVolumeInfoOriginal = volumeManagerUtil.createVolumeInfo;
 }
 
-function tearDown() {
+export function tearDown() {
   volumeManagerFactory.revokeInstanceForTesting();
   // To avoid a closure warning assigning to |chrome|, tearDown() does not
   // balance the call to installMockChrome() here.
+
+  // Restore the createVolumeInfo() function.
+  volumeManagerUtil.createVolumeInfo = createVolumeInfoOriginal;
+}
+
+async function waitAllVolumes(volumeManager) {
+  // Drive + Downloads + Android:
+  await waitUntil(() => volumeManager.volumeInfoList.length === 3);
 }
 
 /**
@@ -134,50 +167,86 @@ function getMockProfile() {
   return {
     displayName: 'foobar@chromium.org',
     isCurrentProfile: true,
-    profileId: ''
+    profileId: '',
   };
 }
 
-function testGetVolumeInfo(callback) {
-  reportPromise(
-      volumeManagerFactory.getInstance().then(volumeManager => {
-        const entry = new MockFileEntry(
-            new MockFileSystem('download:Downloads'), '/foo/bar/bla.zip');
+export async function testGetVolumeInfo(done) {
+  const volumeManager = await volumeManagerFactory.getInstance();
 
-        const volumeInfo = volumeManager.getVolumeInfo(entry);
-        assertEquals('download:Downloads', volumeInfo.volumeId);
-        assertEquals(
-            VolumeManagerCommon.VolumeType.DOWNLOADS, volumeInfo.volumeType);
-      }),
-      callback);
+  const entry = MockFileEntry.create(
+      new MockFileSystem('download:Downloads'), '/foo/bar/bla.zip');
+
+  await waitAllVolumes(volumeManager);
+
+  const volumeInfo = volumeManager.getVolumeInfo(entry);
+  assertEquals('download:Downloads', volumeInfo.volumeId);
+  assertEquals(VolumeManagerCommon.VolumeType.DOWNLOADS, volumeInfo.volumeType);
+
+  done();
 }
 
-function testGetDriveConnectionState(callback) {
+/**
+ * Tests that an unresponsive volume doesn't lock the whole Volume Manager
+ * initialization.
+ */
+export async function testUnresponsiveVolumeStartUp(done) {
+  let unblock;
+  const fileManagerPrivate = mockChrome.fileManagerPrivate;
+
+  // Replace chrome.fileManagerPrivate.getVolumeRoot() to emulate 1
+  // volume not resolving.
+  const origGetVolumeRoot = fileManagerPrivate.getVolumeRoot;
+
+  fileManagerPrivate.getVolumeRoot = (options, callback) => {
+    if (options.volumeId === 'download:Downloads') {
+      console.log(`blocking the resolve for ${options.volumeId}`);
+      unblock = () => origGetVolumeRoot(options, callback);
+      return;
+    }
+    return origGetVolumeRoot(options, callback);
+  };
+
+  // getInstance() calls and waits for initialize(), which shouldn't get stuck
+  // waiting for the all volumes to resolve.
+  const volumeManager = await volumeManagerFactory.getInstance();
+
+  // Wait 2 out 3 volumes to be ready.
+  await waitUntil(() => volumeManager.volumeInfoList.length === 2);
+
+  // Unblock the unresponsive volume and check if it gets available:
+  unblock();
+  await waitUntil(() => volumeManager.volumeInfoList.length === 3);
+
+  done();
+}
+
+export function testGetDriveConnectionState(callback) {
   reportPromise(
       volumeManagerFactory.getInstance().then(volumeManager => {
         // Default connection state is online
         assertEquals(
-            VolumeManagerCommon.DriveConnectionType.ONLINE,
+            chrome.fileManagerPrivate.DriveConnectionStateType.ONLINE,
             volumeManager.getDriveConnectionState());
 
         // Sets it to offline.
         chrome.fileManagerPrivate.driveConnectionState =
-            VolumeManagerCommon.DriveConnectionType.OFFLINE;
+            chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE;
         assertEquals(
-            VolumeManagerCommon.DriveConnectionType.OFFLINE,
+            chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE,
             volumeManager.getDriveConnectionState());
 
         // Sets it back to online
         chrome.fileManagerPrivate.driveConnectionState =
-            VolumeManagerCommon.DriveConnectionType.ONLINE;
+            chrome.fileManagerPrivate.DriveConnectionStateType.ONLINE;
         assertEquals(
-            VolumeManagerCommon.DriveConnectionType.ONLINE,
+            chrome.fileManagerPrivate.DriveConnectionStateType.ONLINE,
             volumeManager.getDriveConnectionState());
       }),
       callback);
 }
 
-function testMountArchiveAndUnmount(callback) {
+export function testMountArchiveAndUnmount(callback) {
   const test = async () => {
     // Set states of mock fileManagerPrivate APIs.
     const mountSourcePath = '/usr/local/home/test/Downloads/foobar.zip';
@@ -186,14 +255,17 @@ function testMountArchiveAndUnmount(callback) {
         new MockFileSystem('archive:foobar.zip');
 
     const volumeManager = await volumeManagerFactory.getInstance();
-    const numberOfVolumes = volumeManager.volumeInfoList.length;
+
+    // Drive + Downloads + Android.
+    const numberOfVolumes = 3;
+    await waitAllVolumes(volumeManager);
 
     // Mount an archive
-    const mounted = new Promise(
-        (resolve, reject) => volumeManager.mountArchive(
-            'filesystem:chrome-extension://extensionid/external/' +
-                'Downloads-test/foobar.zip',
-            resolve, reject));
+    const password = 'My Password';
+    const mounted = volumeManager.mountArchive(
+        'filesystem:chrome-extension://extensionid/external/' +
+            'Downloads-test/foobar.zip',
+        password);
 
     mockChrome.fileManagerPrivate.onMountCompleted.dispatchEvent({
       eventType: 'mount',
@@ -214,14 +286,61 @@ function testMountArchiveAndUnmount(callback) {
     await mounted;
 
     assertEquals(numberOfVolumes + 1, volumeManager.volumeInfoList.length);
+    assertEquals(password, mockChrome.fileManagerPrivate.password);
 
     // Unmount the mounted archive
-    const entry =
-        new MockFileEntry(new MockFileSystem('archive:foobar.zip'), '/foo.txt');
+    const entry = MockFileEntry.create(
+        new MockFileSystem('archive:foobar.zip'), '/foo.txt');
     const volumeInfo = volumeManager.getVolumeInfo(entry);
-    await new Promise(
-        (resolve, reject) =>
-            volumeManager.unmount(volumeInfo, resolve, reject));
+    await volumeManager.unmount(volumeInfo);
+
+    await waitUntil(
+        () => volumeManager.volumeInfoList.length === numberOfVolumes);
+    assertEquals(numberOfVolumes, volumeManager.volumeInfoList.length);
+  };
+
+  reportPromise(test(), callback);
+}
+
+export function testCancelMountingArchive(callback) {
+  const test = async () => {
+    // Set states of mock fileManagerPrivate APIs.
+    const mountSourcePath = '/usr/local/home/test/Downloads/foobar.zip';
+    chrome.fileManagerPrivate.mountSourcePath_ = mountSourcePath;
+    chrome.fileManagerPrivate.fileSystemMap_['archive:foobar.zip'] =
+        new MockFileSystem('archive:foobar.zip');
+
+    const volumeManager = await volumeManagerFactory.getInstance();
+
+    // Drive + Downloads + Android.
+    const numberOfVolumes = 3;
+    await waitAllVolumes(volumeManager);
+
+    setTimeout(
+        () => mockChrome.fileManagerPrivate.onMountCompleted.dispatchEvent({
+          eventType: 'mount',
+          status: VolumeManagerCommon.VolumeError.CANCELLED,
+          volumeMetadata: {
+            volumeId: null,
+            volumeLabel: null,
+            volumeType: null,
+            isReadOnly: null,
+            sourcePath: mountSourcePath,
+            profile: null,
+            configurable: null,
+            watchable: null,
+            source: null,
+          },
+        }));
+
+    try {
+      await volumeManager.mountArchive(
+          'filesystem:chrome-extension://extensionid/external/' +
+              'Downloads-test/foobar.zip',
+          'My Password');
+    } catch (error) {
+      assertEquals(error, VolumeManagerCommon.VolumeError.CANCELLED);
+    }
 
     assertEquals(numberOfVolumes, volumeManager.volumeInfoList.length);
   };
@@ -229,132 +348,150 @@ function testMountArchiveAndUnmount(callback) {
   reportPromise(test(), callback);
 }
 
-function testGetCurrentProfileVolumeInfo(callback) {
-  reportPromise(
-      volumeManagerFactory.getInstance().then(volumeManager => {
-        const volumeInfo = volumeManager.getCurrentProfileVolumeInfo(
-            VolumeManagerCommon.VolumeType.DRIVE);
+export async function testGetCurrentProfileVolumeInfo(done) {
+  const volumeManager = await volumeManagerFactory.getInstance();
+  await waitAllVolumes(volumeManager);
 
-        assertEquals(
-            'drive:drive-foobar%40chromium.org-hash', volumeInfo.volumeId);
-        assertEquals(
-            VolumeManagerCommon.VolumeType.DRIVE, volumeInfo.volumeType);
-      }),
-      callback);
+  const volumeInfo = volumeManager.getCurrentProfileVolumeInfo(
+      VolumeManagerCommon.VolumeType.DRIVE);
+
+  assertEquals('drive:drive-foobar%40chromium.org-hash', volumeInfo.volumeId);
+  assertEquals(VolumeManagerCommon.VolumeType.DRIVE, volumeInfo.volumeType);
+
+  done();
 }
 
-function testGetLocationInfo(callback) {
-  reportPromise(
-      volumeManagerFactory.getInstance().then(volumeManager => {
-        const downloadEntry = new MockFileEntry(
-            new MockFileSystem('download:Downloads'), '/foo/bar/bla.zip');
-        const downloadLocationInfo =
-            volumeManager.getLocationInfo(downloadEntry);
-        assertEquals(
-            VolumeManagerCommon.RootType.DOWNLOADS,
-            downloadLocationInfo.rootType);
-        assertFalse(downloadLocationInfo.hasFixedLabel);
-        assertFalse(downloadLocationInfo.isReadOnly);
-        assertFalse(downloadLocationInfo.isRootEntry);
+export async function testGetLocationInfo(done) {
+  const volumeManager = await volumeManagerFactory.getInstance();
+  await waitAllVolumes(volumeManager);
 
-        const driveEntry = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/root');
-        const driveLocationInfo = volumeManager.getLocationInfo(driveEntry);
-        assertEquals(
-            VolumeManagerCommon.RootType.DRIVE, driveLocationInfo.rootType);
-        assertTrue(driveLocationInfo.hasFixedLabel);
-        assertFalse(driveLocationInfo.isReadOnly);
-        assertTrue(driveLocationInfo.isRootEntry);
+  const downloadEntry = MockFileEntry.create(
+      new MockFileSystem('download:Downloads'), '/foo/bar/bla.zip');
+  const downloadLocationInfo = volumeManager.getLocationInfo(downloadEntry);
+  assertEquals(
+      VolumeManagerCommon.RootType.DOWNLOADS, downloadLocationInfo.rootType);
+  assertFalse(downloadLocationInfo.hasFixedLabel);
+  assertFalse(downloadLocationInfo.isReadOnly);
+  assertFalse(downloadLocationInfo.isRootEntry);
 
-        const teamDrivesGrandRoot = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/team_drives');
-        const teamDrivesGrandRootLocationInfo =
-            volumeManager.getLocationInfo(teamDrivesGrandRoot);
-        assertEquals(
-            VolumeManagerCommon.RootType.SHARED_DRIVES_GRAND_ROOT,
-            teamDrivesGrandRootLocationInfo.rootType);
-        assertTrue(teamDrivesGrandRootLocationInfo.hasFixedLabel);
-        assertTrue(teamDrivesGrandRootLocationInfo.isReadOnly);
-        assertTrue(teamDrivesGrandRootLocationInfo.isRootEntry);
+  const driveEntry = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'), '/root');
+  const driveLocationInfo = volumeManager.getLocationInfo(driveEntry);
+  assertEquals(VolumeManagerCommon.RootType.DRIVE, driveLocationInfo.rootType);
+  assertTrue(driveLocationInfo.hasFixedLabel);
+  assertFalse(driveLocationInfo.isReadOnly);
+  assertTrue(driveLocationInfo.isRootEntry);
 
-        const teamDrive = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/team_drives/MyTeamDrive');
-        const teamDriveLocationInfo = volumeManager.getLocationInfo(teamDrive);
-        assertEquals(
-            VolumeManagerCommon.RootType.SHARED_DRIVE,
-            teamDriveLocationInfo.rootType);
-        assertFalse(teamDriveLocationInfo.hasFixedLabel);
-        assertFalse(teamDriveLocationInfo.isReadOnly);
-        assertTrue(teamDriveLocationInfo.isRootEntry);
+  const teamDrivesGrandRoot = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/team_drives');
+  const teamDrivesGrandRootLocationInfo =
+      volumeManager.getLocationInfo(teamDrivesGrandRoot);
+  assertEquals(
+      VolumeManagerCommon.RootType.SHARED_DRIVES_GRAND_ROOT,
+      teamDrivesGrandRootLocationInfo.rootType);
+  assertTrue(teamDrivesGrandRootLocationInfo.hasFixedLabel);
+  assertTrue(teamDrivesGrandRootLocationInfo.isReadOnly);
+  assertTrue(teamDrivesGrandRootLocationInfo.isRootEntry);
 
-        const driveFilesByIdDirectoryEntry = new MockDirectoryEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/.files-by-id/123');
-        const driveFilesByIdDirectoryLocationInfo =
-            volumeManager.getLocationInfo(driveFilesByIdDirectoryEntry);
-        assertEquals(
-            VolumeManagerCommon.RootType.DRIVE_OTHER,
-            driveFilesByIdDirectoryLocationInfo.rootType);
-        assertFalse(driveFilesByIdDirectoryLocationInfo.hasFixedLabel);
-        assertTrue(driveFilesByIdDirectoryLocationInfo.isReadOnly);
-        assertFalse(driveFilesByIdDirectoryLocationInfo.isRootEntry);
+  const teamDrive = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/team_drives/MyTeamDrive');
+  const teamDriveLocationInfo = volumeManager.getLocationInfo(teamDrive);
+  assertEquals(
+      VolumeManagerCommon.RootType.SHARED_DRIVE,
+      teamDriveLocationInfo.rootType);
+  assertFalse(teamDriveLocationInfo.hasFixedLabel);
+  assertFalse(teamDriveLocationInfo.isReadOnly);
+  assertTrue(teamDriveLocationInfo.isRootEntry);
 
-        const driveFilesByIdEntry = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/.files-by-id/123/foo.txt');
-        const driveFilesByIdLocationInfo =
-            volumeManager.getLocationInfo(driveFilesByIdEntry);
-        assertEquals(
-            VolumeManagerCommon.RootType.DRIVE_OTHER,
-            driveFilesByIdLocationInfo.rootType);
-        assertFalse(driveFilesByIdLocationInfo.hasFixedLabel);
-        assertFalse(driveFilesByIdLocationInfo.isReadOnly);
-        assertFalse(driveFilesByIdLocationInfo.isRootEntry);
+  const driveFilesByIdDirectoryEntry = MockDirectoryEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/.files-by-id/123');
+  const driveFilesByIdDirectoryLocationInfo =
+      volumeManager.getLocationInfo(driveFilesByIdDirectoryEntry);
+  assertEquals(
+      VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME,
+      driveFilesByIdDirectoryLocationInfo.rootType);
+  assertFalse(driveFilesByIdDirectoryLocationInfo.hasFixedLabel);
+  assertTrue(driveFilesByIdDirectoryLocationInfo.isReadOnly);
+  assertFalse(driveFilesByIdDirectoryLocationInfo.isRootEntry);
 
-        const androidRoot =
-            new MockFileEntry(new MockFileSystem('android_files:0'), '/');
-        const androidRootLocationInfo =
-            volumeManager.getLocationInfo(androidRoot);
-        assertTrue(androidRootLocationInfo.isReadOnly);
-        assertTrue(androidRootLocationInfo.isRootEntry);
+  const driveFilesByIdEntry = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/.files-by-id/123/foo.txt');
+  const driveFilesByIdLocationInfo =
+      volumeManager.getLocationInfo(driveFilesByIdEntry);
+  assertEquals(
+      VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME,
+      driveFilesByIdLocationInfo.rootType);
+  assertFalse(driveFilesByIdLocationInfo.hasFixedLabel);
+  assertFalse(driveFilesByIdLocationInfo.isReadOnly);
+  assertFalse(driveFilesByIdLocationInfo.isRootEntry);
 
-        const androidSubFolder = new MockFileEntry(
-            new MockFileSystem('android_files:0'), '/Pictures');
-        const androidSubFolderLocationInfo =
-            volumeManager.getLocationInfo(androidSubFolder);
-        assertFalse(androidSubFolderLocationInfo.isReadOnly);
-        assertFalse(androidSubFolderLocationInfo.isRootEntry);
+  const driveShortcutTargetsByIdDirectoryEntry = MockDirectoryEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/.shortcut-targets-by-id/abcdef');
+  const driveShortcutTargetsByIdDirectoryLocationInfo =
+      volumeManager.getLocationInfo(driveShortcutTargetsByIdDirectoryEntry);
+  assertEquals(
+      VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME,
+      driveShortcutTargetsByIdDirectoryLocationInfo.rootType);
+  assertFalse(driveShortcutTargetsByIdDirectoryLocationInfo.hasFixedLabel);
+  assertTrue(driveShortcutTargetsByIdDirectoryLocationInfo.isReadOnly);
+  assertFalse(driveShortcutTargetsByIdDirectoryLocationInfo.isRootEntry);
 
-        const computersGrandRoot = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/Computers');
-        const computersGrandRootLocationInfo =
-            volumeManager.getLocationInfo(computersGrandRoot);
-        assertEquals(
-            VolumeManagerCommon.RootType.COMPUTERS_GRAND_ROOT,
-            computersGrandRootLocationInfo.rootType);
-        assertTrue(computersGrandRootLocationInfo.hasFixedLabel);
-        assertTrue(computersGrandRootLocationInfo.isReadOnly);
-        assertTrue(computersGrandRootLocationInfo.isRootEntry);
+  const driveShortcutTargetsByIdEntry = MockDirectoryEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/.shortcut-targets-by-id/abcdef/foo');
+  const driveShortcutTargetsByIdLocationInfo =
+      volumeManager.getLocationInfo(driveShortcutTargetsByIdEntry);
+  assertEquals(
+      VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME,
+      driveShortcutTargetsByIdLocationInfo.rootType);
+  assertFalse(driveShortcutTargetsByIdLocationInfo.hasFixedLabel);
+  assertFalse(driveShortcutTargetsByIdLocationInfo.isReadOnly);
+  assertFalse(driveShortcutTargetsByIdLocationInfo.isRootEntry);
 
-        const computer = new MockFileEntry(
-            new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
-            '/Computers/MyComputer');
-        const computerLocationInfo = volumeManager.getLocationInfo(computer);
-        assertEquals(
-            VolumeManagerCommon.RootType.COMPUTER,
-            computerLocationInfo.rootType);
-        assertFalse(computerLocationInfo.hasFixedLabel);
-        assertTrue(computerLocationInfo.isReadOnly);
-        assertTrue(computerLocationInfo.isRootEntry);
-      }),
-      callback);
+  const androidRoot =
+      MockFileEntry.create(new MockFileSystem('android_files:0'), '/');
+  const androidRootLocationInfo = volumeManager.getLocationInfo(androidRoot);
+  assertTrue(androidRootLocationInfo.isReadOnly);
+  assertTrue(androidRootLocationInfo.isRootEntry);
+
+  const androidSubFolder =
+      MockFileEntry.create(new MockFileSystem('android_files:0'), '/Pictures');
+  const androidSubFolderLocationInfo =
+      volumeManager.getLocationInfo(androidSubFolder);
+  assertFalse(androidSubFolderLocationInfo.isReadOnly);
+  assertFalse(androidSubFolderLocationInfo.isRootEntry);
+
+  const computersGrandRoot = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/Computers');
+  const computersGrandRootLocationInfo =
+      volumeManager.getLocationInfo(computersGrandRoot);
+  assertEquals(
+      VolumeManagerCommon.RootType.COMPUTERS_GRAND_ROOT,
+      computersGrandRootLocationInfo.rootType);
+  assertTrue(computersGrandRootLocationInfo.hasFixedLabel);
+  assertTrue(computersGrandRootLocationInfo.isReadOnly);
+  assertTrue(computersGrandRootLocationInfo.isRootEntry);
+
+  const computer = MockFileEntry.create(
+      new MockFileSystem('drive:drive-foobar%40chromium.org-hash'),
+      '/Computers/MyComputer');
+  const computerLocationInfo = volumeManager.getLocationInfo(computer);
+  assertEquals(
+      VolumeManagerCommon.RootType.COMPUTER, computerLocationInfo.rootType);
+  assertFalse(computerLocationInfo.hasFixedLabel);
+  assertTrue(computerLocationInfo.isReadOnly);
+  assertTrue(computerLocationInfo.isRootEntry);
+
+  done();
 }
 
-function testWhenReady(callback) {
+export function testWhenReady(callback) {
   volumeManagerFactory.getInstance().then((volumeManager) => {
     const promiseBeforeAdd = volumeManager.whenVolumeInfoReady('volumeId');
     const volumeInfo = new VolumeInfoImpl(
@@ -374,8 +511,10 @@ function testWhenReady(callback) {
         /* watchable */ true,
         /* source */ VolumeManagerCommon.Source.FILE,
         /* diskFileSystemType */ VolumeManagerCommon.FileSystemType.UNKNOWN,
-        /* iconSet*/ {},
-        /* driveLabel*/ 'TEST_DRIVE_LABEL');
+        /* iconSet */ {},
+        /* driveLabel */ 'TEST_DRIVE_LABEL',
+        /* remoteMountPath*/ '',
+        /* vmType*/ undefined);
     volumeManager.volumeInfoList.add(volumeInfo);
     const promiseAfterAdd = volumeManager.whenVolumeInfoReady('volumeId');
     reportPromise(
@@ -387,7 +526,7 @@ function testWhenReady(callback) {
   });
 }
 
-function testDriveMountedDuringInitialization(callback) {
+export function testDriveMountedDuringInitialization(callback) {
   const test = async () => {
     const sendVolumeMetadataListPromise = new Promise(resolve => {
       chrome.fileManagerPrivate.getVolumeMetadataList = resolve;
@@ -404,8 +543,8 @@ function testDriveMountedDuringInitialization(callback) {
         volumeId: 'drive:drive-foobar%40chromium.org-hash',
         volumeType: VolumeManagerCommon.VolumeType.DRIVE,
         sourcePath: '/drive',
-        profile: getMockProfile()
-      }
+        profile: getMockProfile(),
+      },
     });
 
     // Wait until volume manager initialization calls getVolumeMetadataList().
@@ -418,6 +557,8 @@ function testDriveMountedDuringInitialization(callback) {
     // Wait for volume manager to finish initializing.
     const volumeManager = await volumeManagerPromise;
 
+    await waitUntil(() => volumeManager.volumeInfoList.length === 1);
+
     // Check volume manager.
     assertTrue(!!volumeManager.getCurrentProfileVolumeInfo(
         VolumeManagerCommon.VolumeType.DRIVE));
@@ -426,10 +567,97 @@ function testDriveMountedDuringInitialization(callback) {
   reportPromise(test(), callback);
 }
 
-function testErrorPropagatedDuringInitialization(done) {
+export function testErrorPropagatedDuringInitialization(done) {
   chrome.fileManagerPrivate.getVolumeMetadataList = () => {
     throw new Error('Dummy error for test purpose');
   };
 
   reportPromise(assertRejected(volumeManagerFactory.getInstance()), done);
+}
+
+/**
+ * Tests that an error initializing one volume doesn't stop other volumes to be
+ * initialized. crbug.com/1041340
+ */
+export async function testErrorInitializingVolume(done) {
+  // Confirm that a Drive volume is on faked getVolumeMetadataList().
+  assertTrue(
+      chrome.fileManagerPrivate.volumeMetadataList_.some(volumeMetadata => {
+        return volumeMetadata.volumeType ===
+            VolumeManagerCommon.VolumeType.DRIVE;
+      }));
+
+  // Replace createVolumeInfo() to fail to create Drive volume.
+  const createVolumeInfoFake = (volumeMetadata) => {
+    if (volumeMetadata.volumeType === VolumeManagerCommon.VolumeType.DRIVE) {
+      throw new Error('Fake security error');
+    }
+
+    // For any other volume return normal value.
+    return createVolumeInfoOriginal(volumeMetadata);
+  };
+  volumeManagerUtil.createVolumeInfo = createVolumeInfoFake;
+
+  // Wait for initialization to populate volumeInfoList.
+  const volumeManager = new VolumeManagerImpl();
+  await volumeManager.initialize();
+
+  // VolumeInfoList should contain only Android and MyFiles.
+  await waitUntil(() => volumeManager.volumeInfoList.length === 2);
+
+  assertEquals(2, volumeManager.volumeInfoList.length);
+  assertEquals(
+      VolumeManagerCommon.VolumeType.DOWNLOADS,
+      volumeManager.volumeInfoList.item(0).volumeType);
+  assertEquals(
+      VolumeManagerCommon.VolumeType.ANDROID_FILES,
+      volumeManager.volumeInfoList.item(1).volumeType);
+
+  done();
+}
+
+/**
+ * Tests VolumeInfoImpl doesn't raise exception if null is passed for
+ * filesystem. crbug.com/1041340
+ */
+export async function testDriveWithNullFilesystem(done) {
+  // Get Drive volume metadata from faked getVolumeMetadataList().
+  const driveVolumeMetadata =
+      chrome.fileManagerPrivate.volumeMetadataList_.find(volumeMetadata => {
+        return volumeMetadata.volumeType ===
+            VolumeManagerCommon.VolumeType.DRIVE;
+      });
+  assertTrue(!!driveVolumeMetadata);
+
+  const localizedLabel = 'DRIVE LABEL';
+  const expectedError = 'EXPECTED ERROR DESCRIPTION';
+
+  // Create a VolumeInfo with null filesystem, in the same way that happens on
+  // volumeManagerUtil.createVolumeInfo().
+  const volumeInfo = new VolumeInfoImpl(
+      /** @type {VolumeManagerCommon.VolumeType} */
+      (driveVolumeMetadata.volumeType), driveVolumeMetadata.volumeId,
+      null,  // File system is not found.
+      expectedError, driveVolumeMetadata.deviceType,
+      driveVolumeMetadata.devicePath, driveVolumeMetadata.isReadOnly,
+      driveVolumeMetadata.isReadOnlyRemovableDevice,
+      driveVolumeMetadata.profile, localizedLabel,
+      driveVolumeMetadata.providerId, driveVolumeMetadata.hasMedia,
+      driveVolumeMetadata.configurable, driveVolumeMetadata.watchable,
+      /** @type {VolumeManagerCommon.Source} */
+      (driveVolumeMetadata.source),
+      /** @type {VolumeManagerCommon.FileSystemType} */
+      (driveVolumeMetadata.diskFileSystemType), driveVolumeMetadata.iconSet,
+      driveVolumeMetadata.driveLabel, driveVolumeMetadata.remoteMountPath,
+      driveVolumeMetadata.vmType);
+
+  // Wait for trying to resolve display root, it should fail with
+  // |expectedError| if not re-throw to make the test fail.
+  await volumeInfo.resolveDisplayRoot().catch(error => {
+    if (error !== expectedError) {
+      throw error;
+    }
+  });
+
+  done();
 }

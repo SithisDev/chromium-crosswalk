@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package org.chromium.ui.gl;
 import android.graphics.SurfaceTexture;
 
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * Listener to an android SurfaceTexture object for frame availability.
@@ -25,18 +26,23 @@ class SurfaceTextureListener implements SurfaceTexture.OnFrameAvailableListener 
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        nativeFrameAvailable(mNativeSurfaceTextureListener);
+        SurfaceTextureListenerJni.get().frameAvailable(
+                mNativeSurfaceTextureListener, SurfaceTextureListener.this);
     }
 
     @Override
     protected void finalize() throws Throwable {
         try {
-            nativeDestroy(mNativeSurfaceTextureListener);
+            SurfaceTextureListenerJni.get().destroy(
+                    mNativeSurfaceTextureListener, SurfaceTextureListener.this);
         } finally {
             super.finalize();
         }
     }
 
-    private native void nativeFrameAvailable(long nativeSurfaceTextureListener);
-    private native void nativeDestroy(long nativeSurfaceTextureListener);
+    @NativeMethods
+    interface Natives {
+        void frameAvailable(long nativeSurfaceTextureListener, SurfaceTextureListener caller);
+        void destroy(long nativeSurfaceTextureListener, SurfaceTextureListener caller);
+    }
 }

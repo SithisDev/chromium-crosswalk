@@ -1,8 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-function testGetSizeAfterCancelling() {
+import {assertDeepEquals, assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {ImageOrientation} from './image_orientation.js';
+
+export function testGetSizeAfterCancelling() {
   // Crockwise 90 degrees image orientation.
   const orientation = new ImageOrientation(0, 1, 1, 0);
 
@@ -12,7 +16,7 @@ function testGetSizeAfterCancelling() {
   assertEquals(100, size.height);
 }
 
-function testCancelImageOrientation() {
+export function testCancelImageOrientation() {
   // Crockwise 90 degrees image orientation.
   const orientation = new ImageOrientation(0, 1, 1, 0);
 
@@ -39,7 +43,9 @@ function testCancelImageOrientation() {
   orientation.cancelImageOrientation(destinationContext, 2, 1);
   destinationContext.drawImage(canvas, 0, 0);
   const destinationImageData = destinationContext.getImageData(0, 0, 1, 2);
-  assertArrayEquals([255, 0, 0, 100, 0, 0, 0, 100], destinationImageData.data);
+  assertDeepEquals(
+      new Uint8ClampedArray([255, 0, 0, 100, 0, 0, 0, 100]),
+      destinationImageData.data);
 }
 
 function assertImageOrientationEquals(expected, actual, message) {
@@ -49,7 +55,7 @@ function assertImageOrientationEquals(expected, actual, message) {
   assertEquals(expected.d, actual.d, message);
 }
 
-function testFromRotationAndScale() {
+export function testFromRotationAndScale() {
   const rotate270 = {scaleX: 1, scaleY: 1, rotate90: -1};
   const rotate90 = {scaleX: 1, scaleY: 1, rotate90: 1};
   const flipX = {scaleX: -1, scaleY: 1, rotate90: 0};

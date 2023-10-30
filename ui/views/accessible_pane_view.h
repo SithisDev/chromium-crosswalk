@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/views/focus/focus_manager.h"
@@ -28,6 +28,10 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   METADATA_HEADER(AccessiblePaneView);
 
   AccessiblePaneView();
+
+  AccessiblePaneView(const AccessiblePaneView&) = delete;
+  AccessiblePaneView& operator=(const AccessiblePaneView&) = delete;
+
   ~AccessiblePaneView() override;
 
   // Set focus to the pane with complete keyboard access.
@@ -35,7 +39,7 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   // If |initial_focus| is not NULL, that control will get
   // the initial focus, if it's enabled and focusable. Returns true if
   // the pane was able to receive focus.
-  virtual bool SetPaneFocus(View* initial_focus);
+  bool SetPaneFocus(View* initial_focus);
 
   bool pane_has_focus() const { return pane_has_focus_; }
 
@@ -75,15 +79,15 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
 
   // Returns the parent of |v|. Subclasses can override this if
   // they need custom focus search behavior.
-  virtual View* GetParentForFocusSearch(View* v);
+  View* GetParentForFocusSearch(View* v);
 
   // Returns true if |v| is contained within the hierarchy rooted at |root|
   // for the purpose of focus searching. Subclasses can override this if
   // they need custom focus search behavior.
-  virtual bool ContainsForFocusSearch(View* root, const View* v);
+  bool ContainsForFocusSearch(View* root, const View* v);
 
   // Remove pane focus.
-  virtual void RemovePaneFocus();
+  void RemovePaneFocus();
 
   View* GetFirstFocusableChild();
   View* GetLastFocusableChild();
@@ -106,7 +110,7 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
 
   // Save the focus manager rather than calling GetFocusManager(),
   // so that we can remove focus listeners in the destructor.
-  FocusManager* focus_manager_ = nullptr;
+  raw_ptr<FocusManager> focus_manager_ = nullptr;
 
   // Our custom focus search implementation that traps focus in this
   // pane and traverses all views that are focusable for accessibility,
@@ -126,8 +130,6 @@ class VIEWS_EXPORT AccessiblePaneView : public View,
   friend class AccessiblePaneViewFocusSearch;
 
   base::WeakPtrFactory<AccessiblePaneView> method_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AccessiblePaneView);
 };
 
 }  // namespace views

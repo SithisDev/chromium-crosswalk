@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/view_model_utils.h"
 
-#include <algorithm>
+#include <iterator>
 
+#include "base/ranges/algorithm.h"
 #include "ui/views/view.h"
 #include "ui/views/view_model.h"
 
@@ -14,66 +15,61 @@ namespace views {
 namespace {
 
 // Used in calculating ideal bounds.
-int primary_axis_coordinate(bool is_horizontal, int x, int y) {
-  return is_horizontal ? x : y;
+int primary_axis_coordinate(bool is_horizontal, const gfx::Point& point) {
+  return is_horizontal ? point.x() : point.y();
 }
 
 }  // namespace
 
 // static
 void ViewModelUtils::SetViewBoundsToIdealBounds(const ViewModelBase& model) {
-  for (int i = 0; i < model.view_size(); ++i)
-    model.ViewAtBase(i)->SetBoundsRect(model.ideal_bounds(i));
+  for (auto& entry : model.entries())
+    entry.view->SetBoundsRect(entry.ideal_bounds);
 }
 
 // static
 bool ViewModelUtils::IsAtIdealBounds(const ViewModelBase& model) {
-  for (int i = 0; i < model.view_size(); ++i) {
-    View* view = model.ViewAtBase(i);
-    if (view->bounds() != model.ideal_bounds(i))
-      return false;
-  }
-  return true;
+  return base::ranges::all_of(
+      model.entries(), [](const ViewModelBase::Entry& entry) {
+        return entry.view->bounds() == entry.ideal_bounds;
+      });
 }
 
 // static
-int ViewModelUtils::DetermineMoveIndex(const ViewModelBase& model,
-                                       View* view,
-                                       bool is_horizontal,
-                                       int x,
-                                       int y) {
-  int value = primary_axis_coordinate(is_horizontal, x, y);
-  int current_index = model.GetIndexOfView(view);
-  DCHECK_NE(-1, current_index);
-  for (int i = 0; i < current_index; ++i) {
-    int mid_point = primary_axis_coordinate(
-        is_horizontal,
-        model.ideal_bounds(i).x() + model.ideal_bounds(i).width() / 2,
-        model.ideal_bounds(i).y() + model.ideal_bounds(i).height() / 2);
+size_t ViewModelUtils::DetermineMoveIndex(const ViewModelBase& model,
+                                          View* view,
+                                          bool is_horizontal,
+                                          int x,
+                                          int y) {
+  const auto& entries = model.entries();
+  const int value = primary_axis_coordinate(is_horizontal, gfx::Point(x, y));
+  DCHECK(model.GetIndexOfView(view).has_value());
+
+  auto iter = entries.begin();
+  for (; iter->view != view; ++iter) {
+    const int mid_point = primary_axis_coordinate(
+        is_horizontal, iter->ideal_bounds.CenterPoint());
     if (value < mid_point)
-      return i;
+      return static_cast<size_t>(std::distance(entries.begin(), iter));
   }
 
-  if (current_index + 1 == model.view_size())
-    return current_index;
+  if (std::next(iter) == entries.end())
+    return static_cast<size_t>(std::distance(entries.begin(), iter));
 
   // For indices after the current index ignore the bounds of the view being
   // dragged. This keeps the view from bouncing around as moved.
-  int delta =
-      primary_axis_coordinate(is_horizontal,
-                              model.ideal_bounds(current_index + 1).x() -
-                                  model.ideal_bounds(current_index).x(),
-                              model.ideal_bounds(current_index + 1).y() -
-                                  model.ideal_bounds(current_index).y());
-  for (int i = current_index + 1; i < model.view_size(); ++i) {
-    const gfx::Rect& bounds(model.ideal_bounds(i));
-    int mid_point = primary_axis_coordinate(
-        is_horizontal, bounds.x() + bounds.width() / 2 - delta,
-        bounds.y() + bounds.height() / 2 - delta);
+  const int delta = primary_axis_coordinate(
+      is_horizontal, std::next(iter)->ideal_bounds.origin() -
+                         iter->ideal_bounds.origin().OffsetFromOrigin());
+
+  for (++iter; iter != entries.end(); ++iter) {
+    const int mid_point = primary_axis_coordinate(
+                              is_horizontal, iter->ideal_bounds.CenterPoint()) -
+                          delta;
     if (value < mid_point)
-      return i - 1;
+      return static_cast<size_t>(std::distance(entries.begin(), iter)) - 1;
   }
-  return model.view_size() - 1;
+  return entries.size() - 1;
 }
 
 }  // namespace views

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,14 @@
 
 #include <windows.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 namespace ui {
 
 // This interface is implemented by classes who get input events forwarded to
 // them from others. E.g. would be a win32 parent child relationship where the
 // child forwards input events to the parent after doing minimal processing.
-class UI_BASE_EXPORT WindowEventTarget {
+class COMPONENT_EXPORT(UI_BASE) WindowEventTarget {
  public:
   static const char kWin32InputEventTarget[];
 
@@ -61,6 +61,17 @@ class UI_BASE_EXPORT WindowEventTarget {
   // indicates that the message should be DefProc'ed.
   // Returns the result of processing the message.
   virtual LRESULT HandleTouchMessage(unsigned int message,
+                                     WPARAM w_param,
+                                     LPARAM l_param,
+                                     bool* handled) = 0;
+
+  // Handles WM_INPUT events.
+  // The |message| parameter identifies the message.
+  // The |w_param| and |l_param| values are as per MSDN docs.
+  // The |handled| parameter is an output parameter which when set to false
+  // indicates that the message should be DefProc'ed.
+  // Returns the result of processing the message.
+  virtual LRESULT HandleInputMessage(unsigned int message,
                                      WPARAM w_param,
                                      LPARAM l_param,
                                      bool* handled) = 0;
@@ -114,8 +125,11 @@ class UI_BASE_EXPORT WindowEventTarget {
   // to ApplyPanGestureScroll(), ApplyPanGestureScrollEnd(),
   // ApplyPanGestureFlingBegin(), any number of calls to ApplyPanGestureFling(),
   // and finally ApplyPanGestureFlingEnd().
+  // |transition_to_pinch| is a hint to know if the scroll end will be followed
+  // by a pinch begin or not, so that momentum_phase can be set to Blocked if
+  // a momentum scroll/fling will not be happening next.
   virtual void ApplyPanGestureScrollBegin(int scroll_x, int scroll_y) = 0;
-  virtual void ApplyPanGestureScrollEnd() = 0;
+  virtual void ApplyPanGestureScrollEnd(bool transition_to_pinch) = 0;
   virtual void ApplyPanGestureFlingBegin() = 0;
   virtual void ApplyPanGestureFlingEnd() = 0;
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,6 @@ class UI_ANDROID_EXPORT WindowAndroidObserver {
   // should account for whether or not this is the case.
   virtual void OnActivityStopped() = 0;
   virtual void OnActivityStarted() = 0;
-  virtual void OnCursorVisibilityChanged(bool visible) {}
-  virtual void OnFallbackCursorModeToggled(bool is_on) {}
 
  protected:
   virtual ~WindowAndroidObserver() {}

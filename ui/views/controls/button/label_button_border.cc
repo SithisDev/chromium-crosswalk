@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/views/controls/button/label_button_border.h"
 
-#include "base/logging.h"
+#include <utility>
+
 #include "cc/paint/paint_flags.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/sys_color_change_listener.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/border.h"
@@ -32,9 +33,8 @@ void PaintHelper(LabelButtonAssetBorder* border,
                  ui::NativeTheme::State state,
                  const gfx::Rect& rect,
                  const ui::NativeTheme::ExtraParams& extra) {
-  Painter* painter =
-      border->GetPainter(extra.button.is_focused,
-                         Button::GetButtonStateFrom(state));
+  Painter* painter = border->GetPainter(extra.button.is_focused,
+                                        Button::GetButtonStateFrom(state));
   // Paint any corresponding unfocused painter if there is no focused painter.
   if (!painter && extra.button.is_focused)
     painter = border->GetPainter(false, Button::GetButtonStateFrom(state));
@@ -105,7 +105,7 @@ void LabelButtonAssetBorder::Paint(const View& view, gfx::Canvas* canvas) {
 
     {
       // First, modulate the background by 1 - alpha.
-      cc::PaintCanvasAutoRestore auto_restore(canvas->sk_canvas(), false);
+      cc::PaintCanvasAutoRestore auto_restore_alpha(canvas->sk_canvas(), false);
       canvas->sk_canvas()->saveLayerAlpha(&sk_rect, 255 - fg_alpha);
       state = native_theme_delegate->GetBackgroundThemeState(&extra);
       PaintHelper(this, canvas, state, rect, extra);

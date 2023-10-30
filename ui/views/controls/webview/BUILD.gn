@@ -1,15 +1,13 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
+import("//build/config/ozone.gni")
 
-jumbo_component("webview") {
+component("webview") {
   sources = [
     "unhandled_keyboard_event_handler.cc",
     "unhandled_keyboard_event_handler.h",
-    "unhandled_keyboard_event_handler_mac.mm",
-    "unhandled_keyboard_event_handler_win.cc",
     "web_contents_set_background_color.cc",
     "web_contents_set_background_color.h",
     "web_dialog_view.cc",
@@ -19,7 +17,19 @@ jumbo_component("webview") {
     "webview_export.h",
   ]
 
+  if (is_mac) {
+    sources += [ "unhandled_keyboard_event_handler_mac.mm" ]
+  }
+
+  if (is_win) {
+    sources += [ "unhandled_keyboard_event_handler_win.cc" ]
+  }
+
   defines = [ "WEBVIEW_IMPLEMENTATION" ]
+
+  if (is_mac) {
+    frameworks = [ "CoreFoundation.framework" ]
+  }
 
   deps = [
     "//base:i18n",
@@ -43,8 +53,13 @@ jumbo_component("webview") {
     "//ui/views",
   ]
 
-  if (is_linux || is_android) {
-    sources += [ "unhandled_keyboard_event_handler_default.cc" ]
+  if (is_linux || is_chromeos || is_android || is_fuchsia) {
+    if (use_ozone) {
+      sources += [ "unhandled_keyboard_event_handler_ozone.cc" ]
+      deps += [ "//ui/ozone" ]
+    } else {
+      sources += [ "unhandled_keyboard_event_handler_default.cc" ]
+    }
   }
 }
 
@@ -55,9 +70,7 @@ static_library("test_support") {
     "../../test/webview_test_helper.h",
   ]
 
-  public_deps = [
-    ":webview",
-  ]
+  public_deps = [ ":webview" ]
   deps = [
     "//base",
     "//content",

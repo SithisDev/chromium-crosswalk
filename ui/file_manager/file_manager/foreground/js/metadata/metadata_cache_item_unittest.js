@@ -1,15 +1,20 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {assertEquals, assertFalse, assertThrows, assertTrue} from 'chrome://webui-test/chai_assert.js';
+
+import {MetadataCacheItem} from './metadata_cache_item.js';
+import {MetadataItem} from './metadata_item.js';
 
 /**
  * @type {!MetadataItem}
  */
-let metadataA = new MetadataItem();
+const metadataA = new MetadataItem();
 metadataA.contentMimeType = 'value';
 
 
-function testMetadataCacheItemBasic() {
+export function testMetadataCacheItemBasic() {
   const item = new MetadataCacheItem();
   const loadRequested = item.createRequests(['contentMimeType']);
   assertEquals(1, loadRequested.length);
@@ -22,7 +27,7 @@ function testMetadataCacheItemBasic() {
   assertEquals('value', result.contentMimeType);
 }
 
-function testMetadataCacheItemAvoidDoubleLoad() {
+export function testMetadataCacheItemAvoidDoubleLoad() {
   const item = new MetadataCacheItem();
   item.startRequests(1, ['contentMimeType']);
   const loadRequested = item.createRequests(['contentMimeType']);
@@ -35,7 +40,7 @@ function testMetadataCacheItemAvoidDoubleLoad() {
   assertEquals('value', result.contentMimeType);
 }
 
-function testMetadataCacheItemInvalidate() {
+export function testMetadataCacheItemInvalidate() {
   const item = new MetadataCacheItem();
   item.startRequests(1, item.createRequests(['contentMimeType']));
   item.invalidate(2);
@@ -45,12 +50,12 @@ function testMetadataCacheItemInvalidate() {
   assertEquals(1, loadRequested.length);
 }
 
-function testMetadataCacheItemStoreInReverseOrder() {
+export function testMetadataCacheItemStoreInReverseOrder() {
   const item = new MetadataCacheItem();
   item.startRequests(1, item.createRequests(['contentMimeType']));
   item.startRequests(2, item.createRequests(['contentMimeType']));
 
-  let metadataB = new MetadataItem();
+  const metadataB = new MetadataItem();
   metadataB.contentMimeType = 'value2';
 
   assertTrue(item.storeProperties(2, metadataB));
@@ -60,7 +65,7 @@ function testMetadataCacheItemStoreInReverseOrder() {
   assertEquals('value2', result.contentMimeType);
 }
 
-function testMetadataCacheItemClone() {
+export function testMetadataCacheItemClone() {
   const itemA = new MetadataCacheItem();
   itemA.startRequests(1, itemA.createRequests(['contentMimeType']));
   const itemB = itemA.clone();
@@ -74,14 +79,14 @@ function testMetadataCacheItemClone() {
   assertTrue(itemB.hasFreshCache(['contentMimeType']));
 }
 
-function testMetadataCacheItemHasFreshCache() {
+export function testMetadataCacheItemHasFreshCache() {
   const item = new MetadataCacheItem();
   assertFalse(item.hasFreshCache(['contentMimeType', 'externalFileUrl']));
 
   item.startRequests(
       1, item.createRequests(['contentMimeType', 'externalFileUrl']));
 
-  let metadata = new MetadataItem();
+  const metadata = new MetadataItem();
   metadata.contentMimeType = 'mime';
   metadata.externalFileUrl = 'url';
 
@@ -97,36 +102,36 @@ function testMetadataCacheItemHasFreshCache() {
   assertTrue(item.hasFreshCache(['contentMimeType']));
 }
 
-function testMetadataCacheItemShouldNotUpdateBeforeInvalidation() {
+export function testMetadataCacheItemShouldNotUpdateBeforeInvalidation() {
   const item = new MetadataCacheItem();
   item.startRequests(1, item.createRequests(['contentMimeType']));
   item.storeProperties(1, metadataA);
 
-  let metadataB = new MetadataItem();
+  const metadataB = new MetadataItem();
   metadataB.contentMimeType = 'value2';
 
   item.storeProperties(2, metadataB);
   assertEquals('value', item.get(['contentMimeType']).contentMimeType);
 }
 
-function testMetadataCacheItemError() {
+export function testMetadataCacheItemError() {
   const item = new MetadataCacheItem();
   item.startRequests(1, item.createRequests(['contentThumbnailUrl']));
 
-  let metadataWithError = new MetadataItem();
+  const metadataWithError = new MetadataItem();
   metadataWithError.contentThumbnailUrlError = new Error('Error');
 
   item.storeProperties(1, metadataWithError);
-  let property = item.get(['contentThumbnailUrl']);
+  const property = item.get(['contentThumbnailUrl']);
   assertEquals(undefined, property.contentThumbnailUrl);
   assertEquals('Error', property.contentThumbnailUrlError.message);
 }
 
-function testMetadataCacheItemErrorShouldNotFetchedDirectly() {
+export function testMetadataCacheItemErrorShouldNotFetchedDirectly() {
   const item = new MetadataCacheItem();
   item.startRequests(1, item.createRequests(['contentThumbnailUrl']));
 
-  let metadataWithError = new MetadataItem();
+  const metadataWithError = new MetadataItem();
   metadataWithError.contentThumbnailUrlError = new Error('Error');
 
   item.storeProperties(1, metadataWithError);

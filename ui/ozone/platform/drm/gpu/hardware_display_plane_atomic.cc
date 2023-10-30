@@ -1,41 +1,39 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_atomic.h"
 
+#include <drm_fourcc.h>
+
+#include "base/command_line.h"
+#include "base/logging.h"
+#include "build/chromeos_buildflags.h"
+#include "media/media_buildflags.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_util.h"
 
 namespace ui {
 namespace {
 
-// TODO(dcastagna): Remove the following defines once they're in libdrm headers.
-#if !defined(DRM_ROTATE_0)
-#define BIT(n) (1 << (n))
-#define DRM_ROTATE_0 BIT(0)
-#define DRM_ROTATE_90 BIT(1)
-#define DRM_ROTATE_180 BIT(2)
-#define DRM_ROTATE_270 BIT(3)
-#define DRM_REFLECT_X BIT(4)
-#define DRM_REFLECT_Y BIT(5)
-#endif
-
 uint32_t OverlayTransformToDrmRotationPropertyValue(
     gfx::OverlayTransform transform) {
   switch (transform) {
     case gfx::OVERLAY_TRANSFORM_NONE:
-      return DRM_ROTATE_0;
+      return DRM_MODE_ROTATE_0;
     case gfx::OVERLAY_TRANSFORM_FLIP_HORIZONTAL:
-      return DRM_REFLECT_X;
+      return DRM_MODE_REFLECT_X | DRM_MODE_ROTATE_0;
     case gfx::OVERLAY_TRANSFORM_FLIP_VERTICAL:
-      return DRM_REFLECT_Y;
+      return DRM_MODE_REFLECT_Y | DRM_MODE_ROTATE_0;
+    // Driver code swaps 90 and 270 to be compliant with how xrandr uses these
+    // values, so we need to invert them here as well to get them back to the
+    // proper value.
     case gfx::OVERLAY_TRANSFORM_ROTATE_90:
-      return DRM_ROTATE_90;
+      return DRM_MODE_ROTATE_270;
     case gfx::OVERLAY_TRANSFORM_ROTATE_180:
-      return DRM_ROTATE_180;
+      return DRM_MODE_ROTATE_180;
     case gfx::OVERLAY_TRANSFORM_ROTATE_270:
-      return DRM_ROTATE_270;
+      return DRM_MODE_ROTATE_90;
     default:
       NOTREACHED();
   }
@@ -45,10 +43,21 @@ uint32_t OverlayTransformToDrmRotationPropertyValue(
 // Rotations are dependent on modifiers. Tiled formats can be rotated,
 // linear formats cannot. Atomic tests currently ignore modifiers, so there
 // isn't a way of determining if the rotation is supported.
-// TODO(https://crbug/880464): Remove this.
-bool IsRotationTransformSupported(gfx::OverlayTransform transform) {
+// TODO(https://b/172210707): Atomic tests should work if we are using
+// the original buffers as they have the correct modifiers. See
+// kUseRealBuffersForPageFlipTest and the 'GetBufferForPageFlipTest' function.
+// Intel driver reference on rotated and flipped buffers with modifiers:
+// https://code.woboq.org/linux/linux/drivers/gpu/drm/i915/intel_sprite.c.html#1471
+bool IsRotationTransformSupported(gfx::OverlayTransform transform,
+                                  uint32_t format_fourcc,
+                                  bool is_original_buffer) {
   if ((transform == gfx::OVERLAY_TRANSFORM_ROTATE_90) ||
-      (transform == gfx::OVERLAY_TRANSFORM_ROTATE_270)) {
+      (transform == gfx::OVERLAY_TRANSFORM_ROTATE_270) ||
+      (transform == gfx::OVERLAY_TRANSFORM_FLIP_HORIZONTAL)) {
+    if (is_original_buffer && (format_fourcc == DRM_FORMAT_NV12 ||
+                               format_fourcc == DRM_FORMAT_P010)) {
+      return true;
+    }
     return false;
   }
 
@@ -60,7 +69,7 @@ bool IsRotationTransformSupported(gfx::OverlayTransform transform) {
 HardwareDisplayPlaneAtomic::HardwareDisplayPlaneAtomic(uint32_t id)
     : HardwareDisplayPlane(id) {}
 
-HardwareDisplayPlaneAtomic::~HardwareDisplayPlaneAtomic() {}
+HardwareDisplayPlaneAtomic::~HardwareDisplayPlaneAtomic() = default;
 
 bool HardwareDisplayPlaneAtomic::Initialize(DrmDevice* drm) {
   if (!HardwareDisplayPlane::Initialize(drm))
@@ -74,59 +83,90 @@ bool HardwareDisplayPlaneAtomic::Initialize(DrmDevice* drm) {
              properties_.src_w.id && properties_.src_h.id;
   LOG_IF(ERROR, !ret) << "Failed to find all required properties for plane="
                       << id_;
+
+  ret &= (properties_.plane_color_encoding.id == 0) ==
+         (properties_.plane_color_range.id == 0);
+  LOG_IF(ERROR, !ret) << "Inconsistent color management properties for plane="
+                      << id_;
+
   return ret;
 }
 
-bool HardwareDisplayPlaneAtomic::SetPlaneData(
-    drmModeAtomicReq* property_set,
+bool HardwareDisplayPlaneAtomic::AssignPlaneProps(
     uint32_t crtc_id,
     uint32_t framebuffer,
     const gfx::Rect& crtc_rect,
     const gfx::Rect& src_rect,
     const gfx::OverlayTransform transform,
-    int in_fence_fd) {
+    int in_fence_fd,
+    uint32_t format_fourcc,
+    bool is_original_buffer) {
   if (transform != gfx::OVERLAY_TRANSFORM_NONE && !properties_.rotation.id)
     return false;
 
-  if (!IsRotationTransformSupported(transform))
+  if (!IsRotationTransformSupported(transform, format_fourcc,
+                                    is_original_buffer))
     return false;
 
-  properties_.crtc_id.value = crtc_id;
-  properties_.crtc_x.value = crtc_rect.x();
-  properties_.crtc_y.value = crtc_rect.y();
-  properties_.crtc_w.value = crtc_rect.width();
-  properties_.crtc_h.value = crtc_rect.height();
-  properties_.fb_id.value = framebuffer;
-  properties_.src_x.value = src_rect.x();
-  properties_.src_y.value = src_rect.y();
-  properties_.src_w.value = src_rect.width();
-  properties_.src_h.value = src_rect.height();
+  // Make a copy of properties to get the props IDs for the new intermediate
+  // values.
+  assigned_props_ = properties_;
 
-  bool plane_set_succeeded =
-      AddPropertyIfValid(property_set, id_, properties_.crtc_id) &&
-      AddPropertyIfValid(property_set, id_, properties_.crtc_x) &&
-      AddPropertyIfValid(property_set, id_, properties_.crtc_y) &&
-      AddPropertyIfValid(property_set, id_, properties_.crtc_w) &&
-      AddPropertyIfValid(property_set, id_, properties_.crtc_h) &&
-      AddPropertyIfValid(property_set, id_, properties_.fb_id) &&
-      AddPropertyIfValid(property_set, id_, properties_.src_x) &&
-      AddPropertyIfValid(property_set, id_, properties_.src_y) &&
-      AddPropertyIfValid(property_set, id_, properties_.src_w) &&
-      AddPropertyIfValid(property_set, id_, properties_.src_h);
+  assigned_props_.crtc_id.value = crtc_id;
+  assigned_props_.crtc_x.value = crtc_rect.x();
+  assigned_props_.crtc_y.value = crtc_rect.y();
+  assigned_props_.crtc_w.value = crtc_rect.width();
+  assigned_props_.crtc_h.value = crtc_rect.height();
+  assigned_props_.fb_id.value = framebuffer;
+  assigned_props_.src_x.value = src_rect.x();
+  assigned_props_.src_y.value = src_rect.y();
+  assigned_props_.src_w.value = src_rect.width();
+  assigned_props_.src_h.value = src_rect.height();
 
-  if (properties_.rotation.id) {
-    properties_.rotation.value =
+  if (assigned_props_.rotation.id) {
+    assigned_props_.rotation.value =
         OverlayTransformToDrmRotationPropertyValue(transform);
-    plane_set_succeeded =
-        plane_set_succeeded &&
-        AddPropertyIfValid(property_set, id_, properties_.rotation);
   }
 
-  if (properties_.in_fence_fd.id && in_fence_fd >= 0) {
-    properties_.in_fence_fd.value = in_fence_fd;
-    plane_set_succeeded =
-        plane_set_succeeded &&
-        AddPropertyIfValid(property_set, id_, properties_.in_fence_fd);
+  if (assigned_props_.in_fence_fd.id)
+    assigned_props_.in_fence_fd.value = static_cast<uint64_t>(in_fence_fd);
+
+  return true;
+}
+
+bool HardwareDisplayPlaneAtomic::SetPlaneProps(drmModeAtomicReq* property_set) {
+  bool plane_set_succeeded =
+      AddPropertyIfValid(property_set, id_, assigned_props_.crtc_id) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.crtc_x) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.crtc_y) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.crtc_w) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.crtc_h) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.fb_id) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.src_x) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.src_y) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.src_w) &&
+      AddPropertyIfValid(property_set, id_, assigned_props_.src_h);
+
+  if (assigned_props_.rotation.id) {
+    plane_set_succeeded &=
+        AddPropertyIfValid(property_set, id_, assigned_props_.rotation);
+  }
+
+  if (assigned_props_.in_fence_fd.id) {
+    plane_set_succeeded &=
+        AddPropertyIfValid(property_set, id_, assigned_props_.in_fence_fd);
+  }
+
+  if (assigned_props_.plane_color_encoding.id) {
+    // TODO(markyacoub): |color_encoding_bt601_| and |color_range_limited_| are
+    // only set in Initialize(). The properties could be set once in there and
+    // these member variables could be removed.
+    assigned_props_.plane_color_encoding.value = color_encoding_bt601_;
+    assigned_props_.plane_color_range.value = color_range_limited_;
+    plane_set_succeeded &= AddPropertyIfValid(
+        property_set, id_, assigned_props_.plane_color_encoding);
+    plane_set_succeeded &= AddPropertyIfValid(
+        property_set, id_, assigned_props_.plane_color_range);
   }
 
   if (!plane_set_succeeded) {
@@ -134,6 +174,8 @@ bool HardwareDisplayPlaneAtomic::SetPlaneData(
     return false;
   }
 
+  // Update properties_ if the setting the props succeeded.
+  properties_ = assigned_props_;
   return true;
 }
 
@@ -144,6 +186,10 @@ bool HardwareDisplayPlaneAtomic::SetPlaneCtm(drmModeAtomicReq* property_set,
 
   properties_.plane_ctm.value = ctm_blob_id;
   return AddPropertyIfValid(property_set, id_, properties_.plane_ctm);
+}
+
+uint32_t HardwareDisplayPlaneAtomic::AssignedCrtcId() const {
+  return assigned_props_.crtc_id.value;
 }
 
 }  // namespace ui

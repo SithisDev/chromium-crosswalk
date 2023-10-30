@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,40 +137,55 @@ public class SpanApplierTest {
         assertSpannableStringEquality(expectedOutput, actualOutput);
     }
 
-    /*
-     * Tests the attributes of two SpannableStrings and asserts expected equality.
-     *
-     * Prior to KitKat, there was no equals method for SpannableString, so we have to
-     * manually check that the objects are the same.
-     */
-    private void assertSpannableStringEquality(
-            SpannableString expected, SpannableString actual) {
-        if (!areSpannableStringsEqual(expected, actual)) {
-            Assert.fail("Expected string is " + getSpannableStringDescription(expected)
-                    + " Actual string is " + getSpannableStringDescription(actual));
+    @Test
+    public void testRemoveSpanText() {
+        String input = "<cons>consectetur adipiscing</cons>";
+        String expected = "";
+        SpanInfo span = new SpanInfo("<cons>", "</cons>");
+
+        String result = SpanApplier.removeSpanText(input, span);
+        Assert.assertEquals(expected, result);
+    }
+
+    @Test
+    public void testRemoveMultipleSpanText() {
+        String input = "Lorem <link>ipsum</link> dolor sit amet, "
+                + "<cons>consectetur adipiscing</cons><elit>elit. Proin<endElit> consectetur.";
+        String expected = "Lorem "
+                + " dolor sit amet, "
+                + " consectetur.";
+        SpanInfo linkSpan = new SpanInfo("<link>", "</link>");
+        SpanInfo consSpan = new SpanInfo("<cons>", "</cons>");
+        SpanInfo elitSpan = new SpanInfo("<elit>", "<endElit>");
+
+        // Span appearance order does not matter.
+        String result = SpanApplier.removeSpanText(input, consSpan, linkSpan, elitSpan);
+        Assert.assertEquals(expected, result);
+    }
+
+    @Test
+    public void testRemoveNestedSpans() {
+        String input = "<cons><link>ipsum</link>consectetur adipiscing</cons> dolor sit amet";
+        SpanInfo linkSpan = new SpanInfo("<link>", "</link>");
+        SpanInfo consSpan = new SpanInfo("<cons>", "</cons>");
+
+        try {
+            SpanApplier.removeSpanText(input, linkSpan, consSpan);
+            Assert.fail("Expected IllegalArgumentException to be thrown.");
+        } catch (IllegalArgumentException e) {
+            // success
         }
     }
 
-    private boolean areSpannableStringsEqual(SpannableString expected, SpannableString actual) {
-        Object[] expectedSpans = expected.getSpans(0, expected.length(), Object.class);
-        Object[] actualSpans = actual.getSpans(0, actual.length(), Object.class);
-
-        if (!expected.toString().equals(actual.toString())
-                || expectedSpans.length != actualSpans.length) {
-            return false;
+    /*
+     * Tests the attributes of two SpannableStrings and asserts expected equality.
+     */
+    private void assertSpannableStringEquality(
+            SpannableString expected, SpannableString actual) {
+        if (!expected.equals(actual)) {
+            Assert.fail("Expected string is " + getSpannableStringDescription(expected)
+                    + " Actual string is " + getSpannableStringDescription(actual));
         }
-
-        for (int i = 0; i < expectedSpans.length; i++) {
-            Object expectedSpan = expectedSpans[i];
-            Object actualSpan = actualSpans[i];
-            if (expectedSpan != actualSpan
-                    || expected.getSpanStart(expectedSpan) != actual.getSpanStart(actualSpan)
-                    || expected.getSpanEnd(expectedSpan) != actual.getSpanEnd(actualSpan)) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private String getSpannableStringDescription(SpannableString spannableString) {

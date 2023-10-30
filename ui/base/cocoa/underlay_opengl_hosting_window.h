@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,12 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "ui/base/ui_base_export.h"
+#include "base/component_export.h"
 
 // Common base class for windows that host a OpenGL surface that renders under
 // the window. Previously contained methods related to hole punching, now just
 // contains common asserts.
-UI_BASE_EXPORT
+COMPONENT_EXPORT(UI_BASE)
 @interface UnderlayOpenGLHostingWindow : NSWindow
 @end
 

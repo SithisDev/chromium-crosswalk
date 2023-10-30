@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 
 #include <memory>
 
-#include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/dragdrop/os_exchange_data_provider.h"
 
 namespace ui {
 
 // We can't include os_exchange_data_provider_mac.h from arbitrary C++ files
 // because it depends on the Objective-C headers.
-std::unique_ptr<OSExchangeData::Provider> BuildOSExchangeDataProviderMac();
+std::unique_ptr<OSExchangeDataProvider> BuildOSExchangeDataProviderMac();
 
 }  // namespace ui
 

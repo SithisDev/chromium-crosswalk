@@ -1,28 +1,33 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {str, strf, util} from '../../common/js/util.js';
+import {VolumeManagerCommon} from '../../common/js/volume_manager_types.js';
+import {EntryLocation} from '../../externs/entry_location.js';
+import {VolumeManager} from '../../externs/volume_manager.js';
+
+import {DirectoryModel} from './directory_model.js';
+import {TaskController} from './task_controller.js';
+import {FileManagerUI} from './ui/file_manager_ui.js';
+import {SearchBox} from './ui/search_box.js';
 
 /**
  * Controller for searching.
  */
-class SearchController {
+export class SearchController {
   /**
    * @param {!SearchBox} searchBox Search box UI element.
-   * @param {!LocationLine} locationLine Location line UI element.
    * @param {!DirectoryModel} directoryModel Directory model.
+   * @param {!VolumeManager} volumeManager Volume manager.
    * @param {!TaskController} taskController Task controller to execute the
    *     selected item.
    * @param {!FileManagerUI} a11y FileManagerUI to be able to announce a11y
    *     messages.
    */
-  constructor(
-      searchBox, locationLine, directoryModel, volumeManager, taskController,
-      a11y) {
+  constructor(searchBox, directoryModel, volumeManager, taskController, a11y) {
     /** @const @private {!SearchBox} */
     this.searchBox_ = searchBox;
-
-    /** @const @private {!LocationLine} */
-    this.locationLine_ = locationLine;
 
     /** @const @private {!DirectoryModel} */
     this.directoryModel_ = directoryModel;
@@ -88,6 +93,19 @@ class SearchController {
   }
 
   /**
+   * Sets search query on the search box and performs a search.
+   * @param {string} searchQuery Search query string to be searched with.
+   */
+  setSearchQuery(searchQuery) {
+    this.searchBox_.inputElement.focus();
+    this.searchBox_.inputElement.value = searchQuery;
+    this.onTextChange_();
+    if (this.isOnDrive_) {
+      this.onItemSelect_();
+    }
+  }
+
+  /**
    * Handles text change event.
    * @private
    */
@@ -106,7 +124,7 @@ class SearchController {
     // {@code DirectoryModel.search()}.
     if (this.directoryModel_.isSearching() &&
         this.directoryModel_.getLastSearchQuery() != searchString) {
-      this.directoryModel_.search('', () => {}, () => {});
+      this.directoryModel_.search('', () => {});
     }
 
     this.requestAutocompleteSuggestions_();
@@ -153,7 +171,7 @@ class SearchController {
     chrome.fileManagerPrivate.searchDriveMetadata(
         {
           query: searchString,
-          types: 'ALL',
+          types: chrome.fileManagerPrivate.SearchType.ALL,
           maxResults: 4,
         },
         suggestions => {
@@ -219,7 +237,7 @@ class SearchController {
       if (!locationInfo ||
           (locationInfo.isRootEntry &&
            locationInfo.rootType ===
-               VolumeManagerCommon.RootType.DRIVE_OTHER)) {
+               VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME)) {
         this.taskController_.executeEntryTask(entry);
         return;
       }
@@ -248,25 +266,8 @@ class SearchController {
           count === 0 ? 'SEARCH_A11Y_NO_RESULT' : 'SEARCH_A11Y_RESULT';
       const msg = strf(msgId, searchString);
       this.a11y_.speakA11yMessage(msg);
-
-      // If the current location is somewhere in Drive, all files in Drive can
-      // be listed as search results regardless of current location.
-      // In this case, showing current location is confusing, so use the Drive
-      // root "My Drive" as the current location.
-      if (this.isOnDrive_) {
-        const locationInfo = this.currentLocationInfo_;
-        const rootEntry = locationInfo.volumeInfo.displayRoot;
-        if (rootEntry) {
-          this.locationLine_.show(rootEntry);
-        }
-      }
     };
 
-    const onClearSearch = function() {
-      this.locationLine_.show(this.directoryModel_.getCurrentDirEntry());
-    };
-
-    this.directoryModel_.search(
-        searchString, onSearchRescan.bind(this), onClearSearch.bind(this));
+    this.directoryModel_.search(searchString, onSearchRescan.bind(this));
   }
 }

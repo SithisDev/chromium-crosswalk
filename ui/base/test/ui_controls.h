@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/callback_forward.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -39,7 +40,7 @@ namespace ui_controls {
 // tests.
 void EnableUIControls();
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 bool IsUIControlsEnabled();
 #endif
 
@@ -62,12 +63,12 @@ bool SendKeyPressNotifyWhenDone(gfx::NativeWindow window,
                                 base::OnceClosure task);
 
 // Simulate a mouse move.
-bool SendMouseMove(long screen_x, long screen_y);
+bool SendMouseMove(int screen_x, int screen_y);
 
 // Returns false on Windows if the desired position is not over a window
 // belonging to the current process.
-bool SendMouseMoveNotifyWhenDone(long screen_x,
-                                 long screen_y,
+bool SendMouseMoveNotifyWhenDone(int screen_x,
+                                 int screen_y,
                                  base::OnceClosure task);
 
 enum MouseButton {
@@ -109,7 +110,7 @@ bool SendMouseEventsNotifyWhenDone(MouseButton type,
 // Same as SendMouseEvents with UP | DOWN.
 bool SendMouseClick(MouseButton type);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Send WM_POINTER messages to generate touch events. There is no way to detect
 // when events are received by chrome, it's up to users of this API to detect
 // when events arrive. |action| is a bitmask of the TouchType constants that
@@ -117,7 +118,7 @@ bool SendMouseClick(MouseButton type);
 // pointers, |screen_x| and |screen_y| are the screen coordinates of a touch
 // pointer.
 bool SendTouchEvents(int action, int num, int screen_x, int screen_y);
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS)
 // Sends a TouchEvent to the window system. |action| is a bitmask of the
 // TouchType constants that indicates what events are generated, |id| identifies
 // the touch point.
@@ -135,7 +136,7 @@ class UIControlsAura;
 void InstallUIControlsAura(UIControlsAura* instance);
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 // Returns true when tests need to use extra Tab and Shift-Tab key events
 // to traverse to the desired item; because the application is configured to
 // traverse more elements for accessibility reasons.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #ifndef UI_GL_GL_MOCK_H_
 #define UI_GL_GL_MOCK_H_
 
+#include "base/notreached.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gl/gl_bindings.h"
 

@@ -1,10 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef UI_OZONE_PLATFORM_DRM_GPU_DRM_GPU_UTIL_H_
 #define UI_OZONE_PLATFORM_DRM_GPU_DRM_GPU_UTIL_H_
 
+#include "base/trace_event/traced_value.h"
+#include "ui/ozone/platform/drm/common//drm_util.h"
 #include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 
@@ -35,6 +37,14 @@ ScopedDrmColorCtmPtr CreateCTMBlob(const std::vector<float>& color_matrix);
 std::vector<display::GammaRampRGBEntry> ResampleLut(
     const std::vector<display::GammaRampRGBEntry>& lut_in,
     size_t desired_size);
+
+// Returns the display infos parsed in
+// |GetDisplayInfosAndInvalidCrtcs| and disables the invalid CRTCs
+// that weren't picked as preferred CRTCs.
+HardwareDisplayControllerInfoList GetDisplayInfosAndUpdateCrtcs(int fd);
+
+void DrmAsValueIntoHelper(const drmModeModeInfo& mode_info,
+                          base::trace_event::TracedValue* value);
 
 }  // namespace ui
 

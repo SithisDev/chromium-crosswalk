@@ -1,10 +1,19 @@
-amistry@chromium.org
-dats@chromium.org
+adanilo@chromium.org
+austinct@chromium.org
+benreich@chromium.org
 fdegros@chromium.org
-fukino@chromium.org
+jboulic@chromium.org
 joelhockey@chromium.org
 lucmult@chromium.org
+majewski@chromium.org
+msalomao@google.com
+nigeltao@chromium.org
 noel@chromium.org
-sammc@chromium.org
-slangley@chromium.org
-# COMPONENT: Platform>Apps>FileManager
+petermarshall@chromium.org
+simmonsjosh@google.com
+wenbojie@chromium.org
+
+# Temporary ownership for code refactoring: Remove after 2022-12-31.
+# For horizontal changes, usually related to the WebUI toolchain. For any
+# changes that have to do with business logic direct to CrOS OWNERS above.
+file://ui/webui/PLATFORM_OWNERS
