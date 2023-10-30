@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/public/cpp/pagination/pagination_model_observer.h"
-#include "base/macros.h"
-#include "ui/views/controls/button/button.h"
+#include "ui/views/view.h"
 
 namespace ash {
 
@@ -23,11 +22,18 @@ class ASH_EXPORT PageIndicatorView : public views::View,
  public:
   PageIndicatorView(UnifiedSystemTrayController* controller,
                     bool initially_expanded);
+
+  PageIndicatorView(const PageIndicatorView&) = delete;
+  PageIndicatorView& operator=(const PageIndicatorView&) = delete;
+
   ~PageIndicatorView() override;
 
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
   // Otherwise, it shows an intermediate state while animating.
   void SetExpandedAmount(double expanded_amount);
+
+  // Returns the height of this view when the tray is fully expanded.
+  int GetExpandedHeight();
 
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
@@ -40,7 +46,7 @@ class ASH_EXPORT PageIndicatorView : public views::View,
   class PageIndicatorButton;
 
   // PaginationModelObserver:
-  void TotalPagesChanged() override;
+  void TotalPagesChanged(int previous_page_count, int new_page_count) override;
   void SelectedPageChanged(int old_selected, int new_selected) override;
 
   bool IsPageSelectedForTesting(int index);
@@ -57,8 +63,6 @@ class ASH_EXPORT PageIndicatorView : public views::View,
 
   // Owned by views hierarchy.
   views::View* buttons_container_;
-
-  DISALLOW_COPY_AND_ASSIGN(PageIndicatorView);
 };
 
 }  // namespace ash

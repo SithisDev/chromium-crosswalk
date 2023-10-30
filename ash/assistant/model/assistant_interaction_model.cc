@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,12 @@ AssistantInteractionModel::AssistantInteractionModel()
 AssistantInteractionModel::~AssistantInteractionModel() = default;
 
 void AssistantInteractionModel::AddObserver(
-    AssistantInteractionModelObserver* observer) {
+    AssistantInteractionModelObserver* observer) const {
   observers_.AddObserver(observer);
 }
 
 void AssistantInteractionModel::RemoveObserver(
-    AssistantInteractionModelObserver* observer) {
+    AssistantInteractionModelObserver* observer) const {
   observers_.RemoveObserver(observer);
 }
 
@@ -103,11 +103,11 @@ void AssistantInteractionModel::ClearPendingQuery() {
 }
 
 void AssistantInteractionModel::SetPendingResponse(
-    std::unique_ptr<AssistantResponse> pending_response) {
+    scoped_refptr<AssistantResponse> pending_response) {
   pending_response_ = std::move(pending_response);
 }
 
-void AssistantInteractionModel::FinalizePendingResponse() {
+void AssistantInteractionModel::CommitPendingResponse() {
   DCHECK(pending_response_);
   response_ = std::move(pending_response_);
   NotifyResponseChanged();

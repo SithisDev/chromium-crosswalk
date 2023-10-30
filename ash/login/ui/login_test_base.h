@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "ash/public/cpp/login_types.h"
 #include "ash/test/ash_test_base.h"
-#include "base/macros.h"
 
 namespace views {
 class View;
@@ -22,9 +21,13 @@ class LoginDataDispatcher;
 
 // Base test fixture for testing the views-based login and lock screens. This
 // class provides easy access to types which the login/lock frequently need.
-class LoginTestBase : public AshTestBase {
+class LoginTestBase : public NoSessionAshTestBase {
  public:
   LoginTestBase();
+
+  LoginTestBase(const LoginTestBase&) = delete;
+  LoginTestBase& operator=(const LoginTestBase&) = delete;
+
   ~LoginTestBase() override;
 
   // Shows a full Lock/Login screen. These methods are useful for when we want
@@ -32,7 +35,8 @@ class LoginTestBase : public AshTestBase {
   // component needs to be able to talk directly to the lockscreen (e.g. getting
   // the ScreenType).
   void ShowLockScreen();
-  void ShowLoginScreen();
+  // If `set_wallpaper` is true, sets a wallpaper in the default color.
+  void ShowLoginScreen(bool set_wallpaper = true);
 
   // Sets the primary test widget. The widget can be retrieved using |widget()|.
   // This can be used to make a widget scoped to the whole test, e.g. if the
@@ -65,6 +69,10 @@ class LoginTestBase : public AshTestBase {
   // Changes the active number of users. Fires an event on |DataDispatcher()|.
   void AddChildUsers(size_t num_users);
 
+  // Removes user specified by |account_id| from users(). Fires an event on
+  // |DataDispatcher()|
+  void RemoveUser(const AccountId& account_id);
+
   std::vector<LoginUserInfo>& users() { return users_; }
 
   const std::vector<LoginUserInfo>& users() const { return users_; }
@@ -76,14 +84,10 @@ class LoginTestBase : public AshTestBase {
   void TearDown() override;
 
  private:
-  class WidgetDelegate;
-
   // The widget created using |ShowWidgetWithContent|.
   std::unique_ptr<views::Widget> widget_;
 
   std::vector<LoginUserInfo> users_;
-
-  DISALLOW_COPY_AND_ASSIGN(LoginTestBase);
 };
 
 }  // namespace ash

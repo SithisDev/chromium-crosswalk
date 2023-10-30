@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,12 @@
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/network/network_icon.h"
 #include "ash/system/network/network_icon_animation.h"
+#include "ash/system/network/tray_network_state_model.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/views/controls/image_view.h"
 
 namespace ash {
-namespace tray {
 
 namespace {
 
@@ -34,8 +35,8 @@ network_icon::IconType GetIconType() {
 NetworkTrayView::NetworkTrayView(Shelf* shelf, ActiveNetworkIcon::Type type)
     : TrayItemView(shelf), type_(type) {
   Shell::Get()->system_tray_model()->network_state_model()->AddObserver(this);
+  Shell::Get()->session_controller()->AddObserver(this);
   CreateImageView();
-  UpdateNetworkStateHandlerIcon();
   UpdateConnectionStatus(true /* notify_a11y */);
 }
 
@@ -43,6 +44,7 @@ NetworkTrayView::~NetworkTrayView() {
   network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   Shell::Get()->system_tray_model()->network_state_model()->RemoveObserver(
       this);
+  Shell::Get()->session_controller()->RemoveObserver(this);
 }
 
 const char* NetworkTrayView::GetClassName() const {
@@ -50,9 +52,14 @@ const char* NetworkTrayView::GetClassName() const {
 }
 
 void NetworkTrayView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  // A valid role must be set prior to setting the name.
+  node_data->role = ax::mojom::Role::kImage;
   node_data->SetName(accessible_name_);
   node_data->SetDescription(accessible_description_);
-  node_data->role = ax::mojom::Role::kButton;
+}
+
+std::u16string NetworkTrayView::GetAccessibleNameString() const {
+  return tooltip_;
 }
 
 views::View* NetworkTrayView::GetTooltipHandlerForPoint(
@@ -60,8 +67,17 @@ views::View* NetworkTrayView::GetTooltipHandlerForPoint(
   return GetLocalBounds().Contains(point) ? this : nullptr;
 }
 
-base::string16 NetworkTrayView::GetTooltipText(const gfx::Point& p) const {
+std::u16string NetworkTrayView::GetTooltipText(const gfx::Point& p) const {
   return tooltip_;
+}
+
+void NetworkTrayView::HandleLocaleChange() {
+  UpdateConnectionStatus(false /* notify_a11y */);
+}
+
+void NetworkTrayView::OnThemeChanged() {
+  TrayItemView::OnThemeChanged();
+  UpdateNetworkStateHandlerIcon();
 }
 
 void NetworkTrayView::NetworkIconChanged() {
@@ -104,7 +120,7 @@ void NetworkTrayView::UpdateNetworkStateHandlerIcon() {
 }
 
 void NetworkTrayView::UpdateConnectionStatus(bool notify_a11y) {
-  base::string16 prev_accessible_name = accessible_name_;
+  std::u16string prev_accessible_name = accessible_name_;
   Shell::Get()
       ->system_tray_model()
       ->active_network_icon()
@@ -116,5 +132,4 @@ void NetworkTrayView::UpdateConnectionStatus(bool notify_a11y) {
   }
 }
 
-}  // namespace tray
 }  // namespace ash

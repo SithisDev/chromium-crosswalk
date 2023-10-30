@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,10 @@
 #include "ash/wm/window_state.h"
 #include "base/bind.h"
 #include "components/viz/host/host_frame_sink_manager.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "ui/aura/env.h"
-#include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/compositor/compositor.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/core/window_util.h"
 
@@ -20,19 +21,14 @@ namespace ash {
 namespace {
 
 // How long to wait before attempting to re-establish a lost connection.
-constexpr base::TimeDelta kReEstablishConnectionDelay =
-    base::TimeDelta::FromMilliseconds(100);
+constexpr base::TimeDelta kReEstablishConnectionDelay = base::Milliseconds(100);
 
 }  // namespace
 
 VideoDetector::VideoDetector()
     : state_(State::NOT_PLAYING),
       video_is_playing_(false),
-      window_observer_manager_(this),
-      scoped_session_observer_(this),
-      is_shutting_down_(false),
-      binding_(this),
-      weak_factory_(this) {
+      is_shutting_down_(false) {
   aura::Env::GetInstance()->AddObserver(this);
   Shell::Get()->AddShellObserver(this);
   EstablishConnectionToViz();
@@ -52,19 +48,19 @@ void VideoDetector::RemoveObserver(Observer* observer) {
 }
 
 void VideoDetector::OnWindowInitialized(aura::Window* window) {
-  window_observer_manager_.Add(window);
+  window_observations_manager_.AddObservation(window);
 }
 
 void VideoDetector::OnWindowDestroying(aura::Window* window) {
   if (fullscreen_desks_containers_.count(window)) {
-    window_observer_manager_.Remove(window);
+    window_observations_manager_.RemoveObservation(window);
     fullscreen_desks_containers_.erase(window);
     UpdateState();
   }
 }
 
 void VideoDetector::OnWindowDestroyed(aura::Window* window) {
-  window_observer_manager_.Remove(window);
+  window_observations_manager_.RemoveObservation(window);
 }
 
 void VideoDetector::OnChromeTerminating() {
@@ -79,12 +75,12 @@ void VideoDetector::OnFullscreenStateChanged(bool is_fullscreen,
       fullscreen_desks_containers_.count(container);
   if (is_fullscreen && !has_fullscreen_in_container) {
     fullscreen_desks_containers_.insert(container);
-    if (!window_observer_manager_.IsObserving(container))
-      window_observer_manager_.Add(container);
+    if (!window_observations_manager_.IsObservingSource(container))
+      window_observations_manager_.AddObservation(container);
     UpdateState();
   } else if (!is_fullscreen && has_fullscreen_in_container) {
     fullscreen_desks_containers_.erase(container);
-    window_observer_manager_.Remove(container);
+    window_observations_manager_.RemoveObservation(container);
     UpdateState();
   }
 }
@@ -117,14 +113,14 @@ void VideoDetector::OnVideoActivityEnded() {
 }
 
 void VideoDetector::EstablishConnectionToViz() {
-  viz::mojom::VideoDetectorObserverPtr observer;
-  if (binding_.is_bound())
-    binding_.Close();
-  binding_.Bind(mojo::MakeRequest(&observer));
-  binding_.set_connection_error_handler(base::BindOnce(
+  if (receiver_.is_bound())
+    receiver_.reset();
+  mojo::PendingRemote<viz::mojom::VideoDetectorObserver> observer =
+      receiver_.BindNewPipeAndPassRemote();
+  receiver_.set_disconnect_handler(base::BindOnce(
       &VideoDetector::OnConnectionError, base::Unretained(this)));
   aura::Env::GetInstance()
-      ->context_factory_private()
+      ->context_factory()
       ->GetHostFrameSinkManager()
       ->AddVideoDetectorObserver(std::move(observer));
 }

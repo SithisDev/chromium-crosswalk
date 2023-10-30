@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,10 @@
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_item.h"
+#include "ash/wm/overview/overview_test_util.h"
+#include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/workspace/backdrop_controller.h"
@@ -19,24 +22,23 @@
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
 
-using OverviewTransition = OverviewSession::OverviewTransition;
-
 class OverviewGridTest : public AshTestBase {
  public:
   OverviewGridTest() = default;
+
+  OverviewGridTest(const OverviewGridTest&) = delete;
+  OverviewGridTest& operator=(const OverviewGridTest&) = delete;
+
   ~OverviewGridTest() override = default;
 
   void InitializeGrid(const std::vector<aura::Window*>& windows) {
-    ASSERT_FALSE(grid_);
     aura::Window* root = Shell::GetPrimaryRootWindow();
-    grid_ = std::make_unique<OverviewGrid>(
-        root, windows, nullptr,
-        screen_util::GetDisplayWorkAreaBoundsInParentForActiveDeskContainer(
-            root));
+    grid_ = std::make_unique<OverviewGrid>(root, windows, nullptr);
   }
 
   void CheckAnimationStates(
@@ -44,7 +46,7 @@ class OverviewGridTest : public AshTestBase {
       const std::vector<gfx::RectF>& target_bounds,
       const std::vector<bool>& expected_start_animations,
       const std::vector<bool>& expected_end_animations,
-      base::Optional<size_t> selected_window_index = base::nullopt) {
+      absl::optional<size_t> selected_window_index = absl::nullopt) {
     ASSERT_EQ(windows.size(), target_bounds.size());
     ASSERT_EQ(windows.size(), expected_start_animations.size());
     ASSERT_EQ(windows.size(), expected_end_animations.size());
@@ -82,10 +84,14 @@ class OverviewGridTest : public AshTestBase {
     }
   }
 
+  SplitViewController* split_view_controller() {
+    return SplitViewController::Get(Shell::GetPrimaryRootWindow());
+  }
+
+  OverviewGrid* grid() { return grid_.get(); }
+
  private:
   std::unique_ptr<OverviewGrid> grid_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverviewGridTest);
 };
 
 // Tests that with only one window, we always animate.
@@ -188,7 +194,7 @@ TEST_F(OverviewGridTest, SelectedWindow) {
                                            gfx::RectF(100.f, 100.f)};
   CheckAnimationStates({window1.get(), window2.get(), window3.get()},
                        target_bounds, {true, true, true}, {false, false, true},
-                       base::make_optional(2u));
+                       absl::make_optional(2u));
 }
 
 TEST_F(OverviewGridTest, WindowWithBackdrop) {
@@ -217,6 +223,92 @@ TEST_F(OverviewGridTest, WindowWithBackdrop) {
                                            gfx::RectF(100.f, 100.f)};
   CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
                        {true, false}, {true, true});
+}
+
+TEST_F(OverviewGridTest, DestinationPartiallyOffscreenWindow) {
+  UpdateDisplay("500x400");
+  auto window1 = CreateTestWindow(gfx::Rect(100, 100));
+  auto window2 = CreateTestWindow(gfx::Rect(100, 100));
+
+  // Position |window2|'s destination to be partially offscreen. Tests that it
+  // still animates because the onscreen portion is not occluded by |window1|.
+  std::vector<gfx::RectF> target_bounds = {
+      gfx::RectF(100.f, 100.f), gfx::RectF(350.f, 100.f, 100.f, 100.f)};
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, true}, {true, true});
+
+  // Maximize |window1|. |window2| should no longer animate since the parts of
+  // it that are onscreen are fully occluded.
+  WindowState::Get(window1.get())->Maximize();
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, false}, {true, false});
+}
+
+TEST_F(OverviewGridTest, SourcePartiallyOffscreenWindow) {
+  UpdateDisplay("500x400");
+  auto window1 = CreateTestWindow(gfx::Rect(100, 100));
+  // Create |window2| to be partially offscreen.
+  auto window2 = CreateTestWindow(gfx::Rect(450, 100, 100, 100));
+
+  // Tests that it still animates because the onscreen portion is not occluded
+  // by |window1|.
+  std::vector<gfx::RectF> target_bounds = {gfx::RectF(100.f, 100.f),
+                                           gfx::RectF(200.f, 200.f)};
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, true}, {true, true});
+
+  // Maximize |window1|. |window2| should no longer animate since the parts of
+  // it that are onscreen are fully occluded.
+  WindowState::Get(window1.get())->Maximize();
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, false}, {true, false});
+}
+
+// Tests that windows whose destination is fully offscreen never animate.
+TEST_F(OverviewGridTest, FullyOffscreenWindow) {
+  UpdateDisplay("500x400");
+  auto window1 = CreateTestWindow(gfx::Rect(100, 100));
+  auto window2 = CreateTestWindow(gfx::Rect(100, 100));
+
+  std::vector<gfx::RectF> target_bounds = {
+      gfx::RectF(100.f, 100.f), gfx::RectF(450.f, 450.f, 100.f, 100.f)};
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, false}, {true, false});
+
+  WindowState::Get(window1.get())->Maximize();
+  CheckAnimationStates({window1.get(), window2.get()}, target_bounds,
+                       {true, false}, {true, false});
+}
+
+// Tests that only one window animates when entering overview from splitview
+// double snapped.
+TEST_F(OverviewGridTest, SnappedWindow) {
+  auto window1 = CreateTestWindow(gfx::Rect(100, 100));
+  auto window2 = CreateTestWindow(gfx::Rect(100, 100));
+  auto window3 = CreateTestWindow(gfx::Rect(100, 100));
+  wm::ActivateWindow(window1.get());
+  wm::ActivateWindow(window2.get());
+
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  split_view_controller()->SnapWindow(window1.get(), SplitViewController::LEFT);
+
+  // Snap |window2| and check that |window3| is maximized.
+  split_view_controller()->SnapWindow(window2.get(),
+                                      SplitViewController::RIGHT);
+  EXPECT_TRUE(WindowState::Get(window3.get())->IsMaximized());
+
+  // We cannot create a grid object like in the other tests because creating a
+  // grid calls |GetGridBoundsInScreen| with split view state both snapped which
+  // is an unnatural state.
+  EnterOverview();
+
+  // Tests that |window3| is not animated even though its bounds are larger than
+  // |window2| because it is fully occluded by |window1| + |window2| and the
+  // split view divider.
+  OverviewItem* item2 = GetOverviewItemForWindow(window2.get());
+  OverviewItem* item3 = GetOverviewItemForWindow(window3.get());
+  EXPECT_TRUE(item2->should_animate_when_entering());
+  EXPECT_FALSE(item3->should_animate_when_entering());
 }
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@ class Window;
 }
 
 namespace views {
+class View;
 class Widget;
 }
 
@@ -24,7 +25,8 @@ namespace ash {
 // should only be supplied if called from ash, otherwise use null to get the
 // right container.
 ASH_PUBLIC_EXPORT std::unique_ptr<views::Widget> CreateLockScreenWidget(
-    aura::Window* parent = nullptr);
+    aura::Window* parent,
+    std::unique_ptr<views::View> contents_view);
 
 }  // namespace ash
 

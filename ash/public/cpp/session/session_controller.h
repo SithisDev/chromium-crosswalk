@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ class AccountId;
 
 namespace ash {
 
+class SessionObserver;
 class SessionControllerClient;
 class SessionActivationObserver;
 
@@ -68,7 +69,10 @@ class ASH_PUBLIC_EXPORT SessionController {
   // Runs the pre-unlock animation. Invoked by the screen locker before
   // dismissing. When the mojo call returns, screen locker takes that as a
   // signal of finished unlock animation and dismisses itself.
-  using RunUnlockAnimationCallback = base::OnceClosure;
+  // The boolean parameter will be `true` if the unlock animation was aborted,
+  // resulting in the lock screen being reshown. It will be false otherwise and
+  // the unlock will proceed as normal.
+  using RunUnlockAnimationCallback = base::OnceCallback<void(bool)>;
   virtual void RunUnlockAnimation(RunUnlockAnimationCallback callback) = 0;
 
   // Notifies that chrome is terminating.
@@ -77,11 +81,8 @@ class ASH_PUBLIC_EXPORT SessionController {
   // Adds a countdown timer to the system tray menu and creates or updates a
   // notification saying the session length is limited (e.g. a public session in
   // a library). Setting |length_limit| to zero removes the notification.
-  // NOTE: Chrome enforces the limit, not ash. Ash could enforce it if local
-  // state prefs and user activity monitoring were available under mustash.
-  // http://crbug.com/729808
   virtual void SetSessionLengthLimit(base::TimeDelta length_limit,
-                                     base::TimeTicks start_time) = 0;
+                                     base::Time start_time) = 0;
 
   // Returns whether it's ok to switch the active multiprofile user. May affect
   // or be affected by system state such as window overview mode and screen
@@ -117,6 +118,13 @@ class ASH_PUBLIC_EXPORT SessionController {
   virtual void RemoveSessionActivationObserverForAccountId(
       const AccountId& account_id,
       SessionActivationObserver* observer) = 0;
+
+  // Adds/remove session observer.
+  virtual void AddObserver(SessionObserver* observer) = 0;
+  virtual void RemoveObserver(SessionObserver* observer) = 0;
+
+  // Returns true if the screen is currently locked.
+  virtual bool IsScreenLocked() const = 0;
 
  protected:
   SessionController();

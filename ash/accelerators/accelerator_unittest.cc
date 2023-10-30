@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,14 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ui_controls_factory_ash.h"
-#include "ash/test_screenshot_delegate.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_observer.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/user_action_tester.h"
-#include "chromeos/dbus/shill/shill_clients.h"
-#include "chromeos/network/network_handler.h"
+#include "chromeos/ash/components/dbus/shill/shill_clients.h"
+#include "chromeos/ash/components/network/network_handler.h"
 #include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/test_accelerator_target.h"
@@ -35,6 +34,10 @@ namespace {
 class TestNetworkObserver : public NetworkObserver {
  public:
   TestNetworkObserver() = default;
+
+  TestNetworkObserver(const TestNetworkObserver&) = delete;
+  TestNetworkObserver& operator=(const TestNetworkObserver&) = delete;
+
   ~TestNetworkObserver() override = default;
 
   // ash::NetworkObserver:
@@ -46,8 +49,6 @@ class TestNetworkObserver : public NetworkObserver {
 
  private:
   bool wifi_enabled_status_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestNetworkObserver);
 };
 
 }  // namespace
@@ -62,21 +63,18 @@ class AcceleratorTest : public AshTestBase, public OverviewObserver {
  public:
   AcceleratorTest() : is_in_overview_mode_(false) {}
 
+  AcceleratorTest(const AcceleratorTest&) = delete;
+  AcceleratorTest& operator=(const AcceleratorTest&) = delete;
+
   void SetUp() override {
     ui_controls::InstallUIControlsAura(test::CreateAshUIControls());
 
     AshTestBase::SetUp();
 
     Shell::Get()->overview_controller()->AddObserver(this);
-
-    chromeos::shill_clients::InitializeFakes();
-    chromeos::NetworkHandler::Initialize();
   }
 
   void TearDown() override {
-    chromeos::NetworkHandler::Shutdown();
-    chromeos::shill_clients::Shutdown();
-
     Shell::Get()->overview_controller()->RemoveObserver(this);
 
     AshTestBase::TearDown();
@@ -103,28 +101,12 @@ class AcceleratorTest : public AshTestBase, public OverviewObserver {
 
  protected:
   bool is_in_overview_mode_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AcceleratorTest);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Tests a sample of accelerators.
 TEST_F(AcceleratorTest, Basic) {
-  // Test TAKE_SCREENSHOT and TAKE_PARTIAL_SCREENSHOT.
-  TestScreenshotDelegate* screenshot_delegate = GetScreenshotDelegate();
-  screenshot_delegate->set_can_take_screenshot(true);
-  EXPECT_EQ(0, screenshot_delegate->handle_take_screenshot_count());
-  SendKeyPressSync(ui::VKEY_MEDIA_LAUNCH_APP1, true, false, false);
-  EXPECT_EQ(1, screenshot_delegate->handle_take_screenshot_count());
-  SendKeyPressSync(ui::VKEY_SNAPSHOT, false, false, false);
-  EXPECT_EQ(2, screenshot_delegate->handle_take_screenshot_count());
-  SendKeyPressSync(ui::VKEY_MEDIA_LAUNCH_APP1, true, true, false);
-  EXPECT_EQ(2, screenshot_delegate->handle_take_screenshot_count());
-  // Press ESC to go out of the partial screenshot mode.
-  SendKeyPressSync(ui::VKEY_ESCAPE, false, false, false);
-
   // Test VOLUME_MUTE.
   base::UserActionTester user_action_tester;
   EXPECT_EQ(0, user_action_tester.GetActionCount("Accel_VolumeMute_F8"));
@@ -187,9 +169,9 @@ TEST_F(AcceleratorTest, NonRepeatableNeedingWindowActions) {
   // Test TOGGLE_FULLSCREEN.
   WindowState* active_window_state = WindowState::ForActiveWindow();
   EXPECT_FALSE(active_window_state->IsFullscreen());
-  SendKeyPressSync(ui::VKEY_MEDIA_LAUNCH_APP2, false, false, false);
+  SendKeyPressSync(ui::VKEY_ZOOM, false, false, false);
   EXPECT_TRUE(active_window_state->IsFullscreen());
-  SendKeyPressSync(ui::VKEY_MEDIA_LAUNCH_APP2, false, false, false);
+  SendKeyPressSync(ui::VKEY_ZOOM, false, false, false);
   EXPECT_FALSE(active_window_state->IsFullscreen());
 }
 

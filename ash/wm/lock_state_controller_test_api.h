@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,11 @@ namespace ash {
 class LockStateControllerTestApi {
  public:
   explicit LockStateControllerTestApi(LockStateController* controller);
+
+  LockStateControllerTestApi(const LockStateControllerTestApi&) = delete;
+  LockStateControllerTestApi& operator=(const LockStateControllerTestApi&) =
+      delete;
+
   ~LockStateControllerTestApi();
 
   void set_shutdown_controller(ShutdownController* shutdown_controller) {
@@ -22,9 +27,6 @@ class LockStateControllerTestApi {
   bool lock_fail_timer_is_running() const {
     return controller_->lock_fail_timer_.IsRunning();
   }
-  bool lock_to_shutdown_timer_is_running() const {
-    return controller_->lock_to_shutdown_timer_.IsRunning();
-  }
   bool shutdown_timer_is_running() const {
     return controller_->pre_shutdown_timer_.IsRunning();
   }
@@ -32,17 +34,10 @@ class LockStateControllerTestApi {
     return controller_->real_shutdown_timer_.IsRunning();
   }
   bool is_animating_lock() const { return controller_->animating_lock_; }
-  bool is_lock_cancellable() const {
-    return controller_->CanCancelLockAnimation();
-  }
 
   void trigger_lock_fail_timeout() {
     controller_->OnLockFailTimeout();
     controller_->lock_fail_timer_.Stop();
-  }
-  void trigger_lock_to_shutdown_timeout() {
-    controller_->OnLockToShutdownTimeout();
-    controller_->lock_to_shutdown_timer_.Stop();
   }
   void trigger_shutdown_timeout() {
     controller_->OnPreShutdownAnimationTimeout();
@@ -55,8 +50,6 @@ class LockStateControllerTestApi {
 
  private:
   LockStateController* controller_;  // not owned
-
-  DISALLOW_COPY_AND_ASSIGN(LockStateControllerTestApi);
 };
 
 }  // namespace ash

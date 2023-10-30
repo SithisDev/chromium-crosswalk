@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/ime/ime_feature_pod_controller.h"
 
-#include "ash/ime/ime_controller.h"
+#include "ash/ime/ime_controller_impl.h"
 #include "ash/keyboard/ui/keyboard_util.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
@@ -20,16 +20,16 @@ namespace {
 
 bool IsButtonVisible() {
   DCHECK(Shell::Get());
-  ImeController* ime_controller = Shell::Get()->ime_controller();
-  size_t ime_count = ime_controller->available_imes().size();
+  ImeControllerImpl* ime_controller = Shell::Get()->ime_controller();
+  size_t ime_count = ime_controller->GetVisibleImes().size();
   return !ime_controller->is_menu_active() &&
          (ime_count > 1 || ime_controller->managed_by_policy());
 }
 
-base::string16 GetLabelString() {
+std::u16string GetLabelString() {
   DCHECK(Shell::Get());
-  ImeController* ime_controller = Shell::Get()->ime_controller();
-  size_t ime_count = ime_controller->available_imes().size();
+  ImeControllerImpl* ime_controller = Shell::Get()->ime_controller();
+  size_t ime_count = ime_controller->GetVisibleImes().size();
   if (ime_count > 1) {
     return ime_controller->current_ime().short_name;
   } else {
@@ -39,10 +39,10 @@ base::string16 GetLabelString() {
   }
 }
 
-base::string16 GetTooltipString() {
+std::u16string GetTooltipString() {
   DCHECK(Shell::Get());
-  ImeController* ime_controller = Shell::Get()->ime_controller();
-  size_t ime_count = ime_controller->available_imes().size();
+  ImeControllerImpl* ime_controller = Shell::Get()->ime_controller();
+  size_t ime_count = ime_controller->GetVisibleImes().size();
   if (ime_count > 1) {
     return l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_IME_TOOLTIP_WITH_NAME,
                                       ime_controller->current_ime().name);
@@ -64,7 +64,7 @@ IMEFeaturePodController::~IMEFeaturePodController() {
 }
 
 FeaturePodButton* IMEFeaturePodController::CreateButton() {
-  button_ = new FeaturePodButton(this);
+  button_ = new FeaturePodButton(this, /*is_togglable=*/false);
   button_->SetVectorIcon(kUnifiedMenuKeyboardIcon);
   button_->SetLabel(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_IME_SHORT));
   button_->SetIconAndLabelTooltips(GetTooltipString());

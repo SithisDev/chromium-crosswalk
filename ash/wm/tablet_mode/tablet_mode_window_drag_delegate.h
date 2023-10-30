@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,23 @@
 
 #include <memory>
 
-#include "ash/public/cpp/presentation_time_recorder.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/toplevel_window_event_handler.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/aura/window_occlusion_tracker.h"
+#include "ui/compositor/presentation_time_recorder.h"
 #include "ui/wm/core/shadow_types.h"
+
+namespace {
+class PresentationTimeRecorder;
+}
 
 namespace ash {
 
-enum class IndicatorState;
 class SplitViewDragIndicators;
-class PresentationTimeRecorder;
 
 // This class includes the common logic when dragging a window around, either
 // it's a browser window, or an app window. It does almost everything needs to
@@ -48,32 +51,34 @@ class TabletModeWindowDragDelegate {
   };
 
   TabletModeWindowDragDelegate();
+
+  TabletModeWindowDragDelegate(const TabletModeWindowDragDelegate&) = delete;
+  TabletModeWindowDragDelegate& operator=(const TabletModeWindowDragDelegate&) =
+      delete;
+
   virtual ~TabletModeWindowDragDelegate();
 
   // Called when a window starts being dragged.
   void StartWindowDrag(aura::Window* window,
-                       const gfx::Point& location_in_screen);
+                       const gfx::PointF& location_in_screen);
 
   // Called when a window continues being dragged. |type| specifies how we want
   // to update the dragged window during dragging, and |target_bounds| is the
   // target window bounds for the dragged window if |type| is UPDATE_BOUNDS.
   // Note |target_bounds| has no use if |type| is UPDATE_TRANSFROM.
-  void ContinueWindowDrag(const gfx::Point& location_in_screen,
+  void ContinueWindowDrag(const gfx::PointF& location_in_screen,
                           UpdateDraggedWindowType type,
                           const gfx::Rect& target_bounds = gfx::Rect());
 
   // Calls when a window ends dragging with its drag result |result|.
   void EndWindowDrag(ToplevelWindowEventHandler::DragResult result,
-                     const gfx::Point& location_in_screen);
+                     const gfx::PointF& location_in_screen);
 
   // Calls when a window ends dragging because of fling or swipe.
   void FlingOrSwipe(ui::GestureEvent* event);
 
   // Return the location of |event| in screen coordinates.
-  gfx::Point GetEventLocationInScreen(const ui::GestureEvent* event) const;
-
-  // Returns the IndicatorState according to |location_in_screen|.
-  IndicatorState GetIndicatorState(const gfx::Point& location_in_screen) const;
+  gfx::PointF GetEventLocationInScreen(const ui::GestureEvent* event) const;
 
   aura::Window* dragged_window() { return dragged_window_; }
 
@@ -86,15 +91,15 @@ class TabletModeWindowDragDelegate {
   }
 
  protected:
-  // These four methods are used by its child class to do its special handling
+  // These five methods are used by its child class to do its special handling
   // before/during/after dragging.
-  virtual void PrepareWindowDrag(const gfx::Point& location_in_screen) = 0;
-  virtual void UpdateWindowDrag(const gfx::Point& location_in_screen) = 0;
+  virtual void PrepareWindowDrag(const gfx::PointF& location_in_screen) {}
+  virtual void UpdateWindowDrag(const gfx::PointF& location_in_screen) {}
   virtual void EndingWindowDrag(ToplevelWindowEventHandler::DragResult result,
-                                const gfx::Point& location_in_screen) = 0;
-  virtual void EndedWindowDrag(const gfx::Point& location_in_screen) = 0;
+                                const gfx::PointF& location_in_screen) {}
+  virtual void EndedWindowDrag(const gfx::PointF& location_in_screen) {}
   // Calls when a fling event starts.
-  virtual void StartFling(const ui::GestureEvent* event) = 0;
+  virtual void StartFling(const ui::GestureEvent* event) {}
 
   // Returns true if we should open overview behind the dragged window when drag
   // starts.
@@ -106,16 +111,16 @@ class TabletModeWindowDragDelegate {
 
   // Gets the desired snap position for |location_in_screen|.
   SplitViewController::SnapPosition GetSnapPosition(
-      const gfx::Point& location_in_screen) const;
+      const gfx::PointF& location_in_screen) const;
 
   // Updates the dragged window's transform during dragging.
-  void UpdateDraggedWindowTransform(const gfx::Point& location_in_screen);
+  void UpdateDraggedWindowTransform(const gfx::PointF& location_in_screen);
 
   // Returns true if the dragged window should be dropped into overview on drag
   // end.
   bool ShouldDropWindowIntoOverview(
       SplitViewController::SnapPosition snap_position,
-      const gfx::Point& location_in_screen);
+      const gfx::PointF& location_in_screen);
 
   // Returns true if fling event should drop the window into overview grid.
   bool ShouldFlingIntoOverview(const ui::GestureEvent* event) const;
@@ -131,14 +136,11 @@ class TabletModeWindowDragDelegate {
 
   aura::Window* dragged_window_ = nullptr;  // not owned.
 
-  // The backdrop should be disabled during dragging and resumed after dragging.
-  BackdropWindowMode original_backdrop_mode_ = BackdropWindowMode::kAuto;
-
   // The dragged window should have the active window shadow elevation during
   // dragging.
   int original_shadow_elevation_ = ::wm::kShadowElevationDefault;
 
-  gfx::Point initial_location_in_screen_;
+  gfx::PointF initial_location_in_screen_;
 
   // Overview mode will be triggered if a window is being dragged, and the drop
   // target will be created in the overview grid. The variable stores the bounds
@@ -156,17 +158,14 @@ class TabletModeWindowDragDelegate {
   // Drag need to last later than the deadline here to be considered as 'moved'.
   base::Time drag_start_deadline_;
 
-  base::Optional<aura::WindowOcclusionTracker::ScopedExclude>
+  absl::optional<aura::WindowOcclusionTracker::ScopedExclude>
       occlusion_excluder_;
 
   // Records the presentation time for app/browser/tab window dragging
   // in tablet mode.
-  std::unique_ptr<PresentationTimeRecorder> presentation_time_recorder_;
+  std::unique_ptr<ui::PresentationTimeRecorder> presentation_time_recorder_;
 
-  base::WeakPtrFactory<TabletModeWindowDragDelegate> weak_ptr_factory_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TabletModeWindowDragDelegate);
+  base::WeakPtrFactory<TabletModeWindowDragDelegate> weak_ptr_factory_{this};
 };
 
 }  // namespace ash

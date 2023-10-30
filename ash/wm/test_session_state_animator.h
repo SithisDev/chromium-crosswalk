@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 
 #include "ash/ash_export.h"
 #include "ash/wm/session_state_animator.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 
 namespace ash {
@@ -26,6 +25,10 @@ namespace ash {
 class TestSessionStateAnimator : public SessionStateAnimator {
  public:
   TestSessionStateAnimator();
+
+  TestSessionStateAnimator(const TestSessionStateAnimator&) = delete;
+  TestSessionStateAnimator& operator=(const TestSessionStateAnimator&) = delete;
+
   ~TestSessionStateAnimator() override;
 
   int last_animation_epoch() { return last_animation_epoch_; }
@@ -71,10 +74,12 @@ class TestSessionStateAnimator : public SessionStateAnimator {
                                   AnimationSpeed speed,
                                   base::OnceClosure callback) override;
   AnimationSequence* BeginAnimationSequence(
-      base::OnceClosure callback) override;
+      AnimationCallback callback) override;
   bool IsWallpaperHidden() const override;
   void ShowWallpaper() override;
   void HideWallpaper() override;
+
+  void AbortAnimations(int container_mask);
 
  private:
   class AnimationSequence;
@@ -88,9 +93,10 @@ class TestSessionStateAnimator : public SessionStateAnimator {
                     SessionStateAnimator::Container container,
                     AnimationType type,
                     AnimationSpeed speed,
-                    base::Closure success_callback,
-                    base::Closure failed_callback);
-    ActiveAnimation(const ActiveAnimation& other);
+                    base::OnceClosure success_callback,
+                    base::OnceClosure failed_callback);
+    ActiveAnimation(ActiveAnimation&& other);
+    ActiveAnimation& operator=(ActiveAnimation&& other);
     virtual ~ActiveAnimation();
 
     // The time epoch that this animation was scheduled.
@@ -109,10 +115,10 @@ class TestSessionStateAnimator : public SessionStateAnimator {
     AnimationSpeed speed;
 
     // The callback to be invoked upon a successful completion.
-    base::Closure success_callback;
+    base::OnceClosure success_callback;
 
     // The callback to be invoked upon an unsuccessful completion.
-    base::Closure failed_callback;
+    base::OnceClosure failed_callback;
   };
 
   typedef std::vector<ActiveAnimation> AnimationList;
@@ -133,8 +139,8 @@ class TestSessionStateAnimator : public SessionStateAnimator {
   void AddAnimation(SessionStateAnimator::Container container,
                     AnimationType type,
                     AnimationSpeed speed,
-                    base::Closure success_callback,
-                    base::Closure failed_callback);
+                    base::OnceClosure success_callback,
+                    base::OnceClosure failed_callback);
 
   // If an animation is currently active for the given |container| it will be
   // aborted by invoking OnAnimationAborted and removed from the list of active
@@ -153,8 +159,6 @@ class TestSessionStateAnimator : public SessionStateAnimator {
 
   // Tracks whether the wallpaper is hidden or not.
   bool is_wallpaper_hidden_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSessionStateAnimator);
 };
 
 }  // namespace ash

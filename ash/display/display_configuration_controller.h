@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "ash/ash_export.h"
 #include "ash/display/window_tree_host_manager.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/display/display.h"
 #include "ui/display/unified_desktop_utils.h"
@@ -44,6 +43,12 @@ class ASH_EXPORT DisplayConfigurationController
   DisplayConfigurationController(
       display::DisplayManager* display_manager,
       WindowTreeHostManager* window_tree_host_manager);
+
+  DisplayConfigurationController(const DisplayConfigurationController&) =
+      delete;
+  DisplayConfigurationController& operator=(
+      const DisplayConfigurationController&) = delete;
+
   ~DisplayConfigurationController() override;
 
   // Sets the layout for the current displays with a fade in/out
@@ -121,9 +126,7 @@ class ASH_EXPORT DisplayConfigurationController
   std::unique_ptr<DisplayAnimator> display_animator_;
   std::unique_ptr<DisplayChangeLimiter> limiter_;
 
-  base::WeakPtrFactory<DisplayConfigurationController> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayConfigurationController);
+  base::WeakPtrFactory<DisplayConfigurationController> weak_ptr_factory_{this};
 };
 
 }  // namespace ash

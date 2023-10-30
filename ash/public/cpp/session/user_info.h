@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,6 @@
 #include <vector>
 
 #include "ash/public/cpp/ash_public_export.h"
-#include "ash/public/cpp/session/user_info.h"
-#include "base/optional.h"
 #include "base/token.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user_type.h"
@@ -41,9 +39,9 @@ struct ASH_PUBLIC_EXPORT UserInfo {
 
   user_manager::UserType type = user_manager::USER_TYPE_REGULAR;
   AccountId account_id;
-  base::Optional<base::Token> service_instance_group;
   std::string display_name;
   std::string display_email;
+  std::string given_name;
   UserAvatar avatar;
 
   // True if this user has a newly created profile (first time login on the

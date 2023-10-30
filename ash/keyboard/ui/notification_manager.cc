@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 namespace keyboard {
 
 template <typename T>
+ValueNotificationConsolidator<T>::ValueNotificationConsolidator(
+    const T& initial_value)
+    : value_(initial_value) {}
+
+template <typename T>
 bool ValueNotificationConsolidator<T>::ShouldSendNotification(
-    const T new_value) {
-  if (never_sent_) {
-    value_ = new_value;
-    never_sent_ = false;
-    return true;
-  }
+    const T& new_value) {
   const bool value_changed = new_value != value_;
   if (value_changed) {
     value_ = new_value;
@@ -24,7 +24,11 @@ bool ValueNotificationConsolidator<T>::ShouldSendNotification(
   return value_changed;
 }
 
-NotificationManager::NotificationManager() = default;
+NotificationManager::NotificationManager()
+    : visibility_(false),
+      visual_bounds_(gfx::Rect()),
+      occluded_bounds_(gfx::Rect()),
+      workspace_displaced_bounds_(gfx::Rect()) {}
 
 void NotificationManager::SendNotifications(
     bool does_occluded_bounds_affect_layout,

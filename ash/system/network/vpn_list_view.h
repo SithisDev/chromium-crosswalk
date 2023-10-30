@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "ash/system/network/network_state_list_detailed_view.h"
 #include "ash/system/network/vpn_list.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
 
@@ -21,10 +20,6 @@ class View;
 }
 
 namespace ash {
-
-class TrayNetworkStateModel;
-
-namespace tray {
 
 // A list of VPN providers and networks that shows VPN providers and networks in
 // a hierarchical layout, allowing the user to see at a glance which provider a
@@ -42,21 +37,21 @@ namespace tray {
 class VPNListView : public NetworkStateListDetailedView,
                     public VpnList::Observer {
  public:
-  VPNListView(DetailedViewDelegate* delegate, LoginStatus login);
-  ~VPNListView() override;
+  using VpnProviderPtr = chromeos::network_config::mojom::VpnProviderPtr;
 
-  // Make following functions publicly accessible for VPNListNetworkEntry.
-  using NetworkStateListDetailedView::SetupConnectedScrollListItem;
-  using NetworkStateListDetailedView::SetupConnectingScrollListItem;
+  VPNListView(DetailedViewDelegate* delegate, LoginStatus login);
+
+  VPNListView(const VPNListView&) = delete;
+  VPNListView& operator=(const VPNListView&) = delete;
+
+  ~VPNListView() override;
 
   // NetworkStateListDetailedView:
   void UpdateNetworkList() override;
   bool IsNetworkEntry(views::View* view, std::string* guid) const override;
 
   // VpnList::Observer:
-  void OnVPNProvidersChanged() override;
-
-  TrayNetworkStateModel* model() { return model_; }
+  void OnVpnProvidersChanged() override;
 
   // See Shell::RegisterProfilePrefs().
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
@@ -74,12 +69,9 @@ class VPNListView : public NetworkStateListDetailedView,
       const chromeos::network_config::mojom::NetworkStateProperties* network);
 
   // Adds the VPN provider identified by |vpn_provider| to the list, along with
-  // no networks that belong to this provider.
-  void AddProviderAndNetworks(const VPNProvider& vpn_provider);
-
-  // Adds the VPN provider identified by |vpn_provider| to the list, along with
-  // any networks that belong to this provider.
-  void AddProviderAndNetworks(const VPNProvider& vpn_provider,
+  // any networks that may belong to this provider. Takes ownership of
+  // |vpn_provider|.
+  void AddProviderAndNetworks(VpnProviderPtr vpn_provider,
                               const NetworkStateList& networks);
 
   // Finds VPN provider from |providers| that matches given |network|. Then adds
@@ -90,15 +82,13 @@ class VPNListView : public NetworkStateListDetailedView,
   bool ProcessProviderForNetwork(
       const chromeos::network_config::mojom::NetworkStateProperties* network,
       const NetworkStateList& networks,
-      std::vector<VPNProvider>* providers);
+      std::vector<VpnProviderPtr>* providers);
 
   // Adds all available VPN providers and networks to the list.
   void AddProvidersAndNetworks(const NetworkStateList& networks);
 
-  TrayNetworkStateModel* model_;
-
   // A mapping from each VPN provider's list entry to the provider.
-  std::map<const views::View* const, VPNProvider> provider_view_map_;
+  std::map<const views::View* const, VpnProviderPtr> provider_view_map_;
 
   // A mapping from each network's list entry to the network's guid.
   std::map<const views::View* const, std::string> network_view_guid_map_;
@@ -108,11 +98,8 @@ class VPNListView : public NetworkStateListDetailedView,
   bool list_empty_ = true;
 
   base::WeakPtrFactory<VPNListView> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VPNListView);
 };
 
-}  // namespace tray
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_NETWORK_VPN_LIST_VIEW_H_

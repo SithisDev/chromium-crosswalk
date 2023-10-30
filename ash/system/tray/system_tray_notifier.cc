@@ -1,14 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/tray/system_tray_notifier.h"
 
-#include "ash/public/cpp/system_tray_focus_observer.h"
+#include "ash/public/cpp/system_tray_observer.h"
 #include "ash/system/ime/ime_observer.h"
 #include "ash/system/network/network_observer.h"
-#include "ash/system/screen_security/screen_capture_observer.h"
-#include "ash/system/screen_security/screen_share_observer.h"
+#include "ash/system/privacy/screen_capture_observer.h"
+#include "ash/system/privacy/screen_share_observer.h"
 #include "ash/system/virtual_keyboard/virtual_keyboard_observer.h"
 
 namespace ash {
@@ -61,7 +61,7 @@ void SystemTrayNotifier::RemoveScreenCaptureObserver(
 void SystemTrayNotifier::NotifyScreenCaptureStart(
     base::RepeatingClosure stop_callback,
     base::RepeatingClosure source_callback,
-    const base::string16& sharing_app_name) {
+    const std::u16string& sharing_app_name) {
   for (auto& observer : screen_capture_observers_)
     observer.OnScreenCaptureStart(stop_callback, source_callback,
                                   sharing_app_name);
@@ -82,8 +82,8 @@ void SystemTrayNotifier::RemoveScreenShareObserver(
 }
 
 void SystemTrayNotifier::NotifyScreenShareStart(
-    const base::Closure& stop_callback,
-    const base::string16& helper_name) {
+    base::RepeatingClosure stop_callback,
+    const std::u16string& helper_name) {
   for (auto& observer : screen_share_observers_)
     observer.OnScreenShareStart(stop_callback, helper_name);
 }
@@ -93,19 +93,23 @@ void SystemTrayNotifier::NotifyScreenShareStop() {
     observer.OnScreenShareStop();
 }
 
-void SystemTrayNotifier::AddSystemTrayFocusObserver(
-    SystemTrayFocusObserver* observer) {
-  system_tray_focus_observers_.AddObserver(observer);
+void SystemTrayNotifier::AddSystemTrayObserver(SystemTrayObserver* observer) {
+  system_tray_observers_.AddObserver(observer);
 }
 
-void SystemTrayNotifier::RemoveSystemTrayFocusObserver(
-    SystemTrayFocusObserver* observer) {
-  system_tray_focus_observers_.RemoveObserver(observer);
+void SystemTrayNotifier::RemoveSystemTrayObserver(
+    SystemTrayObserver* observer) {
+  system_tray_observers_.RemoveObserver(observer);
 }
 
 void SystemTrayNotifier::NotifyFocusOut(bool reverse) {
-  for (auto& observer : system_tray_focus_observers_)
+  for (auto& observer : system_tray_observers_)
     observer.OnFocusLeavingSystemTray(reverse);
+}
+
+void SystemTrayNotifier::NotifySystemTrayBubbleShown() {
+  for (auto& observer : system_tray_observers_)
+    observer.OnSystemTrayBubbleShown();
 }
 
 void SystemTrayNotifier::AddVirtualKeyboardObserver(

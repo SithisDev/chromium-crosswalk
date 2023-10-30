@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,13 @@
 #define ASH_SHELF_SHELF_VIEW_TEST_API_H_
 
 #include "ash/public/cpp/shelf_item.h"
-#include "base/macros.h"
+#include "base/callback_forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/ui_base_types.h"
+
+namespace base {
+class TimeDelta;
+}
 
 namespace gfx {
 class Point;
@@ -15,6 +20,7 @@ class Rect;
 }
 
 namespace views {
+class BoundsAnimator;
 class View;
 }
 
@@ -29,10 +35,14 @@ class ShelfView;
 class ShelfViewTestAPI {
  public:
   explicit ShelfViewTestAPI(ShelfView* shelf_view);
+
+  ShelfViewTestAPI(const ShelfViewTestAPI&) = delete;
+  ShelfViewTestAPI& operator=(const ShelfViewTestAPI&) = delete;
+
   ~ShelfViewTestAPI();
 
   // Number of icons displayed.
-  int GetButtonCount();
+  size_t GetButtonCount();
 
   // Retrieve the button at |index|, doesn't support the home button,
   // because the home button is not a ShelfAppButton.
@@ -55,12 +65,18 @@ class ShelfViewTestAPI {
   void HideOverflowBubble();
 
   // An accessor for the |bounds_animator_| duration.
-  int GetAnimationDuration() const;
+  base::TimeDelta GetAnimationDuration() const;
 
-  // Sets animation duration in milliseconds for test.
-  void SetAnimationDuration(int duration_ms);
+  // Sets animation duration for test.
+  void SetAnimationDuration(base::TimeDelta duration);
 
-  // Runs message loop and waits until all add/remove animations are done.
+  // Runs message loop and waits until all add/remove animations are done for
+  // the given bounds animator.
+  void RunMessageLoopUntilAnimationsDone(
+      views::BoundsAnimator* bounds_animator);
+
+  // Runs message loop and waits until all add/remove animations are done on
+  // the shelf view.
   void RunMessageLoopUntilAnimationsDone();
 
   // Gets the anchor point that would be used for a context menu with these
@@ -71,6 +87,9 @@ class ShelfViewTestAPI {
 
   // Close any open app list or context menu; returns true if a menu was closed.
   bool CloseMenu();
+
+  // The union of all visible shelf item bounds.
+  const gfx::Rect& visible_shelf_item_bounds_union() const;
 
   // An accessor for |shelf_view|.
   ShelfView* shelf_view() { return shelf_view_; }
@@ -100,11 +119,18 @@ class ShelfViewTestAPI {
   // An accessor for |shelf_button_pressed_metric_tracker_|.
   ShelfButtonPressedMetricTracker* shelf_button_pressed_metric_tracker();
 
+  // Set callback which will run after showing shelf context menu.
+  void SetShelfContextMenuCallback(base::RepeatingClosure closure);
+
+  // Returns |separator_index_|.
+  absl::optional<size_t> GetSeparatorIndex() const;
+
+  // Checks whether the separator is visible or not.
+  bool IsSeparatorVisible() const;
+
  private:
   ShelfView* shelf_view_;
   int id_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(ShelfViewTestAPI);
 };
 
 }  // namespace ash

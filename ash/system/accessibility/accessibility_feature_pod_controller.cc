@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,8 @@ AccessibilityFeaturePodController::~AccessibilityFeaturePodController() =
     default;
 
 FeaturePodButton* AccessibilityFeaturePodController::CreateButton() {
-  auto* button = new FeaturePodButton(this);
-  button->SetID(ash::VIEW_ID_ACCESSIBILITY_TRAY_ITEM);
+  auto* button = new FeaturePodButton(this, /*is_togglable=*/false);
+  button->SetID(VIEW_ID_ACCESSIBILITY_TRAY_ITEM);
   button->SetLabel(
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBILITY));
   button->SetVectorIcon(kUnifiedMenuAccessibilityIcon);

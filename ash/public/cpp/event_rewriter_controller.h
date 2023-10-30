@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
+#include "ui/chromeos/events/event_rewriter_chromeos.h"
 
 namespace ui {
 class Event;
@@ -16,13 +17,19 @@ class EventRewriter;
 
 namespace ash {
 
-class SpokenFeedbackEventRewriterDelegate;
+class AccessibilityEventRewriterDelegate;
 
 // Allows clients to toggle some event rewriting behavior.
 class ASH_EXPORT EventRewriterController {
  public:
   // Returns the singleton EventRewriterController instance.
   static EventRewriterController* Get();
+
+  // Initializes this controller after ash::Shell finishes initialization.
+  virtual void Initialize(
+      ui::EventRewriterChromeOS::Delegate* event_rewriter_delegate,
+      AccessibilityEventRewriterDelegate*
+          accessibility_event_rewriter_delegate) = 0;
 
   // Takes ownership of |rewriter| and adds it to the current event sources.
   virtual void AddEventRewriter(
@@ -36,10 +43,6 @@ class ASH_EXPORT EventRewriterController {
   // This only applies when the KeyboardDrivenEventRewriter is active.
   virtual void SetArrowToTabRewritingEnabled(bool enabled) = 0;
 
-  // Set the delegate used by the spoken feedback event rewriter.
-  virtual void SetSpokenFeedbackEventRewriterDelegate(
-      SpokenFeedbackEventRewriterDelegate* delegate) = 0;
-
   // Continue dispatch of key events that were unhandled by ChromeVox.
   // TODO(crbug.com/839541): ChromeVox should not repost unhandled events.
   virtual void OnUnhandledSpokenFeedbackEvent(
@@ -48,8 +51,8 @@ class ASH_EXPORT EventRewriterController {
   // Discards key events and sends to spoken feedback when true.
   virtual void CaptureAllKeysForSpokenFeedback(bool capture) = 0;
 
-  // Sends mouse events to ChromeVox when true.
-  virtual void SetSendMouseEventsToDelegate(bool value) = 0;
+  // Sends mouse events to accessibility component extensions when true.
+  virtual void SetSendMouseEvents(bool value) = 0;
 
  protected:
   virtual ~EventRewriterController() {}

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,16 @@
 #include <set>
 #include <vector>
 
-#include "ash/accelerators/accelerator_confirmation_dialog.h"
+#include "ash/accelerators/accelerator_history_impl.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/accelerators/exit_warning_handler.h"
+#include "ash/accessibility/ui/accessibility_confirmation_dialog.h"
 #include "ash/ash_export.h"
 #include "ash/public/cpp/accelerators.h"
-#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "ui/base/accelerators/accelerator.h"
-#include "ui/base/accelerators/accelerator_history.h"
+#include "ui/base/accelerators/accelerator_map.h"
+#include "ui/base/ime/ash/input_method_manager.h"
 
 namespace ui {
 class AcceleratorManager;
@@ -41,19 +41,38 @@ enum class TabletModeVolumeAdjustType {
   kMaxValue = kNormalAdjustWithSwapDisabled,
 };
 
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// Captures usage of Alt+[ and Alt+].
+enum class WindowSnapAcceleratorAction {
+  kCycleLeftSnapInClamshellNoOverview = 0,
+  kCycleLeftSnapInClamshellOverview = 1,
+  kCycleLeftSnapInTablet = 2,
+  kCycleRightSnapInClamshellNoOverview = 3,
+  kCycleRightSnapInClamshellOverview = 4,
+  kCycleRightSnapInTablet = 5,
+  kMaxValue = kCycleRightSnapInTablet,
+};
+
 // Histogram for volume adjustment in tablet mode.
 ASH_EXPORT extern const char kTabletCountOfVolumeAdjustType[];
 
-// Identifiers for toggling accelerator notifications.
-ASH_EXPORT extern const char kHighContrastToggleAccelNotificationId[];
-ASH_EXPORT extern const char kDockedMagnifierToggleAccelNotificationId[];
-ASH_EXPORT extern const char kFullscreenMagnifierToggleAccelNotificationId[];
+// UMA accessibility histogram names.
+ASH_EXPORT extern const char kAccessibilityHighContrastShortcut[];
+ASH_EXPORT extern const char kAccessibilitySpokenFeedbackShortcut[];
+ASH_EXPORT extern const char kAccessibilityScreenMagnifierShortcut[];
+ASH_EXPORT extern const char kAccessibilityDockedMagnifierShortcut[];
+
+// Name of histogram corresponding to |WindowSnapAcceleratorAction|.
+ASH_EXPORT extern const char kAccelWindowSnap[];
 
 // AcceleratorControllerImpl provides functions for registering or unregistering
 // global keyboard accelerators, which are handled earlier than any windows. It
 // also implements several handlers as an accelerator target.
-class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
-                                             public AcceleratorController {
+class ASH_EXPORT AcceleratorControllerImpl
+    : public ui::AcceleratorTarget,
+      public AcceleratorController,
+      public input_method::InputMethodManager::Observer {
  public:
   // Some Chrome OS devices have volume up and volume down buttons on their
   // side. We want the button that's closer to the top/right to increase the
@@ -74,15 +93,22 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   class TestApi {
    public:
     explicit TestApi(AcceleratorControllerImpl* controller);
+
+    TestApi(const TestApi&) = delete;
+    TestApi& operator=(const TestApi&) = delete;
+
     ~TestApi() = default;
 
     // If |controller_->tablet_mode_volume_adjust_timer_| is running, stops it,
     // runs its task, and returns true. Otherwise returns false.
-    bool TriggerTabletModeVolumeAdjustTimer() WARN_UNUSED_RESULT;
+    [[nodiscard]] bool TriggerTabletModeVolumeAdjustTimer();
 
     // Registers the specified accelerators.
     void RegisterAccelerators(const AcceleratorData accelerators[],
                               size_t accelerators_length);
+
+    // Returns whether the action for this accelerator is enabled.
+    bool IsActionForAcceleratorEnabled(const ui::Accelerator& accelerator);
 
     // Returns the corresponding accelerator data if |action| maps to a
     // deprecated accelerator, otherwise return nullptr.
@@ -90,7 +116,10 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
         AcceleratorAction action);
 
     // Accessor to accelerator confirmation dialog.
-    AcceleratorConfirmationDialog* GetConfirmationDialog();
+    AccessibilityConfirmationDialog* GetConfirmationDialog();
+
+    // Provides access to the ExitWarningHandler.
+    ExitWarningHandler* GetExitWarningHandler();
 
     AcceleratorControllerImpl::SideVolumeButtonLocation
     side_volume_button_location() {
@@ -102,8 +131,6 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
 
    private:
     AcceleratorControllerImpl* controller_;  // Not owned.
-
-    DISALLOW_COPY_AND_ASSIGN(TestApi);
   };
 
   // Fields of the side volume button location info.
@@ -120,11 +147,14 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   static constexpr const char* kVolumeButtonSideBottom = "bottom";
 
   AcceleratorControllerImpl();
+  AcceleratorControllerImpl(const AcceleratorControllerImpl&) = delete;
+  AcceleratorControllerImpl& operator=(const AcceleratorControllerImpl&) =
+      delete;
   ~AcceleratorControllerImpl() override;
 
   // A list of possible ways in which an accelerator should be restricted before
   // processing. Any target registered with this controller should respect
-  // restrictions by calling |GetCurrentAcceleratorRestriction| during
+  // restrictions by calling GetAcceleratorProcessingRestriction() during
   // processing.
   enum AcceleratorProcessingRestriction {
     // Process the accelerator normally.
@@ -136,6 +166,11 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
     // Don't process the accelerator and prevent propagation to other targets.
     RESTRICTION_PREVENT_PROCESSING_AND_PROPAGATION
   };
+
+  // input_method::InputMethodManager::Observer overrides:
+  void InputMethodChanged(input_method::InputMethodManager* manager,
+                          Profile* profile,
+                          bool show_message) override;
 
   // Registers global keyboard accelerators for the specified target. If
   // multiple targets are registered for any given accelerator, a target
@@ -150,18 +185,16 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // Unregisters all keyboard accelerators for the specified target.
   void UnregisterAll(ui::AcceleratorTarget* target);
 
-  // Returns true if there is an action for |accelerator| and it is enabled.
-  bool IsActionForAcceleratorEnabled(const ui::Accelerator& accelerator) const;
-
   // AcceleratorControllerImpl:
   bool Process(const ui::Accelerator& accelerator) override;
   bool IsDeprecated(const ui::Accelerator& accelerator) const override;
   bool PerformActionIfEnabled(AcceleratorAction action,
                               const ui::Accelerator& accelerator) override;
   bool OnMenuAccelerator(const ui::Accelerator& accelerator) override;
-
-  // Returns true if the |accelerator| is registered.
-  bool IsRegistered(const ui::Accelerator& accelerator) const;
+  bool IsRegistered(const ui::Accelerator& accelerator) const override;
+  AcceleratorHistoryImpl* GetAcceleratorHistory() override;
+  bool DoesAcceleratorMatchAction(const ui::Accelerator& accelerator,
+                                  AcceleratorAction action) override;
 
   // Returns true if the |accelerator| is preferred. A preferred accelerator
   // is handled before being passed to an window/web contents, unless
@@ -172,16 +205,9 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // is always handled and will never be passed to an window/web contents.
   bool IsReserved(const ui::Accelerator& accelerator) const;
 
-  // Returns the restriction for the current context.
-  AcceleratorProcessingRestriction GetCurrentAcceleratorRestriction();
-
   // Provides access to the ExitWarningHandler for testing.
   ExitWarningHandler* GetExitWarningHandlerForTest() {
     return &exit_warning_handler_;
-  }
-
-  ui::AcceleratorHistory* accelerator_history() {
-    return accelerator_history_.get();
   }
 
   // Overridden from ui::AcceleratorTarget:
@@ -195,18 +221,21 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // users would be aware of the shortcut they have just enabled, and to prevent
   // users from accidentally triggering the feature. The dialog is currently
   // shown when enabling the following features: high contrast, full screen
-  // magnifier and docked magnifier. The shown dialog is stored as a weak
-  // pointer in the variable |confirmation_dialog_| below.
+  // magnifier, docked magnifier and screen rotation. The shown dialog is stored
+  // as a weak pointer in the variable |confirmation_dialog_| below.
   void MaybeShowConfirmationDialog(int window_title_text_id,
                                    int dialog_text_id,
-                                   base::OnceClosure on_accept_callback);
+                                   base::OnceClosure on_accept_callback,
+                                   base::OnceClosure on_cancel_callback);
 
-  // Read the side volume button location info from local file under
-  // kSideVolumeButtonLocationFilePath, parse and write it into
-  // |side_volume_button_location_|.
-  void ParseSideVolumeButtonLocationInfo();
+  // If set to true, all accelerators will not be processed.
+  void SetPreventProcessingAccelerators(bool prevent_processing_accelerators);
+  bool ShouldPreventProcessingAccelerators() const;
 
  private:
+  // A map for looking up actions from accelerators.
+  using AcceleratorActionMap = ui::AcceleratorMap<AcceleratorAction>;
+
   // Initializes the accelerators this class handles as a target.
   void Init();
 
@@ -216,6 +245,9 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
 
   // Registers the deprecated accelerators and their replacing new ones.
   void RegisterDeprecatedAccelerators();
+
+  // Returns true if there is an action for |accelerator| and it is enabled.
+  bool IsActionForAcceleratorEnabled(const ui::Accelerator& accelerator) const;
 
   // Returns whether |action| can be performed. The |accelerator| may provide
   // additional data the action needs.
@@ -258,6 +290,11 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // SideVolumeButonLocation for the details.
   bool ShouldSwapSideVolumeButtons(int source_device_id) const;
 
+  // Read the side volume button location info from local file under
+  // kSideVolumeButtonLocationFilePath, parse and write it into
+  // |side_volume_button_location_|.
+  void ParseSideVolumeButtonLocationInfo();
+
   // The metrics recorded include accidental volume adjustments (defined as a
   // sequence of volume button events in close succession starting with a
   // volume-up event but ending with an overall-decreased volume, or vice versa)
@@ -272,7 +309,7 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   std::unique_ptr<ui::AcceleratorManager> accelerator_manager_;
 
   // A tracker for the current and previous accelerators.
-  std::unique_ptr<ui::AcceleratorHistory> accelerator_history_;
+  std::unique_ptr<AcceleratorHistoryImpl> accelerator_history_;
 
   // Handles the exit accelerator which requires a double press to exit and
   // shows a popup with an explanation.
@@ -280,7 +317,7 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
 
   // A map from accelerators to the AcceleratorAction values, which are used in
   // the implementation.
-  std::map<ui::Accelerator, AcceleratorAction> accelerators_;
+  AcceleratorActionMap accelerators_;
 
   std::map<AcceleratorAction, const DeprecatedAcceleratorData*>
       actions_with_deprecations_;
@@ -309,8 +346,8 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // Actions that can be performed without closing the menu (if one is present).
   std::set<int> actions_keeping_menu_open_;
 
-  // Holds a weak pointer to the accelerator confirmation dialog.
-  base::WeakPtr<AcceleratorConfirmationDialog> confirmation_dialog_;
+  // Holds a weak pointer to the accessibility confirmation dialog.
+  base::WeakPtr<AccessibilityConfirmationDialog> confirmation_dialog_;
 
   // Path of the file that contains the side volume button location info. It
   // should always be kSideVolumeButtonLocationFilePath. But it is allowed to be
@@ -331,9 +368,10 @@ class ASH_EXPORT AcceleratorControllerImpl : public ui::AcceleratorTarget,
   // The initial volume percentage when volume adjust starts.
   int initial_volume_percent_ = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(AcceleratorControllerImpl);
+  // Prevents the processing of all KB shortcuts in the controller.
+  bool prevent_processing_accelerators_ = false;
 };
 
 }  // namespace ash
 
-#endif  // ASH_ACCELERATOR_CONTROLLER_IMPL_H_
+#endif  // ASH_ACCELERATORS_ACCELERATOR_CONTROLLER_IMPL_H_

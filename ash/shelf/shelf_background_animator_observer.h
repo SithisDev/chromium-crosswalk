@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,9 @@ class ASH_EXPORT ShelfBackgroundAnimatorObserver {
  public:
   // Called when the Shelf's background should be updated.
   virtual void UpdateShelfBackground(SkColor color) {}
+
+  // Called when the ShelfBackgroundAnimator's animation is ended.
+  virtual void OnShelfBackgroundAnimationEnded() {}
 
  protected:
   virtual ~ShelfBackgroundAnimatorObserver() {}

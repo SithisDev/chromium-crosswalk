@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "ash/system/brightness/unified_brightness_view.h"
 #include "ash/system/brightness_control_delegate.h"
 #include "ash/system/unified/unified_system_tray_model.h"
+#include "base/memory/scoped_refptr.h"
 
 namespace ash {
 namespace {
@@ -21,7 +22,7 @@ constexpr double kMinBrightnessPercent = 5.0;
 }  // namespace
 
 UnifiedBrightnessSliderController::UnifiedBrightnessSliderController(
-    UnifiedSystemTrayModel* model)
+    scoped_refptr<UnifiedSystemTrayModel> model)
     : model_(model) {}
 
 UnifiedBrightnessSliderController::~UnifiedBrightnessSliderController() =
@@ -33,17 +34,12 @@ views::View* UnifiedBrightnessSliderController::CreateView() {
   return slider_;
 }
 
-void UnifiedBrightnessSliderController::ButtonPressed(views::Button* sender,
-                                                      const ui::Event& event) {
-  // The button in is UnifiedBrightnessView is no-op.
-}
-
 void UnifiedBrightnessSliderController::SliderValueChanged(
     views::Slider* sender,
     float value,
     float old_value,
     views::SliderChangeReason reason) {
-  if (reason != views::VALUE_CHANGED_BY_USER)
+  if (reason != views::SliderChangeReason::kByUser)
     return;
 
   BrightnessControlDelegate* brightness_control_delegate =

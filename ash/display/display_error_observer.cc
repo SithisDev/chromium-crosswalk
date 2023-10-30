@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include "ash/display/display_util.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/chromeos/devicetype_utils.h"
-#include "ui/display/display.h"
 #include "ui/display/types/display_snapshot.h"
+#include "ui/display/util/display_util.h"
 
 namespace ash {
 
@@ -25,8 +26,7 @@ void DisplayErrorObserver::OnDisplayModeChangeFailed(
   LOG(ERROR) << "Failed to configure the following display(s):";
   for (auto* display : displays) {
     const int64_t display_id = display->display_id();
-    internal_display_failed |=
-        display::Display::IsInternalDisplayId(display_id);
+    internal_display_failed |= display::IsInternalDisplayId(display_id);
     LOG(ERROR) << "- Display with ID = " << display_id << ", and EDID = "
                << base::HexEncode(display->edid().data(),
                                   display->edid().size())
@@ -40,7 +40,7 @@ void DisplayErrorObserver::OnDisplayModeChangeFailed(
     return;
   }
 
-  base::string16 message =
+  std::u16string message =
       (new_state == display::MULTIPLE_DISPLAY_STATE_MULTI_MIRROR)
           ? l10n_util::GetStringUTF16(IDS_ASH_DISPLAY_FAILURE_ON_MIRRORING)
           : ui::SubstituteChromeOSDeviceType(

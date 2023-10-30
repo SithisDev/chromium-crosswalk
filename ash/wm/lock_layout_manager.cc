@@ -1,12 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/lock_layout_manager.h"
 
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
-#include "ash/shelf/shelf.h"
-#include "ash/shell.h"
 #include "ash/wm/lock_window_state.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
@@ -19,12 +17,10 @@ namespace ash {
 LockLayoutManager::LockLayoutManager(aura::Window* window, Shelf* shelf)
     : WmDefaultLayoutManager(),
       window_(window),
-      root_window_(window->GetRootWindow()),
-      shelf_observer_(this) {
-  Shell::Get()->AddShellObserver(this);
+      root_window_(window->GetRootWindow()) {
   root_window_->AddObserver(this);
   keyboard::KeyboardUIController::Get()->AddObserver(this);
-  shelf_observer_.Add(shelf);
+  shelf_observation_.Observe(shelf);
 }
 
 LockLayoutManager::~LockLayoutManager() {
@@ -36,7 +32,6 @@ LockLayoutManager::~LockLayoutManager() {
   for (aura::Window* child : window_->children())
     child->RemoveObserver(this);
 
-  Shell::Get()->RemoveShellObserver(this);
 }
 
 void LockLayoutManager::OnWindowResized() {
@@ -95,7 +90,8 @@ void LockLayoutManager::OnWindowBoundsChanged(aura::Window* window,
                                               const gfx::Rect& new_bounds,
                                               ui::PropertyChangeReason reason) {
   if (root_window_ == window) {
-    const WMEvent wm_event(WM_EVENT_DISPLAY_BOUNDS_CHANGED);
+    const DisplayMetricsChangedWMEvent wm_event(
+        display::DisplayObserver::DISPLAY_METRIC_BOUNDS);
     AdjustWindowsForWorkAreaChange(&wm_event);
   }
 }

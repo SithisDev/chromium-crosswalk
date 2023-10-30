@@ -1,30 +1,39 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/app_list/views/top_icon_animation_view.h"
 
+#include <memory>
+#include <utility>
+
 #include "ash/app_list/views/app_list_item_view.h"
+#include "ash/app_list/views/apps_grid_view.h"
+#include "ash/public/cpp/app_list/app_list_color_provider.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
+#include "ash/style/ash_color_id.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 
-namespace app_list {
+namespace ash {
 
-TopIconAnimationView::TopIconAnimationView(const gfx::ImageSkia& icon,
-                                           const base::string16& title,
+TopIconAnimationView::TopIconAnimationView(AppsGridView* grid,
+                                           const gfx::ImageSkia& icon,
+                                           const std::u16string& title,
                                            const gfx::Rect& scaled_rect,
                                            bool open_folder,
                                            bool item_in_folder_icon)
-    : icon_(nullptr),
+    : grid_(grid),
+      icon_(nullptr),
       title_(nullptr),
       scaled_rect_(scaled_rect),
       open_folder_(open_folder),
       item_in_folder_icon_(item_in_folder_icon) {
-  icon_size_ = AppListConfig::instance().grid_icon_size();
+  icon_size_ = grid->app_list_config()->grid_icon_size();
   DCHECK(!icon.isNull());
   gfx::ImageSkia resized(gfx::ImageSkiaOperations::CreateResizedImage(
       icon, skia::ImageOperations::RESIZE_BEST, icon_size_));
@@ -36,11 +45,11 @@ TopIconAnimationView::TopIconAnimationView(const gfx::ImageSkia& icon,
   title_label->SetBackgroundColor(SK_ColorTRANSPARENT);
   title_label->SetAutoColorReadabilityEnabled(false);
   title_label->SetHandlesTooltips(false);
-  title_label->SetFontList(AppListConfig::instance().app_title_font());
+  title_label->SetFontList(grid_->app_list_config()->app_title_font());
   title_label->SetLineHeight(
-      AppListConfig::instance().app_title_max_line_height());
+      grid_->app_list_config()->app_title_max_line_height());
   title_label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
-  title_label->SetEnabledColor(SK_ColorBLACK);
+  title_label->SetEnabledColorId(cros_tokens::kTextColorPrimary);
   title_label->SetText(title);
   if (item_in_folder_icon_) {
     // The title's opacity of the item should be changed separately if it is in
@@ -68,10 +77,7 @@ void TopIconAnimationView::RemoveObserver(TopIconAnimationObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void TopIconAnimationView::TransformView() {
-  // This view will delete itself on animation completion.
-  set_owned_by_client();
-
+void TopIconAnimationView::TransformView(base::TimeDelta duration) {
   // Transform used for scaling down the icon and move it back inside to the
   // original folder icon. The transform's origin is this view's origin.
   gfx::Transform transform;
@@ -80,7 +86,6 @@ void TopIconAnimationView::TransformView() {
   transform.Scale(
       static_cast<double>(scaled_rect_.width()) / bounds().width(),
       static_cast<double>(scaled_rect_.height()) / bounds().height());
-
   if (open_folder_) {
     // Transform to a scaled down icon inside the original folder icon.
     layer()->SetTransform(transform);
@@ -94,8 +99,7 @@ void TopIconAnimationView::TransformView() {
   ui::ScopedLayerAnimationSettings settings(layer()->GetAnimator());
   settings.AddObserver(this);
   settings.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
-  settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-      AppListConfig::instance().folder_transition_in_duration_ms()));
+  settings.SetTransitionDuration(duration);
   layer()->SetTransform(open_folder_ ? gfx::Transform() : transform);
   if (!item_in_folder_icon_)
     layer()->SetOpacity(open_folder_ ? 1.0f : 0.0f);
@@ -106,8 +110,7 @@ void TopIconAnimationView::TransformView() {
     ui::ScopedLayerAnimationSettings title_settings(
         title_->layer()->GetAnimator());
     title_settings.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
-    title_settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-        AppListConfig::instance().folder_transition_in_duration_ms()));
+    title_settings.SetTransitionDuration(duration);
     title_->layer()->SetOpacity(open_folder_ ? 1.0f : 0.0f);
   }
 }
@@ -117,8 +120,8 @@ const char* TopIconAnimationView::GetClassName() const {
 }
 
 gfx::Size TopIconAnimationView::CalculatePreferredSize() const {
-  return gfx::Size(AppListConfig::instance().grid_tile_width(),
-                   AppListConfig::instance().grid_tile_height());
+  return gfx::Size(grid_->app_list_config()->grid_tile_width(),
+                   grid_->app_list_config()->grid_tile_height());
 }
 
 void TopIconAnimationView::Layout() {
@@ -128,20 +131,24 @@ void TopIconAnimationView::Layout() {
     return;
 
   icon_->SetBoundsRect(AppListItemView::GetIconBoundsForTargetViewBounds(
-      rect, icon_->GetImage().size()));
+      grid_->app_list_config(), rect, icon_->GetImage().size(),
+      /*icon_scale=*/1.0f));
   title_->SetBoundsRect(AppListItemView::GetTitleBoundsForTargetViewBounds(
-      rect, title_->GetPreferredSize()));
+      grid_->app_list_config(), rect, title_->GetPreferredSize(),
+      /*icon_scale=*/1.0f));
 }
 
 void TopIconAnimationView::OnImplicitAnimationsCompleted() {
   SetVisible(false);
   for (auto& observer : observers_)
     observer.OnTopIconAnimationsComplete(this);
-  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
+  DCHECK(parent());
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
+      FROM_HERE, parent()->RemoveChildViewT(this));
 }
 
 bool TopIconAnimationView::RequiresNotificationWhenAnimatorDestroyed() const {
   return true;
 }
 
-}  // namespace app_list
+}  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,13 @@ enum class SystemTrayItemUmaType {
   UMA_NIGHT_LIGHT = 26,
   UMA_QUIET_MODE = 27,
   UMA_LOCALE = 28,
-  UMA_COUNT = 29,
+  UMA_PRIVACY_SCREEN = 29,
+  UMA_DARK_MODE = 30,
+  UMA_NEARBY_SHARE = 31,
+  UMA_PROJECTOR = 32,
+  UMA_SHELF_PARTY = 33,
+  UMA_AUTOZOOM = 34,
+  UMA_COUNT = 35,
 };
 
 }  // namespace ash

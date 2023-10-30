@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,28 @@
 
 #include <memory>
 
-#include "ash/frame/non_client_frame_view_ash.h"
-#include "ash/public/cpp/caption_buttons/caption_button_model.h"
-#include "ash/public/cpp/caption_buttons/frame_back_button.h"
-#include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
-#include "ash/public/cpp/default_frame_header.h"
-#include "ash/public/cpp/window_properties.h"
 #include "ash/shell.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
 #include "base/auto_reset.h"
+#include "chromeos/ui/base/window_properties.h"
+#include "chromeos/ui/frame/caption_buttons/caption_button_model.h"
+#include "chromeos/ui/frame/caption_buttons/frame_back_button.h"
+#include "chromeos/ui/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "chromeos/ui/frame/default_frame_header.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/window.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/ui_base_features.h"
+#include "ui/compositor/layer.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 namespace ash {
+
+using ::chromeos::DefaultFrameHeader;
+using ::chromeos::kFrameActiveColorKey;
+using ::chromeos::kFrameInactiveColorKey;
 
 // The view used to draw the content (background and title string)
 // of the header. This is a separate view so that it can use
@@ -31,6 +36,10 @@ namespace ash {
 class HeaderView::HeaderContentView : public views::View {
  public:
   HeaderContentView(HeaderView* header_view) : header_view_(header_view) {}
+
+  HeaderContentView(const HeaderContentView&) = delete;
+  HeaderContentView& operator=(const HeaderContentView&) = delete;
+
   ~HeaderContentView() override = default;
 
   // views::View:
@@ -49,31 +58,32 @@ class HeaderView::HeaderContentView : public views::View {
   HeaderView* header_view_;
   views::PaintInfo::ScaleType scale_type_ =
       views::PaintInfo::ScaleType::kScaleWithEdgeSnapping;
-  DISALLOW_COPY_AND_ASSIGN(HeaderContentView);
 };
 
-HeaderView::HeaderView(views::Widget* target_widget)
-    : target_widget_(target_widget),
-      avatar_icon_(nullptr),
-      header_content_view_(new HeaderContentView(this)),
-      caption_button_container_(nullptr),
-      fullscreen_visible_fraction_(0),
-      should_paint_(true) {
-  AddChildView(header_content_view_);
+HeaderView::HeaderView(views::Widget* target_widget,
+                       views::NonClientFrameView* frame_view)
+    : target_widget_(target_widget) {
+  header_content_view_ =
+      AddChildView(std::make_unique<HeaderContentView>(this));
 
   caption_button_container_ =
-      new FrameCaptionButtonContainerView(target_widget_);
+      AddChildView(std::make_unique<chromeos::FrameCaptionButtonContainerView>(
+          target_widget_));
   caption_button_container_->UpdateCaptionButtonState(false /*=animate*/);
-  AddChildView(caption_button_container_);
 
-  aura::Window* window = target_widget->GetNativeWindow();
   frame_header_ = std::make_unique<DefaultFrameHeader>(
-      target_widget, this, caption_button_container_);
+      target_widget,
+      (frame_view ? static_cast<views::View*>(frame_view) : this),
+      caption_button_container_);
+}
 
+void HeaderView::Init() {
   UpdateBackButton();
-
+  UpdateCenterButton();
   frame_header_->UpdateFrameColors();
-  window_observer_.Add(window);
+
+  aura::Window* window = target_widget_->GetNativeWindow();
+  window_observation_.Observe(window);
   Shell::Get()->tablet_mode_controller()->AddObserver(this);
 }
 
@@ -91,7 +101,7 @@ void HeaderView::ResetWindowControls() {
 }
 
 int HeaderView::GetPreferredOnScreenHeight() {
-  if (is_immersive_delegate_ && in_immersive_mode_) {
+  if (in_immersive_mode_) {
     return static_cast<int>(GetPreferredHeight() *
                             fullscreen_visible_fraction_);
   }
@@ -136,6 +146,7 @@ void HeaderView::UpdateCaptionButtons() {
   caption_button_container_->UpdateCaptionButtonState(true /*=animate*/);
 
   UpdateBackButton();
+  UpdateCenterButton();
 
   Layout();
 }
@@ -149,9 +160,6 @@ void HeaderView::SetWidthInPixels(int width_in_pixels) {
           ? views::PaintInfo::ScaleType::kUniformScaling
           : views::PaintInfo::ScaleType::kScaleWithEdgeSnapping);
 }
-
-///////////////////////////////////////////////////////////////////////////////
-// HeaderView, views::View overrides:
 
 void HeaderView::Layout() {
   did_layout_ = true;
@@ -209,13 +217,31 @@ void HeaderView::OnWindowPropertyChanged(aura::Window* window,
   } else if (key == aura::client::kShowStateKey) {
     frame_header_->OnShowStateChanged(
         window->GetProperty(aura::client::kShowStateKey));
+  } else if (key == chromeos::kWindowStateTypeKey) {
+    // Float state is an ash specific state that changes the header UI. It isn't
+    // a show state so we need to watch the window state type key as well.
+    if (window->GetProperty(chromeos::kWindowStateTypeKey) ==
+            chromeos::WindowStateType::kFloated ||
+        static_cast<chromeos::WindowStateType>(old) ==
+            chromeos::WindowStateType::kFloated) {
+      frame_header_->OnFloatStateChanged();
+    }
   }
 }
 
 void HeaderView::OnWindowDestroying(aura::Window* window) {
-  window_observer_.Remove(window);
+  DCHECK(window_observation_.IsObservingSource(window));
+  window_observation_.Reset();
   // A HeaderView may outlive the target widget.
   target_widget_ = nullptr;
+}
+
+void HeaderView::OnDisplayMetricsChanged(const display::Display& display,
+                                         uint32_t changed_metrics) {
+  if ((changed_metrics & chromeos::TabletState::DISPLAY_METRIC_ROTATION) &&
+      frame_header_) {
+    frame_header_->LayoutHeader();
+  }
 }
 
 views::View* HeaderView::avatar_icon() const {
@@ -234,10 +260,6 @@ void HeaderView::SetShouldPaintHeader(bool paint) {
 views::FrameCaptionButton* HeaderView::GetBackButton() {
   return frame_header_->GetBackButton();
 }
-
-///////////////////////////////////////////////////////////////////////////////
-// HeaderView,
-//   ImmersiveFullscreenControllerDelegate overrides:
 
 void HeaderView::OnImmersiveRevealStarted() {
   fullscreen_visible_fraction_ = 0;
@@ -264,9 +286,8 @@ void HeaderView::OnImmersiveRevealEnded() {
 void HeaderView::OnImmersiveFullscreenEntered() {
   in_immersive_mode_ = true;
   parent()->InvalidateLayout();
-  // The frame may not have been created yet (during window initialization).
-  if (target_widget_ && target_widget_->non_client_view()->frame_view())
-    target_widget_->non_client_view()->Layout();
+  if (!immersive_mode_changed_callback_.is_null())
+    immersive_mode_changed_callback_.Run();
 }
 
 void HeaderView::OnImmersiveFullscreenExited() {
@@ -275,8 +296,8 @@ void HeaderView::OnImmersiveFullscreenExited() {
   if (add_layer_for_immersive_)
     DestroyLayer();
   parent()->InvalidateLayout();
-  if (target_widget_ && target_widget_->non_client_view()->frame_view())
-    target_widget_->non_client_view()->Layout();
+  if (!immersive_mode_changed_callback_.is_null())
+    immersive_mode_changed_callback_.Run();
 }
 
 void HeaderView::SetVisibleFraction(double visible_fraction) {
@@ -306,13 +327,7 @@ void HeaderView::PaintHeaderContent(gfx::Canvas* canvas) {
   if (!should_paint_ || !target_widget_)
     return;
 
-  bool paint_as_active =
-      target_widget_->non_client_view()->frame_view()->ShouldPaintAsActive();
-  frame_header_->SetPaintAsActive(paint_as_active);
-
-  FrameHeader::Mode header_mode =
-      paint_as_active ? FrameHeader::MODE_ACTIVE : FrameHeader::MODE_INACTIVE;
-  frame_header_->PaintHeader(canvas, header_mode);
+  frame_header_->PaintHeader(canvas);
 }
 
 void HeaderView::UpdateBackButton() {
@@ -321,7 +336,7 @@ void HeaderView::UpdateBackButton() {
   views::FrameCaptionButton* back_button = frame_header_->GetBackButton();
   if (has_back_button) {
     if (!back_button) {
-      back_button = new FrameBackButton();
+      back_button = new chromeos::FrameBackButton();
       AddChildView(back_button);
       frame_header_->SetBackButton(back_button);
     }
@@ -333,11 +348,29 @@ void HeaderView::UpdateBackButton() {
   }
 }
 
+void HeaderView::UpdateCenterButton() {
+  bool is_center_button_visible = caption_button_container_->model()->IsVisible(
+      views::CAPTION_BUTTON_ICON_CENTER);
+  auto* center_button = frame_header_->GetCenterButton();
+  if (!center_button)
+    return;
+  if (is_center_button_visible) {
+    if (!center_button->parent())
+      AddChildView(center_button);
+    center_button->SetVisible(true);
+  } else {
+    center_button->SetVisible(false);
+  }
+}
+
 void HeaderView::UpdateCaptionButtonsVisibility() {
   if (!target_widget_)
     return;
 
   caption_button_container_->SetVisible(should_paint_);
 }
+
+BEGIN_METADATA(HeaderView, views::View)
+END_METADATA
 
 }  // namespace ash

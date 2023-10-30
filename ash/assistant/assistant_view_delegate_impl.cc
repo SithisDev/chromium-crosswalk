@@ -1,42 +1,45 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/assistant/assistant_view_delegate_impl.h"
 
-#include "ash/assistant/assistant_cache_controller.h"
-#include "ash/assistant/assistant_controller.h"
-#include "ash/assistant/assistant_controller_observer.h"
-#include "ash/assistant/assistant_interaction_controller.h"
-#include "ash/assistant/assistant_notification_controller.h"
-#include "ash/assistant/assistant_prefs_controller.h"
+#include <utility>
+
+#include "ash/assistant/assistant_controller_impl.h"
+#include "ash/assistant/assistant_notification_controller_impl.h"
+#include "ash/assistant/model/assistant_interaction_model.h"
+#include "ash/assistant/model/assistant_interaction_model_observer.h"
+#include "ash/assistant/model/assistant_notification_model.h"
+#include "ash/assistant/model/assistant_notification_model_observer.h"
+#include "ash/assistant/ui/assistant_ui_constants.h"
+#include "ash/public/cpp/assistant/assistant_state_base.h"
+#include "ash/public/cpp/session/session_types.h"
+#include "ash/public/cpp/session/user_info.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "base/command_line.h"
+#include "chromeos/ash/services/assistant/public/cpp/features.h"
+#include "chromeos/ash/services/assistant/public/cpp/switches.h"
 
 namespace ash {
 
+namespace {
+
+using assistant::ui::kOnboardingMaxSessionsShown;
+
+}  // namespace
+
 AssistantViewDelegateImpl::AssistantViewDelegateImpl(
-    AssistantController* assistant_controller)
+    AssistantControllerImpl* assistant_controller)
     : assistant_controller_(assistant_controller) {}
 
 AssistantViewDelegateImpl::~AssistantViewDelegateImpl() = default;
 
-const AssistantCacheModel* AssistantViewDelegateImpl::GetCacheModel() const {
-  return assistant_controller_->cache_controller()->model();
-}
-
-const AssistantInteractionModel*
-AssistantViewDelegateImpl::GetInteractionModel() const {
-  return assistant_controller_->interaction_controller()->model();
-}
-
 const AssistantNotificationModel*
 AssistantViewDelegateImpl::GetNotificationModel() const {
   return assistant_controller_->notification_controller()->model();
-}
-
-const AssistantUiModel* AssistantViewDelegateImpl::GetUiModel() const {
-  return assistant_controller_->ui_controller()->model();
 }
 
 void AssistantViewDelegateImpl::AddObserver(
@@ -49,89 +52,30 @@ void AssistantViewDelegateImpl::RemoveObserver(
   view_delegate_observers_.RemoveObserver(observer);
 }
 
-void AssistantViewDelegateImpl::AddCacheModelObserver(
-    AssistantCacheModelObserver* observer) {
-  assistant_controller_->cache_controller()->AddModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::RemoveCacheModelObserver(
-    AssistantCacheModelObserver* observer) {
-  assistant_controller_->cache_controller()->RemoveModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::AddInteractionModelObserver(
-    AssistantInteractionModelObserver* observer) {
-  assistant_controller_->interaction_controller()->AddModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::RemoveInteractionModelObserver(
-    AssistantInteractionModelObserver* observer) {
-  assistant_controller_->interaction_controller()->RemoveModelObserver(
-      observer);
-}
-
-void AssistantViewDelegateImpl::AddNotificationModelObserver(
-    AssistantNotificationModelObserver* observer) {
-  assistant_controller_->notification_controller()->AddModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::RemoveNotificationModelObserver(
-    AssistantNotificationModelObserver* observer) {
-  assistant_controller_->notification_controller()->RemoveModelObserver(
-      observer);
-}
-
-void AssistantViewDelegateImpl::AddUiModelObserver(
-    AssistantUiModelObserver* observer) {
-  assistant_controller_->ui_controller()->AddModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::RemoveUiModelObserver(
-    AssistantUiModelObserver* observer) {
-  assistant_controller_->ui_controller()->RemoveModelObserver(observer);
-}
-
-void AssistantViewDelegateImpl::AddAssistantPrefsObserver(
-    AssistantPrefsObserver* observer) {
-  assistant_controller_->prefs_controller()->AddObserver(observer);
-}
-
-void AssistantViewDelegateImpl::RemoveAssistantPrefsObserver(
-    AssistantPrefsObserver* observer) {
-  assistant_controller_->prefs_controller()->RemoveObserver(observer);
-}
-
-CaptionBarDelegate* AssistantViewDelegateImpl::GetCaptionBarDelegate() {
-  return assistant_controller_->ui_controller();
-}
-
 void AssistantViewDelegateImpl::DownloadImage(
     const GURL& url,
-    AssistantImageDownloader::DownloadCallback callback) {
+    ImageDownloader::DownloadCallback callback) {
   assistant_controller_->DownloadImage(url, std::move(callback));
-}
-
-int AssistantViewDelegateImpl::GetConsentStatus() const {
-  return assistant_controller_->prefs_controller()->prefs()->GetInteger(
-      chromeos::assistant::prefs::kAssistantConsentStatus);
 }
 
 ::wm::CursorManager* AssistantViewDelegateImpl::GetCursorManager() {
   return Shell::Get()->cursor_manager();
 }
 
-void AssistantViewDelegateImpl::GetNavigableContentsFactoryForView(
-    mojo::PendingReceiver<content::mojom::NavigableContentsFactory> receiver) {
-  assistant_controller_->GetNavigableContentsFactory(std::move(receiver));
+std::string AssistantViewDelegateImpl::GetPrimaryUserGivenName() const {
+  return Shell::Get()
+      ->session_controller()
+      ->GetPrimaryUserSession()
+      ->user_info.given_name;
+}
+
+aura::Window* AssistantViewDelegateImpl::GetRootWindowForDisplayId(
+    int64_t display_id) {
+  return Shell::Get()->GetRootWindowForDisplayId(display_id);
 }
 
 aura::Window* AssistantViewDelegateImpl::GetRootWindowForNewWindows() {
   return Shell::Get()->GetRootWindowForNewWindows();
-}
-
-bool AssistantViewDelegateImpl::IsLaunchWithMicOpen() const {
-  return assistant_controller_->prefs_controller()->prefs()->GetBoolean(
-      chromeos::assistant::prefs::kAssistantLaunchWithMicOpen);
 }
 
 bool AssistantViewDelegateImpl::IsTabletMode() const {
@@ -150,16 +94,16 @@ void AssistantViewDelegateImpl::OnDialogPlateContentsCommitted(
     observer.OnDialogPlateContentsCommitted(text);
 }
 
-void AssistantViewDelegateImpl::OnMiniViewPressed() {
-  for (auto& observer : view_delegate_observers_)
-    observer.OnMiniViewPressed();
-}
-
 void AssistantViewDelegateImpl::OnNotificationButtonPressed(
     const std::string& notification_id,
     int notification_button_index) {
   assistant_controller_->notification_controller()->OnNotificationClicked(
-      notification_id, notification_button_index, /*reply=*/base::nullopt);
+      notification_id, notification_button_index, /*reply=*/absl::nullopt);
+}
+
+void AssistantViewDelegateImpl::OnOnboardingShown() {
+  for (auto& observer : view_delegate_observers_)
+    observer.OnOnboardingShown();
 }
 
 void AssistantViewDelegateImpl::OnOptInButtonPressed() {
@@ -167,21 +111,46 @@ void AssistantViewDelegateImpl::OnOptInButtonPressed() {
     observer.OnOptInButtonPressed();
 }
 
-void AssistantViewDelegateImpl::OnSuggestionChipPressed(
-    const AssistantSuggestion* suggestion) {
+void AssistantViewDelegateImpl::OnSuggestionPressed(
+    const base::UnguessableToken& suggestion_id) {
   for (AssistantViewDelegateObserver& observer : view_delegate_observers_)
-    observer.OnSuggestionChipPressed(suggestion);
+    observer.OnSuggestionPressed(suggestion_id);
 }
 
-void AssistantViewDelegateImpl::OpenUrlFromView(const GURL& url) {
-  assistant_controller_->OpenUrl(url);
-}
+bool AssistantViewDelegateImpl::ShouldShowOnboarding() const {
+  // UI developers need to be able to force the onboarding flow.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          assistant::switches::kForceAssistantOnboarding)) {
+    return true;
+  }
 
-void AssistantViewDelegateImpl::NotifyDeepLinkReceived(
-    assistant::util::DeepLinkType type,
-    const std::map<std::string, std::string>& params) {
-  for (AssistantViewDelegateObserver& observer : view_delegate_observers_)
-    observer.OnDeepLinkReceived(type, params);
+  // Once a user has had an interaction with Assistant, we will no longer show
+  // onboarding in that user session.
+  auto* interaction_controller = AssistantInteractionController::Get();
+  const bool has_had_interaction = interaction_controller->HasHadInteraction();
+  if (has_had_interaction)
+    return false;
+
+  // If we do show onboarding to a user in a session, we will keep showing it
+  // for that session until an Assistant interaction takes place.
+  auto* ui_controller = AssistantUiController::Get();
+  const bool has_shown_onboarding = ui_controller->HasShownOnboarding();
+  if (has_shown_onboarding)
+    return true;
+
+  // Once a user has seen onboarding in any session, they will continue to see
+  // onboarding each session until the maximum number of sessions is reached.
+  const int number_of_sessions_where_onboarding_shown =
+      ui_controller->GetNumberOfSessionsWhereOnboardingShown();
+  if (number_of_sessions_where_onboarding_shown > 0) {
+    return number_of_sessions_where_onboarding_shown <
+           kOnboardingMaxSessionsShown;
+  }
+
+  // The feature will start to show only for new users which we define as users
+  // who haven't had an interaction with Assistant in the last 28 days.
+  return interaction_controller->GetTimeDeltaSinceLastInteraction() >=
+         base::Days(28);
 }
 
 }  // namespace ash

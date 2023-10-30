@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 #define ASH_WM_OVERLAY_EVENT_FILTER_H_
 
 #include "ash/ash_export.h"
-#include "ash/session/session_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "ui/aura/window.h"
 #include "ui/events/event_handler.h"
 
@@ -38,6 +37,10 @@ class ASH_EXPORT OverlayEventFilter : public ui::EventHandler,
   };
 
   OverlayEventFilter();
+
+  OverlayEventFilter(const OverlayEventFilter&) = delete;
+  OverlayEventFilter& operator=(const OverlayEventFilter&) = delete;
+
   ~OverlayEventFilter() override;
 
   // Starts the filtering of events.  It also notifies the specified
@@ -66,8 +69,6 @@ class ASH_EXPORT OverlayEventFilter : public ui::EventHandler,
  private:
   Delegate* delegate_ = nullptr;
   ScopedSessionObserver scoped_session_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverlayEventFilter);
 };
 
 }  // namespace ash

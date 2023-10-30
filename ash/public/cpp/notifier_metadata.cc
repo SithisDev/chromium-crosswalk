@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@ NotifierMetadata::NotifierMetadata(NotifierMetadata&& other) = default;
 
 NotifierMetadata::NotifierMetadata(
     const message_center::NotifierId& notifier_id,
-    const base::string16& name,
+    const std::u16string& name,
     bool enabled,
     bool enforced,
     const gfx::ImageSkia& icon)

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "ash/lock_screen_action/lock_screen_action_background_controller_impl.h"
 #include "ash/lock_screen_action/lock_screen_action_background_controller_stub.h"
 #include "ash/lock_screen_action/lock_screen_action_background_observer.h"
-#include "ash/public/cpp/ash_switches.h"
 #include "base/callback.h"
 
 namespace ash {
@@ -24,11 +23,6 @@ std::unique_ptr<LockScreenActionBackgroundController>
 LockScreenActionBackgroundController::Create() {
   if (g_testing_factory_callback)
     return g_testing_factory_callback->Run();
-  // Web UI based lock screen implements its own background - use the stub
-  // lock action background controller implementation unless md-based lock UI
-  // is used.
-  if (!switches::IsUsingViewsLock())
-    return std::make_unique<LockScreenActionBackgroundControllerStub>();
   return std::make_unique<LockScreenActionBackgroundControllerImpl>();
 }
 

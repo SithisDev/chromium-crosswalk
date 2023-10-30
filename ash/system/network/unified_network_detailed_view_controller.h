@@ -1,44 +1,41 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_SYSTEM_NETWORK_UNIFIED_NETWORK_DETAILED_VIEW_CONTROLLER_H_
 #define ASH_SYSTEM_NETWORK_UNIFIED_NETWORK_DETAILED_VIEW_CONTROLLER_H_
 
-#include "ash/system/network/tray_network_state_model.h"
+#include <memory>
+
 #include "ash/system/unified/detailed_view_controller.h"
 
 namespace ash {
 
-namespace tray {
-class NetworkListView;
-}  // namespace tray
-
 class DetailedViewDelegate;
+class NetworkListView;
 class UnifiedSystemTrayController;
 
 // Controller of Network detailed view in UnifiedSystemTray.
-class UnifiedNetworkDetailedViewController
-    : public DetailedViewController,
-      public TrayNetworkStateModel::Observer {
+class UnifiedNetworkDetailedViewController : public DetailedViewController {
  public:
   explicit UnifiedNetworkDetailedViewController(
       UnifiedSystemTrayController* tray_controller);
+
+  UnifiedNetworkDetailedViewController(
+      const UnifiedNetworkDetailedViewController&) = delete;
+  UnifiedNetworkDetailedViewController& operator=(
+      const UnifiedNetworkDetailedViewController&) = delete;
+
   ~UnifiedNetworkDetailedViewController() override;
 
   // DetailedViewControllerBase:
   views::View* CreateView() override;
-
-  // TrayNetworkStateModel::Observer:
-  void ActiveNetworkStateChanged() override;
-  void NetworkListChanged() override;
+  std::u16string GetAccessibleName() const override;
 
  private:
   const std::unique_ptr<DetailedViewDelegate> detailed_view_delegate_;
 
-  tray::NetworkListView* view_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(UnifiedNetworkDetailedViewController);
+  NetworkListView* view_ = nullptr;
 };
 
 }  // namespace ash

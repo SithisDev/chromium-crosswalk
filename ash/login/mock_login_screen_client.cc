@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,32 +33,17 @@ void MockLoginScreenClient::AuthenticateUserWithPasswordOrPin(
   }
 }
 
-void MockLoginScreenClient::AuthenticateUserWithExternalBinary(
+void MockLoginScreenClient::AuthenticateUserWithChallengeResponse(
     const AccountId& account_id,
     base::OnceCallback<void(bool)> callback) {
-  AuthenticateUserWithExternalBinary_(account_id, callback);
-  if (authenticate_user_with_external_binary_callback_storage_) {
-    *authenticate_user_with_external_binary_callback_storage_ =
-        std::move(callback);
-  } else {
-    std::move(callback).Run(authenticate_user_callback_result_);
-  }
+  AuthenticateUserWithChallengeResponse_(account_id, callback);
 }
 
-void MockLoginScreenClient::EnrollUserWithExternalBinary(
-    base::OnceCallback<void(bool)> callback) {
-  EnrollUserWithExternalBinary_(callback);
-  if (enroll_user_with_external_binary_callback_storage_) {
-    *enroll_user_with_external_binary_callback_storage_ = std::move(callback);
-  } else {
-    std::move(callback).Run(authenticate_user_callback_result_);
-  }
-}
-
-bool MockLoginScreenClient::ValidateParentAccessCode(
+ParentCodeValidationResult MockLoginScreenClient::ValidateParentAccessCode(
     const AccountId& account_id,
-    const std::string& code) {
-  ValidateParentAccessCode_(account_id, code);
+    const std::string& code,
+    base::Time validation_time) {
+  ValidateParentAccessCode_(account_id, code, validation_time);
   return validate_parent_access_code_result_;
 }
 

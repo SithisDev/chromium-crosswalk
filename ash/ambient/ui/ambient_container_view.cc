@@ -1,84 +1,63 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/ambient/ui/ambient_container_view.h"
 
-#include "ash/ambient/ambient_controller.h"
-#include "ash/ambient/ui/ambient_container_view.h"
+#include <memory>
+#include <utility>
+
+#include "ash/ambient/metrics/ambient_multi_screen_metrics_recorder.h"
+#include "ash/ambient/resources/ambient_animation_static_resources.h"
+#include "ash/ambient/ui/ambient_animation_view.h"
+#include "ash/ambient/ui/ambient_view_delegate.h"
+#include "ash/ambient/ui/ambient_view_ids.h"
 #include "ash/ambient/ui/photo_view.h"
 #include "ash/ambient/util/ambient_util.h"
-#include "ash/login/ui/lock_screen.h"
+#include "ash/public/cpp/ambient/ambient_metrics.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/shell.h"
+#include "base/check.h"
 #include "ui/aura/window.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/views/background.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 
-namespace {
-
-aura::Window* GetContainer() {
-  aura::Window* container = nullptr;
-  if (ambient::util::IsShowing(LockScreen::ScreenType::kLock))
-    container = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
-                                    kShellWindowId_LockScreenContainer);
-
-  return container;
-}
-
-void CreateWidget(AmbientContainerView* view) {
-  views::Widget::InitParams params;
-  params.parent = GetContainer();
-  params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
-  params.delegate = view;
-  params.name = view->GetClassName();
-
-  views::Widget* widget = new views::Widget;
-  widget->Init(params);
-  widget->SetFullscreen(true);
-}
-
-}  // namespace
-
 AmbientContainerView::AmbientContainerView(
-    AmbientController* ambient_controller)
-    : ambient_controller_(ambient_controller) {
-  Init();
+    AmbientViewDelegateImpl* delegate,
+    AmbientAnimationProgressTracker* progress_tracker,
+    std::unique_ptr<AmbientAnimationStaticResources> animation_static_resources,
+    AmbientMultiScreenMetricsRecorder* multi_screen_metrics_recorder) {
+  DCHECK(delegate);
+  DCHECK(multi_screen_metrics_recorder);
+  SetID(AmbientViewID::kAmbientContainerView);
+  // TODO(b/139954108): Choose a better dark mode theme color.
+  SetBackground(views::CreateSolidBackground(SK_ColorBLACK));
+  SetLayoutManager(std::make_unique<views::FillLayout>());
+  View* main_rendering_view = nullptr;
+  AmbientAnimationTheme theme =
+      animation_static_resources
+          ? animation_static_resources->GetAmbientAnimationTheme()
+          : AmbientAnimationTheme::kSlideshow;
+  if (animation_static_resources) {
+    main_rendering_view = AddChildView(std::make_unique<AmbientAnimationView>(
+        delegate, progress_tracker, std::move(animation_static_resources),
+        multi_screen_metrics_recorder));
+  } else {
+    main_rendering_view = AddChildView(std::make_unique<PhotoView>(delegate));
+    multi_screen_metrics_recorder->RegisterScreen(/*animation=*/nullptr);
+  }
+  orientation_metrics_recorder_ =
+      std::make_unique<ambient::AmbientOrientationMetricsRecorder>(
+          main_rendering_view, theme);
 }
 
 AmbientContainerView::~AmbientContainerView() = default;
 
-const char* AmbientContainerView::GetClassName() const {
-  return "AmbientContainerView";
-}
-
-gfx::Size AmbientContainerView::CalculatePreferredSize() const {
-  // TODO(wutao): Handle multiple displays.
-  return GetWidget()->GetNativeWindow()->GetRootWindow()->bounds().size();
-}
-
-void AmbientContainerView::OnMouseEvent(ui::MouseEvent* event) {
-  if (event->type() == ui::ET_MOUSE_PRESSED) {
-    event->SetHandled();
-    GetWidget()->Close();
-  }
-}
-
-void AmbientContainerView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() == ui::ET_GESTURE_TAP) {
-    event->SetHandled();
-    GetWidget()->Close();
-  }
-}
-
-void AmbientContainerView::Init() {
-  CreateWidget(this);
-  SetLayoutManager(std::make_unique<views::FillLayout>());
-  photo_view_ = new PhotoView(ambient_controller_);
-  AddChildView(photo_view_);
-}
+BEGIN_METADATA(AmbientContainerView, views::View)
+END_METADATA
 
 }  // namespace ash

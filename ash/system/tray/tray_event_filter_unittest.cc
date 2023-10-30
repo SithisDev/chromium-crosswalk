@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,18 @@
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
+#include "ash/system/message_center/ash_message_popup_collection.h"
+#include "ash/system/message_center/unified_message_center_bubble.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
-#include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/message_center/message_center.h"
+
+using message_center::MessageCenter;
+using message_center::Notification;
 
 namespace ash {
 
@@ -22,7 +27,16 @@ namespace {
 class TrayEventFilterTest : public AshTestBase {
  public:
   TrayEventFilterTest() = default;
+
+  TrayEventFilterTest(const TrayEventFilterTest&) = delete;
+  TrayEventFilterTest& operator=(const TrayEventFilterTest&) = delete;
+
   ~TrayEventFilterTest() override = default;
+
+  // AshTestBase:
+  void SetUp() override {
+    AshTestBase::SetUp();
+  }
 
   ui::MouseEvent outside_event() {
     const gfx::Rect tray_bounds = GetSystemTrayBoundsInScreen();
@@ -38,13 +52,33 @@ class TrayEventFilterTest : public AshTestBase {
     return ui::MouseEvent(ui::ET_MOUSE_PRESSED, point, point, time, 0, 0);
   }
 
- protected:
-  void ShowSystemTrayMainView() {
-    GetPrimaryUnifiedSystemTray()->ShowBubble(false /* show_by_click */);
+  ui::MouseEvent InsideMessageCenterEvent() {
+    const gfx::Rect message_center_bounds = GetMessageCenterBoundsInScreen();
+    const gfx::Point point = message_center_bounds.origin();
+    const base::TimeTicks time = base::TimeTicks::Now();
+    return ui::MouseEvent(ui::ET_MOUSE_PRESSED, point, point, time, 0, 0);
   }
+
+ protected:
+  std::string AddNotification() {
+    std::string notification_id = base::NumberToString(notification_id_++);
+    MessageCenter::Get()->AddNotification(std::make_unique<Notification>(
+        message_center::NOTIFICATION_TYPE_SIMPLE, notification_id,
+        u"test title", u"test message", ui::ImageModel(),
+        std::u16string() /* display_source */, GURL(),
+        message_center::NotifierId(), message_center::RichNotificationData(),
+        new message_center::NotificationDelegate()));
+    return notification_id;
+  }
+
+  void ShowSystemTrayMainView() { GetPrimaryUnifiedSystemTray()->ShowBubble(); }
 
   bool IsBubbleShown() {
     return GetPrimaryUnifiedSystemTray()->IsBubbleShown();
+  }
+
+  bool IsMessageCenterBubbleShown() {
+    return GetPrimaryUnifiedSystemTray()->IsMessageCenterBubbleShown();
   }
 
   gfx::Rect GetSystemTrayBoundsInScreen() {
@@ -59,8 +93,15 @@ class TrayEventFilterTest : public AshTestBase {
     return GetPrimaryShelf()->GetStatusAreaWidget()->unified_system_tray();
   }
 
+  UnifiedMessageCenterBubble* GetMessageCenterBubble() {
+    return GetPrimaryUnifiedSystemTray()->message_center_bubble();
+  }
+  gfx::Rect GetMessageCenterBoundsInScreen() {
+    return GetMessageCenterBubble()->GetBubbleView()->GetBoundsInScreen();
+  }
+
  private:
-  DISALLOW_COPY_AND_ASSIGN(TrayEventFilterTest);
+  int notification_id_ = 0;
 };
 
 TEST_F(TrayEventFilterTest, ClickingOutsideCloseBubble) {
@@ -80,6 +121,26 @@ TEST_F(TrayEventFilterTest, ClickingInsideDoesNotCloseBubble) {
   // Clicking inside should not close the bubble
   ui::MouseEvent event = inside_event();
   GetTrayEventFilter()->OnMouseEvent(&event);
+  EXPECT_TRUE(IsBubbleShown());
+}
+
+TEST_F(TrayEventFilterTest, DraggingInsideDoesNotCloseBubble) {
+  ShowSystemTrayMainView();
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Dragging within the bubble should not close the bubble.
+  const gfx::Rect tray_bounds = GetSystemTrayBoundsInScreen();
+  const gfx::Point start = tray_bounds.origin();
+  const gfx::Point end_inside = start + gfx::Vector2d(5, 5);
+  GetEventGenerator()->GestureScrollSequence(start, end_inside,
+                                             base::Milliseconds(100), 4);
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Dragging from inside to outside of the bubble should not close the bubble.
+  const gfx::Point start_inside = end_inside;
+  const gfx::Point end_outside = start + gfx::Vector2d(-5, -5);
+  GetEventGenerator()->GestureScrollSequence(start_inside, end_outside,
+                                             base::Milliseconds(100), 4);
   EXPECT_TRUE(IsBubbleShown());
 }
 
@@ -103,8 +164,15 @@ TEST_F(TrayEventFilterTest, ClickingOnMenuContainerDoesNotCloseBubble) {
 
 TEST_F(TrayEventFilterTest, ClickingOnPopupDoesNotCloseBubble) {
   // Set up a popup window.
-  std::unique_ptr<views::Widget> popup_widget =
-      CreateTestWidget(nullptr, kShellWindowId_StatusContainer, gfx::Rect());
+  auto popup_widget = std::make_unique<views::Widget>();
+  views::Widget::InitParams popup_params;
+  popup_params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  auto ash_message_center_popup_collection =
+      std::make_unique<AshMessagePopupCollection>(GetPrimaryShelf());
+  ash_message_center_popup_collection->ConfigureWidgetInitParamsForContainer(
+      popup_widget.get(), &popup_params);
+  popup_widget->Init(std::move(popup_params));
+
   std::unique_ptr<aura::Window> popup_window =
       CreateTestWindow(gfx::Rect(), aura::client::WINDOW_TYPE_POPUP);
   popup_window->set_owned_by_parent(false);
@@ -140,6 +208,54 @@ TEST_F(TrayEventFilterTest, ClickingOnKeyboardContainerDoesNotCloseBubble) {
   ui::Event::DispatcherApi(&event).set_target(keyboard_window.get());
   GetTrayEventFilter()->OnMouseEvent(&event);
   EXPECT_TRUE(IsBubbleShown());
+}
+
+TEST_F(TrayEventFilterTest, DraggingOnTrayClosesBubble) {
+  ShowSystemTrayMainView();
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Dragging on the tray background view should close the bubble.
+  const gfx::Rect tray_bounds =
+      GetPrimaryUnifiedSystemTray()->GetBoundsInScreen();
+  const gfx::Point start = tray_bounds.CenterPoint();
+  const gfx::Point end_inside = start + gfx::Vector2d(0, 10);
+  GetEventGenerator()->GestureScrollSequence(start, end_inside,
+                                             base::Milliseconds(100), 4);
+  EXPECT_FALSE(IsBubbleShown());
+}
+
+TEST_F(TrayEventFilterTest, MessageCenterAndSystemTrayStayOpenTogether) {
+  AddNotification();
+
+  ShowSystemTrayMainView();
+  EXPECT_TRUE(GetMessageCenterBubble()->GetBubbleWidget()->IsVisible());
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Clicking inside system tray should not close either bubble.
+  ui::MouseEvent event = inside_event();
+  GetTrayEventFilter()->OnMouseEvent(&event);
+  EXPECT_TRUE(GetMessageCenterBubble()->GetBubbleWidget()->IsVisible());
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Clicking inside the message center bubble should not close either bubble.
+  event = InsideMessageCenterEvent();
+  GetTrayEventFilter()->OnMouseEvent(&event);
+  EXPECT_TRUE(GetMessageCenterBubble()->GetBubbleWidget()->IsVisible());
+  EXPECT_TRUE(IsBubbleShown());
+}
+
+TEST_F(TrayEventFilterTest, MessageCenterAndSystemTrayCloseTogether) {
+  AddNotification();
+
+  ShowSystemTrayMainView();
+  EXPECT_TRUE(IsMessageCenterBubbleShown());
+  EXPECT_TRUE(IsBubbleShown());
+
+  // Clicking outside should close both bubbles.
+  ui::MouseEvent event = outside_event();
+  GetTrayEventFilter()->OnMouseEvent(&event);
+  EXPECT_FALSE(IsMessageCenterBubbleShown());
+  EXPECT_FALSE(IsBubbleShown());
 }
 
 }  // namespace

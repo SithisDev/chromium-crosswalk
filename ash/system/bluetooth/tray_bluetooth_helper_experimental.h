@@ -1,21 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_SYSTEM_BLUETOOTH_TRAY_BLUETOOTH_HELPER_EXPERIMENTAL_H_
 #define ASH_SYSTEM_BLUETOOTH_TRAY_BLUETOOTH_HELPER_EXPERIMENTAL_H_
 
-#include <string>
-
 #include "ash/ash_export.h"
 #include "ash/system/bluetooth/tray_bluetooth_helper.h"
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/bluetooth_system.mojom.h"
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
 
 namespace ash {
 
@@ -26,7 +21,14 @@ class TrayBluetoothHelperExperimental
       public device::mojom::BluetoothSystemClient {
  public:
   explicit TrayBluetoothHelperExperimental(
-      service_manager::Connector* connector);
+      mojo::PendingRemote<device::mojom::BluetoothSystemFactory>
+          bluetooth_system_factory);
+
+  TrayBluetoothHelperExperimental(const TrayBluetoothHelperExperimental&) =
+      delete;
+  TrayBluetoothHelperExperimental& operator=(
+      const TrayBluetoothHelperExperimental&) = delete;
+
   ~TrayBluetoothHelperExperimental() override;
 
   // TrayBluetoothHelper:
@@ -45,17 +47,14 @@ class TrayBluetoothHelperExperimental
       device::mojom::BluetoothSystem::ScanState state) override;
 
  private:
-  service_manager::Connector* connector_;
-
-  device::mojom::BluetoothSystemPtr bluetooth_system_ptr_;
-  mojo::Binding<device::mojom::BluetoothSystemClient>
-      bluetooth_system_client_binding_{this};
+  mojo::Remote<device::mojom::BluetoothSystemFactory> bluetooth_system_factory_;
+  mojo::Remote<device::mojom::BluetoothSystem> bluetooth_system_;
+  mojo::Receiver<device::mojom::BluetoothSystemClient>
+      bluetooth_system_client_receiver_{this};
 
   device::mojom::BluetoothSystem::State cached_state_ =
       device::mojom::BluetoothSystem::State::kUnavailable;
   device::mojom::BluetoothSystem::ScanState cached_scan_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrayBluetoothHelperExperimental);
 };
 
 }  // namespace ash

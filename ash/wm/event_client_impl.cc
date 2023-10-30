@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ EventClientImpl::EventClientImpl() = default;
 
 EventClientImpl::~EventClientImpl() = default;
 
-bool EventClientImpl::CanProcessEventsWithinSubtree(
+bool EventClientImpl::GetCanProcessEventsWithinSubtree(
     const aura::Window* window) const {
   if (skip_user_session_blocked_check_)
     return true;

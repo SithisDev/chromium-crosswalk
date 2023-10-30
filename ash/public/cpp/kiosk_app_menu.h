@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "ash/public/cpp/ash_public_export.h"
 #include "base/callback_forward.h"
-#include "base/strings/string16.h"
 #include "components/account_id/account_id.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -33,7 +32,7 @@ struct ASH_PUBLIC_EXPORT KioskAppMenuEntry {
   // For ARC kiosk apps only, the account id for the app.
   AccountId account_id;
 
-  base::string16 name;
+  std::u16string name;
 
   gfx::ImageSkia icon;
 };
@@ -45,12 +44,16 @@ class ASH_PUBLIC_EXPORT KioskAppMenu {
   // Returns the singleton instance.
   static KioskAppMenu* Get();
 
-  // Update the kiosk app data. |launch_app| will be called if the user selects
-  // an item (app) from the menu.
+  // Update the kiosk app data.
   virtual void SetKioskApps(
-      const std::vector<KioskAppMenuEntry>& kiosk_apps,
-      const base::RepeatingCallback<void(const KioskAppMenuEntry&)>&
-          launch_app) = 0;
+      const std::vector<KioskAppMenuEntry>& kiosk_apps) = 0;
+
+  // Configure the kiosk callbacks. |launch_app| will be called if the user
+  // selects an item (app) from the menu. |on_show_menu| will be called when the
+  // menu will be displayed.
+  virtual void ConfigureKioskCallbacks(
+      const base::RepeatingCallback<void(const KioskAppMenuEntry&)>& launch_app,
+      const base::RepeatingClosure& on_show_menu) = 0;
 
  protected:
   KioskAppMenu();

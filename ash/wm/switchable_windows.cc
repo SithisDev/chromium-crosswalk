@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,42 +6,27 @@
 
 #include <array>
 
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/wm/desks/desks_util.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "ui/aura/window.h"
 
 namespace ash {
 
 namespace {
 
-// TODO(afakhry): Consolidate the below lists when we launch Virtual Desks.
-// The list of switchable containers IDs when the Virtual Desks feature is
-// enabled.
-constexpr std::array<int, 5> kSwitchableContainersWithDesks = {
-    kShellWindowId_DefaultContainerDeprecated,
-    kShellWindowId_DeskContainerB,
-    kShellWindowId_DeskContainerC,
-    kShellWindowId_DeskContainerD,
+constexpr std::array<int, 3> kSwitchableContainers = {
     kShellWindowId_AlwaysOnTopContainer,
+    kShellWindowId_FloatContainer,
+    kShellWindowId_PipContainer,
 };
 
-// The list of switchable containers IDs when the Virtual Desks feature is
-// disabled.
-constexpr std::array<int, 2> kSwitchableContainersNoDesks = {
-    kShellWindowId_DefaultContainerDeprecated,
-    kShellWindowId_AlwaysOnTopContainer,
-};
+std::vector<int> GetSwitchableContainerIds() {
+  std::vector<int> ids = desks_util::GetDesksContainersIds();
+  for (const int id : kSwitchableContainers)
+    ids.emplace_back(id);
 
-std::vector<int> GetSwitchableContainersIds() {
-  if (!features::IsVirtualDesksEnabled()) {
-    return std::vector<int>(kSwitchableContainersNoDesks.begin(),
-                            kSwitchableContainersNoDesks.end());
-  }
-
-  return std::vector<int>(kSwitchableContainersWithDesks.begin(),
-                          kSwitchableContainersWithDesks.end());
+  return ids;
 }
 
 }  // namespace
@@ -60,10 +45,10 @@ std::vector<aura::Window*> GetSwitchableContainersForRoot(
     return containers;
   }
 
-  for (const auto& id : GetSwitchableContainersIds()) {
+  for (const auto& id : GetSwitchableContainerIds()) {
     auto* container = root->GetChildById(id);
     DCHECK(container);
-    containers.emplace_back(container);
+    containers.push_back(container);
   }
 
   return containers;
@@ -73,9 +58,8 @@ std::vector<aura::Window*> GetSwitchableContainersForRoot(
 bool IsSwitchableContainer(const aura::Window* window) {
   if (!window)
     return false;
-  const int shell_window_id = window->id();
 
-  return base::Contains(GetSwitchableContainersIds(), shell_window_id);
+  return base::Contains(GetSwitchableContainerIds(), window->GetId());
 }
 
 }  // namespace ash

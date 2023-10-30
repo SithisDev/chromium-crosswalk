@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "ash/public/cpp/app_menu_constants.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shelf/shelf_context_menu_model.h"
@@ -16,20 +17,12 @@
 #include "components/strings/grit/components_strings.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
-#include "ui/events/event_constants.h"
-#include "ui/gfx/paint_vector_icon.h"
-#include "ui/views/controls/menu/menu_config.h"
+#include "ui/base/models/image_model.h"
+#include "ui/events/types/event_type.h"
 #include "ui/views/vector_icons.h"
 #include "ui/wm/core/window_animations.h"
 
 namespace ash {
-
-namespace {
-
-// Close command id; avoids colliding with ShelfContextMenuModel command ids.
-const int kCloseCommandId = ShelfContextMenuModel::MENU_ASH_END + 1;
-
-}  // namespace
 
 ShelfWindowWatcherItemDelegate::ShelfWindowWatcherItemDelegate(
     const ShelfID& id,
@@ -45,7 +38,8 @@ void ShelfWindowWatcherItemDelegate::ItemSelected(
     std::unique_ptr<ui::Event> event,
     int64_t display_id,
     ShelfLaunchSource source,
-    ItemSelectedCallback callback) {
+    ItemSelectedCallback callback,
+    const ItemFilterPredicate& filter_predicate) {
   if (wm::IsActiveWindow(window_)) {
     if (event && event->type() == ui::ET_KEY_RELEASED) {
       ::wm::AnimateWindow(window_, ::wm::WINDOW_ANIMATION_TYPE_BOUNCE);
@@ -65,11 +59,10 @@ void ShelfWindowWatcherItemDelegate::GetContextMenu(
     GetContextMenuCallback callback) {
   auto menu = std::make_unique<ShelfContextMenuModel>(this, display_id);
   // Show a default context menu with just an extra close item.
-  const views::MenuConfig& menu_config = views::MenuConfig::instance();
   menu->AddItemWithStringIdAndIcon(
-      kCloseCommandId, IDS_CLOSE,
-      gfx::CreateVectorIcon(views::kCloseIcon, menu_config.touchable_icon_size,
-                            menu_config.touchable_icon_color));
+      CommandId::MENU_CLOSE, IDS_CLOSE,
+      ui::ImageModel::FromVectorIcon(views::kCloseIcon,
+                                     ui::kColorAshSystemUIMenuIcon));
   std::move(callback).Run(std::move(menu));
 }
 
@@ -77,7 +70,8 @@ void ShelfWindowWatcherItemDelegate::ExecuteCommand(bool from_context_menu,
                                                     int64_t command_id,
                                                     int32_t event_flags,
                                                     int64_t display_id) {
-  DCHECK_EQ(command_id, kCloseCommandId) << "Unknown ShelfItemDelegate command";
+  DCHECK_EQ(command_id, CommandId::MENU_CLOSE)
+      << "Unknown ShelfItemDelegate command";
   Close();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,32 +20,32 @@ TEST_F(SpokenFeedbackTogglerTest, Basic) {
   AccessibilityControllerImpl* controller =
       Shell::Get()->accessibility_controller();
   ui::test::EventGenerator* generator = GetEventGenerator();
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
 
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
   generator->ReleaseKey(ui::VKEY_F6, 0);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
 
   // Click and hold toggles the spoken feedback.
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
   generator->ReleaseKey(ui::VKEY_F6, 0);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
 
   // toggle again
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
   generator->PressKey(ui::VKEY_F6, ui::EF_SHIFT_DOWN);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
   generator->ReleaseKey(ui::VKEY_F6, 0);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
 }
 
 TEST_F(SpokenFeedbackTogglerTest, PassThroughEvents) {

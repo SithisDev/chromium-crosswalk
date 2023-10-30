@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ SelectToSpeakEventHandler::~SelectToSpeakEventHandler() {
 }
 
 bool SelectToSpeakEventHandler::IsSelectToSpeakEnabled() {
-  return Shell::Get()->accessibility_controller()->select_to_speak_enabled();
+  return Shell::Get()->accessibility_controller()->select_to_speak().enabled();
 }
 
 void SelectToSpeakEventHandler::SetSelectToSpeakStateSelecting(
@@ -42,8 +42,8 @@ void SelectToSpeakEventHandler::SetSelectToSpeakStateSelecting(
     // up event by not resetting the state to INACTIVE.
     if (state_ != MOUSE_RELEASED)
       state_ = INACTIVE;
-    touch_id_ = ui::PointerDetails::kUnknownPointerId;
-    touch_type_ = ui::EventPointerType::POINTER_TYPE_UNKNOWN;
+    touch_id_ = ui::kPointerIdUnknown;
+    touch_type_ = ui::EventPointerType::kUnknown;
   }
 }
 
@@ -158,7 +158,7 @@ void SelectToSpeakEventHandler::OnTouchEvent(ui::TouchEvent* event) {
   // On a touch-down event, if selection was requested, we begin capturing
   // touch events.
   if (event->type() == ui::ET_TOUCH_PRESSED && state_ == SELECTION_REQUESTED &&
-      touch_id_ == ui::PointerDetails::kUnknownPointerId) {
+      touch_id_ == ui::kPointerIdUnknown) {
     state_ = CAPTURING_TOUCH_ONLY;
     touch_id_ = event->pointer_details().id;
     touch_type_ = event->pointer_details().pointer_type;
@@ -177,8 +177,8 @@ void SelectToSpeakEventHandler::OnTouchEvent(ui::TouchEvent* event) {
   if (event->type() == ui::ET_TOUCH_RELEASED &&
       state_ == CAPTURING_TOUCH_ONLY) {
     state_ = INACTIVE;
-    touch_id_ = ui::PointerDetails::kUnknownPointerId;
-    touch_type_ = ui::EventPointerType::POINTER_TYPE_UNKNOWN;
+    touch_id_ = ui::kPointerIdUnknown;
+    touch_type_ = ui::EventPointerType::kUnknown;
   }
 
   // Create a mouse event to send to the extension, describing the touch.
@@ -200,7 +200,12 @@ void SelectToSpeakEventHandler::OnTouchEvent(ui::TouchEvent* event) {
       return;
   }
   int flags = ui::EF_LEFT_MOUSE_BUTTON;
-  ui::MouseEvent event_to_send(type, event->location(), event->root_location(),
+
+  // Get screen coordinates if available.
+  gfx::Point root_location = event->target()
+                                 ? event->target()->GetScreenLocation(*event)
+                                 : event->root_location();
+  ui::MouseEvent event_to_send(type, event->location(), root_location,
                                event->time_stamp(), flags, flags);
 
   delegate_->DispatchMouseEvent(event_to_send);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "ash/accelerators/accelerator_table.h"
 #include "base/hash/md5.h"
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -17,10 +16,10 @@ namespace ash {
 namespace {
 
 // The number of non-Search-based accelerators.
-constexpr int kNonSearchAcceleratorsNum = 93;
+constexpr int kNonSearchAcceleratorsNum = 109;
 // The hash of non-Search-based accelerators. See HashAcceleratorData().
 constexpr char kNonSearchAcceleratorsHash[] =
-    "0be65cc67955b2320bef45ab7a9c68bb";
+    "2cada710fecfc1ae0fa22ecad7900f16";
 
 struct Cmp {
   bool operator()(const AcceleratorData& lhs,
@@ -33,14 +32,12 @@ struct Cmp {
 
 std::string AcceleratorDataToString(const AcceleratorData& accelerator) {
   return base::StringPrintf(
-      "trigger_on_press=%s keycode=%d shift=%s control=%s alt=%s search=%s "
-      "action=%d",
+      "trigger_on_press=%s keycode=%d shift=%s control=%s alt=%s search=%s",
       accelerator.trigger_on_press ? "true" : "false", accelerator.keycode,
       (accelerator.modifiers & ui::EF_SHIFT_DOWN) ? "true" : "false",
       (accelerator.modifiers & ui::EF_CONTROL_DOWN) ? "true" : "false",
       (accelerator.modifiers & ui::EF_ALT_DOWN) ? "true" : "false",
-      (accelerator.modifiers & ui::EF_COMMAND_DOWN) ? "true" : "false",
-      accelerator.action);
+      (accelerator.modifiers & ui::EF_COMMAND_DOWN) ? "true" : "false");
 }
 
 std::string HashAcceleratorData(
@@ -61,6 +58,11 @@ TEST(AcceleratorTableTest, CheckDuplicatedAccelerators) {
   std::set<AcceleratorData, Cmp> accelerators;
   for (size_t i = 0; i < kAcceleratorDataLength; ++i) {
     const AcceleratorData& entry = kAcceleratorData[i];
+    EXPECT_TRUE(accelerators.insert(entry).second)
+        << "Duplicated accelerator: " << AcceleratorDataToString(entry);
+  }
+  for (size_t i = 0; i < kDisableWithNewMappingAcceleratorDataLength; ++i) {
+    const AcceleratorData& entry = kDisableWithNewMappingAcceleratorData[i];
     EXPECT_TRUE(accelerators.insert(entry).second)
         << "Duplicated accelerator: " << AcceleratorDataToString(entry);
   }
@@ -125,8 +127,8 @@ TEST(AcceleratorTableTest, CheckDeprecatedAccelerators) {
   for (size_t i = 0; i < kDeprecatedAcceleratorsDataLength; ++i) {
     // There must never be any duplicated actions.
     const DeprecatedAcceleratorData& data = kDeprecatedAcceleratorsData[i];
-    EXPECT_TRUE(actions.insert(data.action).second) << "Deprecated action: "
-                                                    << data.action;
+    EXPECT_TRUE(actions.insert(data.action).second)
+        << "Deprecated action: " << data.action;
 
     // The UMA histogram name must be of the format "Ash.Accelerators.*"
     std::string uma_histogram(data.uma_histogram_name);
@@ -140,6 +142,12 @@ TEST(AcceleratorTableTest, CheckSearchBasedAccelerators) {
   std::vector<AcceleratorData> non_search_accelerators;
   for (size_t i = 0; i < kAcceleratorDataLength; ++i) {
     const AcceleratorData& entry = kAcceleratorData[i];
+    if (entry.modifiers & ui::EF_COMMAND_DOWN)
+      continue;
+    non_search_accelerators.emplace_back(entry);
+  }
+  for (size_t i = 0; i < kDisableWithNewMappingAcceleratorDataLength; ++i) {
+    const AcceleratorData& entry = kDisableWithNewMappingAcceleratorData[i];
     if (entry.modifiers & ui::EF_COMMAND_DOWN)
       continue;
     non_search_accelerators.emplace_back(entry);

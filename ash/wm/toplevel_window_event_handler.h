@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 #include "ash/ash_export.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display_observer.h"
 #include "ui/events/event_handler.h"
+#include "ui/events/gestures/gesture_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/public/window_move_client.h"
 
@@ -56,38 +56,48 @@ class ASH_EXPORT ToplevelWindowEventHandler
   using EndClosure = base::OnceCallback<void(DragResult)>;
 
   ToplevelWindowEventHandler();
+
+  ToplevelWindowEventHandler(const ToplevelWindowEventHandler&) = delete;
+  ToplevelWindowEventHandler& operator=(const ToplevelWindowEventHandler&) =
+      delete;
+
   ~ToplevelWindowEventHandler() override;
 
   // display::DisplayObserver:
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t metrics) override;
 
-  // Overridden from ui::EventHandler:
+  // ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnMouseEvent(ui::MouseEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+
+  // wm::WindowMoveClient:
+  wm::WindowMoveResult RunMoveLoop(aura::Window* source,
+                                   const gfx::Vector2d& drag_offset,
+                                   ::wm::WindowMoveSource move_source) override;
+  void EndMoveLoop() override;
 
   // Attempts to start a drag if one is not already in progress. Returns true if
   // successful. |end_closure| is run when the drag completes, including if the
   // drag is not started. If |update_gesture_target| is true, the gesture
   // target is forcefully updated and gesture events are transferred to
-  // new target if any. In general, prefer the first version.
+  // new target if any. If |grab_capture| is true, capture is set to |window|,
+  // if it is not set yet. In general, prefer the first version.
   bool AttemptToStartDrag(aura::Window* window,
-                          const gfx::Point& point_in_parent,
+                          const gfx::PointF& point_in_parent,
                           int window_component,
                           ToplevelWindowEventHandler::EndClosure end_closure);
   bool AttemptToStartDrag(aura::Window* window,
-                          const gfx::Point& point_in_parent,
+                          const gfx::PointF& point_in_parent,
                           int window_component,
                           ::wm::WindowMoveSource source,
                           EndClosure end_closure,
-                          bool update_gesture_target);
+                          bool update_gesture_target,
+                          bool grab_capture = true);
 
   // If there is a drag in progress it is reverted, otherwise does nothing.
   void RevertDrag();
-
-  // Returns true if there is a drag in progress.
-  bool is_drag_in_progress() const { return window_resizer_.get() != nullptr; }
 
   // Returns the toplevel window that should be dragged for a gesture event that
   // occurs in the HTCLIENT area of a window. Returns null if there shouldn't be
@@ -100,16 +110,13 @@ class ASH_EXPORT ToplevelWindowEventHandler
   // Returns the window that is currently handling gesture events and its
   // location.
   aura::Window* gesture_target() { return gesture_target_; }
-  const gfx::Point& event_location_in_gesture_target() {
+  const gfx::PointF& event_location_in_gesture_target() {
     return event_location_in_gesture_target_;
   }
+  bool in_gesture_drag() { return in_gesture_drag_; }
 
-  // Overridden from wm::WindowMoveClient:
-  ::wm::WindowMoveResult RunMoveLoop(
-      aura::Window* source,
-      const gfx::Vector2d& drag_offset,
-      ::wm::WindowMoveSource move_source) override;
-  void EndMoveLoop() override;
+  // Returns true if there is a drag in progress.
+  bool is_drag_in_progress() const { return window_resizer_.get() != nullptr; }
 
  private:
   class ScopedWindowResizer;
@@ -118,9 +125,10 @@ class ASH_EXPORT ToplevelWindowEventHandler
   // true on success, false if there is something preventing the resize from
   // starting.
   bool PrepareForDrag(aura::Window* window,
-                      const gfx::Point& point_in_parent,
+                      const gfx::PointF& point_in_parent,
                       int window_component,
-                      ::wm::WindowMoveSource source);
+                      ::wm::WindowMoveSource source,
+                      bool grab_capture);
 
   // Completes or reverts the drag if one is in progress. Returns true if a
   // drag was completed or reverted.
@@ -155,7 +163,7 @@ class ASH_EXPORT ToplevelWindowEventHandler
 
   // Update the gesture target and event location.
   void UpdateGestureTarget(aura::Window* window,
-                           const gfx::Point& location = gfx::Point());
+                           const gfx::PointF& location = gfx::PointF());
 
   // The hittest result for the first finger at the time that it initially
   // touched the screen. |first_finger_hittest_| is one of ui/base/hit_test.h
@@ -163,15 +171,17 @@ class ASH_EXPORT ToplevelWindowEventHandler
 
   // The point for the first finger at the time that it initially touched the
   // screen.
-  gfx::Point first_finger_touch_point_;
+  gfx::PointF first_finger_touch_point_;
 
   // Is a window move/resize in progress because of gesture events?
   bool in_gesture_drag_ = false;
 
   aura::Window* gesture_target_ = nullptr;
-  gfx::Point event_location_in_gesture_target_;
+  gfx::PointF event_location_in_gesture_target_;
 
   std::unique_ptr<ScopedWindowResizer> window_resizer_;
+
+  display::ScopedDisplayObserver display_observer_{this};
 
   EndClosure end_closure_;
 
@@ -179,8 +189,6 @@ class ASH_EXPORT ToplevelWindowEventHandler
   bool in_move_loop_ = false;
 
   base::WeakPtrFactory<ToplevelWindowEventHandler> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventHandler);
 };
 
 }  // namespace ash

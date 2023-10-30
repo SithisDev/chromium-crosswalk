@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,31 +7,33 @@
 
 #include <stddef.h>
 
-#include "ash/public/interfaces/ime_info.mojom.h"
+#include "ash/public/cpp/ime_info.h"
 #include "ash/system/ime_menu/ime_list_view.h"
-#include "base/macros.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 
 namespace views {
 class ImageView;
 }  // namespace views
 
 namespace ash {
-class ImeController;
-
-namespace tray {
+class ImeControllerImpl;
 
 // A list of available IMEs shown in the IME detailed view of the system menu,
 // along with other items in the title row (a settings button and optional
 // enterprise-controlled icon).
 class IMEDetailedView : public ImeListView {
  public:
+  METADATA_HEADER(IMEDetailedView);
+
   IMEDetailedView(DetailedViewDelegate* delegate,
-                  ImeController* ime_controller);
+                  ImeControllerImpl* ime_controller);
+  IMEDetailedView(const IMEDetailedView&) = delete;
+  IMEDetailedView& operator=(const IMEDetailedView&) = delete;
   ~IMEDetailedView() override = default;
 
   void Update(const std::string& current_ime_id,
-              const std::vector<mojom::ImeInfo>& list,
-              const std::vector<mojom::ImeMenuItem>& property_list,
+              const std::vector<ImeInfo>& list,
+              const std::vector<ImeMenuItem>& property_list,
               bool show_keyboard_toggle,
               SingleImeBehavior single_ime_behavior) override;
 
@@ -42,23 +44,17 @@ class IMEDetailedView : public ImeListView {
  private:
   // ImeListView:
   void ResetImeListView() override;
-  void HandleButtonPressed(views::Button* sender,
-                           const ui::Event& event) override;
   void CreateExtraTitleRowButtons() override;
   void ShowSettings();
-  const char* GetClassName() const override;
 
-  ImeController* const ime_controller_;
+  ImeControllerImpl* const ime_controller_;
 
   // Gear icon that takes the user to IME settings.
   views::Button* settings_button_ = nullptr;
 
   // This icon says that the IMEs are managed by policy.
   views::ImageView* controlled_setting_icon_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(IMEDetailedView);
 };
-}
 
 }  // namespace ash
 

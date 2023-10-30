@@ -1,15 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/app_list/app_list_metrics.h"
 
 #include "ash/public/cpp/app_list/app_list_types.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 
 namespace {
 
-// The following constants affect logging, and  should not be changed without
+// The following constants affect logging, and should not be changed without
 // deprecating the related UMA histograms.
 
 const char kAppListSearchResultOpenTypeHistogram[] =
@@ -22,31 +23,68 @@ const char kAppListSuggestionChipOpenTypeHistogramInClamshell[] =
     "Apps.AppListSuggestedChipOpenType.ClamshellMode";
 const char kAppListSuggestionChipOpenTypeHistogramInTablet[] =
     "Apps.AppListSuggestedChipOpenType.TabletMode";
+const char kAppListContinueTaskOpenTypeHistogramInClamshell[] =
+    "Apps.AppListContinueTaskOpenType.ClamshellMode";
+const char kAppListContinueTaskOpenTypeHistogramInTablet[] =
+    "Apps.AppListContinueTaskOpenType.TabletMode";
 const char kAppListZeroStateSuggestionOpenTypeHistogram[] =
     "Apps.AppList.ZeroStateSuggestionOpenType";
+const char kAppListDefaultSearchResultOpenTypeHistogram[] =
+    "Apps.AppListDefaultSearchResultOpenType";
 // The UMA histogram that logs the length of user typed queries app list
 // launcher issues to the search providers.
 constexpr char kAppListLauncherIssuedSearchQueryLength[] =
     "Apps.AppListLauncherIssuedSearchQueryLength";
+// The UMA histogram that logs the length of the query that resulted in a click.
+constexpr char kAppListLauncherClickedSearchQueryLength[] =
+    "Apps.AppListLauncherClickedSearchQueryLength";
+// The UMA histogram that logs the length of the query that resulted in an app
+// launch from search box.
+constexpr char kSearchQueryLengthAppLaunch[] =
+    "Apps.AppList.SearchQueryLength.Apps";
+// The UMA histogram that logs the number of app launches from the search box
+// with non-empty queries.
+constexpr char kSearchSuccessAppLaunch[] = "Apps.AppList.SearchSuccess.Apps";
 
 // Maximum query length logged for user typed query in characters.
 constexpr int kMaxLoggedUserQueryLength = 20;
 
 }  // namespace
 
-namespace app_list {
+namespace ash {
 
-void RecordSearchResultOpenTypeHistogram(
-    ash::AppListLaunchedFrom launch_location,
-    SearchResultType type,
-    bool is_tablet_mode) {
+constexpr char kClamshellPrefOrderClearActionHistogram[] =
+    "Apps.Launcher.AppListSortClearAction.ClamshellMode";
+constexpr char kTabletPrefOrderClearActionHistogram[] =
+    "Apps.Launcher.AppListSortClearAction.TabletMode";
+
+constexpr char kClamshellAppListSortOrderOnSessionStartHistogram[] =
+    "Apps.AppList.SortOrderOnSessionStart.ClamshellMode";
+constexpr char kTabletAppListSortOrderOnSessionStartHistogram[] =
+    "Apps.AppList.SortOrderOnSessionStart.TabletMode";
+
+constexpr char kAppListSortDiscoveryDurationAfterNudge[] =
+    "Apps.AppList.SortDiscoveryDurationAfterEducationNudge";
+
+constexpr char kAppListSortDiscoveryDurationAfterActivation[] =
+    "Apps.AppList."
+    "AppListSortDiscoveryDurationAfterActivation";
+
+constexpr char kAppListSortDiscoveryDurationAfterNudgeClamshell[] =
+    "Apps.AppList.SortDiscoveryDurationAfterEducationNudgeV2.ClamshellMode";
+constexpr char kAppListSortDiscoveryDurationAfterNudgeTablet[] =
+    "Apps.AppList.SortDiscoveryDurationAfterEducationNudgeV2.TabletMode";
+
+void RecordSearchResultOpenTypeHistogram(AppListLaunchedFrom launch_location,
+                                         SearchResultType type,
+                                         bool is_tablet_mode) {
   if (type == SEARCH_RESULT_TYPE_BOUNDARY) {
     NOTREACHED();
     return;
   }
 
   switch (launch_location) {
-    case ash::AppListLaunchedFrom::kLaunchedFromSearchBox:
+    case AppListLaunchedFrom::kLaunchedFromSearchBox:
       UMA_HISTOGRAM_ENUMERATION(kAppListSearchResultOpenTypeHistogram, type,
                                 SEARCH_RESULT_TYPE_BOUNDARY);
       if (is_tablet_mode) {
@@ -58,7 +96,7 @@ void RecordSearchResultOpenTypeHistogram(
             SEARCH_RESULT_TYPE_BOUNDARY);
       }
       break;
-    case ash::AppListLaunchedFrom::kLaunchedFromSuggestionChip:
+    case AppListLaunchedFrom::kLaunchedFromSuggestionChip:
       if (is_tablet_mode) {
         UMA_HISTOGRAM_ENUMERATION(
             kAppListSuggestionChipOpenTypeHistogramInTablet, type,
@@ -69,12 +107,32 @@ void RecordSearchResultOpenTypeHistogram(
             SEARCH_RESULT_TYPE_BOUNDARY);
       }
       break;
-    case ash::AppListLaunchedFrom::kLaunchedFromShelf:
-    case ash::AppListLaunchedFrom::kLaunchedFromGrid:
-      // Search results don't live in the shelf or the app grid.
+    case AppListLaunchedFrom::kLaunchedFromContinueTask:
+      if (is_tablet_mode) {
+        UMA_HISTOGRAM_ENUMERATION(kAppListContinueTaskOpenTypeHistogramInTablet,
+                                  type, SEARCH_RESULT_TYPE_BOUNDARY);
+      } else {
+        UMA_HISTOGRAM_ENUMERATION(
+            kAppListContinueTaskOpenTypeHistogramInClamshell, type,
+            SEARCH_RESULT_TYPE_BOUNDARY);
+      }
+      break;
+    case AppListLaunchedFrom::kLaunchedFromShelf:
+    case AppListLaunchedFrom::kLaunchedFromGrid:
+    case AppListLaunchedFrom::kLaunchedFromRecentApps:
+      // Search results don't live in the shelf, the app grid or recent apps.
       NOTREACHED();
       break;
   }
+}
+
+void RecordDefaultSearchResultOpenTypeHistogram(SearchResultType type) {
+  if (type == SEARCH_RESULT_TYPE_BOUNDARY) {
+    NOTREACHED();
+    return;
+  }
+  UMA_HISTOGRAM_ENUMERATION(kAppListDefaultSearchResultOpenTypeHistogram, type,
+                            SEARCH_RESULT_TYPE_BOUNDARY);
 }
 
 void RecordZeroStateSuggestionOpenTypeHistogram(SearchResultType type) {
@@ -91,4 +149,57 @@ void RecordLauncherIssuedSearchQueryLength(int query_length) {
   }
 }
 
-}  // namespace app_list
+void RecordLauncherClickedSearchQueryLength(int query_length) {
+  if (query_length > 0) {
+    UMA_HISTOGRAM_EXACT_LINEAR(
+        kAppListLauncherClickedSearchQueryLength,
+        std::min(query_length, kMaxLoggedUserQueryLength),
+        kMaxLoggedUserQueryLength);
+  }
+}
+
+void RecordSuccessfulAppLaunchUsingSearch(AppListLaunchedFrom launched_from,
+                                          int query_length) {
+  if (query_length > 0) {
+    UMA_HISTOGRAM_ENUMERATION(kSearchSuccessAppLaunch, launched_from);
+    UMA_HISTOGRAM_COUNTS_100(kSearchQueryLengthAppLaunch, query_length);
+  }
+}
+
+void ReportPrefOrderClearAction(AppListOrderUpdateEvent action,
+                                bool in_tablet) {
+  if (in_tablet) {
+    base::UmaHistogramEnumeration(kTabletPrefOrderClearActionHistogram, action);
+  } else {
+    base::UmaHistogramEnumeration(kClamshellPrefOrderClearActionHistogram,
+                                  action);
+  }
+}
+
+void RecordFirstSearchResult(SearchResultType type, bool in_tablet) {
+  if (in_tablet) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "Apps.AppList.LaunchedResultInNewUsersFirstSearch.TabletMode", type,
+        SEARCH_RESULT_TYPE_BOUNDARY);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION(
+        "Apps.AppList.LaunchedResultInNewUsersFirstSearch.ClamshellMode", type,
+        SEARCH_RESULT_TYPE_BOUNDARY);
+  }
+}
+
+void ReportPrefSortOrderOnSessionStart(AppListSortOrder permanent_order,
+                                       bool in_tablet) {
+  // NOTE: kNameReverseAlphabetical is not used outside of tests.
+  DCHECK(permanent_order != AppListSortOrder::kNameReverseAlphabetical);
+
+  if (in_tablet) {
+    base::UmaHistogramEnumeration(
+        kTabletAppListSortOrderOnSessionStartHistogram, permanent_order);
+  } else {
+    base::UmaHistogramEnumeration(
+        kClamshellAppListSortOrderOnSessionStartHistogram, permanent_order);
+  }
+}
+
+}  // namespace ash

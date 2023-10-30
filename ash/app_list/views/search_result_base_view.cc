@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,25 @@
 #include "ash/app_list/model/search/search_result.h"
 #include "ash/app_list/views/search_result_actions_view.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "base/i18n/number_formatting.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/base/l10n/l10n_util.h"
 
-namespace app_list {
+namespace ash {
 
-SearchResultBaseView::SearchResultBaseView() : Button(this) {
+SearchResultBaseView::SearchResultBaseView() {
+  SetGroup(kSearchResultViewGroup);
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   SetInstallFocusRingOnFocus(false);
 }
 
-SearchResultBaseView::~SearchResultBaseView() = default;
+SearchResultBaseView::~SearchResultBaseView() {
+  if (result_)
+    result_->RemoveObserver(this);
+  result_ = nullptr;
+}
 
 bool SearchResultBaseView::SkipDefaultKeyEventProcessing(
     const ui::KeyEvent& event) {
@@ -29,26 +39,22 @@ const char* SearchResultBaseView::GetClassName() const {
 }
 
 void SearchResultBaseView::SetSelected(bool selected,
-                                       base::Optional<bool> reverse_tab_order) {
+                                       absl::optional<bool> reverse_tab_order) {
   if (selected_ == selected)
     return;
 
   selected_ = selected;
 
-  if (app_list_features::IsSearchBoxSelectionEnabled()) {
-    if (selected) {
-      SelectInitialResultAction(reverse_tab_order.value_or(false));
-    } else {
-      ClearSelectedResultAction();
-    }
+  if (selected) {
+    SelectInitialResultAction(reverse_tab_order.value_or(false));
+  } else {
+    ClearSelectedResultAction();
   }
 
   SchedulePaint();
 }
 
 bool SearchResultBaseView::SelectNextResultAction(bool reverse_tab_order) {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
   if (!selected() || !actions_view_)
     return false;
 
@@ -57,6 +63,12 @@ bool SearchResultBaseView::SelectNextResultAction(bool reverse_tab_order) {
 
   SchedulePaint();
   return true;
+}
+
+views::View* SearchResultBaseView::GetSelectedView() {
+  if (actions_view_ && actions_view_->HasSelectedAction())
+    return actions_view_->GetSelectedView();
+  return this;
 }
 
 void SearchResultBaseView::SetResult(SearchResult* result) {
@@ -74,15 +86,41 @@ void SearchResultBaseView::OnResultDestroying() {
   SetResult(nullptr);
 }
 
-base::string16 SearchResultBaseView::ComputeAccessibleName() const {
+std::u16string SearchResultBaseView::ComputeAccessibleName() const {
   if (!result())
-    return base::string16();
+    return u"";
 
-  base::string16 accessible_name = result()->title();
-  if (!result()->title().empty() && !result()->details().empty())
-    accessible_name += base::ASCIIToUTF16(", ");
-  accessible_name += result()->details();
+  std::u16string accessible_name;
+  if (!result()->accessible_name().empty())
+    return result()->accessible_name();
 
+  std::u16string title = result()->title();
+  if (result()->result_type() == AppListSearchResultType::kPlayStoreApp ||
+      result()->result_type() == AppListSearchResultType::kInstantApp) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_APP_ACCESSIBILITY_ARC_APP_ANNOUNCEMENT, title);
+  } else if (result()->result_type() ==
+             AppListSearchResultType::kPlayStoreReinstallApp) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_APP_ACCESSIBILITY_APP_RECOMMENDATION_ARC, title);
+  } else if (result()->result_type() ==
+             AppListSearchResultType::kInstalledApp) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_APP_ACCESSIBILITY_INSTALLED_APP_ANNOUNCEMENT, title);
+  } else if (result()->result_type() == AppListSearchResultType::kInternalApp) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_APP_ACCESSIBILITY_INTERNAL_APP_ANNOUNCEMENT, title);
+  } else if (!result()->details().empty()) {
+    accessible_name = base::JoinString({title, result()->details()}, u", ");
+  } else {
+    accessible_name = title;
+  }
+
+  if (result()->rating() && result()->rating() >= 0) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_APP_ACCESSIBILITY_APP_WITH_STAR_RATING_ARC, accessible_name,
+        base::FormatDouble(result()->rating(), 1));
+  }
   return accessible_name;
 }
 
@@ -93,23 +131,18 @@ void SearchResultBaseView::UpdateAccessibleName() {
 void SearchResultBaseView::ClearResult() {
   if (result_)
     result_->RemoveObserver(this);
+  SetSelected(false, absl::nullopt);
   result_ = nullptr;
 }
 
 void SearchResultBaseView::SelectInitialResultAction(bool reverse_tab_order) {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
-  if (actions_view_ && actions_view_->SelectInitialAction(reverse_tab_order))
-    return;
-
-  NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+  if (actions_view_)
+    actions_view_->SelectInitialAction(reverse_tab_order);
 }
 
 void SearchResultBaseView::ClearSelectedResultAction() {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
   if (actions_view_)
     actions_view_->ClearSelectedAction();
 }
 
-}  // namespace app_list
+}  // namespace ash

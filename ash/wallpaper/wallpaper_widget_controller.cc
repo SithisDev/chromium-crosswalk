@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,181 +7,49 @@
 #include <utility>
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
-#include "base/scoped_observer.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_view.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/animation/tween.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
+#include "ui/wm/core/window_util.h"
 
 namespace ash {
 
-// Observes a wallpaper widget state, and notifies WallpaperWidgetController
-// about relevant widget changes:
-//  * when widget is being destroyed
-//  * when the widgets implicit animations finish.
-// Additionally, provides methods to manage wallpaper widget state - e.g. to
-// show widget, reparent widget, or change the widget blur.
-class WallpaperWidgetController::WidgetHandler
-    : public ui::ImplicitAnimationObserver,
-      public views::WidgetObserver,
-      public aura::WindowObserver {
- public:
-  WidgetHandler(WallpaperWidgetController* controller, views::Widget* widget)
-      : controller_(controller),
-        widget_(widget),
-        parent_window_(widget->GetNativeWindow()->parent()),
-        widget_observer_(this),
-        window_observer_(this) {
-    DCHECK(controller_);
-    DCHECK(widget_);
-    widget_observer_.Add(widget_);
-    window_observer_.Add(parent_window_);
-  }
+WallpaperWidgetController::WallpaperWidgetController(aura::Window* root_window)
+    : root_window_(root_window) {}
 
-  ~WidgetHandler() override { Reset(true /*close*/); }
-
-  views::Widget* widget() { return widget_; }
-
-  // ui::ImplicitAnimationObserver:
-  void OnImplicitAnimationsCompleted() override {
-    observing_implicit_animations_ = false;
-    StopObservingImplicitAnimations();
-
-    controller_->WidgetFinishedAnimating(this);
-  }
-
-  // views::WidgetObserver:
-  void OnWidgetDestroying(views::Widget* widget) override {
-    Reset(false /*close*/);
-
-    // NOTE: Do not use |this| past this point - |controller_| will delete this
-    // instance.
-    controller_->WidgetHandlerReset(this);
-  }
-
-  // aura::WindowObserver:
-  void OnWindowBoundsChanged(aura::Window* window,
-                             const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds,
-                             ui::PropertyChangeReason reason) override {
-    widget_->SetBounds(new_bounds);
-  }
-
-  void Show() {
-    ui::ScopedLayerAnimationSettings settings(
-        widget_->GetLayer()->GetAnimator());
-    observing_implicit_animations_ = true;
-    settings.AddObserver(this);
-
-    // When |widget_| shows, AnimateShowWindowCommon() is called to do the
-    // animation. Sets transition duration to 0 to avoid animating to the
-    // show animation's initial values.
-    settings.SetTransitionDuration(base::TimeDelta());
-    widget_->Show();
-  }
-
-  bool Reparent(aura::Window* new_parent) {
-    if (parent_window_ == new_parent)
-      return false;
-
-    window_observer_.Remove(parent_window_);
-    if (has_blur_cache_)
-      parent_window_->layer()->RemoveCacheRenderSurfaceRequest();
-
-    new_parent->AddChild(widget_->GetNativeWindow());
-
-    parent_window_ = widget_->GetNativeWindow()->parent();
-    window_observer_.Add(parent_window_);
-
-    has_blur_cache_ = widget_->GetLayer()->layer_blur() > 0.0f;
-    if (has_blur_cache_)
-      parent_window_->layer()->AddCacheRenderSurfaceRequest();
-
-    return true;
-  }
-
-  float blur_sigma() const { return widget_->GetLayer()->layer_blur(); }
-
-  void SetBlur(float blur_sigma) {
-    widget_->GetLayer()->SetLayerBlur(blur_sigma);
-
-    const bool old_has_blur_cache = has_blur_cache_;
-    has_blur_cache_ = blur_sigma > 0.0f;
-    if (!old_has_blur_cache && has_blur_cache_) {
-      parent_window_->layer()->AddCacheRenderSurfaceRequest();
-    } else if (old_has_blur_cache && !has_blur_cache_) {
-      parent_window_->layer()->RemoveCacheRenderSurfaceRequest();
-    }
-  }
-
-  void StopAnimating() { widget_->GetLayer()->GetAnimator()->StopAnimating(); }
-
- private:
-  void Reset(bool close) {
-    if (reset_)
-      return;
-    reset_ = true;
-
-    window_observer_.RemoveAll();
-    widget_observer_.RemoveAll();
-
-    if (observing_implicit_animations_) {
-      observing_implicit_animations_ = false;
-      StopObservingImplicitAnimations();
-    }
-
-    if (has_blur_cache_)
-      parent_window_->layer()->RemoveCacheRenderSurfaceRequest();
-    parent_window_ = nullptr;
-
-    if (close)
-      widget_->CloseNow();
-    widget_ = nullptr;
-  }
-
-  WallpaperWidgetController* controller_;
-  views::Widget* widget_;
-  aura::Window* parent_window_;
-
-  bool reset_ = false;
-  bool has_blur_cache_ = false;
-  bool observing_implicit_animations_ = false;
-
-  ScopedObserver<views::Widget, WidgetHandler> widget_observer_;
-  ScopedObserver<aura::Window, WidgetHandler> window_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(WidgetHandler);
-};
-
-WallpaperWidgetController::WallpaperWidgetController(
-    base::OnceClosure wallpaper_set_callback)
-    : wallpaper_set_callback_(std::move(wallpaper_set_callback)) {}
-
-WallpaperWidgetController::~WallpaperWidgetController() = default;
-
-views::Widget* WallpaperWidgetController::GetWidget() {
-  if (!active_widget_)
-    return nullptr;
-  return active_widget_->widget();
+WallpaperWidgetController::~WallpaperWidgetController() {
+  widget_->CloseNow();
 }
 
-views::Widget* WallpaperWidgetController::GetAnimatingWidget() {
-  if (!animating_widget_)
-    return nullptr;
-  return animating_widget_->widget();
+void WallpaperWidgetController::Init(bool locked) {
+  widget_ = CreateWallpaperWidget(root_window_, wallpaper_constants::kClear,
+                                  locked, &wallpaper_view_);
+}
+
+views::Widget* WallpaperWidgetController::GetWidget() {
+  return widget_.get();
 }
 
 bool WallpaperWidgetController::IsAnimating() const {
-  return animating_widget_.get();
+  return old_layer_tree_owner_ &&
+         old_layer_tree_owner_->root()->GetAnimator()->is_animating();
 }
 
-void WallpaperWidgetController::EndPendingAnimation() {
-  if (!IsAnimating())
-    return;
-  animating_widget_->StopAnimating();
+void WallpaperWidgetController::StopAnimating() {
+  if (old_layer_tree_owner_) {
+    old_layer_tree_owner_->root()->GetAnimator()->StopAnimating();
+    old_layer_tree_owner_.reset();
+  }
 }
 
 void WallpaperWidgetController::AddAnimationEndCallback(
@@ -189,76 +57,49 @@ void WallpaperWidgetController::AddAnimationEndCallback(
   animation_end_callbacks_.emplace_back(std::move(callback));
 }
 
-void WallpaperWidgetController::SetWallpaperWidget(
-    views::Widget* widget,
-    WallpaperView* wallpaper_view,
-    float blur_sigma) {
-  DCHECK(widget);
-
-  // If there is a widget currently being shown, finish the animation and set it
-  // as the primary widget, before starting transition to the new wallpaper.
-  if (animating_widget_) {
-    SetAnimatingWidgetAsActive();
-    active_widget_->StopAnimating();
-  }
-
-  animating_widget_ = std::make_unique<WidgetHandler>(this, widget);
-  animating_widget_->SetBlur(blur_sigma);
-  animating_widget_->Show();
-
-  wallpaper_view_ = wallpaper_view;
-}
-
-bool WallpaperWidgetController::Reparent(aura::Window* root_window,
-                                         int container) {
+bool WallpaperWidgetController::Reparent(int container) {
+  auto* parent = GetWidget()->GetNativeWindow()->parent();
+  auto* root_window = parent->GetRootWindow();
   aura::Window* new_parent = root_window->GetChildById(container);
 
-  bool moved_widget = active_widget_ && active_widget_->Reparent(new_parent);
-  bool moved_animating_widget =
-      animating_widget_ && animating_widget_->Reparent(new_parent);
-  return moved_widget || moved_animating_widget;
+  if (parent == new_parent)
+    return false;
+  new_parent->AddChild(GetWidget()->GetNativeWindow());
+  return true;
 }
 
-void WallpaperWidgetController::SetWallpaperBlur(float blur_sigma) {
-  if (animating_widget_)
-    animating_widget_->SetBlur(blur_sigma);
-  if (active_widget_)
-    active_widget_->SetBlur(blur_sigma);
-}
+bool WallpaperWidgetController::SetWallpaperBlur(
+    float blur,
+    const base::TimeDelta& animation_duration) {
+  if (!widget_->GetNativeWindow())
+    return false;
 
-void WallpaperWidgetController::ResetWidgetsForTesting() {
-  animating_widget_.reset();
-  active_widget_.reset();
-  wallpaper_view_ = nullptr;
-}
+  StopAnimating();
+  bool blur_changed = wallpaper_view_->blur_sigma() != blur;
 
-void WallpaperWidgetController::WidgetHandlerReset(WidgetHandler* widget) {
-  if (widget == active_widget_.get()) {
-    SetAnimatingWidgetAsActive();
-    if (active_widget_)
-      active_widget_->StopAnimating();
-  } else if (widget == animating_widget_.get()) {
-    animating_widget_.reset();
+  wallpaper_view_->set_blur_sigma(blur);
+  // Show the widget when we have something to show.
+  if (!widget_->IsVisible())
+    widget_->Show();
+  if (!animation_duration.is_zero()) {
+    ApplyCrossFadeAnimation(animation_duration);
+  } else {
+    wallpaper_view_->SchedulePaint();
+    // Since there is no actual animation scheduled, just call completed method.
+    OnImplicitAnimationsCompleted();
   }
+  return blur_changed;
 }
 
-void WallpaperWidgetController::WidgetFinishedAnimating(WidgetHandler* widget) {
-  if (widget != animating_widget_.get())
-    return;
-
-  SetAnimatingWidgetAsActive();
+float WallpaperWidgetController::GetWallpaperBlur() const {
+  return wallpaper_view_->blur_sigma();
 }
 
-void WallpaperWidgetController::SetAnimatingWidgetAsActive() {
-  active_widget_ = std::move(animating_widget_);
-
-  if (!active_widget_)
-    return;
-
-  if (wallpaper_set_callback_)
-    std::move(wallpaper_set_callback_).Run();
-
-  // Notify observers that animation finished.
+void WallpaperWidgetController::OnImplicitAnimationsCompleted() {
+  StopAnimating();
+  wallpaper_view_->SetLockShieldEnabled(
+      wallpaper_view_->GetWidget()->GetNativeWindow()->parent()->GetId() ==
+      kShellWindowId_LockScreenWallpaperContainer);
   RunAnimationEndCallbacks();
 }
 
@@ -267,6 +108,32 @@ void WallpaperWidgetController::RunAnimationEndCallbacks() {
   animation_end_callbacks_.swap(callbacks);
   for (auto& callback : callbacks)
     std::move(callback).Run();
+}
+
+void WallpaperWidgetController::ApplyCrossFadeAnimation(
+    base::TimeDelta duration) {
+  DCHECK(wallpaper_view_);
+
+  old_layer_tree_owner_ = ::wm::RecreateLayers(wallpaper_view_);
+
+  ui::Layer* old_layer = old_layer_tree_owner_->root();
+  ui::Layer* new_layer = wallpaper_view_->layer();
+  DCHECK_EQ(old_layer->parent(), new_layer->parent());
+  old_layer->parent()->StackAbove(old_layer, new_layer);
+
+  old_layer->SetOpacity(1.f);
+  new_layer->SetOpacity(1.f);
+
+  // Fade out the old layer. When clearing the blur, use the opposite tween so
+  // that the animations are mirrors of each other.
+  const bool clearing =
+      wallpaper_view_->blur_sigma() == wallpaper_constants::kClear;
+  ui::ScopedLayerAnimationSettings settings(old_layer->GetAnimator());
+  settings.SetTransitionDuration(duration);
+  settings.SetTweenType(clearing ? gfx::Tween::EASE_IN : gfx::Tween::EASE_OUT);
+  settings.AddObserver(this);
+
+  old_layer->SetOpacity(0.f);
 }
 
 }  // namespace ash

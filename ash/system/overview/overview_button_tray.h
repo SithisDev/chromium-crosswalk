@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 #define ASH_SYSTEM_OVERVIEW_OVERVIEW_BUTTON_TRAY_H_
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/session/session_observer.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
-#include "ash/session/session_observer.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/wm/overview/overview_observer.h"
-#include "base/macros.h"
+#include "base/time/time.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/events/event_constants.h"
 
 namespace views {
@@ -27,8 +29,11 @@ namespace ash {
 class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
                                       public SessionObserver,
                                       public OverviewObserver,
-                                      public TabletModeObserver {
+                                      public TabletModeObserver,
+                                      public ShelfConfig::Observer {
  public:
+  METADATA_HEADER(OverviewButtonTray);
+
   // Second taps within this time will be counted as double taps. Use this
   // instead of ui::Event's click_count and tap_count as those have a minimum
   // time bewtween events before the second tap counts as a double tap.
@@ -36,14 +41,12 @@ class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
   // overview enter animation time, once ux decides which one to match (both are
   // 300ms currently).
   static constexpr base::TimeDelta kDoubleTapThresholdMs =
-      base::TimeDelta::FromMilliseconds(300);
+      base::Milliseconds(300);
 
   explicit OverviewButtonTray(Shelf* shelf);
+  OverviewButtonTray(const OverviewButtonTray&) = delete;
+  OverviewButtonTray& operator=(const OverviewButtonTray&) = delete;
   ~OverviewButtonTray() override;
-
-  // Updates the tray's visibility based on the LoginStatus and the current
-  // state of TabletMode
-  virtual void UpdateAfterLoginStatusChange(LoginStatus status);
 
   // Sets the ink drop ripple to ACTIVATED immediately with no animations.
   void SnapRippleToActivated();
@@ -53,6 +56,8 @@ class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
 
   // ActionableView:
   bool PerformAction(const ui::Event& event) override;
+  void HandlePerformActionResult(bool action_performed,
+                                 const ui::Event& event) override;
 
   // SessionObserver:
   void OnSessionStateChanged(session_manager::SessionState state) override;
@@ -64,19 +69,20 @@ class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
   // TabletModeObserver:
   void OnTabletModeEventsBlockingChanged() override;
 
-  // TrayBackgroundView:
-  void ClickedOutsideBubble() override;
-  base::string16 GetAccessibleNameForTray() override;
-  void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
+  // ShelfConfigObserver:
+  void OnShelfConfigUpdated() override;
 
-  // views::View:
-  const char* GetClassName() const override;
+  // TrayBackgroundView:
+  void UpdateAfterLoginStatusChange() override;
+  void ClickedOutsideBubble() override;
+  std::u16string GetAccessibleNameForTray() override;
+  void HandleLocaleChange() override;
+  void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
+  void OnThemeChanged() override;
 
  private:
   friend class OverviewButtonTrayTest;
 
-  // Sets the icon to visible if tablet mode is enabled and
-  // OverviewController::CanSelect.
   void UpdateIconVisibility();
 
   // Weak pointer, will be parented by TrayContainer for its lifetime.
@@ -86,9 +92,7 @@ class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
 
   // Stores the timestamp of the last tap event time that happened while not
   // in overview mode. Used to check for double taps, which invoke quick switch.
-  base::Optional<base::TimeTicks> last_press_event_time_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverviewButtonTray);
+  absl::optional<base::TimeTicks> last_press_event_time_;
 };
 
 }  // namespace ash

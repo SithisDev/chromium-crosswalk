@@ -1,20 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/detachable_base/detachable_base_notification_controller.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "ash/constants/notifier_catalogs.h"
 #include "ash/detachable_base/detachable_base_handler.h"
 #include "ash/detachable_base/detachable_base_pairing_status.h"
 #include "ash/public/cpp/notification_utils.h"
-#include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "base/strings/string16.h"
+#include "chromeos/ui/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -37,10 +38,8 @@ const char
 
 DetachableBaseNotificationController::DetachableBaseNotificationController(
     DetachableBaseHandler* detachable_base_handler)
-    : detachable_base_handler_(detachable_base_handler),
-      detachable_base_observer_(this),
-      session_observer_(this) {
-  detachable_base_observer_.Add(detachable_base_handler);
+    : detachable_base_handler_(detachable_base_handler) {
+  detachable_base_observation_.Observe(detachable_base_handler);
   ShowPairingNotificationIfNeeded();
 }
 
@@ -59,21 +58,22 @@ void DetachableBaseNotificationController::
     return;
   }
 
-  base::string16 title = l10n_util::GetStringUTF16(
+  std::u16string title = l10n_util::GetStringUTF16(
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_UPDATE_NEEDED_TITLE);
-  base::string16 message = l10n_util::GetStringUTF16(
+  std::u16string message = l10n_util::GetStringUTF16(
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_UPDATE_NEEDED_MESSAGE);
 
   std::unique_ptr<message_center::Notification> notification =
-      ash::CreateSystemNotification(
+      CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE,
-          kBaseRequiresUpdateNotificationId, title, message, base::string16(),
+          kBaseRequiresUpdateNotificationId, title, message, std::u16string(),
           GURL(),
           message_center::NotifierId(
               message_center::NotifierType::SYSTEM_COMPONENT,
-              kDetachableBaseNotifierId),
+              kDetachableBaseNotifierId,
+              NotificationCatalogName::kDetachableBaseRequiresUpdate),
           message_center::RichNotificationData(), nullptr,
-          kNotificationWarningIcon,
+          chromeos::kNotificationWarningIcon,
           message_center::SystemNotificationWarningLevel::CRITICAL_WARNING);
   // Set system priority so the notification gets shown when the user session is
   // blocked.
@@ -135,19 +135,20 @@ void DetachableBaseNotificationController::ShowPairingNotificationIfNeeded() {
   options.never_timeout = true;
   options.priority = message_center::MAX_PRIORITY;
 
-  base::string16 title = l10n_util::GetStringUTF16(
+  std::u16string title = l10n_util::GetStringUTF16(
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_DEVICE_CHANGED_TITLE);
-  base::string16 message = l10n_util::GetStringUTF16(
+  std::u16string message = l10n_util::GetStringUTF16(
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_DEVICE_CHANGED_MESSAGE);
 
   std::unique_ptr<message_center::Notification> notification =
-      ash::CreateSystemNotification(
+      CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE, kBaseChangedNotificationId,
-          title, message, base::string16(), GURL(),
+          title, message, std::u16string(), GURL(),
           message_center::NotifierId(
               message_center::NotifierType::SYSTEM_COMPONENT,
-              kDetachableBaseNotifierId),
-          options, nullptr, kNotificationWarningIcon,
+              kDetachableBaseNotifierId,
+              NotificationCatalogName::kDetachableBasePairingNotification),
+          options, nullptr, chromeos::kNotificationWarningIcon,
           message_center::SystemNotificationWarningLevel::CRITICAL_WARNING);
 
   message_center::MessageCenter::Get()->AddNotification(

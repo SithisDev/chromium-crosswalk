@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
-#include "base/stl_util.h"
 #include "media/base/media_switches.h"
 #include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -23,7 +23,7 @@ namespace {
 bool IsSystemKey(ui::KeyboardCode key_code) {
   switch (key_code) {
     case ui::VKEY_ASSISTANT:
-    case ui::VKEY_MEDIA_LAUNCH_APP2:  // Fullscreen button.
+    case ui::VKEY_ZOOM:               // Fullscreen button.
     case ui::VKEY_MEDIA_LAUNCH_APP1:  // Overview button.
     case ui::VKEY_BRIGHTNESS_DOWN:
     case ui::VKEY_BRIGHTNESS_UP:
@@ -34,10 +34,17 @@ bool IsSystemKey(ui::KeyboardCode key_code) {
     case ui::VKEY_VOLUME_UP:
     case ui::VKEY_POWER:
     case ui::VKEY_SLEEP:
+    case ui::VKEY_PRIVACY_SCREEN_TOGGLE:
+    case ui::VKEY_SETTINGS:
       return true;
     case ui::VKEY_MEDIA_NEXT_TRACK:
+    case ui::VKEY_MEDIA_PAUSE:
+    case ui::VKEY_MEDIA_PLAY:
     case ui::VKEY_MEDIA_PLAY_PAUSE:
     case ui::VKEY_MEDIA_PREV_TRACK:
+    case ui::VKEY_MEDIA_STOP:
+    case ui::VKEY_OEM_103:  // KEYCODE_MEDIA_REWIND
+    case ui::VKEY_OEM_104:  // KEYCODE_MEDIA_FAST_FORWARD
       return base::FeatureList::IsEnabled(media::kHardwareMediaKeyHandling);
     default:
       return false;

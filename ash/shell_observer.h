@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/login_status.h"
+#include "ash/public/cpp/shelf_types.h"
 
 namespace aura {
 class Window;
@@ -22,16 +23,17 @@ class ASH_EXPORT ShellObserver {
   // Invoked after a non-primary root window is created.
   virtual void OnRootWindowAdded(aura::Window* root_window) {}
 
+  // Invoked when a root window is about to be shutdown.
+  virtual void OnRootWindowWillShutdown(aura::Window* root_window) {}
+
   // Invoked when the shelf alignment in |root_window| is changed.
-  virtual void OnShelfAlignmentChanged(aura::Window* root_window) {}
+  virtual void OnShelfAlignmentChanged(aura::Window* root_window,
+                                       ShelfAlignment old_alignment) {}
 
   // Invoked when user work area insets (accessibility panel, docked magnifier,
   // keyboard) in |root_window| changed.
   // This notification is not fired when shelf bounds changed.
   virtual void OnUserWorkAreaInsetsChanged(aura::Window* root_window) {}
-
-  // Invoked when the shelf auto-hide behavior in |root_window| is changed.
-  virtual void OnShelfAutoHideBehaviorChanged(aura::Window* root_window) {}
 
   // Invoked when entering or exiting fullscreen mode in |container|.
   // |container| is always the active desk container.
@@ -40,16 +42,6 @@ class ASH_EXPORT ShellObserver {
 
   // Invoked when |pinned_window| enter or exit pinned mode.
   virtual void OnPinnedStateChanged(aura::Window* pinned_window) {}
-
-  // Called when the split view mode is about to be started before the window
-  // gets snapped and activated).
-  virtual void OnSplitViewModeStarting() {}
-
-  // Called when the split view mode has been started.
-  virtual void OnSplitViewModeStarted() {}
-
-  // Called after split view mode has ended.
-  virtual void OnSplitViewModeEnded() {}
 
   // Called when dictation is activated.
   virtual void OnDictationStarted() {}

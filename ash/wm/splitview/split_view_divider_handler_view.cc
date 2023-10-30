@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,23 @@
 
 #include "ash/display/screen_orientation_controller.h"
 #include "ash/shell.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/wm/splitview/split_view_constants.h"
 #include "ash/wm/splitview/split_view_utils.h"
 #include "base/timer/timer.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
+#include "ui/views/background.h"
 
 namespace ash {
 
 namespace {
 
-constexpr base::TimeDelta kWhiteBarSpawnDelay =
-    base::TimeDelta::FromMilliseconds(kSplitviewDividerSpawnDelayMs);
+SkColor GetBackgroundColor() {
+  return AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kIconColorPrimary);
+}
 
 }  // namespace
 
@@ -27,9 +32,12 @@ class SplitViewDividerHandlerView::SelectionAnimation
  public:
   SelectionAnimation(SplitViewDividerHandlerView* white_handler_view)
       : gfx::SlideAnimation(this), white_handler_view_(white_handler_view) {
-    SetSlideDuration(kSplitviewDividerSelectionStatusChangeDurationMs);
+    SetSlideDuration(kSplitviewDividerSelectionStatusChangeDuration);
     SetTweenType(gfx::Tween::EASE_IN);
   }
+
+  SelectionAnimation(const SelectionAnimation&) = delete;
+  SelectionAnimation& operator=(const SelectionAnimation&) = delete;
 
   ~SelectionAnimation() override = default;
 
@@ -46,13 +54,11 @@ class SplitViewDividerHandlerView::SelectionAnimation
   // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override {
     UpdateWhiteHandlerBounds();
-    white_handler_view_->SetCornerRadius(CurrentValueBetween(
+    white_handler_view_->UpdateCornerRadius(CurrentValueBetween(
         kSplitviewWhiteBarCornerRadius, kSplitviewWhiteBarRadius));
   }
 
   SplitViewDividerHandlerView* white_handler_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(SelectionAnimation);
 };
 
 class SplitViewDividerHandlerView::SpawningAnimation
@@ -67,15 +73,18 @@ class SplitViewDividerHandlerView::SpawningAnimation
                              (divider_signed_offset > 0
                                   ? kSplitviewWhiteBarSpawnUnsignedOffset
                                   : -kSplitviewWhiteBarSpawnUnsignedOffset)) {
-    SetSlideDuration(kSplitviewDividerSpawnDurationMs);
+    SetSlideDuration(kSplitviewDividerSpawnDuration);
     SetTweenType(gfx::Tween::LINEAR_OUT_SLOW_IN);
   }
+
+  SpawningAnimation(const SpawningAnimation&) = delete;
+  SpawningAnimation& operator=(const SpawningAnimation&) = delete;
 
   ~SpawningAnimation() override = default;
 
   void Activate() {
     white_handler_view_->SetVisible(false);
-    delay_timer_.Start(FROM_HERE, kWhiteBarSpawnDelay, this,
+    delay_timer_.Start(FROM_HERE, kSplitviewDividerSpawnDelay, this,
                        &SpawningAnimation::StartAnimation);
   }
 
@@ -108,14 +117,13 @@ class SplitViewDividerHandlerView::SpawningAnimation
   SplitViewDividerHandlerView* white_handler_view_;
   int spawn_signed_offset_;
   base::OneShotTimer delay_timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(SpawningAnimation);
 };
 
 SplitViewDividerHandlerView::SplitViewDividerHandlerView()
-    : RoundedRectView(kSplitviewWhiteBarCornerRadius, kSplitviewWhiteBarColor),
-      selection_animation_(std::make_unique<SelectionAnimation>(this)) {
+    : selection_animation_(std::make_unique<SelectionAnimation>(this)) {
   SetPaintToLayer();
+  SetBackground(views::CreateRoundedRectBackground(
+      GetBackgroundColor(), kSplitviewWhiteBarCornerRadius));
 }
 
 SplitViewDividerHandlerView::~SplitViewDividerHandlerView() = default;
@@ -127,14 +135,18 @@ void SplitViewDividerHandlerView::DoSpawningAnimation(
   spawning_animation_->Activate();
 }
 
-void SplitViewDividerHandlerView::Refresh() {
+void SplitViewDividerHandlerView::Refresh(bool is_resizing) {
   spawning_animation_.reset();
   SetVisible(true);
   selection_animation_->UpdateWhiteHandlerBounds();
-  if (Shell::Get()->split_view_controller()->is_resizing())
+  if (is_resizing)
     selection_animation_->Show();
   else
     selection_animation_->Hide();
+}
+
+void SplitViewDividerHandlerView::UpdateCornerRadius(float radius) {
+  layer()->SetRoundedCornerRadius(gfx::RoundedCornersF{radius});
 }
 
 void SplitViewDividerHandlerView::SetBounds(int short_length,
@@ -154,7 +166,13 @@ void SplitViewDividerHandlerView::OnPaint(gfx::Canvas* canvas) {
   views::View::OnPaint(canvas);
   // It's needed to avoid artifacts when tapping on the divider quickly.
   canvas->DrawColor(SK_ColorTRANSPARENT, SkBlendMode::kSrc);
-  RoundedRectView::OnPaint(canvas);
+  views::View::OnPaint(canvas);
+}
+
+void SplitViewDividerHandlerView::OnThemeChanged() {
+  views::View::OnThemeChanged();
+  background()->SetNativeControlColor(GetBackgroundColor());
+  SchedulePaint();
 }
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,10 @@ enum class KeyboardEnableFlag {
   // Enabled via the "--enable-virtual-keyboard" command line switch.
   // Used for development and debugging.
   kCommandLineEnabled,
+
+  // Enabled via the "--disable-virtual-keyboard" command line switch,
+  // or chrome flag. Used as workaround when VK keeps popping up.
+  kCommandLineDisabled,
 };
 
 // Container types used to set and identify container behavior. Used in UMA

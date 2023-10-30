@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/shelf_types.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_split.h"
 
 namespace ash {
@@ -16,16 +17,69 @@ constexpr char kDelimiter[] = "|";
 
 }  // namespace
 
+std::ostream& operator<<(std::ostream& out, ShelfAutoHideState state) {
+  switch (state) {
+    case SHELF_AUTO_HIDE_SHOWN:
+      return out << "SHOWN";
+    case SHELF_AUTO_HIDE_HIDDEN:
+      return out << "HIDDEN";
+  }
+}
+
+std::ostream& operator<<(std::ostream& out, ShelfBackgroundType type) {
+  switch (type) {
+    case ShelfBackgroundType::kDefaultBg:
+      return out << "DefaultBg";
+    case ShelfBackgroundType::kMaximized:
+      return out << "Maximized";
+    case ShelfBackgroundType::kHomeLauncher:
+      return out << "HomeLauncher";
+    case ShelfBackgroundType::kOobe:
+      return out << "Oobe";
+    case ShelfBackgroundType::kLogin:
+      return out << "Login";
+    case ShelfBackgroundType::kLoginNonBlurredWallpaper:
+      return out << "LoginNonBlurredWallpaper";
+    case ShelfBackgroundType::kOverview:
+      return out << "Overview";
+    case ShelfBackgroundType::kInApp:
+      return out << "InApp";
+  }
+}
+
 bool IsValidShelfItemType(int64_t type) {
-  return type == TYPE_PINNED_APP || type == TYPE_BROWSER_SHORTCUT ||
-         type == TYPE_APP || type == TYPE_DIALOG || type == TYPE_UNDEFINED;
+  switch (type) {
+    case TYPE_PINNED_APP:
+    case TYPE_BROWSER_SHORTCUT:
+    case TYPE_APP:
+    case TYPE_UNPINNED_BROWSER_SHORTCUT:
+    case TYPE_DIALOG:
+    case TYPE_UNDEFINED:
+      return true;
+  }
+  return false;
+}
+
+bool IsPinnedShelfItemType(ShelfItemType type) {
+  switch (type) {
+    case TYPE_PINNED_APP:
+    case TYPE_BROWSER_SHORTCUT:
+      return true;
+    case TYPE_APP:
+    case TYPE_UNPINNED_BROWSER_SHORTCUT:
+    case TYPE_DIALOG:
+    case TYPE_UNDEFINED:
+      return false;
+  }
+  NOTREACHED();
+  return false;
 }
 
 bool SamePinState(ShelfItemType a, ShelfItemType b) {
-  if ((a != TYPE_PINNED_APP && a != TYPE_APP && a != TYPE_BROWSER_SHORTCUT) ||
-      (b != TYPE_PINNED_APP && b != TYPE_APP && b != TYPE_BROWSER_SHORTCUT)) {
+  if (!IsPinnedShelfItemType(a) && a != TYPE_APP)
     return false;
-  }
+  if (!IsPinnedShelfItemType(b) && b != TYPE_APP)
+    return false;
   const bool a_unpinned = (a == TYPE_APP);
   const bool b_unpinned = (b == TYPE_APP);
   return a_unpinned == b_unpinned;

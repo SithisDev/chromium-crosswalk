@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,14 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_window_watcher_item_delegate.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/string_util.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -71,17 +70,12 @@ ShelfWindowWatcher::ContainerWindowObserver::ContainerWindowObserver(
 ShelfWindowWatcher::ContainerWindowObserver::~ContainerWindowObserver() =
     default;
 
-// static
-const char ShelfWindowWatcher::kDefaultShelfIdPrefix[] = "ShelfWindowWatcher";
-
-void ShelfWindowWatcher::ContainerWindowObserver::OnWindowHierarchyChanged(
-    const HierarchyChangeParams& params) {
-  if (!params.old_parent && params.new_parent &&
-      desks_util::IsDeskContainer(params.new_parent)) {
-    // A new window was created in one of the desks' containers. Note that the
-    // shelf is globally showing all apps from all active and inactive desks.
-    window_watcher_->OnUserWindowAdded(params.target);
-  }
+void ShelfWindowWatcher::ContainerWindowObserver::OnWindowAdded(
+    aura::Window* new_window) {
+  DCHECK(new_window);
+  DCHECK(new_window->parent());
+  DCHECK(desks_util::IsDeskContainer(new_window->parent()));
+  window_watcher_->OnUserWindowAdded(new_window);
 }
 
 void ShelfWindowWatcher::ContainerWindowObserver::OnWindowDestroying(
@@ -122,7 +116,7 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowVisibilityChanged(
     aura::Window* window,
     bool visible) {
   // This is also called for descendants; check that the window is observed.
-  if (window_watcher_->observed_user_windows_.IsObserving(window))
+  if (window_watcher_->observed_user_windows_.IsObservingSource(window))
     window_watcher_->OnUserWindowPropertyChanged(window);
 }
 
@@ -135,8 +129,6 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowTitleChanged(
 
 ShelfWindowWatcher::ShelfWindowWatcher(ShelfModel* model)
     : model_(model),
-      container_window_observer_(this),
-      user_window_observer_(this),
       observed_container_windows_(&container_window_observer_),
       observed_user_windows_(&user_window_observer_) {
   Shell::Get()->activation_client()->AddObserver(this);
@@ -155,11 +147,9 @@ void ShelfWindowWatcher::AddShelfItem(aura::Window* window) {
   ShelfItem item;
   UpdateShelfItemForWindow(&item, window);
 
-  model_->SetShelfItemDelegate(
-      item.id,
+  model_->AddAt(
+      model_->item_count(), item,
       std::make_unique<ShelfWindowWatcherItemDelegate>(item.id, window));
-
-  model_->AddAt(model_->item_count(), item);
 }
 
 void ShelfWindowWatcher::RemoveShelfItem(aura::Window* window) {
@@ -172,23 +162,23 @@ void ShelfWindowWatcher::RemoveShelfItem(aura::Window* window) {
 }
 
 void ShelfWindowWatcher::OnContainerWindowDestroying(aura::Window* container) {
-  observed_container_windows_.Remove(container);
+  observed_container_windows_.RemoveObservation(container);
 }
 
 void ShelfWindowWatcher::OnUserWindowAdded(aura::Window* window) {
   // The window may already be tracked from a prior display or parent container.
-  if (observed_user_windows_.IsObserving(window))
+  if (observed_user_windows_.IsObservingSource(window))
     return;
 
-  observed_user_windows_.Add(window);
+  observed_user_windows_.AddObservation(window);
 
   // Add, update, or remove a ShelfItem for |window|, as needed.
   OnUserWindowPropertyChanged(window);
 }
 
 void ShelfWindowWatcher::OnUserWindowDestroying(aura::Window* window) {
-  if (observed_user_windows_.IsObserving(window))
-    observed_user_windows_.Remove(window);
+  if (observed_user_windows_.IsObservingSource(window))
+    observed_user_windows_.RemoveObservation(window);
 
   if (user_windows_with_items_.count(window) > 0)
     RemoveShelfItem(window);
@@ -197,7 +187,7 @@ void ShelfWindowWatcher::OnUserWindowDestroying(aura::Window* window) {
 
 void ShelfWindowWatcher::OnUserWindowPropertyChanged(aura::Window* window) {
   // ShelfWindowWatcher only handles dialogs for now, all other shelf item
-  // types are handled by ChromeLauncherController.
+  // types are handled by ChromeShelfController.
   const ShelfItemType item_type = GetShelfItemType(window);
   if (item_type != TYPE_DIALOG || GetShelfID(window).IsNull()) {
     // Remove |window|'s ShelfItem if it was added by ShelfWindowWatcher.
@@ -236,7 +226,7 @@ void ShelfWindowWatcher::OnRootWindowAdded(aura::Window* root_window) {
   for (aura::Window* container : desks_util::GetDesksContainers(root_window)) {
     for (aura::Window* window : container->children())
       OnUserWindowAdded(window);
-    observed_container_windows_.Add(container);
+    observed_container_windows_.AddObservation(container);
   }
 }
 

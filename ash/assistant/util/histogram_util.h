@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,11 @@
 #define ASH_ASSISTANT_UTIL_HISTOGRAM_UTIL_H_
 
 #include "base/component_export.h"
+#include "chromeos/ash/services/assistant/public/cpp/assistant_service.h"
 
 namespace ash {
 
 enum class AssistantButtonId;
-enum class AssistantEntryPoint;
-enum class AssistantExitPoint;
-enum class AssistantQuerySource;
 
 namespace assistant {
 namespace util {
@@ -35,7 +33,8 @@ void IncrementAssistantButtonClickCount(AssistantButtonId button_id);
 
 // Record the input source of each query (e.g. voice, typing).
 COMPONENT_EXPORT(ASSISTANT_UTIL)
-void RecordAssistantQuerySource(AssistantQuerySource source);
+void RecordAssistantQuerySource(
+    chromeos::assistant::AssistantQuerySource source);
 
 }  // namespace util
 }  // namespace assistant

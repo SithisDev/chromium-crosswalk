@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,38 +22,43 @@ class UserChooserDetailedViewController;
 views::View* CreateUserAvatarView(int user_index);
 
 // Get accessibility string for |user_index|.
-base::string16 GetUserItemAccessibleString(int user_index);
+std::u16string GetUserItemAccessibleString(int user_index);
 
 // A button item of a switchable user.
-class UserItemButton : public views::Button, public views::ButtonListener {
+class UserItemButton : public views::Button {
  public:
-  UserItemButton(int user_index,
+  UserItemButton(PressedCallback callback,
                  UserChooserDetailedViewController* controller,
+                 int user_index,
+                 ax::mojom::Role role,
                  bool has_close_button);
+
+  UserItemButton(const UserItemButton&) = delete;
+  UserItemButton& operator=(const UserItemButton&) = delete;
+
   ~UserItemButton() override = default;
 
   void SetCaptureState(MediaCaptureState capture_states);
 
   // views::Button:
-  base::string16 GetTooltipText(const gfx::Point& p) const override;
-
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  std::u16string GetTooltipText(const gfx::Point& p) const override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
  private:
   const int user_index_;
-  UserChooserDetailedViewController* const controller_;
   views::ImageView* const capture_icon_;
   views::Label* const name_;
   views::Label* const email_;
-
-  DISALLOW_COPY_AND_ASSIGN(UserItemButton);
 };
 
 // A detailed view of user chooser.
 class UserChooserView : public views::View, public MediaCaptureObserver {
  public:
   explicit UserChooserView(UserChooserDetailedViewController* controller);
+
+  UserChooserView(const UserChooserView&) = delete;
+  UserChooserView& operator=(const UserChooserView&) = delete;
+
   ~UserChooserView() override;
 
   // MediaCaptureObserver:
@@ -65,10 +70,8 @@ class UserChooserView : public views::View, public MediaCaptureObserver {
 
  private:
   std::vector<UserItemButton*> user_item_buttons_;
-
-  DISALLOW_COPY_AND_ASSIGN(UserChooserView);
 };
 
 }  // namespace ash
 
-#endif  // ASH_SYSTEM_UNIFIED_UNIFIED_SYSTEM_TRAY_VIEW_H_
+#endif  // ASH_SYSTEM_UNIFIED_USER_CHOOSER_VIEW_H_

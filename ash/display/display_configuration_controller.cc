@@ -1,8 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/display/display_configuration_controller.h"
+
+#include <memory>
 
 #include "ash/display/display_animator.h"
 #include "ash/display/display_util.h"
@@ -13,6 +15,7 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "base/bind.h"
 #include "base/time/time.h"
 #include "chromeos/system/devicemode.h"
@@ -40,14 +43,14 @@ display::DisplayPositionInUnifiedMatrix GetUnifiedModeShelfCellPosition() {
   const ShelfAlignment alignment =
       Shell::GetPrimaryRootWindowController()->shelf()->alignment();
   switch (alignment) {
-    case SHELF_ALIGNMENT_BOTTOM:
-    case SHELF_ALIGNMENT_BOTTOM_LOCKED:
+    case ShelfAlignment::kBottom:
+    case ShelfAlignment::kBottomLocked:
       return display::DisplayPositionInUnifiedMatrix::kBottomLeft;
 
-    case SHELF_ALIGNMENT_LEFT:
+    case ShelfAlignment::kLeft:
       return display::DisplayPositionInUnifiedMatrix::kTopLeft;
 
-    case SHELF_ALIGNMENT_RIGHT:
+    case ShelfAlignment::kRight:
       return display::DisplayPositionInUnifiedMatrix::kTopRight;
   }
 
@@ -61,17 +64,17 @@ class DisplayConfigurationController::DisplayChangeLimiter {
  public:
   DisplayChangeLimiter() : throttle_timeout_(base::Time::Now()) {}
 
+  DisplayChangeLimiter(const DisplayChangeLimiter&) = delete;
+  DisplayChangeLimiter& operator=(const DisplayChangeLimiter&) = delete;
+
   void SetThrottleTimeout(int64_t throttle_ms) {
-    throttle_timeout_ =
-        base::Time::Now() + base::TimeDelta::FromMilliseconds(throttle_ms);
+    throttle_timeout_ = base::Time::Now() + base::Milliseconds(throttle_ms);
   }
 
   bool IsThrottled() const { return base::Time::Now() < throttle_timeout_; }
 
  private:
   base::Time throttle_timeout_;
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayChangeLimiter);
 };
 
 // static
@@ -83,13 +86,12 @@ DisplayConfigurationController::DisplayConfigurationController(
     display::DisplayManager* display_manager,
     WindowTreeHostManager* window_tree_host_manager)
     : display_manager_(display_manager),
-      window_tree_host_manager_(window_tree_host_manager),
-      weak_ptr_factory_(this) {
+      window_tree_host_manager_(window_tree_host_manager) {
   window_tree_host_manager_->AddObserver(this);
   if (chromeos::IsRunningAsSystemCompositor())
-    limiter_.reset(new DisplayChangeLimiter);
+    limiter_ = std::make_unique<DisplayChangeLimiter>();
   if (!g_disable_animator_for_test)
-    display_animator_.reset(new DisplayAnimator());
+    display_animator_ = std::make_unique<DisplayAnimator>();
 }
 
 DisplayConfigurationController::~DisplayConfigurationController() {
@@ -100,8 +102,8 @@ void DisplayConfigurationController::SetDisplayLayout(
     std::unique_ptr<display::DisplayLayout> layout) {
   if (display_animator_) {
     display_animator_->StartFadeOutAnimation(
-        base::Bind(&DisplayConfigurationController::SetDisplayLayoutImpl,
-                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&layout)));
+        base::BindOnce(&DisplayConfigurationController::SetDisplayLayoutImpl,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(layout)));
   } else {
     SetDisplayLayoutImpl(std::move(layout));
   }
@@ -112,7 +114,7 @@ void DisplayConfigurationController::SetUnifiedDesktopLayoutMatrix(
   DCHECK(display_manager_->IsInUnifiedMode());
 
   if (display_animator_) {
-    display_animator_->StartFadeOutAnimation(base::Bind(
+    display_animator_->StartFadeOutAnimation(base::BindOnce(
         &DisplayConfigurationController::SetUnifiedDesktopLayoutMatrixImpl,
         weak_ptr_factory_.GetWeakPtr(), matrix));
   } else {
@@ -129,8 +131,8 @@ void DisplayConfigurationController::SetMirrorMode(bool mirror, bool throttle) {
   SetThrottleTimeout(kCycleDisplayThrottleTimeoutMs);
   if (display_animator_) {
     display_animator_->StartFadeOutAnimation(
-        base::Bind(&DisplayConfigurationController::SetMirrorModeImpl,
-                   weak_ptr_factory_.GetWeakPtr(), mirror));
+        base::BindOnce(&DisplayConfigurationController::SetMirrorModeImpl,
+                       weak_ptr_factory_.GetWeakPtr(), mirror));
   } else {
     SetMirrorModeImpl(mirror);
   }
@@ -141,7 +143,9 @@ void DisplayConfigurationController::SetDisplayRotation(
     display::Display::Rotation rotation,
     display::Display::RotationSource source,
     DisplayConfigurationController::RotationAnimation mode) {
-  if (display_manager_->IsDisplayIdValid(display_id)) {
+  // No need to apply animation if the wallpaper isn't set yet during startup.
+  if (display_manager_->IsDisplayIdValid(display_id) &&
+      Shell::Get()->wallpaper_controller()->is_wallpaper_set()) {
     if (GetTargetRotation(display_id) == rotation)
       return;
     if (display_animator_) {
@@ -177,8 +181,8 @@ void DisplayConfigurationController::SetPrimaryDisplayId(int64_t display_id,
   SetThrottleTimeout(kSetPrimaryDisplayThrottleTimeoutMs);
   if (display_animator_) {
     display_animator_->StartFadeOutAnimation(
-        base::Bind(&DisplayConfigurationController::SetPrimaryDisplayIdImpl,
-                   weak_ptr_factory_.GetWeakPtr(), display_id));
+        base::BindOnce(&DisplayConfigurationController::SetPrimaryDisplayIdImpl,
+                       weak_ptr_factory_.GetWeakPtr(), display_id));
   } else {
     SetPrimaryDisplayIdImpl(display_id);
   }
@@ -204,7 +208,7 @@ void DisplayConfigurationController::SetAnimatorForTest(bool enable) {
   if (display_animator_ && !enable)
     display_animator_.reset();
   else if (!display_animator_ && enable)
-    display_animator_.reset(new DisplayAnimator());
+    display_animator_ = std::make_unique<DisplayAnimator>();
 }
 
 // Private
@@ -228,7 +232,7 @@ void DisplayConfigurationController::SetDisplayLayoutImpl(
 void DisplayConfigurationController::SetMirrorModeImpl(bool mirror) {
   display_manager_->SetMirrorMode(
       mirror ? display::MirrorMode::kNormal : display::MirrorMode::kOff,
-      base::nullopt);
+      absl::nullopt);
   if (display_animator_)
     display_animator_->StartFadeInAnimation();
 }

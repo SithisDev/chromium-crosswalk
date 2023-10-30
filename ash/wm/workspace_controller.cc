@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include "ash/wm/fullscreen_window_finder.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/window_animations.h"
 #include "ash/wm/window_state.h"
-#include "ash/wm/wm_window_animations.h"
 #include "ash/wm/workspace/backdrop_controller.h"
 #include "ash/wm/workspace/workspace_event_handler.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
@@ -112,14 +112,14 @@ void WorkspaceController::DoInitialAnimation() {
 
     settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
     layer->GetAnimator()->SchedulePauseForProperties(
-        base::TimeDelta::FromMilliseconds(kInitialPauseTimeMS),
+        base::Milliseconds(kInitialPauseTimeMS),
         ui::LayerAnimationElement::TRANSFORM |
             ui::LayerAnimationElement::OPACITY |
             ui::LayerAnimationElement::BRIGHTNESS |
             ui::LayerAnimationElement::VISIBILITY);
     settings.SetTweenType(gfx::Tween::EASE_OUT);
     settings.SetTransitionDuration(
-        base::TimeDelta::FromMilliseconds(kInitialAnimationDurationMS));
+        base::Milliseconds(kInitialAnimationDurationMS));
     layer->SetTransform(gfx::Transform());
     layer->SetOpacity(1.0f);
   }

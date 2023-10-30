@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_ASSISTANT_UI_LOGO_VIEW_LOGO_VIEW_H_
 #define ASH_ASSISTANT_UI_LOGO_VIEW_LOGO_VIEW_H_
 
+#include <memory>
+
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "ui/views/view.h"
 
 namespace ash {
@@ -22,6 +23,10 @@ class COMPONENT_EXPORT(ASSISTANT_UI) LogoView : public views::View {
   };
 
   LogoView();
+
+  LogoView(const LogoView&) = delete;
+  LogoView& operator=(const LogoView&) = delete;
+
   ~LogoView() override;
 
   // If |animate| is true, animates to the |state|.
@@ -32,10 +37,7 @@ class COMPONENT_EXPORT(ASSISTANT_UI) LogoView : public views::View {
   virtual void SetSpeechLevel(float speech_level) {}
 
   // Creates LogoView based on the build flag ENABLE_CROS_LIBASSISTANT.
-  static LogoView* Create();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LogoView);
+  static std::unique_ptr<LogoView> Create();
 };
 
 }  // namespace ash

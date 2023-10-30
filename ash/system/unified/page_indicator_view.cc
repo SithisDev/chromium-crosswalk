@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,50 +10,61 @@
 
 #include "ash/app_list/app_list_metrics.h"
 #include "ash/public/cpp/pagination/pagination_model.h"
-#include "ash/system/tray/tray_constants.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/color_util.h"
+#include "ash/style/style_util.h"
+#include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/unified/unified_system_tray_controller.h"
+#include "base/bind.h"
 #include "base/i18n/number_formatting.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "third_party/skia/include/core/SkPath.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/insets.h"
-#include "ui/gfx/skia_util.h"
-#include "ui/strings/grit/ui_strings.h"
-#include "ui/views/animation/flood_fill_ink_drop_ripple.h"
-#include "ui/views/animation/ink_drop_highlight.h"
-#include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
-#include "ui/views/animation/ink_drop_painted_layer_delegates.h"
+#include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/views/animation/ink_drop.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/layout/box_layout.h"
 
 namespace ash {
 
 namespace {
 
+constexpr int kUnifiedPageIndicatorButtonRadius = 3;
 constexpr int kInkDropRadius = 3 * kUnifiedPageIndicatorButtonRadius;
-
-constexpr SkColor kInkDropRippleColor =
-    SkColorSetA(kUnifiedPageIndicatorButtonInkDropColor, 0xF);
-constexpr SkColor kInkDropHighlightColor =
-    SkColorSetA(kUnifiedPageIndicatorButtonInkDropColor, 0x14);
 
 }  // namespace
 
 // Button internally used in PageIndicatorView. Each button
 // stores a page number which it switches to if pressed.
-class PageIndicatorView::PageIndicatorButton : public views::Button,
-                                               public views::ButtonListener {
+class PageIndicatorView::PageIndicatorButton : public views::Button {
  public:
-  explicit PageIndicatorButton(UnifiedSystemTrayController* controller,
-                               int page)
-      : views::Button(this), controller_(controller), page_number_(page) {
-    SetInkDropMode(InkDropMode::ON);
+  PageIndicatorButton(UnifiedSystemTrayController* controller, int page)
+      : views::Button(base::BindRepeating(
+            &UnifiedSystemTrayController::HandlePageSwitchAction,
+            base::Unretained(controller),
+            page)) {
+    SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
+    views::InstallFixedSizeCircleHighlightPathGenerator(this, kInkDropRadius);
+
+    const gfx::Point center = GetLocalBounds().CenterPoint();
+    const gfx::Rect bounds(center.x() - kInkDropRadius,
+                           center.y() - kInkDropRadius, 2 * kInkDropRadius,
+                           2 * kInkDropRadius);
+    StyleUtil::SetUpInkDropForButton(this, GetLocalBounds().InsetsFrom(bounds),
+                                     /*highlight_on_hover=*/true,
+                                     /*highlight_on_focus=*/false);
   }
+
+  PageIndicatorButton(const PageIndicatorButton&) = delete;
+  PageIndicatorButton& operator=(const PageIndicatorButton&) = delete;
 
   ~PageIndicatorButton() override {}
 
@@ -67,6 +78,7 @@ class PageIndicatorView::PageIndicatorButton : public views::Button,
       NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
   }
 
+  // views::View:
   gfx::Size CalculatePreferredSize() const override {
     return gfx::Size(kInkDropRadius * 2, kInkDropRadius * 2);
   }
@@ -74,71 +86,43 @@ class PageIndicatorView::PageIndicatorButton : public views::Button,
   // views::Button:
   const char* GetClassName() const override { return "PageIndicatorView"; }
 
+  // views::Button:
   void PaintButtonContents(gfx::Canvas* canvas) override {
     gfx::Rect rect(GetContentsBounds());
 
-    SkColor current_color = selected_
-                                ? kUnifiedPageIndicatorButtonColor
-                                : SkColorSetA(kUnifiedPageIndicatorButtonColor,
-                                              kUnifiedPageIndicatorButtonAlpha);
-
+    const SkColor selected_color =
+        AshColorProvider::Get()->GetContentLayerColor(
+            AshColorProvider::ContentLayerType::kIconColorPrimary);
     cc::PaintFlags flags;
     flags.setAntiAlias(true);
     flags.setStyle(cc::PaintFlags::kFill_Style);
-    flags.setColor(current_color);
+    flags.setColor(selected_ ? selected_color
+                             : ColorUtil::GetDisabledColor(selected_color));
     canvas->DrawCircle(rect.CenterPoint(), kUnifiedPageIndicatorButtonRadius,
                        flags);
   }
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override {
-    DCHECK(controller_);
-    controller_->HandlePageSwitchAction(page_number_);
+
+  // views::Button:
+  void OnThemeChanged() override {
+    views::Button::OnThemeChanged();
+    StyleUtil::ConfigureInkDropAttributes(
+        this, StyleUtil::kBaseColor | StyleUtil::kInkDropOpacity |
+                  StyleUtil::kHighlightOpacity);
+    SchedulePaint();
   }
 
-  bool selected() { return selected_; }
+  bool selected() const { return selected_; }
 
  protected:
-  std::unique_ptr<views::InkDrop> CreateInkDrop() override {
-    std::unique_ptr<views::InkDropImpl> ink_drop =
-        Button::CreateDefaultInkDropImpl();
-    ink_drop->SetShowHighlightOnHover(true);
-    ink_drop->SetAutoHighlightMode(
-        views::InkDropImpl::AutoHighlightMode::SHOW_ON_RIPPLE);
-    return std::move(ink_drop);
-  }
-
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override {
-    return std::make_unique<views::CircleInkDropMask>(
-        size(), GetLocalBounds().CenterPoint(), kInkDropRadius);
-  }
-
-  std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override {
-    gfx::Point center = GetLocalBounds().CenterPoint();
-    gfx::Rect bounds(center.x() - kInkDropRadius, center.y() - kInkDropRadius,
-                     2 * kInkDropRadius, 2 * kInkDropRadius);
-    return std::make_unique<views::FloodFillInkDropRipple>(
-        size(), GetLocalBounds().InsetsFrom(bounds),
-        GetInkDropCenterBasedOnLastEvent(), kInkDropRippleColor, 1.0f);
-  }
-
-  std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
-      const override {
-    return std::make_unique<views::InkDropHighlight>(
-        gfx::PointF(GetLocalBounds().CenterPoint()),
-        std::make_unique<views::CircleLayerDelegate>(kInkDropHighlightColor,
-                                                     kInkDropRadius));
-  }
-
+  // views::Button:
   void NotifyClick(const ui::Event& event) override {
     Button::NotifyClick(event);
-    GetInkDrop()->AnimateToState(views::InkDropState::ACTION_TRIGGERED);
+    views::InkDrop::Get(this)->GetInkDrop()->AnimateToState(
+        views::InkDropState::ACTION_TRIGGERED);
   }
 
  private:
   bool selected_ = false;
-  UnifiedSystemTrayController* const controller_;
-  const int page_number_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(PageIndicatorButton);
 };
 
 PageIndicatorView::PageIndicatorView(UnifiedSystemTrayController* controller,
@@ -148,15 +132,15 @@ PageIndicatorView::PageIndicatorView(UnifiedSystemTrayController* controller,
       expanded_amount_(initially_expanded ? 1 : 0),
       buttons_container_(new views::View) {
   SetVisible(initially_expanded);
-  SetPaintToLayer();
-  layer()->SetFillsBoundsOpaquely(false);
 
   buttons_container_->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets()));
+  buttons_container_->SetPaintToLayer();
+  buttons_container_->layer()->SetFillsBoundsOpaquely(false);
 
   AddChildView(buttons_container_);
 
-  TotalPagesChanged();
+  TotalPagesChanged(0, model_->total_pages());
 
   DCHECK(model_);
   model_->AddObserver(this);
@@ -167,9 +151,7 @@ PageIndicatorView::~PageIndicatorView() {
 }
 
 gfx::Size PageIndicatorView::CalculatePreferredSize() const {
-  gfx::Size size = buttons_container_->GetPreferredSize();
-  size.set_height(size.height() * expanded_amount_);
-  return size;
+  return gfx::Size(kTrayMenuWidth, kPageIndicatorViewMaxHeight);
 }
 
 void PageIndicatorView::Layout() {
@@ -188,15 +170,22 @@ void PageIndicatorView::SetExpandedAmount(double expanded_amount) {
   DCHECK(0.0 <= expanded_amount && expanded_amount <= 1.0);
   SetVisible(expanded_amount > 0.0);
   expanded_amount_ = expanded_amount;
-  InvalidateLayout();
   // TODO(amehfooz): Confirm animation curve with UX.
-  layer()->SetOpacity(std::max(0., 6 * expanded_amount_ - 5.));
+  buttons_container_->layer()->SetOpacity(
+      std::max(0., 6 * expanded_amount_ - 5.));
+  if (CalculatePreferredSize() != size())
+    InvalidateLayout();
 }
 
-void PageIndicatorView::TotalPagesChanged() {
+int PageIndicatorView::GetExpandedHeight() {
+  return buttons_container_->GetPreferredSize().height();
+}
+
+void PageIndicatorView::TotalPagesChanged(int previous_page_count,
+                                          int new_page_count) {
   DCHECK(model_);
 
-  buttons_container_->RemoveAllChildViews(true);
+  buttons_container_->RemoveAllChildViews();
   for (int i = 0; i < model_->total_pages(); ++i) {
     PageIndicatorButton* button = new PageIndicatorButton(controller_, i);
     button->SetAccessibleName(l10n_util::GetStringFUTF16(
@@ -219,9 +208,9 @@ void PageIndicatorView::SelectedPageChanged(int old_selected,
                                             int new_selected) {
   size_t total_children = buttons_container_->children().size();
 
-  if (old_selected >= 0 && size_t{old_selected} < total_children)
+  if (old_selected >= 0 && static_cast<size_t>(old_selected) < total_children)
     GetButtonByIndex(old_selected)->SetSelected(false);
-  if (new_selected >= 0 && size_t{old_selected} < total_children)
+  if (new_selected >= 0 && static_cast<size_t>(new_selected) < total_children)
     GetButtonByIndex(new_selected)->SetSelected(true);
 }
 

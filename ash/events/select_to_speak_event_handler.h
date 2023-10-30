@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define ASH_EVENTS_SELECT_TO_SPEAK_EVENT_HANDLER_H_
 
 #include "ash/ash_export.h"
-#include "base/macros.h"
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
 
@@ -20,6 +19,11 @@ class ASH_EXPORT SelectToSpeakEventHandler : public ui::EventHandler {
  public:
   explicit SelectToSpeakEventHandler(
       SelectToSpeakEventHandlerDelegate* delegate);
+
+  SelectToSpeakEventHandler(const SelectToSpeakEventHandler&) = delete;
+  SelectToSpeakEventHandler& operator=(const SelectToSpeakEventHandler&) =
+      delete;
+
   ~SelectToSpeakEventHandler() override;
 
   // Called when the Select-to-Speak extension changes state. |is_selecting| is
@@ -97,14 +101,12 @@ class ASH_EXPORT SelectToSpeakEventHandler : public ui::EventHandler {
 
   State state_ = INACTIVE;
 
-  ui::PointerId touch_id_ = ui::PointerDetails::kUnknownPointerId;
+  ui::PointerId touch_id_ = ui::kPointerIdUnknown;
 
-  ui::EventPointerType touch_type_ = ui::EventPointerType::POINTER_TYPE_UNKNOWN;
+  ui::EventPointerType touch_type_ = ui::EventPointerType::kUnknown;
 
   // The delegate used to send key events to the Select-to-Speak extension.
   SelectToSpeakEventHandlerDelegate* delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(SelectToSpeakEventHandler);
 };
 
 }  // namespace ash

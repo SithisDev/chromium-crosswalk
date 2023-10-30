@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/overview/scoped_overview_hide_windows.h"
 
-#include "base/logging.h"
+#include "base/containers/contains.h"
+#include "base/notreached.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -13,20 +14,30 @@ ScopedOverviewHideWindows::ScopedOverviewHideWindows(
     const std::vector<aura::Window*>& windows,
     bool force_hidden)
     : force_hidden_(force_hidden) {
-  for (auto* window : windows) {
-    window->AddObserver(this);
-    window_visibility_.emplace(window, window->IsVisible());
-    window->Hide();
-  }
+  for (auto* window : windows)
+    AddWindow(window);
 }
 
 ScopedOverviewHideWindows::~ScopedOverviewHideWindows() {
-  for (auto iter = window_visibility_.begin(); iter != window_visibility_.end();
-       iter++) {
-    iter->first->RemoveObserver(this);
-    if (iter->second)
-      iter->first->Show();
+  for (const auto& element : window_visibility_) {
+    element.first->RemoveObserver(this);
+    if (element.second)
+      element.first->Show();
   }
+}
+
+void ScopedOverviewHideWindows::AddWindow(aura::Window* window) {
+  window->AddObserver(this);
+  window_visibility_.emplace(window, window->IsVisible());
+  window->Hide();
+}
+
+void ScopedOverviewHideWindows::RemoveWindow(aura::Window* window) {
+  DCHECK(base::Contains(window_visibility_, window));
+  window->RemoveObserver(this);
+  if (window_visibility_[window])
+    window->Show();
+  window_visibility_.erase(window);
 }
 
 void ScopedOverviewHideWindows::OnWindowDestroying(aura::Window* window) {

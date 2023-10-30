@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <memory>
 
 #include "ash/metrics/task_switch_time_tracker.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 
 namespace ash {
 
@@ -24,7 +26,7 @@ const char kAcceleratorWindowCycleHistogramName[] =
     "Ash.WindowCycleController.TimeBetweenTaskSwitches";
 
 const char kOverviewModeHistogramName[] =
-    "Ash.WindowSelector.TimeBetweenActiveWindowChanges";
+    "Ash.Overview.TimeBetweenActiveWindowChanges";
 
 // Returns the histogram name for the given |task_switch_source|.
 const char* GetHistogramName(TaskSwitchSource task_switch_source) {

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,25 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/login/ui/login_menu_view.h"
 #include "ash/login/ui/non_accessible_view.h"
+#include "ash/login/ui/public_account_menu_view.h"
 #include "ui/events/event_handler.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/styled_label.h"
+#include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
+
+class PrefRegistrySimple;
 
 namespace ash {
 
+class MonitoringWarningView;
 class ArrowButtonView;
+struct LocaleItem;
 class LoginUserView;
 class RightPaneView;
-class PublicAccountWarningDialog;
+class PublicAccountMonitoringInfoDialog;
 struct LoginUserInfo;
 
 // Implements an expanded view for the public account user to select language
@@ -34,20 +39,22 @@ class ASH_EXPORT LoginExpandedPublicAccountView : public NonAccessibleView {
     explicit TestApi(LoginExpandedPublicAccountView* view);
     ~TestApi();
 
+    LoginUserView* user_view();
     views::View* advanced_view_button();
     ArrowButtonView* submit_button();
     views::View* advanced_view();
-    PublicAccountWarningDialog* warning_dialog();
+    PublicAccountMonitoringInfoDialog* learn_more_dialog();
     views::StyledLabel* learn_more_label();
-    views::View* language_selection_button();
-    views::View* keyboard_selection_button();
-    LoginMenuView* language_menu_view();
-    LoginMenuView* keyboard_menu_view();
-    LoginMenuView::Item selected_language_item();
-    LoginMenuView::Item selected_keyboard_item();
+    PublicAccountMenuView* language_menu_view();
+    PublicAccountMenuView* keyboard_menu_view();
+    std::string selected_language_item_value();
+    std::string selected_keyboard_item_value();
     views::ImageView* monitoring_warning_icon();
     views::Label* monitoring_warning_label();
     void ResetUserForTest();
+    bool SelectLanguage(const std::string& language_code);
+    bool SelectKeyboard(const std::string& ime_id);
+    std::vector<LocaleItem> GetLocales();
 
    private:
     LoginExpandedPublicAccountView* const view_;
@@ -56,32 +63,53 @@ class ASH_EXPORT LoginExpandedPublicAccountView : public NonAccessibleView {
   using OnPublicSessionViewDismissed = base::RepeatingClosure;
   explicit LoginExpandedPublicAccountView(
       const OnPublicSessionViewDismissed& on_dismissed);
+
+  LoginExpandedPublicAccountView(const LoginExpandedPublicAccountView&) =
+      delete;
+  LoginExpandedPublicAccountView& operator=(
+      const LoginExpandedPublicAccountView&) = delete;
+
   ~LoginExpandedPublicAccountView() override;
+
+  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
   void ProcessPressedEvent(const ui::LocatedEvent* event);
   void UpdateForUser(const LoginUserInfo& user);
   const LoginUserInfo& current_user() const;
   void Hide();
   void ShowWarningDialog();
-  void OnWarningDialogClosed();
+  void OnLearnMoreDialogClosed();
   void SetShowFullManagementDisclosure(bool show_full_management_disclosure);
 
+  static gfx::Size GetPreferredSizeLandscape();
+  static gfx::Size GetPreferredSizePortrait();
+
   // views::View:
+  int GetHeightForWidth(int width) const override;
+  void Layout() override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   void OnPaint(gfx::Canvas* canvas) override;
 
   // ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
 
  private:
+  void UseLandscapeLayout();
+  void UsePortraitLayout();
+
+  views::BoxLayout* layout_ = nullptr;
   LoginUserView* user_view_ = nullptr;
+  MonitoringWarningView* monitoring_warning_view_ = nullptr;
+  views::View* left_pane_ = nullptr;
+  views::View* separator_ = nullptr;
   RightPaneView* right_pane_ = nullptr;
+  ArrowButtonView* submit_button_ = nullptr;
+
   OnPublicSessionViewDismissed on_dismissed_;
-  PublicAccountWarningDialog* warning_dialog_ = nullptr;
+  PublicAccountMonitoringInfoDialog* learn_more_dialog_ = nullptr;
   std::unique_ptr<ui::EventHandler> event_handler_;
 
   base::WeakPtrFactory<LoginExpandedPublicAccountView> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(LoginExpandedPublicAccountView);
 };
 
 }  // namespace ash

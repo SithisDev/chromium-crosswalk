@@ -1,12 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/highlighter/highlighter_gesture_util.h"
 
-#include "ash/components/fast_ink/fast_ink_points.h"
-
 #include <cmath>
+
+#include "ash/fast_ink/fast_ink_points.h"
+#include "base/numerics/math_constants.h"
 
 namespace ash {
 
@@ -16,7 +17,7 @@ constexpr float kHorizontalStrokeLengthThreshold = 20;
 constexpr float kHorizontalStrokeThicknessThreshold = 2;
 constexpr float kHorizontalStrokeFlatnessThreshold = 0.1;
 
-constexpr double kClosedShapeSweepThreshold = M_PI * 2 * 0.8;
+constexpr double kClosedShapeSweepThreshold = base::kPiDouble * 2 * 0.8;
 constexpr double kClosedShapeJiggleThreshold = 0.1;
 
 bool DetectHorizontalStroke(const gfx::RectF& box,
@@ -49,10 +50,10 @@ bool DetectClosedShape(const gfx::RectF& box,
         atan2(point.location.y() - center.y(), point.location.x() - center.x());
     if (has_prev_angle) {
       double diff_angle = angle - prev_angle;
-      if (diff_angle > M_PI) {
-        diff_angle -= M_PI * 2;
-      } else if (diff_angle < -M_PI) {
-        diff_angle += M_PI * 2;
+      if (diff_angle > base::kPiDouble) {
+        diff_angle -= base::kPiDouble * 2;
+      } else if (diff_angle < -base::kPiDouble) {
+        diff_angle += base::kPiDouble * 2;
       }
       swept_angle += diff_angle;
       if (diff_angle > 0)

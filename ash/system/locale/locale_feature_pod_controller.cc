@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ LocaleFeaturePodController::LocaleFeaturePodController(
 LocaleFeaturePodController::~LocaleFeaturePodController() = default;
 
 FeaturePodButton* LocaleFeaturePodController::CreateButton() {
-  auto* button = new FeaturePodButton(this);
+  auto* button = new FeaturePodButton(this, /*is_togglable=*/false);
   const bool visible =
       !Shell::Get()->system_tray_model()->locale()->locale_list().empty();
   button->SetVisible(visible);

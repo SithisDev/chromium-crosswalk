@@ -1,14 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shelf/window_preview.h"
 
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/resources/vector_icons/vector_icons.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/wm/window_preview_view.h"
 #include "ash/wm/window_util.h"
+#include "base/bind.h"
 #include "ui/aura/window.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/background.h"
@@ -33,9 +36,7 @@ constexpr SkColor kPreviewContainerBgColor =
     SkColorSetA(gfx::kGoogleGrey100, 0x24);
 constexpr int kPreviewBorderRadius = 4;
 
-WindowPreview::WindowPreview(aura::Window* window,
-                             Delegate* delegate,
-                             const ui::NativeTheme* theme)
+WindowPreview::WindowPreview(aura::Window* window, Delegate* delegate)
     : delegate_(delegate) {
   preview_view_ =
       new WindowPreviewView(window, /*trilinear_filtering_on_init=*/false);
@@ -43,14 +44,14 @@ WindowPreview::WindowPreview(aura::Window* window,
   preview_container_view_->SetBackground(views::CreateRoundedRectBackground(
       kPreviewContainerBgColor, kPreviewBorderRadius));
   title_ = new views::Label(window->GetTitle());
-  close_button_ = new views::ImageButton(this);
+  close_button_ = new views::ImageButton(base::BindRepeating(
+      &WindowPreview::CloseButtonPressed, base::Unretained(this)));
+  close_button_->SetFocusBehavior(FocusBehavior::NEVER);
 
   AddChildView(preview_container_view_);
   AddChildView(preview_view_);
   AddChildView(title_);
   AddChildView(close_button_);
-
-  SetStyling(theme);
 }
 
 WindowPreview::~WindowPreview() = default;
@@ -87,12 +88,13 @@ void WindowPreview::Layout() {
   float preview_ratio = static_cast<float>(mirror_size.width()) /
                         static_cast<float>(mirror_size.height());
 
-  int preview_height = kShelfTooltipPreviewHeight;
+  int preview_height = ShelfConfig::Get()->shelf_tooltip_preview_height();
   int preview_width = preview_height * preview_ratio;
-  if (preview_ratio > kShelfTooltipPreviewMaxRatio) {
+  if (preview_ratio > ShelfConfig::Get()->shelf_tooltip_preview_max_ratio()) {
     // Very wide window.
-    preview_width = kShelfTooltipPreviewMaxWidth;
-    preview_height = kShelfTooltipPreviewMaxWidth / preview_ratio;
+    preview_width = ShelfConfig::Get()->shelf_tooltip_preview_max_width();
+    preview_height =
+        ShelfConfig::Get()->shelf_tooltip_preview_max_width() / preview_ratio;
   }
 
   // Center the actual preview over the container, horizontally and vertically.
@@ -132,28 +134,13 @@ const char* WindowPreview::GetClassName() const {
   return "WindowPreview";
 }
 
-void WindowPreview::ButtonPressed(views::Button* sender,
-                                  const ui::Event& event) {
-  // The close button was pressed.
-  DCHECK_EQ(sender, close_button_);
-  aura::Window* target = preview_view_->window();
-
-  // The window might have been closed in the mean time.
-  // TODO: Use WindowObserver to listen to when previewed windows are
-  // being closed and remove this condition.
-  if (!target)
-    return;
-  window_util::CloseWidgetForWindow(target);
-
-  // This will have the effect of deleting this view.
-  delegate_->OnPreviewDismissed(this);
-}
-
-void WindowPreview::SetStyling(const ui::NativeTheme* theme) {
+void WindowPreview::OnThemeChanged() {
+  views::View::OnThemeChanged();
+  const auto* color_provider = GetColorProvider();
   SkColor background_color =
-      theme->GetSystemColor(ui::NativeTheme::kColorId_TooltipBackground);
+      color_provider->GetColor(ui::kColorTooltipBackground);
   title_->SetEnabledColor(
-      theme->GetSystemColor(ui::NativeTheme::kColorId_TooltipText));
+      color_provider->GetColor(ui::kColorTooltipForeground));
   title_->SetBackgroundColor(background_color);
 
   // The background is not opaque, so we can't do subpixel rendering.
@@ -170,9 +157,24 @@ void WindowPreview::SetStyling(const ui::NativeTheme* theme) {
 
 gfx::Size WindowPreview::GetPreviewContainerSize() const {
   return gfx::Size(
-      std::min(delegate_->GetMaxPreviewRatio() * kShelfTooltipPreviewHeight,
-               static_cast<float>(kShelfTooltipPreviewMaxWidth)),
-      kShelfTooltipPreviewHeight);
+      std::min(delegate_->GetMaxPreviewRatio() *
+                   ShelfConfig::Get()->shelf_tooltip_preview_height(),
+               static_cast<float>(
+                   ShelfConfig::Get()->shelf_tooltip_preview_max_width())),
+      ShelfConfig::Get()->shelf_tooltip_preview_height());
+}
+
+void WindowPreview::CloseButtonPressed() {
+  // The window might have been closed in the mean time.
+  // TODO: Use WindowObserver to listen to when previewed windows are
+  // being closed and remove this condition.
+  aura::Window* target = preview_view_->window();
+  if (!target)
+    return;
+  window_util::CloseWidgetForWindow(target);
+
+  // This will have the effect of deleting this view.
+  delegate_->OnPreviewDismissed(this);
 }
 
 }  // namespace ash

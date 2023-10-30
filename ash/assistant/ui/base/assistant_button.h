@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,14 @@
 
 #include <memory>
 
+#include "ash/public/cpp/style/color_provider.h"
 #include "base/component_export.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/color/color_id.h"
 #include "ui/gfx/color_palette.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/controls/button/image_button.h"
 
 namespace gfx {
@@ -19,48 +22,80 @@ struct VectorIcon;
 }  // namespace gfx
 
 namespace views {
-class ButtonListener;
 class ImageButton;
 }  // namespace views
 
 namespace ash {
 
+class AssistantButton;
+class AssistantButtonListener;
 enum class AssistantButtonId;
 
 class COMPONENT_EXPORT(ASSISTANT_UI) AssistantButton
-    : public views::ImageButton,
-      public views::ButtonListener {
+    : public views::ImageButton {
  public:
-  AssistantButton(views::ButtonListener* listener, AssistantButtonId button_id);
+  METADATA_HEADER(AssistantButton);
+
+  // Initialization parameters for customizing the Assistant button.
+  struct InitParams {
+    InitParams();
+
+    InitParams(InitParams&&);
+    InitParams& operator=(InitParams&&) = default;
+
+    ~InitParams();
+
+    // Size of the Assistant button.
+    int size_in_dip = 0;
+
+    // Params for the icon.
+    int icon_size_in_dip = 0;
+    SkColor icon_color = gfx::kGoogleGrey700;
+    // If both icon_color and icon_color_type are specified, icon_color_type
+    // will be used.
+    absl::optional<ui::ColorId> icon_color_type;
+
+    // ID of the localization string for the button's accessible name.
+    absl::optional<int> accessible_name_id;
+
+    // ID of the localization string for the button's tooltip text.
+    absl::optional<int> tooltip_id;
+  };
+
+  AssistantButton(AssistantButtonListener* listener,
+                  AssistantButtonId button_id);
+  AssistantButton(const AssistantButton&) = delete;
+  AssistantButton& operator=(const AssistantButton&) = delete;
   ~AssistantButton() override;
 
-  // Creates an ImageButton with the default Assistant styles.
-  static views::ImageButton* Create(
-      views::ButtonListener* listener,
+  // Creates a button with the default Assistant styles.
+  static std::unique_ptr<AssistantButton> Create(
+      AssistantButtonListener* listener,
       const gfx::VectorIcon& icon,
-      int size_in_dip,
-      int icon_size_in_dip,
-      int accessible_name_id,
       AssistantButtonId button_id,
-      base::Optional<int> tooltip_id = base::nullopt,
-      SkColor icon_color = gfx::kGoogleGrey700);
+      InitParams params);
 
-  // views::Button:
-  const char* GetClassName() const override;
+  AssistantButtonId GetAssistantButtonId() const { return id_; }
+
+  // views::ImageButton:
+  void OnBlur() override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
-  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
-  std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
-      const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
-  std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
+  void OnFocus() override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  // views::View:
+  void OnPaintBackground(gfx::Canvas* canvas) override;
+  void OnThemeChanged() override;
 
  private:
-  views::ButtonListener* listener_;
+  void OnButtonPressed();
 
-  DISALLOW_COPY_AND_ASSIGN(AssistantButton);
+  AssistantButtonListener* listener_;
+  const AssistantButtonId id_;
+
+  // |icon_color_type_| and |icon_description_| are stored only when
+  // icon_color_type is specified in InitParams.
+  absl::optional<ui::ColorId> icon_color_type_;
+  absl::optional<gfx::IconDescription> icon_description_;
 };
 
 }  // namespace ash

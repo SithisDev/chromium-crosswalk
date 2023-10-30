@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,7 @@ UserSession::~UserSession() = default;
 bool operator==(const UserSession& a, const UserSession& b) {
   return a.session_id == b.session_id && a.user_info == b.user_info &&
          a.custodian_email == b.custodian_email &&
-         a.second_custodian_email == b.second_custodian_email &&
-         a.should_enable_settings == b.should_enable_settings &&
-         a.should_show_notification_tray == b.should_show_notification_tray;
+         a.second_custodian_email == b.second_custodian_email;
 }
 
 }  // namespace ash

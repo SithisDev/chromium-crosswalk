@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ class ASH_EXPORT FeaturePodControllerBase {
   virtual ~FeaturePodControllerBase() {}
 
   // Create the view. Subclasses instantiate FeaturePodButton.
-  // The view will be onwed by views hierarchy. The view will be always deleted
+  // The view will be owned by views hierarchy. The view will be always deleted
   // after the controller is destructed (UnifiedSystemTrayBubble guarantees
   // this).
   virtual FeaturePodButton* CreateButton() = 0;

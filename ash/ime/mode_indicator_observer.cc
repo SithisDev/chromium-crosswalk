@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@ ModeIndicatorObserver::ModeIndicatorObserver() : active_widget_(nullptr) {}
 ModeIndicatorObserver::~ModeIndicatorObserver() {
   if (active_widget_)
     active_widget_->RemoveObserver(this);
+  CHECK(!IsInObserverList());
 }
 
 void ModeIndicatorObserver::AddModeIndicatorWidget(views::Widget* widget) {

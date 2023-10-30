@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,10 @@ class ASH_EXPORT FeaturePodsContainerView : public views::View,
  public:
   FeaturePodsContainerView(UnifiedSystemTrayController* controller,
                            bool initially_expanded);
+
+  FeaturePodsContainerView(const FeaturePodsContainerView&) = delete;
+  FeaturePodsContainerView& operator=(const FeaturePodsContainerView&) = delete;
+
   ~FeaturePodsContainerView() override;
 
   // Add a FeaturePodButton as a child view and if it's visible add it to the
@@ -50,6 +54,9 @@ class ASH_EXPORT FeaturePodsContainerView : public views::View,
   // Returns the number of children that prefer to be visible.
   int GetVisibleCount() const;
 
+  // Make sure button is visible by switching page if needed.
+  void EnsurePageWithButton(views::View* button);
+
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
   void ChildVisibilityChanged(View* child) override;
@@ -60,6 +67,8 @@ class ASH_EXPORT FeaturePodsContainerView : public views::View,
   void OnScrollEvent(ui::ScrollEvent* event) override;
   bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
   const char* GetClassName() const override;
+
+  int row_count() const { return feature_pod_rows_; }
 
  private:
   friend class FeaturePodsContainerViewTest;
@@ -75,6 +84,9 @@ class ASH_EXPORT FeaturePodsContainerView : public views::View,
 
   // Calculates the ideal bounds for all feature pods.
   void CalculateIdealBoundsForFeaturePods();
+
+  // Calculate the number of feature pod rows based on available height.
+  int CalculateRowsFromHeight(int height);
 
   // Calculates the offset for |page_of_view| based on current page and
   // transition target page.
@@ -114,8 +126,6 @@ class ASH_EXPORT FeaturePodsContainerView : public views::View,
   // A view model that contains all visible feature pod buttons.
   // Used to calculate required number of pages.
   views::ViewModelT<FeaturePodButton> visible_buttons_;
-
-  DISALLOW_COPY_AND_ASSIGN(FeaturePodsContainerView);
 };
 
 }  // namespace ash

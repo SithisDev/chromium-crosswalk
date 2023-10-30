@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,11 +26,11 @@ constexpr int kNotificationHeaderLineHeight = 20;
 }  // namespace
 
 NotificationMenuHeaderView::NotificationMenuHeaderView() {
-  SetBorder(views::CreateEmptyBorder(gfx::Insets(
+  SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(
       kNotificationVerticalPadding, kNotificationHorizontalPadding)));
 
   notification_title_ = new views::Label(
-      base::string16(l10n_util::GetStringUTF16(
+      std::u16string(l10n_util::GetStringUTF16(
           IDS_MESSAGE_CENTER_NOTIFICATION_ACCESSIBLE_NAME_PLURAL)),
       {views::Label::GetDefaultFontList().DeriveWithSizeDelta(1)});
   notification_title_->SetEnabledColor(kNotificationHeaderTextColor);
@@ -38,7 +38,7 @@ NotificationMenuHeaderView::NotificationMenuHeaderView() {
   AddChildView(notification_title_);
 
   counter_ = new views::Label(
-      base::string16(),
+      std::u16string(),
       {views::Label::GetDefaultFontList().DeriveWithSizeDelta(1)});
   counter_->SetEnabledColor(kNotificationHeaderTextColor);
   counter_->SetLineHeight(kNotificationHeaderLineHeight);
@@ -58,7 +58,7 @@ void NotificationMenuHeaderView::UpdateCounter(int number_of_notifications) {
 
 gfx::Size NotificationMenuHeaderView::CalculatePreferredSize() const {
   return gfx::Size(
-      views::MenuConfig::instance().touchable_menu_width,
+      views::MenuConfig::instance().touchable_menu_min_width,
       GetInsets().height() + notification_title_->GetPreferredSize().height());
 }
 

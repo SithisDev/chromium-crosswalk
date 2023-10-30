@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 #define ASH_DETACHABLE_BASE_DETACHABLE_BASE_NOTIFICATION_CONTROLLER_H_
 
 #include "ash/ash_export.h"
+#include "ash/detachable_base/detachable_base_handler.h"
 #include "ash/detachable_base/detachable_base_observer.h"
-#include "ash/session/session_observer.h"
-#include "base/scoped_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
+#include "base/scoped_observation.h"
 
 namespace ash {
-
-class DetachableBaseHandler;
 
 // Observes DetachableBaseHandler to detect changes to detachable base state,
 // and shows relevant notifications as needed:
@@ -35,6 +34,12 @@ class ASH_EXPORT DetachableBaseNotificationController
 
   explicit DetachableBaseNotificationController(
       DetachableBaseHandler* detachable_base_handler);
+
+  DetachableBaseNotificationController(
+      const DetachableBaseNotificationController&) = delete;
+  DetachableBaseNotificationController& operator=(
+      const DetachableBaseNotificationController&) = delete;
+
   ~DetachableBaseNotificationController() override;
 
   // DetachableBaseObserver:
@@ -61,11 +66,9 @@ class ASH_EXPORT DetachableBaseNotificationController
 
   DetachableBaseHandler* detachable_base_handler_;
 
-  ScopedObserver<DetachableBaseHandler, DetachableBaseObserver>
-      detachable_base_observer_;
-  ScopedSessionObserver session_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(DetachableBaseNotificationController);
+  base::ScopedObservation<DetachableBaseHandler, DetachableBaseObserver>
+      detachable_base_observation_{this};
+  ScopedSessionObserver session_observer_{this};
 };
 
 }  // namespace ash

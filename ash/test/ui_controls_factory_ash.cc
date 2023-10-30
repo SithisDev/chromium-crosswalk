@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shell.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "base/callback.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
@@ -52,6 +53,10 @@ UIControlsAura* GetUIControlsAt(const gfx::Point& point_in_screen) {
 class UIControlsAsh : public UIControlsAura {
  public:
   UIControlsAsh() = default;
+
+  UIControlsAsh(const UIControlsAsh&) = delete;
+  UIControlsAsh& operator=(const UIControlsAsh&) = delete;
+
   ~UIControlsAsh() override = default;
 
   // UIControslAura overrides:
@@ -80,14 +85,14 @@ class UIControlsAsh : public UIControlsAura {
                window, key, control, shift, alt, command, std::move(closure));
   }
 
-  bool SendMouseMove(long x, long y) override {
+  bool SendMouseMove(int x, int y) override {
     gfx::Point p(x, y);
     UIControlsAura* ui_controls = GetUIControlsAt(p);
     return ui_controls && ui_controls->SendMouseMove(p.x(), p.y());
   }
 
-  bool SendMouseMoveNotifyWhenDone(long x,
-                                   long y,
+  bool SendMouseMoveNotifyWhenDone(int x,
+                                   int y,
                                    base::OnceClosure closure) override {
     gfx::Point p(x, y);
     UIControlsAura* ui_controls = GetUIControlsAt(p);
@@ -135,9 +140,6 @@ class UIControlsAsh : public UIControlsAura {
     return ui_controls && ui_controls->SendTouchEventsNotifyWhenDone(
                               action, id, x, y, std::move(task));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UIControlsAsh);
 };
 
 ui_controls::UIControlsAura* CreateAshUIControls() {

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,41 +6,33 @@
 #define ASH_WM_OVERVIEW_OVERVIEW_CONSTANTS_H_
 
 #include "ash/ash_export.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/wm/window_mini_view.h"
 #include "base/time/time.h"
 
 namespace ash {
 
 // The time duration for transformation animations.
-constexpr base::TimeDelta kTransition = base::TimeDelta::FromMilliseconds(300);
+constexpr base::TimeDelta kTransition = base::Milliseconds(300);
 
 // In the conceptual overview table, the window margin is the space reserved
 // around the window within the cell. This margin does not overlap so the
 // closest distance between adjacent windows will be twice this amount.
 constexpr int kWindowMargin = 5;
 
-// Cover the transformed window including the gaps between the windows with a
-// transparent shield to block the input events from reaching the transformed
-// window while in overview.
-constexpr int kOverviewMargin = kWindowMargin * 2;
-
 // Height of an item header.
-constexpr int kHeaderHeightDp = 40;
+constexpr int kHeaderHeightDp = WindowMiniView::kHeaderHeightDp;
 
-// The opacity of the shield widget that is used to darken the background of
-// the grid.
-constexpr float kShieldOpacity = 0.4f;
+// Windows whose aspect ratio surpass this (width twice as large as height or
+// vice versa) will be classified as too wide or too tall and will be handled
+// slightly differently in overview mode.
+constexpr float kExtremeWindowRatioThreshold = 2.f;
 
-// The amount of rounding on window edges in overview mode.
-constexpr int kOverviewWindowRoundingDp = 4;
-
-// Amount of blur to apply on the wallpaper when we enter or exit overview
-// mode.
-constexpr float kWallpaperBlurSigma = 10.f;
-constexpr float kWallpaperClearBlurSigma = 0.f;
-
-// Amount of time we wait to unpause the occlusion tracker after a overview item
-// is finished dragging. Waits a bit longer than the overview item animation.
-constexpr int kOcclusionPauseDurationForDragMs = 300;
+// Inset for the focus ring around the focusable overview items. The ring is 2px
+// thick and should have a 2px gap from the view it is associated with. Since
+// the thickness is 2px and the stroke is in the middle, we use a -3px inset to
+// achieve this.
+constexpr int kFocusRingHaloInset = -3;
 
 }  // namespace ash
 

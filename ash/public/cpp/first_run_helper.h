@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ class ASH_EXPORT FirstRunHelper {
   static std::unique_ptr<FirstRunHelper> Start(base::OnceClosure on_cancelled);
 
   // Returns the bounds of the home button on the primary display in screen
-  // coordinates.
+  // coordinates. Returns empty bounds if the home button is not shown in shelf.
   virtual gfx::Rect GetAppListButtonBounds() = 0;
 
   // Opens the system tray bubble menu to show the default view. Does nothing if

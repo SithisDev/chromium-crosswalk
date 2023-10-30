@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,34 @@
 
 #include <memory>
 
+#include "ash/ash_export.h"
 #include "ash/system/unified/detailed_view_controller.h"
-#include "base/macros.h"
-#include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/ash/components/audio/cras_audio_handler.h"
 
 namespace ash {
 
-namespace tray {
 class AudioDetailedView;
-}  // namespace tray
-
 class DetailedViewDelegate;
 class UnifiedSystemTrayController;
 
 // Controller of Audio detailed view in UnifiedSystemTray.
-class UnifiedAudioDetailedViewController
+class ASH_EXPORT UnifiedAudioDetailedViewController
     : public DetailedViewController,
-      public chromeos::CrasAudioHandler::AudioObserver {
+      public CrasAudioHandler::AudioObserver {
  public:
   explicit UnifiedAudioDetailedViewController(
       UnifiedSystemTrayController* tray_controller);
+
+  UnifiedAudioDetailedViewController(
+      const UnifiedAudioDetailedViewController&) = delete;
+  UnifiedAudioDetailedViewController& operator=(
+      const UnifiedAudioDetailedViewController&) = delete;
+
   ~UnifiedAudioDetailedViewController() override;
 
   // DetailedViewControllerBase:
   views::View* CreateView() override;
+  std::u16string GetAccessibleName() const override;
 
   // CrasAudioHandler::AudioObserver.
   void OnAudioNodesChanged() override;
@@ -40,9 +44,7 @@ class UnifiedAudioDetailedViewController
  private:
   const std::unique_ptr<DetailedViewDelegate> detailed_view_delegate_;
 
-  tray::AudioDetailedView* view_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(UnifiedAudioDetailedViewController);
+  AudioDetailedView* view_ = nullptr;
 };
 
 }  // namespace ash

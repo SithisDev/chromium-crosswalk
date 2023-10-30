@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 
 #include "ash/ash_export.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/style/ash_color_provider_source.h"
 #include "ash/wm/workspace/workspace_types.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 
@@ -26,11 +27,13 @@ class Point;
 
 namespace ui {
 class WindowTreeHost;
+class SimpleMenuModel;
 }
 
 namespace views {
 class MenuRunner;
-}
+class Widget;
+}  // namespace views
 
 namespace wm {
 class ScopedCaptureClient;
@@ -46,6 +49,7 @@ enum class LoginStatus;
 class RootWindowLayoutManager;
 class Shelf;
 class ShelfLayoutManager;
+class SplitViewController;
 class StackingController;
 class StatusAreaWidget;
 class SystemModalContainerLayoutManager;
@@ -54,7 +58,6 @@ class TouchExplorationManager;
 class TouchHudDebug;
 class TouchHudProjection;
 class WallpaperWidgetController;
-class WindowManager;
 class WorkAreaInsets;
 
 // This class maintains the per root window state for ash. This class
@@ -71,13 +74,19 @@ class ASH_EXPORT RootWindowController {
   // PRIMARY and all others SECONDARY.
   enum class RootWindowType { PRIMARY, SECONDARY };
 
+  RootWindowController(const RootWindowController&) = delete;
+  RootWindowController& operator=(const RootWindowController&) = delete;
+
   ~RootWindowController();
 
   // Creates and Initialize the RootWindowController for primary display.
-  static void CreateForPrimaryDisplay(AshWindowTreeHost* host);
+  // Returns a pointer to the newly created controller.
+  static RootWindowController* CreateForPrimaryDisplay(AshWindowTreeHost* host);
 
   // Creates and Initialize the RootWindowController for secondary displays.
-  static void CreateForSecondaryDisplay(AshWindowTreeHost* host);
+  // Returns a pointer to the newly created controller.
+  static RootWindowController* CreateForSecondaryDisplay(
+      AshWindowTreeHost* host);
 
   // Returns a RootWindowController of the window's root window.
   static RootWindowController* ForWindow(const aura::Window* window);
@@ -90,8 +99,6 @@ class ASH_EXPORT RootWindowController {
                                     : std::vector<RootWindowController*>();
   }
 
-  // TODO(sky): move these to a separate class or use AshWindowTreeHost in
-  // mash. http://crbug.com/671246.
   AshWindowTreeHost* ash_host() { return ash_host_.get(); }
   const AshWindowTreeHost* ash_host() const { return ash_host_.get(); }
 
@@ -99,6 +106,10 @@ class ASH_EXPORT RootWindowController {
   const aura::WindowTreeHost* GetHost() const;
   aura::Window* GetRootWindow();
   const aura::Window* GetRootWindow() const;
+
+  SplitViewController* split_view_controller() const {
+    return split_view_controller_.get();
+  }
 
   Shelf* shelf() const { return shelf_.get(); }
 
@@ -173,6 +184,10 @@ class ASH_EXPORT RootWindowController {
     return lock_screen_action_background_controller_.get();
   }
 
+  AshColorProviderSource* color_provider_source() {
+    return color_provider_source_.get();
+  }
+
   // Deletes associated objects and clears the state, but doesn't delete
   // the root window yet. This is used to delete a secondary displays'
   // root window safely when the display disconnect signal is received,
@@ -189,9 +204,6 @@ class ASH_EXPORT RootWindowController {
   // for something else.
   void MoveWindowsTo(aura::Window* dest);
 
-  // Force the shelf to query for it's current visibility state.
-  void UpdateShelfVisibility();
-
   // Initialize touch HUDs if necessary.
   void InitTouchHuds();
 
@@ -201,6 +213,9 @@ class ASH_EXPORT RootWindowController {
   // currently active desk on this root.
   aura::Window* GetWindowForFullscreenMode();
 
+  // Returns true if window is fulllscreen and the shelf is hidden.
+  bool IsInFullscreenMode();
+
   // If touch exploration is enabled, update the touch exploration
   // controller so that synthesized touch events are anchored at this point.
   void SetTouchAccessibilityAnchorPoint(const gfx::Point& anchor_point);
@@ -209,10 +224,20 @@ class ASH_EXPORT RootWindowController {
   void ShowContextMenu(const gfx::Point& location_in_screen,
                        ui::MenuSourceType source_type);
   void HideContextMenu();
+  void HideContextMenuNoAnimation();
   bool IsContextMenuShown() const;
 
   // Called when the login status changes after login (such as lock/unlock).
   void UpdateAfterLoginStatusChange(LoginStatus status);
+
+  void CreateAmbientWidget();
+  void CloseAmbientWidget(bool immediately);
+  bool HasAmbientWidget() const;
+
+  views::Widget* ambient_widget_for_testing() { return ambient_widget_.get(); }
+  AppMenuModelAdapter* menu_model_adapter_for_testing() {
+    return root_window_menu_model_adapter_.get();
+  }
 
   // Returns accessibility panel layout manager for this root window.
   AccessibilityPanelLayoutManager* GetAccessibilityPanelLayoutManagerForTest();
@@ -221,16 +246,8 @@ class ASH_EXPORT RootWindowController {
   FRIEND_TEST_ALL_PREFIXES(RootWindowControllerTest,
                            ContextMenuDisappearsInTabletMode);
 
-  // TODO(sky): remove this. Temporary during ash-mus unification.
-  // http://crbug.com/671246.
-  friend class WindowManager;
-
-  // Creates a new RootWindowController with the specified host. Only one of
-  // |ash_host| or |window_tree_host| should be specified. This takes ownership
-  // of the supplied arguments.
-  // TODO(sky): mash should create AshWindowTreeHost, http://crbug.com/671246.
-  RootWindowController(AshWindowTreeHost* ash_host,
-                       aura::WindowTreeHost* window_tree_host);
+  // Takes ownership of |ash_host|.
+  explicit RootWindowController(AshWindowTreeHost* ash_host);
 
   // Initializes the RootWindowController based on |root_window_type|.
   void Init(RootWindowType root_window_type);
@@ -238,9 +255,6 @@ class ASH_EXPORT RootWindowController {
   void InitLayoutManagers();
 
   AccessibilityPanelLayoutManager* GetAccessibilityPanelLayoutManager() const;
-
-  // Initializes the shelf for this root window and notifies observers.
-  void InitializeShelf();
 
   // Creates the containers (aura::Windows) used by the shell.
   void CreateContainers();
@@ -255,11 +269,6 @@ class ASH_EXPORT RootWindowController {
   // not this is the first boot.
   void CreateSystemWallpaper(RootWindowType root_window_type);
 
-  // Resets Shell::GetRootWindowForNewWindows() if appropriate. This is called
-  // during shutdown to make sure GetRootWindowForNewWindows() isn't referencing
-  // this.
-  void ResetRootForNewWindowsIfNecessary();
-
   // Callback for MenuRunner.
   void OnMenuClosed();
 
@@ -268,8 +277,7 @@ class ASH_EXPORT RootWindowController {
   void OnFirstWallpaperWidgetSet();
 
   std::unique_ptr<AshWindowTreeHost> ash_host_;
-  std::unique_ptr<aura::WindowTreeHost> mus_window_tree_host_;
-  // This comes from |ash_host_| or |mus_window_tree_host_|.
+  // |ash_host_| as a WindowTreeHost.
   aura::WindowTreeHost* window_tree_host_;
 
   // LayoutManagers are owned by the window they are installed on.
@@ -281,17 +289,16 @@ class ASH_EXPORT RootWindowController {
 
   // Manages the context menu.
   std::unique_ptr<AppMenuModelAdapter> root_window_menu_model_adapter_;
+  std::unique_ptr<ui::SimpleMenuModel> sort_apps_submenu_;
 
   std::unique_ptr<StackingController> stacking_controller_;
+
+  std::unique_ptr<SplitViewController> split_view_controller_;
 
   // The shelf controller for this root window. Exists for the entire lifetime
   // of the RootWindowController so that it is safe for observers to be added
   // to it during construction of the shelf widget and status tray.
   std::unique_ptr<Shelf> shelf_;
-
-  // TODO(jamescook): Eliminate this. It is left over from legacy shelf code and
-  // doesn't mean anything in particular.
-  bool shelf_initialized_ = false;
 
   std::unique_ptr<SystemWallpaperController> system_wallpaper_;
 
@@ -309,6 +316,10 @@ class ASH_EXPORT RootWindowController {
   std::unique_ptr<LockScreenActionBackgroundController>
       lock_screen_action_background_controller_;
 
+  std::unique_ptr<views::Widget> ambient_widget_;
+
+  std::unique_ptr<AshColorProviderSource> color_provider_source_;
+
   // Whether child windows have been closed during shutdown. Exists to avoid
   // calling related cleanup code more than once.
   bool did_close_child_windows_ = false;
@@ -316,8 +327,6 @@ class ASH_EXPORT RootWindowController {
   std::unique_ptr<WorkAreaInsets> work_area_insets_;
 
   static std::vector<RootWindowController*>* root_window_controllers_;
-
-  DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };
 
 }  // namespace ash

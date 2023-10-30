@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,36 +6,51 @@
 #define ASH_SYSTEM_TRAY_TRAY_POPUP_UTILS_H_
 
 #include <memory>
+#include <string>
 
+#include "ash/ash_export.h"
 #include "ash/login_status.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_ink_drop_style.h"
 #include "ash/system/tray/tri_view.h"
-#include "base/strings/string16.h"
+#include "ui/views/controls/button/button.h"
 
 namespace views {
-class ButtonListener;
 class Button;
 class ImageView;
-class InkDrop;
-class InkDropRipple;
-class InkDropHighlight;
-class InkDropHostView;
 class Label;
 class LabelButton;
 class Painter;
 class Separator;
-class Slider;
-class SliderListener;
-class ToggleButton;
 }  // namespace views
 
 namespace ash {
 class HoverHighlightView;
+class UnfocusableLabel;
 
 // Factory/utility functions used by the system menu.
-class TrayPopupUtils {
+class ASH_EXPORT TrayPopupUtils {
  public:
+  enum class FontStyle {
+    // Topmost header rows for default view and detailed view.
+    kTitle,
+    // Topmost header for secondary tray bubbles
+    kPodMenuHeader,
+    // Small title used for selections in tray bubbles.
+    kSmallTitle,
+    // Text in sub-section header rows in detailed views.
+    kSubHeader,
+    // Main text used by detailed view rows.
+    kDetailedViewLabel,
+    // System information text (e.g. date/time, battery status, "Scanning for
+    // devices..." seen in the Bluetooth detailed view, etc).
+    kSystemInfo,
+  };
+
+  TrayPopupUtils() = delete;
+  TrayPopupUtils(const TrayPopupUtils&) = delete;
+  TrayPopupUtils& operator=(const TrayPopupUtils&) = delete;
+
   // Creates a default container view to be used by system menu rows that are
   // either a single targetable area or not targetable at all. The caller takes
   // over ownership of the created view.
@@ -93,6 +108,10 @@ class TrayPopupUtils {
   // TODO(bruthig): Update all system menu rows to use this.
   static views::Label* CreateDefaultLabel();
 
+  // Returns a label that has been configured for system menu layout and does
+  // not allow accessibility focus.
+  static UnfocusableLabel* CreateUnfocusableLabel();
+
   // Returns an image view to be used in the main image region of a system menu
   // row. This should be used by all rows that have a main image, i.e. both
   // default and detailed rows should use this.
@@ -100,27 +119,8 @@ class TrayPopupUtils {
   // TODO(bruthig): Update all system menu rows to use this.
   static views::ImageView* CreateMainImageView();
 
-  // Returns an image view to be used in the 'more' region of default rows. This
-  // is used for all 'more' images as well as other images that appear in this
-  // region, e.g. audio output icon.
-  //
-  // TODO(bruthig): Update all default rows to use this.
-  static views::ImageView* CreateMoreImageView();
-
-  // Returns a slider configured for proper layout within a TriView container
-  // with a FillLayout.
-  static views::Slider* CreateSlider(views::SliderListener* listener);
-
-  // Returns a ToggleButton that has been configured for system menu layout.
-  static views::ToggleButton* CreateToggleButton(
-      views::ButtonListener* listener,
-      int accessible_name_id);
-
   // Creates a default focus painter used for most things in tray popups.
   static std::unique_ptr<views::Painter> CreateFocusPainter();
-
-  // Common setup for various buttons in the system menu.
-  static void ConfigureTrayPopupButton(views::Button* button);
 
   // Sets up |view| to be a sticky header in a tray detail scroll view.
   static void ConfigureAsStickyHeader(views::View* view);
@@ -136,48 +136,23 @@ class TrayPopupUtils {
   // button. For non-MD, this does the same thing as the above. Caller assumes
   // ownership.
   static views::LabelButton* CreateTrayPopupButton(
-      views::ButtonListener* listener,
-      const base::string16& text);
+      views::Button::PressedCallback callback,
+      const std::u16string& text);
 
   // Creates and returns a vertical separator to be used between two items in a
   // material design system menu row. The caller assumes ownership of the
   // returned separator.
   static views::Separator* CreateVerticalSeparator();
 
-  // Creates in InkDrop instance for |host|.
-  // All styles are configured to show the highlight when the ripple is visible.
-  //
-  // All targetable views in the system menu should delegate
-  // InkDropHost::CreateInkDrop() calls here.
-  static std::unique_ptr<views::InkDrop> CreateInkDrop(
-      views::InkDropHostView* host);
+  // Installs a HighlightPathGenerator matching the TrayPopupInkDropStyle.
+  static void InstallHighlightPathGenerator(
+      views::View* host,
+      TrayPopupInkDropStyle ink_drop_style);
 
-  // Creates an InkDropRipple instance for |host| according to the
-  // |ink_drop_style|. The ripple will be centered on |center_point|.
-  //
-  // All targetable views in the system menu should delegate
-  // InkDropHost::CreateInkDropRipple() calls here.
-  static std::unique_ptr<views::InkDropRipple> CreateInkDropRipple(
-      TrayPopupInkDropStyle ink_drop_style,
-      const views::View* host,
-      const gfx::Point& center_point,
-      SkColor color = kTrayPopupInkDropBaseColor);
-
-  // Creates in InkDropHighlight instance for |host| according to the
-  // |ink_drop_style|.
-  //
-  // All targetable views in the system menu should delegate
-  // InkDropHost::CreateInkDropHighlight() calls here.
-  static std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight(
-      TrayPopupInkDropStyle ink_drop_style,
-      const views::View* host,
-      SkColor color = kTrayPopupInkDropBaseColor);
-
-  // Creates a SkPath matching the TrayPopupInkDropStyle. This path is normally
-  // used to generate the focus ring and ink drop shapes.
-  static std::unique_ptr<SkPath> CreateHighlightPath(
-      TrayPopupInkDropStyle ink_drop_style,
-      const views::View* host);
+  // Create a horizontal separator line to be drawn between rows in a detailed
+  // view above the sub-header rows. Caller assumes ownership of the returned
+  // view.
+  static views::Separator* CreateListSubHeaderSeparator();
 
   // Creates and returns a horizontal separator line to be drawn between rows
   // in a detailed view. If |left_inset| is true, then the separator is inset on
@@ -191,25 +166,17 @@ class TrayPopupUtils {
   static bool CanOpenWebUISettings();
 
   // Initializes a row in the system menu as checkable and update the check mark
-  // status of this row.
+  // status of this row. If |enterprise_managed| is true, adds an enterprise
+  // managed icon to the row.
   static void InitializeAsCheckableRow(HoverHighlightView* container,
-                                       bool checked);
-
+                                       bool checked,
+                                       bool enterprise_managed);
   // Updates the visibility and a11y state of the checkable row |container|.
   static void UpdateCheckMarkVisibility(HoverHighlightView* container,
                                         bool visible);
 
- private:
-  // Returns the effective ink drop insets for |host| according to the
-  // |ink_drop_style|.
-  static gfx::Insets GetInkDropInsets(TrayPopupInkDropStyle ink_drop_style);
-
-  // Returns the effective ink drop bounds for |host| according to the
-  // |ink_drop_style|.
-  static gfx::Rect GetInkDropBounds(TrayPopupInkDropStyle ink_drop_style,
-                                    const views::View* host);
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(TrayPopupUtils);
+  // Sets the font list for |label| based on |style|.
+  static void SetLabelFontList(views::Label* label, FontStyle style);
 };
 
 }  // namespace ash

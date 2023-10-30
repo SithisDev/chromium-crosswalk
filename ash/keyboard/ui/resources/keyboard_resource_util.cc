@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "ash/keyboard/ui/grit/keyboard_resources_map.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace keyboard {
@@ -16,11 +15,11 @@ namespace keyboard {
 const char kKeyboardURL[] = "chrome://keyboard";
 const char kKeyboardHost[] = "keyboard";
 
-const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
+const webui::ResourcePath* GetKeyboardExtensionResources(size_t* size) {
   // This looks a lot like the contents of a resource map; however it is
   // necessary to have a custom path for the extension path, so the resource
   // map cannot be used directly.
-  static const GritResourceMap kKeyboardResources[] = {
+  static const webui::ResourcePath kKeyboardResources[] = {
       {"keyboard/locales/en.js", IDR_KEYBOARD_LOCALES_EN},
       {"keyboard/config/emoji.js", IDR_KEYBOARD_CONFIG_EMOJI},
       {"keyboard/config/hwt.js", IDR_KEYBOARD_CONFIG_HWT},
@@ -93,7 +92,7 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
       {"keyboard/sounds/keypress-standard.wav",
        IDR_KEYBOARD_SOUNDS_KEYPRESS_STANDARD},
   };
-  *size = base::size(kKeyboardResources);
+  *size = std::size(kKeyboardResources);
   return kKeyboardResources;
 }
 
@@ -104,11 +103,11 @@ void InitializeKeyboardResources() {
   initialized = true;
 
   base::FilePath pak_dir;
-  base::PathService::Get(base::DIR_MODULE, &pak_dir);
+  base::PathService::Get(base::DIR_ASSETS, &pak_dir);
   base::FilePath pak_file =
       pak_dir.Append(FILE_PATH_LITERAL("keyboard_resources.pak"));
-  ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-      pak_file, ui::SCALE_FACTOR_100P);
+  ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(pak_file,
+                                                              ui::k100Percent);
 }
 
 }  // namespace keyboard

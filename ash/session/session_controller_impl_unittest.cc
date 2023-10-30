@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,21 +11,22 @@
 
 #include "ash/login_status.h"
 #include "ash/public/cpp/ash_prefs.h"
-#include "ash/session/session_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/user_manager/user_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -38,6 +39,10 @@ namespace {
 class TestSessionObserver : public SessionObserver {
  public:
   TestSessionObserver() : active_account_id_(EmptyAccountId()) {}
+
+  TestSessionObserver(const TestSessionObserver&) = delete;
+  TestSessionObserver& operator=(const TestSessionObserver&) = delete;
+
   ~TestSessionObserver() override = default;
 
   // SessionObserver:
@@ -54,7 +59,9 @@ class TestSessionObserver : public SessionObserver {
   void OnSessionStateChanged(SessionState state) override { state_ = state; }
 
   void OnActiveUserPrefServiceChanged(PrefService* pref_service) override {
+    DCHECK_NE(last_user_pref_service_, pref_service);
     last_user_pref_service_ = pref_service;
+    ++user_prefs_changed_count_;
   }
 
   std::string GetUserSessionEmails() const {
@@ -75,6 +82,7 @@ class TestSessionObserver : public SessionObserver {
     return last_user_pref_service_;
   }
   void clear_last_user_pref_service() { last_user_pref_service_ = nullptr; }
+  int user_prefs_changed_count() const { return user_prefs_changed_count_; }
 
  private:
   SessionState state_ = SessionState::UNKNOWN;
@@ -82,8 +90,7 @@ class TestSessionObserver : public SessionObserver {
   bool first_session_started_ = false;
   std::vector<AccountId> user_session_account_ids_;
   PrefService* last_user_pref_service_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSessionObserver);
+  int user_prefs_changed_count_ = 0;
 };
 
 void FillDefaultSessionInfo(SessionInfo* info) {
@@ -97,6 +104,11 @@ void FillDefaultSessionInfo(SessionInfo* info) {
 class SessionControllerImplTest : public testing::Test {
  public:
   SessionControllerImplTest() = default;
+
+  SessionControllerImplTest(const SessionControllerImplTest&) = delete;
+  SessionControllerImplTest& operator=(const SessionControllerImplTest&) =
+      delete;
+
   ~SessionControllerImplTest() override = default;
 
   // testing::Test:
@@ -137,8 +149,49 @@ class SessionControllerImplTest : public testing::Test {
  private:
   std::unique_ptr<SessionControllerImpl> controller_;
   TestSessionObserver observer_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(SessionControllerImplTest);
+class SessionControllerImplWithShellTest : public AshTestBase {
+ public:
+  SessionControllerImplWithShellTest() = default;
+
+  SessionControllerImplWithShellTest(
+      const SessionControllerImplWithShellTest&) = delete;
+  SessionControllerImplWithShellTest& operator=(
+      const SessionControllerImplWithShellTest&) = delete;
+
+  ~SessionControllerImplWithShellTest() override = default;
+
+  // AshTestBase:
+  void SetUp() override {
+    AshTestBase::SetUp();
+    controller()->AddObserver(&observer_);
+  }
+
+  void TearDown() override {
+    controller()->RemoveObserver(&observer_);
+    window_.reset();
+    AshTestBase::TearDown();
+  }
+
+  void CreateFullscreenWindow() {
+    window_ = CreateTestWindow();
+    window_->SetProperty(aura::client::kShowStateKey,
+                         ui::SHOW_STATE_FULLSCREEN);
+    window_state_ = WindowState::Get(window_.get());
+  }
+
+  SessionControllerImpl* controller() {
+    return Shell::Get()->session_controller();
+  }
+  const TestSessionObserver* observer() const { return &observer_; }
+
+ protected:
+  WindowState* window_state_ = nullptr;
+
+ private:
+  TestSessionObserver observer_;
+  std::unique_ptr<aura::Window> window_;
 };
 
 // Tests that the simple session info is reflected properly.
@@ -219,7 +272,7 @@ TEST_F(SessionControllerImplTest, AddUserPolicy) {
 }
 
 // Tests that session state can be set and reflected properly.
-TEST_F(SessionControllerImplTest, SessionState) {
+TEST_F(SessionControllerImplWithShellTest, SessionState) {
   const struct {
     SessionState state;
     bool expected_is_screen_locked;
@@ -237,7 +290,7 @@ TEST_F(SessionControllerImplTest, SessionState) {
   FillDefaultSessionInfo(&info);
   for (const auto& test_case : kTestCases) {
     info.state = test_case.state;
-    SetSessionInfo(info);
+    controller()->SetSessionInfo(info);
 
     EXPECT_EQ(test_case.state, controller()->GetSessionState())
         << "Test case state=" << static_cast<int>(test_case.state);
@@ -263,7 +316,7 @@ TEST_F(SessionControllerImplTest, GetLoginStatus) {
       {SessionState::LOGIN_PRIMARY, LoginStatus::NOT_LOGGED_IN},
       {SessionState::LOGGED_IN_NOT_ACTIVE, LoginStatus::NOT_LOGGED_IN},
       {SessionState::LOCKED, LoginStatus::LOCKED},
-      // TODO: Add LOGIN_SECONDARY if we added a status for it.
+      // TODO(jamescook): Add LOGIN_SECONDARY if we added a status for it.
   };
 
   SessionInfo info;
@@ -291,11 +344,12 @@ TEST_F(SessionControllerImplTest, GetLoginStateForActiveSession) {
       {user_manager::USER_TYPE_REGULAR, LoginStatus::USER},
       {user_manager::USER_TYPE_GUEST, LoginStatus::GUEST},
       {user_manager::USER_TYPE_PUBLIC_ACCOUNT, LoginStatus::PUBLIC},
-      {user_manager::USER_TYPE_SUPERVISED, LoginStatus::SUPERVISED},
       {user_manager::USER_TYPE_KIOSK_APP, LoginStatus::KIOSK_APP},
-      {user_manager::USER_TYPE_CHILD, LoginStatus::SUPERVISED},
-      {user_manager::USER_TYPE_ARC_KIOSK_APP, LoginStatus::ARC_KIOSK_APP},
-      // TODO: Add USER_TYPE_ACTIVE_DIRECTORY if we add a status for it.
+      {user_manager::USER_TYPE_CHILD, LoginStatus::CHILD},
+      {user_manager::USER_TYPE_ARC_KIOSK_APP, LoginStatus::KIOSK_APP},
+      {user_manager::USER_TYPE_WEB_KIOSK_APP, LoginStatus::KIOSK_APP}
+      // TODO(jamescook): Add USER_TYPE_ACTIVE_DIRECTORY if we add a status for
+      // it.
   };
 
   for (const auto& test_case : kTestCases) {
@@ -367,24 +421,21 @@ TEST_F(SessionControllerImplTest, ActiveSession) {
 // Tests that user session is unblocked with a running unlock animation so that
 // focus rules can find a correct activatable window after screen lock is
 // dismissed.
-TEST_F(SessionControllerImplTest,
+TEST_F(SessionControllerImplWithShellTest,
        UserSessionUnblockedWithRunningUnlockAnimation) {
   SessionInfo info;
   FillDefaultSessionInfo(&info);
 
   // LOCKED means blocked user session.
   info.state = SessionState::LOCKED;
-  SetSessionInfo(info);
+  controller()->SetSessionInfo(info);
   EXPECT_TRUE(controller()->IsUserSessionBlocked());
-
-  // Mark a running unlock animation unblocks user session.
-  controller()->RunUnlockAnimation(base::OnceClosure());
-  EXPECT_FALSE(controller()->IsUserSessionBlocked());
 
   const struct {
     SessionState state;
-    bool expected_is_user_session_blocked;
+    bool expect_blocked_after_unlock_animation;
   } kTestCases[] = {
+      {SessionState::LOCKED, false},
       {SessionState::OOBE, true},
       {SessionState::LOGIN_PRIMARY, true},
       {SessionState::LOGGED_IN_NOT_ACTIVE, false},
@@ -393,24 +444,17 @@ TEST_F(SessionControllerImplTest,
   };
   for (const auto& test_case : kTestCases) {
     info.state = test_case.state;
-    SetSessionInfo(info);
+    controller()->SetSessionInfo(info);
 
     // Mark a running unlock animation.
-    controller()->RunUnlockAnimation(base::OnceClosure());
-
-    EXPECT_EQ(test_case.expected_is_user_session_blocked,
+    base::RunLoop run_loop;
+    controller()->RunUnlockAnimation(base::BindLambdaForTesting(
+        [&run_loop](bool aborted) { run_loop.Quit(); }));
+    run_loop.Run();
+    EXPECT_EQ(test_case.expect_blocked_after_unlock_animation,
               controller()->IsUserSessionBlocked())
         << "Test case state=" << static_cast<int>(test_case.state);
   }
-}
-
-TEST_F(SessionControllerImplTest, IsUserSupervised) {
-  UserSession session;
-  session.session_id = 1u;
-  session.user_info.type = user_manager::USER_TYPE_SUPERVISED;
-  controller()->UpdateUserSession(session);
-
-  EXPECT_TRUE(controller()->IsUserSupervised());
 }
 
 TEST_F(SessionControllerImplTest, IsUserChild) {
@@ -420,14 +464,11 @@ TEST_F(SessionControllerImplTest, IsUserChild) {
   controller()->UpdateUserSession(session);
 
   EXPECT_TRUE(controller()->IsUserChild());
-
-  // Child accounts are supervised.
-  EXPECT_TRUE(controller()->IsUserSupervised());
 }
 
 using SessionControllerImplPrefsTest = NoSessionAshTestBase;
 
-// Verifies that ShellObserver is notified for PrefService changes.
+// Verifies that SessionObserver is notified for PrefService changes.
 TEST_F(SessionControllerImplPrefsTest, Observer) {
   constexpr char kUser1[] = "user1@test.com";
   constexpr char kUser2[] = "user2@test.com";
@@ -441,12 +482,11 @@ TEST_F(SessionControllerImplPrefsTest, Observer) {
   // Setup 2 users.
   TestSessionControllerClient* session = GetSessionControllerClient();
   // Disable auto-provision of PrefService for each user.
-  constexpr bool kEnableSettings = true;
   constexpr bool kProvidePrefService = false;
   session->AddUserSession(kUser1, user_manager::USER_TYPE_REGULAR,
-                          kEnableSettings, kProvidePrefService);
+                          kProvidePrefService);
   session->AddUserSession(kUser2, user_manager::USER_TYPE_REGULAR,
-                          kEnableSettings, kProvidePrefService);
+                          kProvidePrefService);
 
   // The observer is not notified because the PrefService for kUser1 is not yet
   // ready.
@@ -465,30 +505,58 @@ TEST_F(SessionControllerImplPrefsTest, Observer) {
 
   // Switching to a user for which prefs are not ready does not notify and
   // GetLastActiveUserPrefService() returns the old PrefService.
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  session->SwitchActiveUser(kUserAccount2);
   EXPECT_EQ(nullptr, observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
             controller->GetLastActiveUserPrefService());
 
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser1));
-  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
-            observer.last_user_pref_service());
+  session->SwitchActiveUser(kUserAccount1);
+  EXPECT_EQ(nullptr, observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
             controller->GetLastActiveUserPrefService());
 
   // There should be no notification about a PrefService for an inactive user
   // becoming initialized.
-  observer.clear_last_user_pref_service();
   pref_service = std::make_unique<TestingPrefServiceSimple>();
   RegisterUserProfilePrefs(pref_service->registry(), true /* for_test */);
   session->SetUserPrefService(kUserAccount2, std::move(pref_service));
   EXPECT_EQ(nullptr, observer.last_user_pref_service());
 
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  session->SwitchActiveUser(kUserAccount2);
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
             observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
             controller->GetLastActiveUserPrefService());
+
+  controller->RemoveObserver(&observer);
+}
+
+// Verifies that SessionObserver is notified only once for the same user prefs.
+TEST_F(SessionControllerImplPrefsTest, NotifyOnce) {
+  constexpr char kUser1[] = "user1@test.com";
+  constexpr char kUser2[] = "user2@test.com";
+  const AccountId kUserAccount1 = AccountId::FromUserEmail(kUser1);
+  const AccountId kUserAccount2 = AccountId::FromUserEmail(kUser2);
+
+  TestSessionObserver observer;
+  SessionControllerImpl* controller = Shell::Get()->session_controller();
+  controller->AddObserver(&observer);
+  ASSERT_EQ(0, observer.user_prefs_changed_count());
+
+  SimulateUserLogin(kUser1);
+  EXPECT_EQ(1, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
+
+  SimulateUserLogin(kUser2);
+  EXPECT_EQ(2, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
+            observer.last_user_pref_service());
+
+  GetSessionControllerClient()->SwitchActiveUser(kUserAccount1);
+  EXPECT_EQ(3, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
 
   controller->RemoveObserver(&observer);
 }
@@ -554,6 +622,10 @@ class CanSwitchUserTest : public AshTestBase {
     DECLINE_DIALOG,  // A dialog should be shown and we do not accept it.
   };
   CanSwitchUserTest() = default;
+
+  CanSwitchUserTest(const CanSwitchUserTest&) = delete;
+  CanSwitchUserTest& operator=(const CanSwitchUserTest&) = delete;
+
   ~CanSwitchUserTest() override = default;
 
   void TearDown() override {
@@ -567,7 +639,7 @@ class CanSwitchUserTest : public AshTestBase {
     Shell::Get()->system_tray_notifier()->NotifyScreenCaptureStart(
         base::BindRepeating(&CanSwitchUserTest::StopCaptureCallback,
                             base::Unretained(this)),
-        base::RepeatingClosure(), base::string16());
+        base::RepeatingClosure(), std::u16string());
   }
 
   // The callback which gets called when the screen capture gets stopped.
@@ -584,7 +656,7 @@ class CanSwitchUserTest : public AshTestBase {
     Shell::Get()->system_tray_notifier()->NotifyScreenShareStart(
         base::BindRepeating(&CanSwitchUserTest::StopShareCallback,
                             base::Unretained(this)),
-        base::string16());
+        std::u16string());
   }
 
   // Simulates a screen share session stop.
@@ -610,14 +682,6 @@ class CanSwitchUserTest : public AshTestBase {
   void SwitchCallback(bool switch_user) {
     if (switch_user)
       switch_callback_hit_count_++;
-  }
-
-  // Methods needed to test with overview mode.
-  bool StartOverview() {
-    return Shell::Get()->overview_controller()->StartOverview();
-  }
-  bool InOverviewSession() const {
-    return Shell::Get()->overview_controller()->InOverviewSession();
   }
 
   // Various counter accessors.
@@ -657,8 +721,6 @@ class CanSwitchUserTest : public AshTestBase {
   int stop_capture_callback_hit_count_ = 0;
   int stop_share_callback_hit_count_ = 0;
   int switch_callback_hit_count_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(CanSwitchUserTest);
 };
 
 // Test that when there is no screen operation going on the user switch will be
@@ -766,18 +828,6 @@ TEST_F(CanSwitchUserTest, BothActiveAccepted) {
   EXPECT_EQ(1, stop_share_callback_hit_count());
 }
 
-// Test that overview mode is dismissed before switching user profile.
-TEST_F(CanSwitchUserTest, OverviewModeDismissed) {
-  EXPECT_EQ(0, switch_callback_hit_count());
-  gfx::Rect bounds(0, 0, 100, 100);
-  std::unique_ptr<aura::Window> w(CreateTestWindowInShellWithBounds(bounds));
-  ASSERT_TRUE(StartOverview());
-  ASSERT_TRUE(InOverviewSession());
-  SwitchUser(CanSwitchUserTest::NO_DIALOG);
-  ASSERT_FALSE(InOverviewSession());
-  EXPECT_EQ(1, switch_callback_hit_count());
-}
-
 using SessionControllerImplUnblockTest = NoSessionAshTestBase;
 
 TEST_F(SessionControllerImplUnblockTest, ActiveWindowAfterUnblocking) {
@@ -791,6 +841,16 @@ TEST_F(SessionControllerImplUnblockTest, ActiveWindowAfterUnblocking) {
   // |widget| should now be active as SessionControllerImpl no longer is
   // blocking windows from becoming active.
   EXPECT_TRUE(widget->IsActive());
+}
+
+TEST_F(SessionControllerImplWithShellTest, ExitFullscreenBeforeLock) {
+  CreateFullscreenWindow();
+  EXPECT_TRUE(window_state_->IsFullscreen());
+
+  base::RunLoop run_loop;
+  Shell::Get()->session_controller()->PrepareForLock(run_loop.QuitClosure());
+
+  EXPECT_FALSE(window_state_->IsFullscreen());
 }
 
 }  // namespace

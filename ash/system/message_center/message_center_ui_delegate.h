@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,9 @@ class MessageCenterUiDelegate {
   virtual void HidePopups() = 0;
 
   // Display the message center containing all undismissed notifications to the
-  // user. Set |show_by_click| to true if message center is shown by mouse or
-  // gesture click. Returns true if the center was actually displayed to the
+  // user. Returns true if the center was actually displayed to the
   // user.
-  virtual bool ShowMessageCenter(bool show_by_click) = 0;
+  virtual bool ShowMessageCenter() = 0;
 
   // Remove the message center from the UI.
   virtual void HideMessageCenter() = 0;

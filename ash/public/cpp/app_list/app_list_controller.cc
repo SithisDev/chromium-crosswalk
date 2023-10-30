@@ -1,12 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/app_list/app_list_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -29,4 +29,4 @@ AppListController::~AppListController() {
   g_instance = nullptr;
 }
 
-}  // namespace app_list
+}  // namespace ash

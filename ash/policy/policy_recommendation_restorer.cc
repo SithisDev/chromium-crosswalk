@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check.h"
+#include "base/containers/contains.h"
+#include "base/notreached.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/user_activity/user_activity_detector.h"
@@ -18,8 +19,7 @@ namespace ash {
 namespace {
 
 // The amount of idle time after which recommended values are restored.
-constexpr base::TimeDelta kRestoreDelayInMinutes =
-    base::TimeDelta::FromMinutes(1);
+constexpr base::TimeDelta kRestoreDelayInMinutes = base::Minutes(1);
 
 }  // namespace
 
@@ -62,6 +62,10 @@ void PolicyRecommendationRestorer::OnUserActivity(const ui::Event* event) {
     restore_timer_.Reset();
 }
 
+void PolicyRecommendationRestorer::DisableForTesting() {
+  disabled_for_testing_ = true;
+}
+
 void PolicyRecommendationRestorer::Restore(bool allow_delay,
                                            const std::string& pref_name) {
   const PrefService::Preference* pref =
@@ -89,7 +93,7 @@ void PolicyRecommendationRestorer::Restore(bool allow_delay,
 
   if (allow_delay)
     StartTimer();
-  else
+  else if (!disabled_for_testing_)
     pref_change_registrar_->prefs()->ClearPref(pref->name());
 }
 
@@ -115,10 +119,9 @@ void PolicyRecommendationRestorer::StartTimer() {
   // case of a recommended value changing, a single timer is a close
   // approximation of the behavior that would be obtained by resetting the timer
   // for the affected pref only.
-  restore_timer_.Start(
-      FROM_HERE, kRestoreDelayInMinutes,
-      base::BindRepeating(&PolicyRecommendationRestorer::RestoreAll,
-                          base::Unretained(this)));
+  restore_timer_.Start(FROM_HERE, kRestoreDelayInMinutes,
+                       base::BindOnce(&PolicyRecommendationRestorer::RestoreAll,
+                                      base::Unretained(this)));
 }
 
 void PolicyRecommendationRestorer::StopTimer() {

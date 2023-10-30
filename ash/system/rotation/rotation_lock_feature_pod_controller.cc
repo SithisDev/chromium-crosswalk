@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,11 +42,7 @@ SystemTrayItemUmaType RotationLockFeaturePodController::GetUmaType() const {
   return SystemTrayItemUmaType::UMA_ROTATION_LOCK;
 }
 
-void RotationLockFeaturePodController::OnTabletModeStarted() {
-  UpdateButton();
-}
-
-void RotationLockFeaturePodController::OnTabletModeEnded() {
+void RotationLockFeaturePodController::OnTabletPhysicalStateChanged() {
   UpdateButton();
 }
 
@@ -55,22 +51,27 @@ void RotationLockFeaturePodController::OnUserRotationLockChanged() {
 }
 
 void RotationLockFeaturePodController::UpdateButton() {
-  bool tablet_enabled = Shell::Get()->tablet_mode_controller()->InTabletMode();
+  // Even though auto-rotation is also supported when the device is not in a
+  // tablet physical state but kSupportsClamshellAutoRotation is set. The "Auto
+  // rotate" feature pod button in the system tray menu is not expected to be
+  // shown in the case.
+  const bool is_auto_rotation_allowed =
+      Shell::Get()->tablet_mode_controller()->is_in_tablet_physical_state();
+  button_->SetVisible(is_auto_rotation_allowed);
 
-  button_->SetVisible(tablet_enabled);
-
-  if (!tablet_enabled)
+  if (!is_auto_rotation_allowed)
     return;
 
-  bool rotation_locked =
-      Shell::Get()->screen_orientation_controller()->user_rotation_locked();
-  bool is_portrait = Shell::Get()
-                         ->screen_orientation_controller()
-                         ->IsUserLockedOrientationPortrait();
+  auto* screen_orientation_controller =
+      Shell::Get()->screen_orientation_controller();
+  const bool rotation_locked =
+      screen_orientation_controller->user_rotation_locked();
+  const bool is_portrait =
+      screen_orientation_controller->IsUserLockedOrientationPortrait();
 
   button_->SetToggled(rotation_locked);
 
-  base::string16 tooltip_state;
+  std::u16string tooltip_state;
 
   if (rotation_locked && is_portrait) {
     button_->SetVectorIcon(kUnifiedMenuRotationLockPortraitIcon);

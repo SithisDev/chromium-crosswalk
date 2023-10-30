@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,11 @@ ASH_PUBLIC_EXPORT bool IsPaletteEnabledOnEveryDisplay();
 // Returns true if the device has an internal stylus.
 ASH_PUBLIC_EXPORT bool HasInternalStylus();
 
-// Forcibly say the device is has stylus input for testing purposes.
+// Forcibly say the device has stylus input for testing purposes.
 ASH_PUBLIC_EXPORT void SetHasStylusInputForTesting();
+
+// Forcibly say the device doesn't have stylus input for testing purposes.
+ASH_PUBLIC_EXPORT void SetNoStylusInputForTesting();
 
 }  // namespace stylus_utils
 }  // namespace ash

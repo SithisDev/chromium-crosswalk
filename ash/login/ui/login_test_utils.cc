@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/login/ui/login_test_utils.h"
+
 #include "ash/login/ui/login_big_user_view.h"
 #include "base/containers/adapters.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_split.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/test/event_generator.h"
@@ -80,15 +82,16 @@ LoginUserInfo CreatePublicAccountUser(const std::string& email) {
   user.basic_user_info.display_email = email;
   user.basic_user_info.type = user_manager::USER_TYPE_PUBLIC_ACCOUNT;
   user.public_account_info.emplace();
-  user.public_account_info->enterprise_domain = email_parts[1];
+  user.public_account_info->device_enterprise_manager = email_parts[1];
   user.public_account_info->show_expanded_view = true;
   return user;
 }
 
 bool HasFocusInAnyChildView(const views::View* view) {
   return view->HasFocus() ||
-         std::any_of(view->children().cbegin(), view->children().cend(),
-                     [](const auto* v) { return HasFocusInAnyChildView(v); });
+         base::ranges::any_of(view->children(), [](const auto* v) {
+           return HasFocusInAnyChildView(v);
+         });
 }
 
 bool TabThroughView(ui::test::EventGenerator* event_generator,

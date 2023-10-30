@@ -1,15 +1,23 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/tablet_mode.h"
 
-#include "base/logging.h"
+#include "ash/constants/ash_switches.h"
+#include "base/check_op.h"
+#include "base/command_line.h"
 
 namespace ash {
 
 namespace {
 TabletMode* g_instance = nullptr;
+}
+
+// static
+bool TabletMode::IsBoardTypeMarkedAsTabletCapable() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kAshEnableTabletMode);
 }
 
 TabletMode* TabletMode::Get() {
@@ -26,7 +34,8 @@ TabletMode::~TabletMode() {
   g_instance = nullptr;
 }
 
-TabletMode::Waiter::Waiter(bool enable) : enable_(enable) {
+TabletMode::Waiter::Waiter(bool enable)
+    : enable_(enable), run_loop_(base::RunLoop::Type::kNestableTasksAllowed) {
   if (TabletMode::Get()->InTabletMode() == enable_)
     run_loop_.Quit();
   else
@@ -49,6 +58,11 @@ void TabletMode::Waiter::OnTabletModeStarted() {
 void TabletMode::Waiter::OnTabletModeEnded() {
   if (!enable_)
     run_loop_.QuitWhenIdle();
+}
+
+bool TabletMode::IsInTabletMode() {
+  const TabletMode* singleton = TabletMode::Get();
+  return singleton && singleton->InTabletMode();
 }
 
 }  // namespace ash

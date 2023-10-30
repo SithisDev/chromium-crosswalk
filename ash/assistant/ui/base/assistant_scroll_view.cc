@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,11 @@
 #include <memory>
 #include <utility>
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/scrollbar/overlay_scroll_bar.h"
+#include "ui/views/view.h"
 
 namespace ash {
 
@@ -18,6 +22,9 @@ namespace {
 class ContentView : public views::View, views::ViewObserver {
  public:
   ContentView() { AddObserver(this); }
+
+  ContentView(const ContentView&) = delete;
+  ContentView& operator=(const ContentView&) = delete;
 
   ~ContentView() override { RemoveObserver(this); }
 
@@ -38,25 +45,6 @@ class ContentView : public views::View, views::ViewObserver {
   void OnChildViewRemoved(views::View* view, views::View* child) override {
     PreferredSizeChanged();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ContentView);
-};
-
-// InvisibleScrollBar ----------------------------------------------------------
-
-class InvisibleScrollBar : public views::OverlayScrollBar {
- public:
-  explicit InvisibleScrollBar(bool horizontal)
-      : views::OverlayScrollBar(horizontal) {}
-
-  ~InvisibleScrollBar() override = default;
-
-  // views::OverlayScrollBar:
-  int GetThickness() const override { return 0; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InvisibleScrollBar);
 };
 
 }  // namespace
@@ -69,17 +57,25 @@ AssistantScrollView::AssistantScrollView() {
 
 AssistantScrollView::~AssistantScrollView() = default;
 
-const char* AssistantScrollView::GetClassName() const {
-  return "AssistantScrollView";
-}
-
 void AssistantScrollView::OnViewPreferredSizeChanged(views::View* view) {
-  OnContentsPreferredSizeChanged(content_view_);
+  DCHECK_EQ(content_view_, view);
+
+  for (auto& observer : observers_)
+    observer.OnContentsPreferredSizeChanged(content_view_);
+
   PreferredSizeChanged();
 }
 
+void AssistantScrollView::AddScrollViewObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void AssistantScrollView::RemoveScrollViewObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 void AssistantScrollView::InitLayout() {
-  SetBackgroundColor(SK_ColorTRANSPARENT);
+  SetBackgroundColor(absl::nullopt);
   SetDrawOverflowIndicator(false);
 
   // Content view.
@@ -88,11 +84,12 @@ void AssistantScrollView::InitLayout() {
   content_view_ = SetContents(std::move(content_view));
 
   // Scroll bars.
-  horizontal_scroll_bar_ = new InvisibleScrollBar(/*horizontal=*/true);
-  SetHorizontalScrollBar(horizontal_scroll_bar_);
-
-  vertical_scroll_bar_ = new InvisibleScrollBar(/*horizontal=*/false);
-  SetVerticalScrollBar(vertical_scroll_bar_);
+  SetVerticalScrollBarMode(views::ScrollView::ScrollBarMode::kHiddenButEnabled);
+  SetHorizontalScrollBarMode(
+      views::ScrollView::ScrollBarMode::kHiddenButEnabled);
 }
+
+BEGIN_METADATA(AssistantScrollView, views::ScrollView)
+END_METADATA
 
 }  // namespace ash

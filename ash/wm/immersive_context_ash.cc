@@ -1,19 +1,20 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/immersive_context_ash.h"
 
-#include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "base/logging.h"
+#include "chromeos/ui/frame/immersive/immersive_fullscreen_controller.h"
 #include "ui/display/screen.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
+
+using ::chromeos::ImmersiveFullscreenController;
 
 ImmersiveContextAsh::ImmersiveContextAsh() = default;
 

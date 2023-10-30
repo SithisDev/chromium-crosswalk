@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "ash/accessibility/accessibility_controller_impl.h"
-#include "ash/ime/ime_controller.h"
+#include "ash/ime/ime_controller_impl.h"
 #include "ash/ime/test_ime_controller_client.h"
 #include "ash/keyboard/keyboard_controller_impl.h"
 #include "ash/keyboard/ui/test/keyboard_test_util.h"
@@ -21,6 +21,7 @@
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller_test_api.h"
 #include "base/command_line.h"
+#include "ui/display/test/display_manager_test_api.h"
 #include "ui/events/devices/device_data_manager_test_api.h"
 #include "ui/events/devices/input_device.h"
 #include "ui/events/devices/touchscreen_device.h"
@@ -40,6 +41,11 @@ VirtualKeyboardController* GetVirtualKeyboardController() {
 class VirtualKeyboardControllerTest : public AshTestBase {
  public:
   VirtualKeyboardControllerTest() = default;
+
+  VirtualKeyboardControllerTest(const VirtualKeyboardControllerTest&) = delete;
+  VirtualKeyboardControllerTest& operator=(
+      const VirtualKeyboardControllerTest&) = delete;
+
   ~VirtualKeyboardControllerTest() override = default;
 
   display::Display GetPrimaryDisplay() {
@@ -47,15 +53,13 @@ class VirtualKeyboardControllerTest : public AshTestBase {
   }
 
   display::Display GetSecondaryDisplay() {
-    return Shell::Get()->display_manager()->GetSecondaryDisplay();
+    return display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
+        .GetSecondaryDisplay();
   }
 
   keyboard::KeyboardUIController* keyboard_ui_controller() {
     return keyboard::KeyboardUIController::Get();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardControllerTest);
 };
 
 // Mock event blocker that enables the internal keyboard when it's destructor
@@ -63,15 +67,16 @@ class VirtualKeyboardControllerTest : public AshTestBase {
 class MockEventBlocker : public InternalInputDevicesEventBlocker {
  public:
   MockEventBlocker() = default;
+
+  MockEventBlocker(const MockEventBlocker&) = delete;
+  MockEventBlocker& operator=(const MockEventBlocker&) = delete;
+
   ~MockEventBlocker() override {
     std::vector<ui::InputDevice> keyboard_devices;
     keyboard_devices.push_back(ui::InputDevice(
         1, ui::InputDeviceType::INPUT_DEVICE_INTERNAL, "keyboard"));
     ui::DeviceDataManagerTestApi().SetKeyboardDevices(keyboard_devices);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockEventBlocker);
 };
 
 // Tests that reenabling keyboard devices while shutting down does not
@@ -88,23 +93,20 @@ TEST_F(VirtualKeyboardControllerTest,
        ForceToShowKeyboardWithKeysetWhenAccessibilityKeyboardIsEnabled) {
   AccessibilityControllerImpl* accessibility_controller =
       Shell::Get()->accessibility_controller();
-  accessibility_controller->SetVirtualKeyboardEnabled(true);
-  ASSERT_TRUE(accessibility_controller->virtual_keyboard_enabled());
+  accessibility_controller->virtual_keyboard().SetEnabled(true);
+  ASSERT_TRUE(accessibility_controller->virtual_keyboard().enabled());
 
   // Set up a mock ImeControllerClient to test keyset changes.
   TestImeControllerClient client;
-  Shell::Get()->ime_controller()->SetClient(client.CreateInterfacePtr());
+  Shell::Get()->ime_controller()->SetClient(&client);
 
   // Should show the keyboard without messing with accessibility prefs.
   GetVirtualKeyboardController()->ForceShowKeyboardWithKeyset(
-      chromeos::input_method::mojom::ImeKeyset::kEmoji);
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
-  EXPECT_TRUE(accessibility_controller->virtual_keyboard_enabled());
+      input_method::ImeKeyset::kEmoji);
+  EXPECT_TRUE(accessibility_controller->virtual_keyboard().enabled());
 
   // Keyset should be emoji.
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kEmoji,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kEmoji, client.last_keyset_);
 
   // Simulate the keyboard hiding.
   if (keyboard_ui_controller()->HasObserver(GetVirtualKeyboardController())) {
@@ -114,22 +116,22 @@ TEST_F(VirtualKeyboardControllerTest,
   base::RunLoop().RunUntilIdle();
 
   // The keyboard should still be enabled.
-  EXPECT_TRUE(accessibility_controller->virtual_keyboard_enabled());
+  EXPECT_TRUE(accessibility_controller->virtual_keyboard().enabled());
 
   // Reset the accessibility prefs.
-  accessibility_controller->SetVirtualKeyboardEnabled(false);
+  accessibility_controller->virtual_keyboard().SetEnabled(false);
 
   // Keyset should be reset to none.
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kNone,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kNone, client.last_keyset_);
+
+  Shell::Get()->ime_controller()->SetClient(nullptr);
 }
 
 TEST_F(VirtualKeyboardControllerTest,
        ForceToShowKeyboardWithKeysetWhenKeyboardIsDisabled) {
   // Set up a mock ImeControllerClient to test keyset changes.
   TestImeControllerClient client;
-  Shell::Get()->ime_controller()->SetClient(client.CreateInterfacePtr());
+  Shell::Get()->ime_controller()->SetClient(&client);
 
   // Should show the keyboard by enabling it temporarily.
   EXPECT_FALSE(keyboard_ui_controller()->IsEnabled());
@@ -137,16 +139,14 @@ TEST_F(VirtualKeyboardControllerTest,
       KeyboardEnableFlag::kShelfEnabled));
 
   GetVirtualKeyboardController()->ForceShowKeyboardWithKeyset(
-      chromeos::input_method::mojom::ImeKeyset::kEmoji);
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
+      input_method::ImeKeyset::kEmoji);
 
   EXPECT_TRUE(keyboard_ui_controller()->IsEnableFlagSet(
       KeyboardEnableFlag::kShelfEnabled));
   EXPECT_TRUE(keyboard_ui_controller()->IsEnabled());
 
   // Keyset should be emoji.
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kEmoji,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kEmoji, client.last_keyset_);
 
   // Simulate the keyboard hiding.
   if (keyboard_ui_controller()->HasObserver(GetVirtualKeyboardController())) {
@@ -161,29 +161,25 @@ TEST_F(VirtualKeyboardControllerTest,
       KeyboardEnableFlag::kShelfEnabled));
 
   // Keyset should be reset to none.
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kNone,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kNone, client.last_keyset_);
 }
 
 TEST_F(VirtualKeyboardControllerTest,
        ForceToShowKeyboardWithKeysetTemporaryHide) {
   // Set up a mock ImeControllerClient to test keyset changes.
   TestImeControllerClient client;
-  Shell::Get()->ime_controller()->SetClient(client.CreateInterfacePtr());
+  Shell::Get()->ime_controller()->SetClient(&client);
 
   // Should show the keyboard by enabling it temporarily.
   GetVirtualKeyboardController()->ForceShowKeyboardWithKeyset(
-      chromeos::input_method::mojom::ImeKeyset::kEmoji);
-  Shell::Get()->ime_controller()->FlushMojoForTesting();
+      input_method::ImeKeyset::kEmoji);
 
   EXPECT_TRUE(keyboard_ui_controller()->IsEnableFlagSet(
       KeyboardEnableFlag::kShelfEnabled));
   EXPECT_TRUE(keyboard_ui_controller()->IsEnabled());
 
   // Keyset should be emoji.
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kEmoji,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kEmoji, client.last_keyset_);
 
   // Simulate the keyboard hiding temporarily.
   if (keyboard_ui_controller()->HasObserver(GetVirtualKeyboardController())) {
@@ -198,14 +194,19 @@ TEST_F(VirtualKeyboardControllerTest,
   EXPECT_TRUE(keyboard_ui_controller()->IsEnabled());
 
   // Keyset should still be emoji.
-  EXPECT_EQ(chromeos::input_method::mojom::ImeKeyset::kEmoji,
-            client.last_keyset_);
+  EXPECT_EQ(input_method::ImeKeyset::kEmoji, client.last_keyset_);
 }
 
 class VirtualKeyboardControllerAutoTest : public VirtualKeyboardControllerTest,
                                           public VirtualKeyboardObserver {
  public:
   VirtualKeyboardControllerAutoTest() : notified_(false), suppressed_(false) {}
+
+  VirtualKeyboardControllerAutoTest(const VirtualKeyboardControllerAutoTest&) =
+      delete;
+  VirtualKeyboardControllerAutoTest& operator=(
+      const VirtualKeyboardControllerAutoTest&) = delete;
+
   ~VirtualKeyboardControllerAutoTest() override = default;
 
   void SetUp() override {
@@ -238,8 +239,6 @@ class VirtualKeyboardControllerAutoTest : public VirtualKeyboardControllerTest,
 
   // Whether the keeyboard is suppressed.
   bool suppressed_;
-
-  DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardControllerAutoTest);
 };
 
 // Tests that the onscreen keyboard is disabled if an internal keyboard is
@@ -391,6 +390,12 @@ class VirtualKeyboardControllerAlwaysEnabledTest
  public:
   VirtualKeyboardControllerAlwaysEnabledTest()
       : VirtualKeyboardControllerAutoTest() {}
+
+  VirtualKeyboardControllerAlwaysEnabledTest(
+      const VirtualKeyboardControllerAlwaysEnabledTest&) = delete;
+  VirtualKeyboardControllerAlwaysEnabledTest& operator=(
+      const VirtualKeyboardControllerAlwaysEnabledTest&) = delete;
+
   ~VirtualKeyboardControllerAlwaysEnabledTest() override = default;
 
   void SetUp() override {
@@ -398,9 +403,6 @@ class VirtualKeyboardControllerAlwaysEnabledTest
         keyboard::switches::kEnableVirtualKeyboard);
     VirtualKeyboardControllerAutoTest::SetUp();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardControllerAlwaysEnabledTest);
 };
 
 // Tests that the controller cannot suppress the keyboard if the virtual

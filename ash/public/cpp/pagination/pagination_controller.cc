@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/pagination/pagination_controller.h"
 
 #include "ash/public/cpp/pagination/pagination_model.h"
+#include "base/check.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 
@@ -13,7 +14,7 @@ namespace ash {
 namespace {
 
 // Constants for dealing with scroll events.
-const int kMinScrollToSwitchPage = 20;
+const int kMinScrollToSwitchPage = 10;
 const int kMinHorizVelocityToSwitchPage = 800;
 
 const double kFinishTransitionThreshold = 0.33;
@@ -28,14 +29,15 @@ PaginationController::PaginationController(PaginationModel* model,
       scroll_axis_(scroll_axis),
       record_metrics_(record_metrics),
       is_tablet_mode_(is_tablet_mode) {
+  DCHECK(pagination_model_);
   DCHECK(record_metrics_);
 }
 
 PaginationController::~PaginationController() = default;
 
-bool PaginationController::OnScroll(const gfx::Vector2d& offset,
+bool PaginationController::OnScroll(const gfx::Vector2dF& offset,
                                     ui::EventType type) {
-  int offset_magnitude;
+  float offset_magnitude;
   if (scroll_axis_ == SCROLL_AXIS_HORIZONTAL) {
     // If the view scrolls horizontally, both horizontal and vertical scroll
     // events are valid (since most mouse wheels only have vertical scrolling).
@@ -52,10 +54,7 @@ bool PaginationController::OnScroll(const gfx::Vector2d& offset,
   if (abs(offset_magnitude) > kMinScrollToSwitchPage &&
       !pagination_model_->has_transition()) {
     const int delta = offset_magnitude > 0 ? -1 : 1;
-    if (pagination_model_->IsValidPageRelative(delta)) {
-      record_metrics_.Run(type, is_tablet_mode_);
-    }
-    pagination_model_->SelectPageRelative(delta, true);
+    SelectPageAndRecordMetric(delta, type);
     return true;
   }
 
@@ -85,14 +84,18 @@ bool PaginationController::OnGestureEvent(const ui::GestureEvent& event,
       float velocity = scroll_axis_ == SCROLL_AXIS_HORIZONTAL
                            ? details.velocity_x()
                            : details.velocity_y();
-      pagination_model_->EndScroll(true);
 
       if (fabs(velocity) > kMinHorizVelocityToSwitchPage) {
+        pagination_model_->EndScroll(true);
+
         const int delta = velocity < 0 ? 1 : -1;
-        if (pagination_model_->IsValidPageRelative(delta)) {
-          record_metrics_.Run(event.type(), is_tablet_mode_);
-        }
-        pagination_model_->SelectPageRelative(delta, true);
+        SelectPageAndRecordMetric(delta, event.type());
+      } else {
+        // If the gesture ends in a fling below page switch velocity threshold,
+        // decide whether to switch page depending on the scroll progress (if
+        // gesture ends with a slow fling after the user has dragged the page
+        // beyond page switch drag threshold, switch the page).
+        EndDrag(event);
       }
       return true;
     }
@@ -101,13 +104,13 @@ bool PaginationController::OnGestureEvent(const ui::GestureEvent& event,
   }
 }
 
-void PaginationController::StartMouseDrag(const gfx::Vector2d& offset) {
+void PaginationController::StartMouseDrag(const gfx::Vector2dF& offset) {
   float scroll =
       scroll_axis_ == SCROLL_AXIS_HORIZONTAL ? offset.x() : offset.y();
   StartDrag(scroll);
 }
 
-void PaginationController::UpdateMouseDrag(const gfx::Vector2d& offset,
+void PaginationController::UpdateMouseDrag(const gfx::Vector2dF& offset,
                                            const gfx::Rect& bounds) {
   float scroll =
       scroll_axis_ == SCROLL_AXIS_HORIZONTAL ? offset.x() : offset.y();
@@ -149,6 +152,14 @@ bool PaginationController::EndDrag(const ui::LocatedEvent& event) {
     record_metrics_.Run(event.type(), is_tablet_mode_);
 
   return true;
+}
+
+void PaginationController::SelectPageAndRecordMetric(int delta,
+                                                     ui::EventType type) {
+  if (pagination_model_->IsValidPageRelative(delta)) {
+    record_metrics_.Run(type, is_tablet_mode_);
+  }
+  pagination_model_->SelectPageRelative(delta, true);
 }
 
 }  // namespace ash

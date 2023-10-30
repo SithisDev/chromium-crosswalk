@@ -1,16 +1,15 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/app_list/views/search_result_container_view.h"
 
-#include "ash/app_list/views/search_result_base_view.h"
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 
-namespace app_list {
+namespace ash {
 
 SearchResultContainerView::SearchResultContainerView(
     AppListViewDelegate* view_delegate)
@@ -35,14 +34,24 @@ void SearchResultContainerView::SetResults(
   Update();
 }
 
-void SearchResultContainerView::NotifyFirstResultYIndex(int /*y_index*/) {
+absl::optional<SearchResultContainerView::ResultsAnimationInfo>
+SearchResultContainerView::ScheduleResultAnimations(
+    const ResultsAnimationInfo& aggregate_animation_info) {
+  NOTREACHED();
+  return absl::nullopt;
+}
+
+void SearchResultContainerView::AppendShownResultMetadata(
+    std::vector<SearchResultAimationMetadata>* result_metadata_) {
   NOTREACHED();
 }
 
-int SearchResultContainerView::GetYSize() {
+bool SearchResultContainerView::HasAnimatingChildView() {
   NOTREACHED();
-  return 0;
+  return false;
 }
+
+void SearchResultContainerView::OnSelectedResultChanged() {}
 
 void SearchResultContainerView::Update() {
   update_factory_.InvalidateWeakPtrs();
@@ -60,21 +69,14 @@ const char* SearchResultContainerView::GetClassName() const {
   return "SearchResultContainerView";
 }
 
-void SearchResultContainerView::OnViewFocused(View* observed_view) {
-  if (delegate_) {
-    delegate_->OnSearchResultContainerResultFocused(
-        static_cast<SearchResultBaseView*>(observed_view));
-  }
-}
-
 void SearchResultContainerView::AddObservedResultView(
     SearchResultBaseView* result_view) {
-  result_view_observer_.Add(result_view);
+  result_view_observations_.AddObservation(result_view);
 }
 
 void SearchResultContainerView::RemoveObservedResultView(
     SearchResultBaseView* result_view) {
-  result_view_observer_.Remove(result_view);
+  result_view_observations_.RemoveObservation(result_view);
 }
 
 void SearchResultContainerView::ListItemsAdded(size_t /*start*/,
@@ -98,7 +100,7 @@ void SearchResultContainerView::ListItemsChanged(size_t /*start*/,
 }
 
 SearchResultBaseView* SearchResultContainerView::GetFirstResultView() {
-  return nullptr;
+  return num_results_ <= 0 ? nullptr : GetResultViewAt(0);
 }
 
 void SearchResultContainerView::SetShown(bool shown) {
@@ -123,4 +125,4 @@ void SearchResultContainerView::ScheduleUpdate() {
   }
 }
 
-}  // namespace app_list
+}  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,15 @@
 #include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
+#include "ash/public/cpp/login_types.h"
 #include "base/callback_forward.h"
-
-class AccountId;
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 
 class LoginScreenClient;
 class LoginScreenModel;
 class ScopedGuestButtonBlocker;
-
-enum class ParentAccessRequestReason;
 
 // Allows clients (e.g. the browser process) to send messages to the ash
 // login/lock/user-add screens.
@@ -54,27 +52,15 @@ class ASH_PUBLIC_EXPORT LoginScreen {
   // Sets whether shutdown button is enabled in the login screen.
   virtual void EnableShutdownButton(bool enable) = 0;
 
-  // Shows or hides the guest button on the login shelf during OOBE.
-  virtual void ShowGuestButtonInOobe(bool show) = 0;
+  // Sets whether shelf buttons are enabled.
+  virtual void EnableShelfButtons(bool enable) = 0;
+
+  // Used to show or hide apps the guest and buttons on the login shelf during
+  // OOBE.
+  virtual void SetIsFirstSigninStep(bool is_first) = 0;
 
   // Shows or hides the parent access button on the login shelf.
   virtual void ShowParentAccessButton(bool show) = 0;
-
-  // Shows a standalone Parent Access dialog. If |child_account_id| is valid, it
-  // validates the parent access code for that child only, when it is  empty it
-  // validates the code for any child signed in the device. |callback| is
-  // invoked when the back button is clicked or the correct code was entered.
-  // |reason| contains information about why the parent access view is
-  // necessary, it is used to modify the view appearance by changing the title
-  // and description strings and background color. The parent access widget is a
-  // modal and already contains a dimmer, use |extra_dimmer| when another modal
-  // needs to instantiate it. Note: this is intended for children only. If a non
-  // child account id is provided, the validation will necessarily fail.
-  virtual void ShowParentAccessWidget(
-      const AccountId& child_account_id,
-      base::RepeatingCallback<void(bool success)> callback,
-      ParentAccessRequestReason reason,
-      bool extra_dimmer = false) = 0;
 
   // Sets if the guest button on the login shelf can be shown. Even if set to
   // true the button may still not be visible.
@@ -83,6 +69,17 @@ class ASH_PUBLIC_EXPORT LoginScreen {
   // Returns scoped object to temporarily disable Browse as Guest button.
   virtual std::unique_ptr<ScopedGuestButtonBlocker>
   GetScopedGuestButtonBlocker() = 0;
+
+  // Called to request the user to enter the PIN of the security token (e.g.,
+  // the smart card).
+  virtual void RequestSecurityTokenPin(SecurityTokenPinRequest request) = 0;
+
+  // Called to close the UI previously opened with RequestSecurityTokenPin().
+  virtual void ClearSecurityTokenPinRequest() = 0;
+
+  // Get login screen widget. Currently used to set proper accessibility
+  // navigation.
+  virtual views::Widget* GetLoginWindowWidget() = 0;
 
  protected:
   LoginScreen();

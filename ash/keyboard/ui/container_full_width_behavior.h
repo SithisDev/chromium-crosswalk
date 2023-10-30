@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,8 @@ class KEYBOARD_EXPORT ContainerFullWidthBehavior : public ContainerBehavior {
                     const gfx::Size& screen_size) override;
   bool HandlePointerEvent(const ui::LocatedEvent& event,
                           const display::Display& current_display) override;
+  bool HandleGestureEvent(const ui::GestureEvent& event,
+                          const gfx::Rect& bounds_in_screen) override;
   void SetCanonicalBounds(aura::Window* container,
                           const gfx::Rect& display_bounds) override;
   ContainerType GetType() const override;
@@ -44,6 +46,7 @@ class KEYBOARD_EXPORT ContainerFullWidthBehavior : public ContainerBehavior {
       const gfx::Rect& visual_bounds_in_window) const override;
   bool OccludedBoundsAffectWorkspaceLayout() const override;
   void SetDraggableArea(const gfx::Rect& rect) override;
+  void SetAreaToRemainOnScreen(const gfx::Rect& bounds) override;
 
  private:
   gfx::Rect occluded_bounds_in_window_;

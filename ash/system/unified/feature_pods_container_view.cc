@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/unified/feature_pods_container_view.h"
 
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/pagination/pagination_controller.h"
 #include "ash/public/cpp/pagination/pagination_model.h"
 #include "ash/system/tray/tray_constants.h"
@@ -42,7 +41,7 @@ void FeaturePodsContainerView::SetExpandedAmount(double expanded_amount) {
     // When collapsing from page > 1, each row of buttons fades out one by one
     // and once expanded_amount is less than kCollapseThreshold we begin to
     // fade in the single row of buttons for the collapsed state.
-    if (expanded_amount_ < kCollapseThreshold &&
+    if (expanded_amount_ > 0.0 && expanded_amount_ < kCollapseThreshold &&
         pagination_model_->selected_page() > 0) {
       button->SetExpandedAmount(1.0 - expanded_amount,
                                 true /* fade_icon_button */);
@@ -74,12 +73,12 @@ int FeaturePodsContainerView::GetExpandedHeight() const {
   int number_of_lines = (visible_count + kUnifiedFeaturePodItemsInRow - 1) /
                         kUnifiedFeaturePodItemsInRow;
 
-  if (features::IsSystemTrayFeaturePodsPaginationEnabled())
-    number_of_lines = std::min(number_of_lines, feature_pod_rows_);
+  number_of_lines = std::min(number_of_lines, feature_pod_rows_);
 
   return kUnifiedFeaturePodBottomPadding +
          (kUnifiedFeaturePodVerticalPadding + kUnifiedFeaturePodSize.height()) *
-             number_of_lines;
+             std::max(0, number_of_lines - 1) +
+         kUnifiedFeaturePodSize.height() + kUnifiedFeaturePodTopPadding;
 }
 
 int FeaturePodsContainerView::GetCollapsedHeight() const {
@@ -117,7 +116,7 @@ void FeaturePodsContainerView::ViewHierarchyChanged(
 void FeaturePodsContainerView::Layout() {
   UpdateCollapsedSidePadding();
   CalculateIdealBoundsForFeaturePods();
-  for (int i = 0; i < visible_buttons_.view_size(); ++i) {
+  for (size_t i = 0; i < visible_buttons_.view_size(); ++i) {
     auto* button = visible_buttons_.view_at(i);
     button->SetBoundsRect(visible_buttons_.ideal_bounds(i));
   }
@@ -137,12 +136,14 @@ void FeaturePodsContainerView::UpdateChildVisibility() {
     bool visible = IsButtonVisible(child, visible_count);
     child->SetVisibleByContainer(visible);
     if (visible) {
-      if (visible_buttons_.GetIndexOfView(child) < 0)
+      if (!visible_buttons_.GetIndexOfView(child).has_value())
         visible_buttons_.Add(child, visible_count);
       ++visible_count;
     } else {
-      if (visible_buttons_.GetIndexOfView(child))
-        visible_buttons_.Remove(visible_buttons_.GetIndexOfView(child));
+      if (auto index = visible_buttons_.GetIndexOfView(child);
+          index.has_value()) {
+        visible_buttons_.Remove(index.value());
+      }
     }
   }
   UpdateTotalPages();
@@ -161,6 +162,23 @@ int FeaturePodsContainerView::GetVisibleCount() const {
       children().cbegin(), children().cend(), [](const auto* v) {
         return static_cast<const FeaturePodButton*>(v)->visible_preferred();
       });
+}
+
+void FeaturePodsContainerView::EnsurePageWithButton(views::View* button) {
+  auto index = visible_buttons_.GetIndexOfView(button->parent());
+  if (!index.has_value())
+    return;
+
+  int tiles_per_page = GetTilesPerPage();
+  size_t first_index = pagination_model_->selected_page() * tiles_per_page;
+  size_t last_index =
+      ((pagination_model_->selected_page() + 1) * tiles_per_page) - 1;
+  if (index.value() < first_index || index.value() > last_index) {
+    int page = ((index.value() + 1) / tiles_per_page) +
+               ((index.value() + 1) % tiles_per_page ? 1 : 0) - 1;
+
+    pagination_model_->SelectPage(page, true /*animate*/);
+  }
 }
 
 gfx::Point FeaturePodsContainerView::GetButtonPosition(
@@ -208,19 +226,35 @@ gfx::Point FeaturePodsContainerView::GetButtonPosition(
       y * expanded_amount_ + collapsed_y * (1.0 - expanded_amount_));
 }
 
-void FeaturePodsContainerView::SetMaxHeight(int max_height) {
-  int feature_pod_rows =
-      (max_height - kUnifiedFeaturePodBottomPadding -
-       kUnifiedFeaturePodTopPadding) /
-      (kUnifiedFeaturePodSize.height() + kUnifiedFeaturePodVerticalPadding);
+int FeaturePodsContainerView::CalculateRowsFromHeight(int height) {
+  int available_height =
+      height - kUnifiedFeaturePodBottomPadding - kUnifiedFeaturePodTopPadding;
+  int row_height =
+      kUnifiedFeaturePodSize.height() + kUnifiedFeaturePodVerticalPadding;
 
-  std::cout << (max_height - kUnifiedFeaturePodBottomPadding -
-                kUnifiedFeaturePodTopPadding) /
-                   (kUnifiedFeaturePodSize.height() +
-                    kUnifiedFeaturePodVerticalPadding)
-            << std::endl;
-  feature_pod_rows = std::min(feature_pod_rows, kUnifiedFeaturePodMaxRows);
-  feature_pod_rows = std::max(feature_pod_rows, kUnifiedFeaturePodMinRows);
+  // Only use the max number of rows when there is enough space
+  // to show the fully expanded message center and quick settings.
+  if (available_height > (kUnifiedFeaturePodMaxRows * row_height) &&
+      available_height - (kUnifiedFeaturePodMaxRows * row_height) >
+          kMessageCenterCollapseThreshold) {
+    return kUnifiedFeaturePodMaxRows;
+  }
+
+  // Use 1 less than the max number of rows when there is enough
+  // space to show the message center in the collapsed state along
+  // with the expanded quick settings.
+  int feature_pod_rows = kUnifiedFeaturePodMaxRows - 1;
+  if (available_height > (feature_pod_rows * row_height) &&
+      available_height - (feature_pod_rows * row_height) >
+          kStackedNotificationBarHeight) {
+    return feature_pod_rows;
+  }
+
+  return kUnifiedFeaturePodMinRows;
+}
+
+void FeaturePodsContainerView::SetMaxHeight(int max_height) {
+  int feature_pod_rows = CalculateRowsFromHeight(max_height);
 
   if (feature_pod_rows_ != feature_pod_rows) {
     feature_pod_rows_ = feature_pod_rows;
@@ -241,7 +275,7 @@ void FeaturePodsContainerView::UpdateCollapsedSidePadding() {
 }
 
 void FeaturePodsContainerView::AddFeaturePodButton(FeaturePodButton* button) {
-  int view_size = visible_buttons_.view_size();
+  size_t view_size = visible_buttons_.view_size();
   if (IsButtonVisible(button, view_size)) {
     visible_buttons_.Add(button, view_size);
   }
@@ -286,7 +320,7 @@ const gfx::Vector2d FeaturePodsContainerView::CalculateTransitionOffset(
 }
 
 void FeaturePodsContainerView::CalculateIdealBoundsForFeaturePods() {
-  for (int i = 0; i < visible_buttons_.view_size(); ++i) {
+  for (size_t i = 0; i < visible_buttons_.view_size(); ++i) {
     gfx::Rect tile_bounds;
     gfx::Size child_size;
     // When we are on the first page we calculate bounds for an expanded tray
@@ -320,16 +354,13 @@ void FeaturePodsContainerView::CalculateIdealBoundsForFeaturePods() {
 }
 
 int FeaturePodsContainerView::GetTilesPerPage() const {
-  if (features::IsSystemTrayFeaturePodsPaginationEnabled())
-    return kUnifiedFeaturePodItemsInRow * feature_pod_rows_;
-  else
-    return children().size();
+  return kUnifiedFeaturePodItemsInRow * feature_pod_rows_;
 }
 
 void FeaturePodsContainerView::UpdateTotalPages() {
   int total_pages = 0;
 
-  int total_visible = visible_buttons_.view_size();
+  size_t total_visible = visible_buttons_.view_size();
   int tiles_per_page = GetTilesPerPage();
 
   if (!visible_buttons_.view_size() || !tiles_per_page) {

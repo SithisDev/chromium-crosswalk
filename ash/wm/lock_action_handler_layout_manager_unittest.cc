@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,12 @@
 #include "ash/lock_screen_action/lock_screen_action_background_controller_stub.h"
 #include "ash/lock_screen_action/test_lock_screen_action_background_controller.h"
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/session/test_session_controller_client.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -31,7 +31,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
@@ -48,24 +47,27 @@ aura::Window* GetContainer(ShellWindowId container_id) {
 
 class TestWindowDelegate : public views::WidgetDelegate {
  public:
-  TestWindowDelegate() = default;
+  TestWindowDelegate() {
+    SetCanMaximize(true);
+    SetCanResize(true);
+    SetOwnedByWidget(true);
+    SetFocusTraversesOut(true);
+  }
+
+  TestWindowDelegate(const TestWindowDelegate&) = delete;
+  TestWindowDelegate& operator=(const TestWindowDelegate&) = delete;
+
   ~TestWindowDelegate() override = default;
 
   // views::WidgetDelegate:
-  void DeleteDelegate() override { delete this; }
   views::Widget* GetWidget() override { return widget_; }
   const views::Widget* GetWidget() const override { return widget_; }
   bool CanActivate() const override { return true; }
-  bool CanResize() const override { return true; }
-  bool CanMaximize() const override { return true; }
-  bool ShouldAdvanceFocusToTopLevelWidget() const override { return true; }
 
   void set_widget(views::Widget* widget) { widget_ = widget; }
 
  private:
   views::Widget* widget_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
 };
 
 }  // namespace
@@ -73,6 +75,12 @@ class TestWindowDelegate : public views::WidgetDelegate {
 class LockActionHandlerLayoutManagerTest : public AshTestBase {
  public:
   LockActionHandlerLayoutManagerTest() = default;
+
+  LockActionHandlerLayoutManagerTest(
+      const LockActionHandlerLayoutManagerTest&) = delete;
+  LockActionHandlerLayoutManagerTest& operator=(
+      const LockActionHandlerLayoutManagerTest&) = delete;
+
   ~LockActionHandlerLayoutManagerTest() override = default;
 
   void SetUp() override {
@@ -80,7 +88,7 @@ class LockActionHandlerLayoutManagerTest : public AshTestBase {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
 
-    action_background_controller_factory_ = base::Bind(
+    action_background_controller_factory_ = base::BindRepeating(
         &LockActionHandlerLayoutManagerTest::CreateActionBackgroundController,
         base::Unretained(this));
     LockScreenActionBackgroundController::SetFactoryCallbackForTesting(
@@ -91,9 +99,9 @@ class LockActionHandlerLayoutManagerTest : public AshTestBase {
     views::Widget::InitParams widget_params(
         views::Widget::InitParams::TYPE_WINDOW);
     widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
-    lock_window_ =
-        CreateTestingWindow(widget_params, kShellWindowId_LockScreenContainer,
-                            std::make_unique<TestWindowDelegate>());
+    lock_window_ = CreateTestingWindow(std::move(widget_params),
+                                       kShellWindowId_LockScreenContainer,
+                                       std::make_unique<TestWindowDelegate>());
   }
 
   void TearDown() override {
@@ -112,7 +120,7 @@ class LockActionHandlerLayoutManagerTest : public AshTestBase {
       window_delegate->set_widget(widget);
       params.delegate = window_delegate.release();
     }
-    widget->Init(params);
+    widget->Init(std::move(params));
     widget->Show();
     return base::WrapUnique<aura::Window>(widget->GetNativeView());
   }
@@ -136,7 +144,7 @@ class LockActionHandlerLayoutManagerTest : public AshTestBase {
 
   void SetUpTrayActionClientAndLockSession(mojom::TrayActionState state) {
     Shell::Get()->tray_action()->SetClient(
-        tray_action_client_.CreateInterfacePtrAndBind(), state);
+        tray_action_client_.CreateRemoteAndBind(), state);
     GetSessionControllerClient()->SetSessionState(
         session_manager::SessionState::LOCKED);
   }
@@ -155,14 +163,20 @@ class LockActionHandlerLayoutManagerTest : public AshTestBase {
       action_background_controller_factory_;
 
   TestTrayActionClient tray_action_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(LockActionHandlerLayoutManagerTest);
 };
 
 class LockActionHandlerLayoutManagerTestWithTestBackgroundController
     : public LockActionHandlerLayoutManagerTest {
  public:
   LockActionHandlerLayoutManagerTestWithTestBackgroundController() = default;
+
+  LockActionHandlerLayoutManagerTestWithTestBackgroundController(
+      const LockActionHandlerLayoutManagerTestWithTestBackgroundController&) =
+      delete;
+  LockActionHandlerLayoutManagerTestWithTestBackgroundController& operator=(
+      const LockActionHandlerLayoutManagerTestWithTestBackgroundController&) =
+      delete;
+
   ~LockActionHandlerLayoutManagerTestWithTestBackgroundController() override =
       default;
 
@@ -187,9 +201,6 @@ class LockActionHandlerLayoutManagerTestWithTestBackgroundController
   // The lock screen action background controller created by
   // |CreateActionBackgroundController|.
   TestLockScreenActionBackgroundController* background_controller_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(
-      LockActionHandlerLayoutManagerTestWithTestBackgroundController);
 };
 
 TEST_F(LockActionHandlerLayoutManagerTest, PreserveNormalWindowBounds) {
@@ -202,7 +213,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, PreserveNormalWindowBounds) {
   // Note: default window delegate (used when no widget delegate is set) does
   // not allow the window to be maximized.
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
   EXPECT_EQ(bounds.ToString(), window->GetBoundsInScreen().ToString());
 
@@ -219,7 +230,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, PreserveNormalWindowBounds) {
 
 TEST_F(LockActionHandlerLayoutManagerTest, MaximizedWindowBounds) {
   // Cange the shelf alignment before locking the session.
-  GetPrimaryShelf()->SetAlignment(SHELF_ALIGNMENT_RIGHT);
+  GetPrimaryShelf()->SetAlignment(ShelfAlignment::kRight);
 
   // This should change the shelf alignment to bottom (temporarily for locked
   // state).
@@ -229,21 +240,21 @@ TEST_F(LockActionHandlerLayoutManagerTest, MaximizedWindowBounds) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       std::make_unique<TestWindowDelegate>());
 
   // Verify that the window bounds are equal to work area for the bottom shelf
   // alignment, which matches how the shelf is aligned on the lock screen,
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      ShelfConstants::shelf_size() /* bottom */);
+  target_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 }
 
 TEST_F(LockActionHandlerLayoutManagerTest, FullscreenWindowBounds) {
   // Cange the shelf alignment before locking the session.
-  GetPrimaryShelf()->SetAlignment(SHELF_ALIGNMENT_RIGHT);
+  GetPrimaryShelf()->SetAlignment(ShelfAlignment::kRight);
 
   // This should change the shelf alignment to bottom (temporarily for locked
   // state).
@@ -253,15 +264,15 @@ TEST_F(LockActionHandlerLayoutManagerTest, FullscreenWindowBounds) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       std::make_unique<TestWindowDelegate>());
 
   // Verify that the window bounds are equal to work area for the bottom shelf
   // alignment, which matches how the shelf is aligned on the lock screen,
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      ShelfConstants::shelf_size() /* bottom */);
+  target_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 }
 
@@ -274,21 +285,21 @@ TEST_F(LockActionHandlerLayoutManagerTest, MaximizeResizableWindow) {
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW);
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       std::make_unique<TestWindowDelegate>());
 
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      ShelfConstants::shelf_size() /* bottom */);
+  target_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 }
 
 TEST_F(LockActionHandlerLayoutManagerTest, KeyboardBounds) {
   gfx::Rect initial_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  initial_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                       ShelfConstants::shelf_size() /* bottom */);
+  initial_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
 
   SetUpTrayActionClientAndLockSession(mojom::TrayActionState::kActive);
 
@@ -296,7 +307,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, KeyboardBounds) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       std::make_unique<TestWindowDelegate>());
   ASSERT_EQ(initial_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
@@ -310,13 +321,12 @@ TEST_F(LockActionHandlerLayoutManagerTest, KeyboardBounds) {
 
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      keyboard_bounds.height() /* bottom */);
+  target_bounds.Inset(gfx::Insets().set_bottom(keyboard_bounds.height()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   // Verify that window bounds get updated when Chromevox bounds are shown (so
   // the Chromevox panel does not overlay with the action handler window).
-  ash::ShelfLayoutManager* shelf_layout_manager =
+  ShelfLayoutManager* shelf_layout_manager =
       GetPrimaryShelf()->shelf_layout_manager();
   ASSERT_TRUE(shelf_layout_manager);
 
@@ -325,8 +335,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, KeyboardBounds) {
       CreateTestWidget(nullptr, kShellWindowId_AccessibilityPanelContainer);
   SetAccessibilityPanelHeight(kAccessibilityPanelHeight);
 
-  target_bounds.Inset(0 /* left */, kAccessibilityPanelHeight /* top */,
-                      0 /* right */, 0 /* bottom */);
+  target_bounds.Inset(gfx::Insets().set_top(kAccessibilityPanelHeight));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   ShowKeyboard(false);
@@ -339,7 +348,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, AddingWindowInActiveState) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
 
   EXPECT_TRUE(window->IsVisible());
@@ -353,7 +362,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, AddingWindowInLaunchingState) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
 
   EXPECT_TRUE(window->IsVisible());
@@ -367,7 +376,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, AddingWindowInNonActiveState) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
 
   // The window should not be visible if the note action is not in active state.
@@ -399,7 +408,7 @@ TEST_F(LockActionHandlerLayoutManagerTest, FocusWindowWhileInNonActiveState) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
 
   EXPECT_EQ(GetContainer(kShellWindowId_LockActionHandlerContainer),
@@ -421,7 +430,7 @@ TEST_F(LockActionHandlerLayoutManagerTest,
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_MAXIMIZED;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       nullptr /* window_delegate */);
 
   EXPECT_EQ(GetContainer(kShellWindowId_LockActionHandlerContainer),
@@ -444,13 +453,13 @@ TEST_F(LockActionHandlerLayoutManagerTest, MultipleMonitors) {
       views::Widget::InitParams::TYPE_WINDOW);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
   std::unique_ptr<aura::Window> window = CreateTestingWindow(
-      widget_params, kShellWindowId_LockActionHandlerContainer,
+      std::move(widget_params), kShellWindowId_LockActionHandlerContainer,
       std::make_unique<TestWindowDelegate>());
 
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      ShelfConstants::shelf_size() /* bottom */);
+  target_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
@@ -459,12 +468,12 @@ TEST_F(LockActionHandlerLayoutManagerTest, MultipleMonitors) {
   window_state->SetRestoreBoundsInScreen(gfx::Rect(400, 0, 30, 40));
   window_state->Maximize();
 
-  // Maximize the window with as the restore bounds is inside 2nd display but
+  // Maximize the window width as the restore bounds is inside 2nd display but
   // lock container windows are always on primary display.
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
   target_bounds = gfx::Rect(300, 400);
-  target_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                      ShelfConstants::shelf_size() /* bottom */);
+  target_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   window_state->Restore();
@@ -711,8 +720,8 @@ TEST_F(LockActionHandlerLayoutManagerTestWithTestBackgroundController,
   // alignment, which matches how the shelf is aligned on the lock screen,
   gfx::Rect target_app_window_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_app_window_bounds.Inset(0 /* left */, 0 /* top */, 0 /* right */,
-                                 ShelfConstants::shelf_size() /* bottom */);
+  target_app_window_bounds.Inset(
+      gfx::Insets().set_bottom(ShelfConfig::Get()->shelf_size()));
   EXPECT_EQ(target_app_window_bounds, window->GetBoundsInScreen());
 
   EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().bounds(),

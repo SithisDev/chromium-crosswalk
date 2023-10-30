@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 #include <set>
 #include <string>
 
-#include "ash/session/session_observer.h"
-#include "base/macros.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "base/timer/timer.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 
@@ -35,6 +34,11 @@ class PolicyRecommendationRestorer : public SessionObserver,
                                      public ui::UserActivityObserver {
  public:
   PolicyRecommendationRestorer();
+
+  PolicyRecommendationRestorer(const PolicyRecommendationRestorer&) = delete;
+  PolicyRecommendationRestorer& operator=(const PolicyRecommendationRestorer&) =
+      delete;
+
   ~PolicyRecommendationRestorer() override;
 
   // Caller calls to start observing recommended value for |pref_name|. It
@@ -47,6 +51,8 @@ class PolicyRecommendationRestorer : public SessionObserver,
 
   // ui::UserActivityObserver:
   void OnUserActivity(const ui::Event* event) override;
+
+  void DisableForTesting();
 
   base::OneShotTimer* restore_timer_for_test() { return &restore_timer_; }
 
@@ -71,7 +77,7 @@ class PolicyRecommendationRestorer : public SessionObserver,
 
   base::OneShotTimer restore_timer_;
 
-  DISALLOW_COPY_AND_ASSIGN(PolicyRecommendationRestorer);
+  bool disabled_for_testing_ = false;
 };
 
 }  // namespace ash

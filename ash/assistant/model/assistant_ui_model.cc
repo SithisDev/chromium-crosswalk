@@ -1,51 +1,50 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/assistant/model/assistant_ui_model.h"
 
 #include "ash/assistant/model/assistant_ui_model_observer.h"
-#include "ash/public/cpp/app_list/app_list_features.h"
 
 namespace ash {
 
-AssistantUiModel::AssistantUiModel()
-    : ui_mode_(app_list_features::IsEmbeddedAssistantUIEnabled()
-                   ? AssistantUiMode::kLauncherEmbeddedUi
-                   : AssistantUiMode::kMainUi) {}
+std::ostream& operator<<(std::ostream& os, AssistantVisibility visibility) {
+  switch (visibility) {
+    case AssistantVisibility::kClosed:
+      return os << "Closed";
+    case AssistantVisibility::kClosing:
+      return os << "Closing";
+    case AssistantVisibility::kVisible:
+      return os << "Visible";
+  }
+}
+
+AssistantUiModel::AssistantUiModel() = default;
 
 AssistantUiModel::~AssistantUiModel() = default;
 
-void AssistantUiModel::AddObserver(AssistantUiModelObserver* observer) {
+void AssistantUiModel::AddObserver(AssistantUiModelObserver* observer) const {
   observers_.AddObserver(observer);
 }
 
-void AssistantUiModel::RemoveObserver(AssistantUiModelObserver* observer) {
+void AssistantUiModel::RemoveObserver(
+    AssistantUiModelObserver* observer) const {
   observers_.RemoveObserver(observer);
-}
-
-void AssistantUiModel::SetUiMode(AssistantUiMode ui_mode,
-                                 bool due_to_interaction) {
-  if (ui_mode == ui_mode_)
-    return;
-
-  ui_mode_ = ui_mode;
-  NotifyUiModeChanged(due_to_interaction);
 }
 
 void AssistantUiModel::SetVisible(AssistantEntryPoint entry_point) {
   SetVisibility(AssistantVisibility::kVisible, entry_point,
-                /*exit_point=*/base::nullopt);
+                /*exit_point=*/absl::nullopt);
 }
 
-void AssistantUiModel::SetHidden(AssistantExitPoint exit_point) {
-  SetVisibility(AssistantVisibility::kHidden,
-                /*entry_point=*/base::nullopt, exit_point);
+void AssistantUiModel::SetClosing(AssistantExitPoint exit_point) {
+  SetVisibility(AssistantVisibility::kClosing,
+                /*entry_point=*/absl::nullopt, exit_point);
 }
 
 void AssistantUiModel::SetClosed(AssistantExitPoint exit_point) {
   SetVisibility(AssistantVisibility::kClosed,
-                /*entry_point=*/base::nullopt, exit_point);
+                /*entry_point=*/absl::nullopt, exit_point);
 }
 
 void AssistantUiModel::SetUsableWorkArea(const gfx::Rect& usable_work_area) {
@@ -56,10 +55,22 @@ void AssistantUiModel::SetUsableWorkArea(const gfx::Rect& usable_work_area) {
   NotifyUsableWorkAreaChanged();
 }
 
+void AssistantUiModel::SetKeyboardTraversalMode(bool keyboard_traversal_mode) {
+  if (keyboard_traversal_mode == keyboard_traversal_mode_)
+    return;
+
+  keyboard_traversal_mode_ = keyboard_traversal_mode;
+  NotifyKeyboardTraversalModeChanged();
+}
+
+void AssistantUiModel::SetAppListBubbleWidth(int width) {
+  app_list_bubble_width_ = width;
+}
+
 void AssistantUiModel::SetVisibility(
     AssistantVisibility visibility,
-    base::Optional<AssistantEntryPoint> entry_point,
-    base::Optional<AssistantExitPoint> exit_point) {
+    absl::optional<AssistantEntryPoint> entry_point,
+    absl::optional<AssistantExitPoint> exit_point) {
   if (visibility == visibility_)
     return;
 
@@ -79,15 +90,15 @@ void AssistantUiModel::SetVisibility(
   NotifyUiVisibilityChanged(old_visibility, entry_point, exit_point);
 }
 
-void AssistantUiModel::NotifyUiModeChanged(bool due_to_interaction) {
+void AssistantUiModel::NotifyKeyboardTraversalModeChanged() {
   for (AssistantUiModelObserver& observer : observers_)
-    observer.OnUiModeChanged(ui_mode_, due_to_interaction);
+    observer.OnKeyboardTraversalModeChanged(keyboard_traversal_mode_);
 }
 
 void AssistantUiModel::NotifyUiVisibilityChanged(
     AssistantVisibility old_visibility,
-    base::Optional<AssistantEntryPoint> entry_point,
-    base::Optional<AssistantExitPoint> exit_point) {
+    absl::optional<AssistantEntryPoint> entry_point,
+    absl::optional<AssistantExitPoint> exit_point) {
   for (AssistantUiModelObserver& observer : observers_)
     observer.OnUiVisibilityChanged(visibility_, old_visibility, entry_point,
                                    exit_point);

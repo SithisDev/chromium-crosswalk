@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
-#include "ui/compositor/dip_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/wm/core/window_properties.h"
@@ -119,6 +119,15 @@ void ScreenPositionController::SetBounds(aura::Window* window,
   }
 
   SetBoundsInScreen(window, bounds, display);
+}
+
+gfx::Point ScreenPositionController::GetRootWindowOriginInScreen(
+    const aura::Window* root_window) {
+  DCHECK(root_window->IsRootWindow());
+  const display::Display& display =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(
+          const_cast<aura::Window*>(root_window));
+  return display.bounds().origin();
 }
 
 }  // namespace ash

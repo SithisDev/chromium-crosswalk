@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/status_area_widget_test_helper.h"
 #include "ash/test/ash_test_base.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ash {
 
@@ -28,7 +29,7 @@ class VirtualKeyboardTrayTest : public AshTestBase {
     // These tests only apply to the floating virtual keyboard, as it is the
     // only case where both the virtual keyboard and the shelf are visible.
     keyboard_controller()->SetContainerType(keyboard::ContainerType::kFloating,
-                                            base::nullopt, base::DoNothing());
+                                            gfx::Rect(), base::DoNothing());
   }
 
   keyboard::KeyboardUIController* keyboard_controller() {
@@ -40,7 +41,7 @@ class VirtualKeyboardTrayTest : public AshTestBase {
 TEST_F(VirtualKeyboardTrayTest, PerformActionTogglesVirtualKeyboard) {
   StatusAreaWidget* status = StatusAreaWidgetTestHelper::GetStatusAreaWidget();
   VirtualKeyboardTray* tray = status->virtual_keyboard_tray_for_testing();
-  tray->SetVisible(true);
+  tray->SetVisiblePreferred(true);
   ASSERT_TRUE(tray->GetVisible());
 
   // First tap should show the virtual keyboard.

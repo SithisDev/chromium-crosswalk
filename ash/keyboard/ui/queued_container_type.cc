@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,11 @@ namespace keyboard {
 QueuedContainerType::QueuedContainerType(
     KeyboardUIController* controller,
     ContainerType container_type,
-    base::Optional<gfx::Rect> bounds,
+    gfx::Rect bounds,
     base::OnceCallback<void(bool success)> callback)
     : controller_(controller),
       container_type_(container_type),
-      bounds_(std::move(bounds)),
+      bounds_(bounds),
       callback_(std::move(callback)) {}
 
 QueuedContainerType::~QueuedContainerType() {

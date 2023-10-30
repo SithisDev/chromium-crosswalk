@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,19 @@
 
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/color_util.h"
+#include "ash/style/style_util.h"
 #include "ash/system/tray/tray_constants.h"
-#include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/unified/feature_pod_controller_base.h"
-#include "ui/accessibility/ax_node_data.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/canvas.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/color/color_id.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/views/animation/flood_fill_ink_drop_ripple.h"
-#include "ui/views/animation/ink_drop_highlight.h"
-#include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/focus_ring.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
@@ -25,125 +26,88 @@
 
 namespace ash {
 
+using ContentLayerType = AshColorProvider::ContentLayerType;
+using ControlsLayerType = AshColorProvider::ControlsLayerType;
+
 namespace {
 
-void ConfigureFeaturePodLabel(views::Label* label) {
+void ConfigureFeaturePodLabel(views::Label* label,
+                              int line_height,
+                              int font_size) {
   label->SetAutoColorReadabilityEnabled(false);
   label->SetSubpixelRenderingEnabled(false);
-  label->set_can_process_events_within_subtree(false);
+  label->SetCanProcessEventsWithinSubtree(false);
+  label->SetLineHeight(line_height);
+
+  gfx::Font default_font;
+  gfx::Font label_font =
+      default_font.Derive(font_size - default_font.GetFontSize(),
+                          gfx::Font::NORMAL, gfx::Font::Weight::NORMAL);
+  gfx::FontList font_list(label_font);
+  label->SetFontList(font_list);
 }
 
 }  // namespace
 
-FeaturePodIconButton::FeaturePodIconButton(views::ButtonListener* listener)
-    : views::ImageButton(listener) {
-  SetPreferredSize(kUnifiedFeaturePodIconSize);
-  SetBorder(views::CreateEmptyBorder(kUnifiedFeaturePodIconPadding));
-  SetImageHorizontalAlignment(ALIGN_CENTER);
-  SetImageVerticalAlignment(ALIGN_MIDDLE);
-  TrayPopupUtils::ConfigureTrayPopupButton(this);
-
-  auto path = std::make_unique<SkPath>();
-  path->addOval(gfx::RectToSkRect(gfx::Rect(kUnifiedFeaturePodIconSize)));
-  SetProperty(views::kHighlightPathKey, path.release());
+FeaturePodIconButton::FeaturePodIconButton(PressedCallback callback,
+                                           bool is_togglable)
+    : IconButton(std::move(callback),
+                 IconButton::Type::kMedium,
+                 /*icon=*/nullptr,
+                 is_togglable,
+                 /*has_border=*/true) {
+  SetFlipCanvasOnPaintForRTLUI(false);
+  GetViewAccessibility().OverrideIsLeaf(true);
 }
 
 FeaturePodIconButton::~FeaturePodIconButton() = default;
 
-void FeaturePodIconButton::SetToggled(bool toggled) {
-  toggled_ = toggled;
-  SchedulePaint();
-}
+BEGIN_METADATA(FeaturePodIconButton, IconButton)
+END_METADATA
 
-void FeaturePodIconButton::PaintButtonContents(gfx::Canvas* canvas) {
-  gfx::Rect rect(GetContentsBounds());
-  cc::PaintFlags flags;
-  flags.setAntiAlias(true);
-
-  SkColor color = kUnifiedMenuButtonColor;
-  if (GetEnabled()) {
-    if (toggled_)
-      color = kUnifiedMenuButtonColorActive;
-  } else {
-    color = kUnifiedMenuButtonColorDisabled;
-  }
-  flags.setColor(color);
-
-  flags.setStyle(cc::PaintFlags::kFill_Style);
-  canvas->DrawCircle(gfx::PointF(rect.CenterPoint()), rect.width() / 2, flags);
-
-  views::ImageButton::PaintButtonContents(canvas);
-}
-
-std::unique_ptr<views::InkDrop> FeaturePodIconButton::CreateInkDrop() {
-  return TrayPopupUtils::CreateInkDrop(this);
-}
-
-std::unique_ptr<views::InkDropRipple>
-FeaturePodIconButton::CreateInkDropRipple() const {
-  return TrayPopupUtils::CreateInkDropRipple(
-      TrayPopupInkDropStyle::FILL_BOUNDS, this,
-      GetInkDropCenterBasedOnLastEvent(), kUnifiedMenuIconColor);
-}
-
-std::unique_ptr<views::InkDropHighlight>
-FeaturePodIconButton::CreateInkDropHighlight() const {
-  return TrayPopupUtils::CreateInkDropHighlight(
-      TrayPopupInkDropStyle::FILL_BOUNDS, this, kUnifiedMenuIconColor);
-}
-
-std::unique_ptr<views::InkDropMask> FeaturePodIconButton::CreateInkDropMask()
-    const {
-  gfx::Rect rect(GetContentsBounds());
-  return std::make_unique<views::CircleInkDropMask>(size(), rect.CenterPoint(),
-                                                    rect.width() / 2);
-}
-
-void FeaturePodIconButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  ImageButton::GetAccessibleNodeData(node_data);
-  node_data->SetName(GetTooltipText(gfx::Point()));
-  node_data->role = ax::mojom::Role::kToggleButton;
-  node_data->SetCheckedState(toggled_ ? ax::mojom::CheckedState::kTrue
-                                      : ax::mojom::CheckedState::kFalse);
-}
-
-const char* FeaturePodIconButton::GetClassName() const {
-  return "FeaturePodIconButton";
-}
-
-FeaturePodLabelButton::FeaturePodLabelButton(views::ButtonListener* listener)
-    : Button(listener),
+FeaturePodLabelButton::FeaturePodLabelButton(PressedCallback callback)
+    : Button(std::move(callback)),
       label_(new views::Label),
       sub_label_(new views::Label),
       detailed_view_arrow_(new views::ImageView) {
   SetBorder(views::CreateEmptyBorder(kUnifiedFeaturePodHoverPadding));
+  GetViewAccessibility().OverrideIsLeaf(true);
 
-  ConfigureFeaturePodLabel(label_);
-  ConfigureFeaturePodLabel(sub_label_);
+  label_->SetLineHeight(kUnifiedFeaturePodLabelLineHeight);
+  label_->SetMultiLine(true);
+  label_->SetMaxLines(kUnifiedFeaturePodLabelMaxLines);
+  ConfigureFeaturePodLabel(label_, kUnifiedFeaturePodLabelLineHeight,
+                           kUnifiedFeaturePodLabelFontSize);
+  ConfigureFeaturePodLabel(sub_label_, kUnifiedFeaturePodSubLabelLineHeight,
+                           kUnifiedFeaturePodSubLabelFontSize);
   sub_label_->SetVisible(false);
 
-  detailed_view_arrow_->set_can_process_events_within_subtree(false);
+  detailed_view_arrow_->SetCanProcessEventsWithinSubtree(false);
   detailed_view_arrow_->SetVisible(false);
-
-  OnEnabledChanged();
 
   AddChildView(label_);
   AddChildView(detailed_view_arrow_);
   AddChildView(sub_label_);
 
-  TrayPopupUtils::ConfigureTrayPopupButton(this);
+  StyleUtil::SetUpInkDropForButton(this);
 
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
+
+  views::InstallRoundRectHighlightPathGenerator(
+      this, gfx::Insets(), kUnifiedFeaturePodHoverCornerRadius);
+
+  views::FocusRing::Get(this)->SetColorId(ui::kColorAshFocusRing);
 }
 
 FeaturePodLabelButton::~FeaturePodLabelButton() = default;
 
 void FeaturePodLabelButton::Layout() {
-  DCHECK(focus_ring());
-  focus_ring()->Layout();
+  DCHECK(views::FocusRing::Get(this));
+  views::FocusRing::Get(this)->Layout();
   LayoutInCenter(label_, GetContentsBounds().y());
-  LayoutInCenter(sub_label_, GetContentsBounds().CenterPoint().y());
+  LayoutInCenter(sub_label_, GetContentsBounds().CenterPoint().y() +
+                                 kUnifiedFeaturePodInterLabelPadding);
 
   if (!detailed_view_arrow_->GetVisible())
     return;
@@ -172,51 +136,43 @@ gfx::Size FeaturePodLabelButton::CalculatePreferredSize() const {
                      label_width + extra_space_for_arrow + GetInsets().width());
   }
 
+  // Make sure there is sufficient margin around the label.
+  int horizontal_margin = width - label_->GetPreferredSize().width();
+  if (horizontal_margin < 2 * kUnifiedFeaturePodMinimumHorizontalMargin)
+    width += 2 * kUnifiedFeaturePodMinimumHorizontalMargin - horizontal_margin;
+
   int height = label_->GetPreferredSize().height() + GetInsets().height();
-  if (sub_label_->GetVisible())
-    height += sub_label_->GetPreferredSize().height();
+  if (sub_label_->GetVisible()) {
+    height += kUnifiedFeaturePodInterLabelPadding +
+              sub_label_->GetPreferredSize().height();
+  }
 
   return gfx::Size(width, height);
 }
 
-std::unique_ptr<views::InkDrop> FeaturePodLabelButton::CreateInkDrop() {
-  auto ink_drop = TrayPopupUtils::CreateInkDrop(this);
-  ink_drop->SetShowHighlightOnHover(true);
-  return ink_drop;
+void FeaturePodLabelButton::OnThemeChanged() {
+  views::Button::OnThemeChanged();
+  OnEnabledChanged();
 }
 
-std::unique_ptr<views::InkDropRipple>
-FeaturePodLabelButton::CreateInkDropRipple() const {
-  return TrayPopupUtils::CreateInkDropRipple(
-      TrayPopupInkDropStyle::FILL_BOUNDS, this,
-      GetInkDropCenterBasedOnLastEvent(), kUnifiedFeaturePodHoverColor);
-}
-
-std::unique_ptr<views::InkDropHighlight>
-FeaturePodLabelButton::CreateInkDropHighlight() const {
-  return TrayPopupUtils::CreateInkDropHighlight(
-      TrayPopupInkDropStyle::FILL_BOUNDS, this, kUnifiedFeaturePodHoverColor);
-}
-
-std::unique_ptr<views::InkDropMask> FeaturePodLabelButton::CreateInkDropMask()
-    const {
-  return std::make_unique<views::RoundRectInkDropMask>(
-      size(), gfx::Insets(), kUnifiedFeaturePodHoverRadius);
-}
-
-const char* FeaturePodLabelButton::GetClassName() const {
-  return "FeaturePodLabelButton";
-}
-
-void FeaturePodLabelButton::SetLabel(const base::string16& label) {
+void FeaturePodLabelButton::SetLabel(const std::u16string& label) {
   label_->SetText(label);
   InvalidateLayout();
 }
 
-void FeaturePodLabelButton::SetSubLabel(const base::string16& sub_label) {
+const std::u16string& FeaturePodLabelButton::GetLabelText() const {
+  return label_->GetText();
+}
+
+void FeaturePodLabelButton::SetSubLabel(const std::u16string& sub_label) {
   sub_label_->SetText(sub_label);
-  sub_label_->SetVisible(true);
+  sub_label_->SetVisible(!sub_label.empty());
+  label_->SetMultiLine(sub_label.empty());
   InvalidateLayout();
+}
+
+const std::u16string& FeaturePodLabelButton::GetSubLabelText() const {
+  return sub_label_->GetText();
 }
 
 void FeaturePodLabelButton::ShowDetailedViewArrow() {
@@ -225,13 +181,23 @@ void FeaturePodLabelButton::ShowDetailedViewArrow() {
 }
 
 void FeaturePodLabelButton::OnEnabledChanged() {
-  label_->SetEnabledColor(GetEnabled() ? kUnifiedMenuTextColor
-                                       : kUnifiedMenuTextColorDisabled);
-  sub_label_->SetEnabledColor(GetEnabled() ? kUnifiedMenuSecondaryTextColor
-                                           : kUnifiedMenuTextColorDisabled);
+  const AshColorProvider* color_provider = AshColorProvider::Get();
+  const SkColor primary_text_color =
+      color_provider->GetContentLayerColor(ContentLayerType::kTextColorPrimary);
+  const SkColor secondary_text_color = color_provider->GetContentLayerColor(
+      ContentLayerType::kTextColorSecondary);
+  label_->SetEnabledColor(
+      GetEnabled() ? primary_text_color
+                   : ColorUtil::GetDisabledColor(primary_text_color));
+  sub_label_->SetEnabledColor(
+      GetEnabled() ? secondary_text_color
+                   : ColorUtil::GetDisabledColor(secondary_text_color));
+
+  const SkColor icon_color =
+      color_provider->GetContentLayerColor(ContentLayerType::kIconColorPrimary);
   detailed_view_arrow_->SetImage(gfx::CreateVectorIcon(
       kUnifiedMenuMoreIcon,
-      GetEnabled() ? kUnifiedMenuIconColor : kUnifiedMenuIconColorDisabled));
+      GetEnabled() ? icon_color : ColorUtil::GetDisabledColor(icon_color)));
 }
 
 void FeaturePodLabelButton::LayoutInCenter(views::View* child, int y) {
@@ -244,10 +210,18 @@ void FeaturePodLabelButton::LayoutInCenter(views::View* child, int y) {
       child_width, preferred_size.height());
 }
 
-FeaturePodButton::FeaturePodButton(FeaturePodControllerBase* controller)
-    : controller_(controller),
-      icon_button_(new FeaturePodIconButton(this)),
-      label_button_(new FeaturePodLabelButton(this)) {
+BEGIN_METADATA(FeaturePodLabelButton, views::Button)
+END_METADATA
+
+FeaturePodButton::FeaturePodButton(FeaturePodControllerBase* controller,
+                                   bool is_togglable)
+    : icon_button_(new FeaturePodIconButton(
+          base::BindRepeating(&FeaturePodControllerBase::OnIconPressed,
+                              base::Unretained(controller)),
+          is_togglable)),
+      label_button_(new FeaturePodLabelButton(
+          base::BindRepeating(&FeaturePodControllerBase::OnLabelPressed,
+                              base::Unretained(controller)))) {
   auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical, gfx::Insets(),
       kUnifiedFeaturePodSpacing));
@@ -269,34 +243,36 @@ double FeaturePodButton::GetOpacityForExpandedAmount(double expanded_amount) {
 }
 
 void FeaturePodButton::SetVectorIcon(const gfx::VectorIcon& icon) {
-  icon_button_->SetImage(views::Button::STATE_NORMAL,
-                         gfx::CreateVectorIcon(icon, kUnifiedMenuIconColor));
-  icon_button_->SetImage(
-      views::Button::STATE_DISABLED,
-      gfx::CreateVectorIcon(icon, kUnifiedMenuIconColorDisabled));
+  icon_button_->SetVectorIcon(icon);
 }
 
-void FeaturePodButton::SetLabel(const base::string16& label) {
+void FeaturePodButton::SetLabel(const std::u16string& label) {
+  if (label_button_->GetLabelText() == label)
+    return;
+
   label_button_->SetLabel(label);
   Layout();
   label_button_->SchedulePaint();
 }
 
-void FeaturePodButton::SetSubLabel(const base::string16& sub_label) {
+void FeaturePodButton::SetSubLabel(const std::u16string& sub_label) {
+  if (label_button_->GetSubLabelText() == sub_label)
+    return;
+
   label_button_->SetSubLabel(sub_label);
   Layout();
   label_button_->SchedulePaint();
 }
 
-void FeaturePodButton::SetIconTooltip(const base::string16& text) {
+void FeaturePodButton::SetIconTooltip(const std::u16string& text) {
   icon_button_->SetTooltipText(text);
 }
 
-void FeaturePodButton::SetLabelTooltip(const base::string16& text) {
+void FeaturePodButton::SetLabelTooltip(const std::u16string& text) {
   label_button_->SetTooltipText(text);
 }
 
-void FeaturePodButton::SetIconAndLabelTooltips(const base::string16& text) {
+void FeaturePodButton::SetIconAndLabelTooltips(const std::u16string& text) {
   SetIconTooltip(text);
   SetLabelTooltip(text);
 }
@@ -344,22 +320,12 @@ void FeaturePodButton::RequestFocus() {
   label_button_->RequestFocus();
 }
 
-const char* FeaturePodButton::GetClassName() const {
-  return "FeaturePodButton";
-}
-
 void FeaturePodButton::OnEnabledChanged() {
   icon_button_->SetEnabled(GetEnabled());
   label_button_->SetEnabled(GetEnabled());
 }
 
-void FeaturePodButton::ButtonPressed(views::Button* sender,
-                                     const ui::Event& event) {
-  if (sender == label_button_) {
-    controller_->OnLabelPressed();
-    return;
-  }
-  controller_->OnIconPressed();
-}
+BEGIN_METADATA(FeaturePodButton, views::View)
+END_METADATA
 
 }  // namespace ash

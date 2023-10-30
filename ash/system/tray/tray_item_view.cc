@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,14 @@
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/shelf/shelf.h"
 #include "ash/system/tray/tray_constants.h"
+#include "base/metrics/histogram_functions.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/compositor/throughput_tracker.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -20,7 +25,38 @@ namespace ash {
 
 namespace {
 
-const int kTrayItemAnimationDurationMS = 200;
+// Animating in will start (after resize stage) when animation value is greater
+// than this value.
+constexpr double kAnimatingInStartValue = 0.5;
+
+// Animating out will end (before resize stage) when animation value is less
+// than this value.
+constexpr double kAnimatingOutEndValue = 0.5;
+
+constexpr char kShowAnimationSmoothnessHistogramName[] =
+    "Ash.StatusArea.TrayItemView.Show";
+
+constexpr char kHideAnimationSmoothnessHistogramName[] =
+    "Ash.StatusArea.TrayItemView.Hide";
+
+void RecordAnimationSmoothness(const std::string& histogram_name,
+                               int smoothness) {
+  DCHECK(0 <= smoothness && smoothness <= 100);
+  base::UmaHistogramPercentage(histogram_name, smoothness);
+}
+
+void SetupThroughputTrackerForAnimationSmoothness(
+    views::Widget* widget,
+    absl::optional<ui::ThroughputTracker>& tracker,
+    const char* histogram_name) {
+  // Return if `tracker` is already running; `widget` may not exist in tests.
+  if (tracker || !widget)
+    return;
+
+  tracker.emplace(widget->GetCompositor()->RequestNewThroughputTracker());
+  tracker->Start(ash::metrics_util::ForSmoothness(
+      base::BindRepeating(&RecordAnimationSmoothness, histogram_name)));
+}
 
 }  // namespace
 
@@ -57,33 +93,59 @@ void TrayItemView::CreateImageView() {
   PreferredSizeChanged();
 }
 
+void TrayItemView::DestroyLabel() {
+  if (!label_)
+    return;
+
+  RemoveChildViewT(label_);
+  label_ = nullptr;
+}
+
+void TrayItemView::DestroyImageView() {
+  if (!image_view_)
+    return;
+
+  RemoveChildViewT(image_view_);
+  image_view_ = nullptr;
+}
+
 void TrayItemView::SetVisible(bool set_visible) {
   if (!GetWidget() ||
-      ui::ScopedAnimationDurationScaleMode::duration_scale_mode() ==
+      ui::ScopedAnimationDurationScaleMode::duration_multiplier() ==
           ui::ScopedAnimationDurationScaleMode::ZERO_DURATION) {
     views::View::SetVisible(set_visible);
     return;
   }
 
+  // Do not invoke animation when visibility is not changing.
+  if (set_visible == GetVisible())
+    return;
+
+  target_visible_ = set_visible;
+
   if (!animation_) {
-    animation_.reset(new gfx::SlideAnimation(this));
-    animation_->SetSlideDuration(GetAnimationDurationMS());
+    animation_ = std::make_unique<gfx::SlideAnimation>(this);
     animation_->SetTweenType(gfx::Tween::LINEAR);
     animation_->Reset(GetVisible() ? 1.0 : 0.0);
   }
 
-  if (!set_visible) {
-    animation_->Hide();
-    AnimationProgressed(animation_.get());
-  } else {
+  if (target_visible_) {
+    SetupThroughputTrackerForAnimationSmoothness(
+        GetWidget(), throughput_tracker_,
+        kShowAnimationSmoothnessHistogramName);
+    animation_->SetSlideDuration(base::Milliseconds(400));
     animation_->Show();
     AnimationProgressed(animation_.get());
     views::View::SetVisible(true);
+    layer()->SetOpacity(0.f);
+  } else {
+    SetupThroughputTrackerForAnimationSmoothness(
+        GetWidget(), throughput_tracker_,
+        kHideAnimationSmoothnessHistogramName);
+    animation_->SetSlideDuration(base::Milliseconds(100));
+    animation_->Hide();
+    AnimationProgressed(animation_.get());
   }
-}
-
-int TrayItemView::GetAnimationDurationMS() {
-  return kTrayItemAnimationDurationMS;
 }
 
 bool TrayItemView::IsHorizontalAlignment() const {
@@ -97,14 +159,18 @@ gfx::Size TrayItemView::CalculatePreferredSize() const {
     size = gfx::Size(kUnifiedTrayIconSize, kUnifiedTrayIconSize);
   }
 
-  if (!animation_.get() || !animation_->is_animating())
+  if (!animation_.get() || !animation_->is_animating() ||
+      !InResizeAnimation(animation_->GetCurrentValue())) {
     return size;
+  }
+
+  double progress = gfx::Tween::CalculateValue(
+      gfx::Tween::FAST_OUT_SLOW_IN,
+      GetResizeProgressFromAnimationProgress(animation_->GetCurrentValue()));
   if (shelf_->IsHorizontalAlignment()) {
-    size.set_width(std::max(
-        1, static_cast<int>(size.width() * animation_->GetCurrentValue())));
+    size.set_width(std::max(1, static_cast<int>(size.width() * progress)));
   } else {
-    size.set_height(std::max(
-        1, static_cast<int>(size.height() * animation_->GetCurrentValue())));
+    size.set_height(std::max(1, static_cast<int>(size.height() * progress)));
   }
   return size;
 }
@@ -122,27 +188,82 @@ void TrayItemView::ChildPreferredSizeChanged(views::View* child) {
 }
 
 void TrayItemView::AnimationProgressed(const gfx::Animation* animation) {
-  gfx::Transform transform;
-  if (shelf_->IsHorizontalAlignment()) {
-    transform.Translate(0, animation->CurrentValueBetween(
-                               static_cast<double>(height()) / 2, 0.));
-  } else {
-    transform.Translate(
-        animation->CurrentValueBetween(static_cast<double>(width() / 2), 0.),
-        0);
+  // Should not animate during resize stage.
+  if (InResizeAnimation(animation->GetCurrentValue())) {
+    PreferredSizeChanged();
+    return;
   }
-  transform.Scale(animation->GetCurrentValue(), animation->GetCurrentValue());
-  layer()->SetTransform(transform);
+
+  double scale_progress =
+      GetItemScaleProgressFromAnimationProgress(animation->GetCurrentValue());
+  layer()->SetOpacity(scale_progress);
+
+  // Only scale when animating icon in.
+  if (target_visible_ && use_scale_in_animation_) {
+    scale_progress = gfx::Tween::CalculateValue(gfx::Tween::LINEAR_OUT_SLOW_IN,
+                                                scale_progress);
+    gfx::Transform transform;
+    transform.Translate(
+        gfx::Tween::DoubleValueBetween(scale_progress,
+                                       static_cast<double>(width()) / 2, 0.),
+        gfx::Tween::DoubleValueBetween(scale_progress,
+                                       static_cast<double>(height()) / 2, 0.));
+    transform.Scale(scale_progress, scale_progress);
+    layer()->SetTransform(transform);
+  }
+
+  // Container size might not fully transition to full size (the resize progress
+  // value converted from animation progress might not be 1 after resize
+  // animation). This call makes sure that it is fully resized.
   PreferredSizeChanged();
 }
 
 void TrayItemView::AnimationEnded(const gfx::Animation* animation) {
   if (animation->GetCurrentValue() < 0.1)
     views::View::SetVisible(false);
+
+  if (throughput_tracker_) {
+    // Reset `throughput_tracker_` to reset animation metrics recording.
+    throughput_tracker_->Stop();
+    throughput_tracker_.reset();
+  }
 }
 
 void TrayItemView::AnimationCanceled(const gfx::Animation* animation) {
   AnimationEnded(animation);
+}
+
+bool TrayItemView::InResizeAnimation(double animation_value) const {
+  // Animation should be delayed for the first part of animating in and last
+  // part of animating out, allowing item resize happen before item animating in
+  // and after item animating out.
+  return ((target_visible_ && animation_value <= kAnimatingInStartValue) ||
+          (!target_visible_ && animation_value <= kAnimatingOutEndValue));
+}
+
+double TrayItemView::GetResizeProgressFromAnimationProgress(
+    double animation_value) const {
+  DCHECK(InResizeAnimation(animation_value));
+  // When animating in, convert value from [0,kAnimatingInStartValue] to [0,1].
+  if (target_visible_)
+    return animation_value * (1 / kAnimatingInStartValue);
+
+  // When animating out, convert value from [kAnimatingOutEndValue,0] to [1,0].
+  return animation_value * (1 / kAnimatingOutEndValue);
+}
+
+double TrayItemView::GetItemScaleProgressFromAnimationProgress(
+    double animation_value) const {
+  DCHECK(!InResizeAnimation(animation_value));
+  // When animating in, convert value from [kAnimatingInStartValue,1] to [0,1].
+  if (target_visible_) {
+    return (animation_value - kAnimatingInStartValue) *
+           (1 / (1 - kAnimatingInStartValue));
+  }
+
+  // When animating out, convert value from [1,kAnimatingOutEndValue] to [1,0].
+  return (animation_value - kAnimatingOutEndValue) *
+         (1 / (1 - kAnimatingOutEndValue));
 }
 
 }  // namespace ash

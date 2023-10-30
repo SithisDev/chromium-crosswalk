@@ -1,96 +1,141 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/app_list/views/remove_query_confirmation_dialog.h"
 
-#include "ash/app_list/views/search_box_view.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/strings/grit/ui_strings.h"
-#include "ui/views/controls/label.h"
-#include "ui/views/focus/focus_manager.h"
-#include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/layout_provider.h"
-#include "ui/views/window/dialog_client_view.h"
+#include <memory>
+#include <utility>
 
-namespace app_list {
+#include "ash/accessibility/accessibility_controller_impl.h"
+#include "ash/public/cpp/ash_typography.h"
+#include "ash/public/cpp/view_shadow.h"
+#include "ash/shell.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/pill_button.h"
+#include "base/bind.h"
+#include "ui/accessibility/ax_node_data.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/compositor/layer.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/strings/grit/ui_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/highlight_border.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/style/typography.h"
+#include "ui/views/view_class_properties.h"
+#include "ui/views/widget/widget.h"
+
+namespace ash {
 
 namespace {
 
-constexpr int kDialogWidth = 320;
-constexpr int kDialogYOffset = 32;
+constexpr int kDialogWidth = 360;
+
+constexpr gfx::Insets kDialogContentInsets = gfx::Insets::VH(20, 24);
+constexpr float kDialogRoundedCornerRadius = 16.0f;
+constexpr int kDialogShadowElevation = 3;
+
+constexpr int kMarginBetweenTitleAndBody = 8;
+constexpr int kMarginBetweenBodyAndButtons = 20;
+constexpr int kMarginBetweenButtons = 8;
 
 }  // namespace
 
 RemoveQueryConfirmationDialog::RemoveQueryConfirmationDialog(
-    const base::string16& query,
     RemovalConfirmationCallback confirm_callback,
-    int event_flags,
-    ContentsView* contents_view)
-    : confirm_callback_(std::move(confirm_callback)),
-      event_flags_(event_flags),
-      contents_view_(contents_view) {
-  const views::LayoutProvider* provider = views::LayoutProvider::Get();
+    const std::u16string& result_title)
+    : confirm_callback_(std::move(confirm_callback)) {
+  SetModalType(ui::MODAL_TYPE_WINDOW);
+
+  SetPaintToLayer();
+  layer()->SetBackgroundBlur(ColorProvider::kBackgroundBlurSigma);
+  layer()->SetBackdropFilterQuality(ColorProvider::kBackgroundBlurQuality);
+
+  view_shadow_ = std::make_unique<ViewShadow>(this, kDialogShadowElevation);
+  view_shadow_->SetRoundedCornerRadius(kDialogRoundedCornerRadius);
+
   SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::Orientation::kVertical,
-      provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT),
-      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL)));
+      views::BoxLayout::Orientation::kVertical, kDialogContentInsets));
 
-  views::Label* label = new views::Label(l10n_util::GetStringFUTF16(
-      IDS_REMOVE_ZERO_STATE_SUGGESTION_DETAILS, query));
-  label->SetMultiLine(true);
-  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  label->SetAllowCharacterBreak(true);
-  AddChildView(label);
+  // Add dialog title.
+  title_ = AddChildView(std::make_unique<views::Label>(
+      l10n_util::GetStringUTF16(IDS_REMOVE_ZERO_STATE_SUGGESTION_TITLE)));
+  title_->SetTextContext(views::style::CONTEXT_DIALOG_TITLE);
+  title_->SetTextStyle(views::style::STYLE_EMPHASIZED);
+  title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  title_->SetAutoColorReadabilityEnabled(false);
+  // Needs to paint to layer so it's stacked above `this` view.
+  title_->SetPaintToLayer();
+  title_->layer()->SetFillsBoundsOpaquely(false);
+  // Ignore labels for accessibility - the accessible name is defined for the
+  // whole dialog view.
+  title_->GetViewAccessibility().OverrideIsIgnored(true);
 
-  contents_view_->AddSearchBoxUpdateObserver(this);
+  // Add dialog body.
+  body_ =
+      AddChildView(std::make_unique<views::Label>(l10n_util::GetStringFUTF16(
+          IDS_REMOVE_ZERO_STATE_SUGGESTION_DETAILS, result_title)));
+  body_->SetProperty(views::kMarginsKey,
+                     gfx::Insets::TLBR(kMarginBetweenTitleAndBody, 0,
+                                       kMarginBetweenBodyAndButtons, 0));
+  body_->SetTextContext(views::style::CONTEXT_DIALOG_BODY_TEXT);
+  body_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  body_->SetMultiLine(true);
+  body_->SetAllowCharacterBreak(true);
+  body_->SetAutoColorReadabilityEnabled(false);
+  // Needs to paint to layer so it's stacked above `this` view.
+  body_->SetPaintToLayer();
+  body_->layer()->SetFillsBoundsOpaquely(false);
+  // Ignore labels for accessibility - the accessible name is defined for the
+  // whole dialog view.
+  body_->GetViewAccessibility().OverrideIsIgnored(true);
+
+  auto run_callback = [](RemoveQueryConfirmationDialog* dialog, bool accept) {
+    if (!dialog->confirm_callback_)
+      return;
+
+    if (accept) {
+      Shell::Get()
+          ->accessibility_controller()
+          ->TriggerAccessibilityAlertWithMessage(
+              l10n_util::GetStringUTF8(IDS_REMOVE_SUGGESTION_ANNOUNCEMENT));
+    }
+
+    std::move(dialog->confirm_callback_).Run(accept);
+
+    dialog->GetWidget()->CloseWithReason(
+        accept ? views::Widget::ClosedReason::kAcceptButtonClicked
+               : views::Widget::ClosedReason::kCancelButtonClicked);
+  };
+
+  // Add button row.
+  auto* button_row = AddChildView(std::make_unique<views::View>());
+  button_row
+      ->SetLayoutManager(std::make_unique<views::BoxLayout>(
+          views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
+          kMarginBetweenButtons))
+      ->set_main_axis_alignment(views::BoxLayout::MainAxisAlignment::kEnd);
+
+  cancel_button_ = button_row->AddChildView(std::make_unique<ash::PillButton>(
+      views::Button::PressedCallback(
+          base::BindRepeating(run_callback, base::Unretained(this), false)),
+      l10n_util::GetStringUTF16(IDS_APP_CANCEL),
+      PillButton::Type::kDefaultWithoutIcon, nullptr));
+  accept_button_ = button_row->AddChildView(std::make_unique<ash::PillButton>(
+      views::Button::PressedCallback(
+          base::BindRepeating(run_callback, base::Unretained(this), true)),
+      l10n_util::GetStringUTF16(IDS_REMOVE_SUGGESTION_BUTTON_LABEL),
+      PillButton::Type::kPrimaryWithoutIcon, nullptr));
 }
 
-RemoveQueryConfirmationDialog::~RemoveQueryConfirmationDialog() {
-  contents_view_->RemoveSearchBoxUpdateObserver(this);
-}
-
-void RemoveQueryConfirmationDialog::Show(gfx::NativeWindow parent) {
-  views::DialogDelegate::CreateDialogWidget(this, nullptr, parent);
-  UpdateBounds();
-  GetWidget()->Show();
-}
+RemoveQueryConfirmationDialog::~RemoveQueryConfirmationDialog() = default;
 
 const char* RemoveQueryConfirmationDialog::GetClassName() const {
   return "RemoveQueryConfirmationDialog";
-}
-
-base::string16 RemoveQueryConfirmationDialog::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(IDS_REMOVE_ZERO_STATE_SUGGESTION_TITLE);
-}
-
-ui::ModalType RemoveQueryConfirmationDialog::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
-}
-
-bool RemoveQueryConfirmationDialog::ShouldShowCloseButton() const {
-  return false;
-}
-
-base::string16 RemoveQueryConfirmationDialog::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return button == ui::DIALOG_BUTTON_CANCEL
-             ? l10n_util::GetStringUTF16(IDS_APP_CANCEL)
-             : l10n_util::GetStringUTF16(IDS_REMOVE_SUGGESTION_BUTTON_LABEL);
-}
-
-bool RemoveQueryConfirmationDialog::Accept() {
-  if (confirm_callback_)
-    std::move(confirm_callback_).Run(true, event_flags_);
-
-  return true;
-}
-
-bool RemoveQueryConfirmationDialog::Cancel() {
-  if (confirm_callback_)
-    std::move(confirm_callback_).Run(false, event_flags_);
-
-  return true;
 }
 
 gfx::Size RemoveQueryConfirmationDialog::CalculatePreferredSize() const {
@@ -98,39 +143,33 @@ gfx::Size RemoveQueryConfirmationDialog::CalculatePreferredSize() const {
   return gfx::Size(default_width, GetHeightForWidth(default_width));
 }
 
-void RemoveQueryConfirmationDialog::OnSearchBoxBoundsUpdated() {
-  UpdateBounds();
+void RemoveQueryConfirmationDialog::OnThemeChanged() {
+  views::WidgetDelegateView::OnThemeChanged();
+
+  SetBackground(views::CreateRoundedRectBackground(
+      AshColorProvider::Get()->GetBaseLayerColor(
+          AshColorProvider::BaseLayerType::kTransparent80),
+      kDialogRoundedCornerRadius));
+  SetBorder(std::make_unique<views::HighlightBorder>(
+      kDialogRoundedCornerRadius,
+      views::HighlightBorder::Type::kHighlightBorder1,
+      /*use_light_colors=*/false));
+  title_->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kTextColorPrimary));
+  body_->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kTextColorPrimary));
 }
 
-void RemoveQueryConfirmationDialog::OnSearchBoxClearAndDeactivated() {
-  // In tablet mode, when the user opens uber tray, the search box will be
-  // cleared and deactivated while app list switches to full app mode. Close
-  // this dialog when receiving such notification.
-  // Note: When the dialog is closed, the focus manager will restore
-  // the focus to the previously focused view, i.e., SearchBoxView's
-  // text field, which will lead to the opening of virtual keyboard. In order to
-  // avoid this, we temporarily clear the stored focus view before closing
-  // the dialog, and restore it back right after.
-  views::FocusManager* focus_manager =
-      contents_view_->GetSearchBoxView()->GetWidget()->GetFocusManager();
-  views::View* strored_focus_view = focus_manager->GetStoredFocusView();
-  focus_manager->SetStoredFocusView(nullptr);
-  GetDialogClientView()->CancelWindow();
-  focus_manager->SetStoredFocusView(strored_focus_view);
+void RemoveQueryConfirmationDialog::GetAccessibleNodeData(
+    ui::AXNodeData* node_data) {
+  if (!GetVisible())
+    return;
+  node_data->role = ax::mojom::Role::kAlertDialog;
+  node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kClick);
+  node_data->SetName(base::JoinString(
+      {l10n_util::GetStringUTF16(IDS_REMOVE_ZERO_STATE_SUGGESTION_TITLE),
+       l10n_util::GetStringUTF16(IDS_REMOVE_ZERO_STATE_SUGGESTION_DETAILS)},
+      u", "));
 }
 
-void RemoveQueryConfirmationDialog::UpdateBounds() {
-  // Calculate confirmation dialog's origin in screen coordinates.
-  gfx::Rect anchor_rect =
-      contents_view_->GetSearchBoxView()->GetBoundsInScreen();
-  gfx::Point origin(anchor_rect.CenterPoint().x() - kDialogWidth / 2,
-                    anchor_rect.y() + kDialogYOffset);
-
-  views::Widget* widget = GetWidget();
-  DCHECK(widget);
-  gfx::Rect widget_rect = widget->GetWindowBoundsInScreen();
-  widget_rect.set_origin(origin);
-  widget->SetBounds(widget_rect);
-}
-
-}  // namespace app_list
+}  // namespace ash

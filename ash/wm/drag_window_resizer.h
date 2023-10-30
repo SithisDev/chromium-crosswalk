@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,8 @@
 #include "ash/wm/window_resizer.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace ash {
 
@@ -27,10 +26,14 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
   // displays to |next_window_resizer|.
   DragWindowResizer(std::unique_ptr<WindowResizer> next_window_resizer,
                     WindowState* window_state);
+
+  DragWindowResizer(const DragWindowResizer&) = delete;
+  DragWindowResizer& operator=(const DragWindowResizer&) = delete;
+
   ~DragWindowResizer() override;
 
   // WindowResizer:
-  void Drag(const gfx::Point& location, int event_flags) override;
+  void Drag(const gfx::PointF& location, int event_flags) override;
   void CompleteDrag() override;
   void RevertDrag() override;
   void FlingOrSwipe(ui::GestureEvent* event) override;
@@ -45,7 +48,7 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
                            DragWindowControllerAcrossThreeDisplays);
 
   // Updates the bounds of the drag window for window dragging.
-  void UpdateDragWindow(const gfx::Point& drag_location_in_screen);
+  void UpdateDragWindow();
 
   // Returns true if we should allow the mouse pointer to warp.
   bool ShouldAllowMouseWarp();
@@ -59,14 +62,12 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
   // Shows a semi-transparent image of the window being dragged.
   std::unique_ptr<DragWindowController> drag_window_controller_;
 
-  gfx::Point last_mouse_location_;
+  gfx::PointF last_mouse_location_;
 
   // Current instance for use by the DragWindowResizerTest.
   static DragWindowResizer* instance_;
 
-  base::WeakPtrFactory<DragWindowResizer> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(DragWindowResizer);
+  base::WeakPtrFactory<DragWindowResizer> weak_ptr_factory_{this};
 };
 
 }  // namespace ash

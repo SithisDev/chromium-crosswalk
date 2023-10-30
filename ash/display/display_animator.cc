@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,13 @@ const int kFadingTimeoutDurationInSeconds = 10;
 // runs the specified |callback| when all of the animations have finished.
 class CallbackRunningObserver {
  public:
-  CallbackRunningObserver(base::Closure callback)
-      : completed_counter_(0), animation_aborted_(false), callback_(callback) {}
+  CallbackRunningObserver(base::OnceClosure callback)
+      : completed_counter_(0),
+        animation_aborted_(false),
+        callback_(std::move(callback)) {}
+
+  CallbackRunningObserver(const CallbackRunningObserver&) = delete;
+  CallbackRunningObserver& operator=(const CallbackRunningObserver&) = delete;
 
   void AddNewAnimator(ui::LayerAnimator* animator) {
     auto observer = std::make_unique<Observer>(animator, this);
@@ -45,7 +50,8 @@ class CallbackRunningObserver {
     if (completed_counter_ >= observer_list_.size()) {
       base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
       if (!animation_aborted_)
-        base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback_);
+        base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                      std::move(callback_));
     }
   }
 
@@ -59,6 +65,9 @@ class CallbackRunningObserver {
    public:
     Observer(ui::LayerAnimator* animator, CallbackRunningObserver* observer)
         : animator_(animator), observer_(observer) {}
+
+    Observer(const Observer&) = delete;
+    Observer& operator=(const Observer&) = delete;
 
    protected:
     // ui::LayerAnimationObserver overrides:
@@ -80,21 +89,17 @@ class CallbackRunningObserver {
    private:
     ui::LayerAnimator* animator_;
     CallbackRunningObserver* observer_;
-
-    DISALLOW_COPY_AND_ASSIGN(Observer);
   };
 
   size_t completed_counter_;
   bool animation_aborted_;
   std::vector<std::unique_ptr<Observer>> observer_list_;
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(CallbackRunningObserver);
+  base::OnceClosure callback_;
 };
 
 }  // namespace
 
-DisplayAnimator::DisplayAnimator() : weak_ptr_factory_(this) {
+DisplayAnimator::DisplayAnimator() {
   Shell::Get()->display_configurator()->AddObserver(this);
 }
 
@@ -103,8 +108,9 @@ DisplayAnimator::~DisplayAnimator() {
   ClearHidingLayers();
 }
 
-void DisplayAnimator::StartFadeOutAnimation(base::Closure callback) {
-  CallbackRunningObserver* observer = new CallbackRunningObserver(callback);
+void DisplayAnimator::StartFadeOutAnimation(base::OnceClosure callback) {
+  CallbackRunningObserver* observer =
+      new CallbackRunningObserver(std::move(callback));
   ClearHidingLayers();
 
   // Make the fade-out animation for all root windows.  Instead of actually
@@ -116,16 +122,16 @@ void DisplayAnimator::StartFadeOutAnimation(base::Closure callback) {
         std::make_unique<ui::Layer>(ui::LAYER_SOLID_COLOR);
     hiding_layer->SetColor(SK_ColorBLACK);
     hiding_layer->SetBounds(root_window->bounds());
-    ui::Layer* parent = ash::Shell::GetContainer(
-                            root_window, ash::kShellWindowId_OverlayContainer)
-                            ->layer();
+    ui::Layer* parent =
+        Shell::GetContainer(root_window, kShellWindowId_OverlayContainer)
+            ->layer();
     parent->Add(hiding_layer.get());
 
     hiding_layer->SetOpacity(0.0);
 
     ui::ScopedLayerAnimationSettings settings(hiding_layer->GetAnimator());
     settings.SetTransitionDuration(
-        base::TimeDelta::FromMilliseconds(kFadingAnimationDurationInMS));
+        base::Milliseconds(kFadingAnimationDurationInMS));
     observer->AddNewAnimator(hiding_layer->GetAnimator());
     hiding_layer->SetOpacity(1.0f);
     hiding_layer->SetVisible(true);
@@ -135,10 +141,9 @@ void DisplayAnimator::StartFadeOutAnimation(base::Closure callback) {
   // In case that OnDisplayModeChanged() isn't called or its animator is
   // canceled due to some unknown errors, we set a timer to clear these
   // hiding layers.
-  timer_.reset(new base::OneShotTimer());
-  timer_->Start(FROM_HERE,
-                base::TimeDelta::FromSeconds(kFadingTimeoutDurationInSeconds),
-                this, &DisplayAnimator::ClearHidingLayers);
+  timer_ = std::make_unique<base::OneShotTimer>();
+  timer_->Start(FROM_HERE, base::Seconds(kFadingTimeoutDurationInSeconds), this,
+                &DisplayAnimator::ClearHidingLayers);
 }
 
 void DisplayAnimator::StartFadeInAnimation() {
@@ -146,8 +151,9 @@ void DisplayAnimator::StartFadeInAnimation() {
   // finished.  Note that this callback can be canceled, but the cancel only
   // happens when the next animation is scheduled.  Thus the hiding layers
   // should be deleted eventually.
-  CallbackRunningObserver* observer = new CallbackRunningObserver(base::Bind(
-      &DisplayAnimator::ClearHidingLayers, weak_ptr_factory_.GetWeakPtr()));
+  CallbackRunningObserver* observer =
+      new CallbackRunningObserver(base::BindOnce(
+          &DisplayAnimator::ClearHidingLayers, weak_ptr_factory_.GetWeakPtr()));
 
   // Ensure that layers are not animating.
   for (auto& e : hiding_layers_) {
@@ -168,9 +174,9 @@ void DisplayAnimator::StartFadeInAnimation() {
       hiding_layer = new ui::Layer(ui::LAYER_SOLID_COLOR);
       hiding_layer->SetColor(SK_ColorBLACK);
       hiding_layer->SetBounds(root_window->bounds());
-      ui::Layer* parent = ash::Shell::GetContainer(
-                              root_window, ash::kShellWindowId_OverlayContainer)
-                              ->layer();
+      ui::Layer* parent =
+          Shell::GetContainer(root_window, kShellWindowId_OverlayContainer)
+              ->layer();
       parent->Add(hiding_layer);
       hiding_layer->SetOpacity(1.0f);
       hiding_layer->SetVisible(true);
@@ -183,7 +189,7 @@ void DisplayAnimator::StartFadeInAnimation() {
 
     ui::ScopedLayerAnimationSettings settings(hiding_layer->GetAnimator());
     settings.SetTransitionDuration(
-        base::TimeDelta::FromMilliseconds(kFadingAnimationDurationInMS));
+        base::Milliseconds(kFadingAnimationDurationInMS));
     observer->AddNewAnimator(hiding_layer->GetAnimator());
     hiding_layer->SetOpacity(0.0f);
     hiding_layer->SetVisible(false);

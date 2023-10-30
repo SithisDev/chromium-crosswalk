@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,11 @@ aura::Window* TestKeyboardUIFactory::TestKeyboardUI::LoadKeyboardWindow(
 
 aura::Window* TestKeyboardUIFactory::TestKeyboardUI::GetKeyboardWindow() const {
   return window_.get();
+}
+
+ui::GestureConsumer* TestKeyboardUIFactory::TestKeyboardUI::GetGestureConsumer()
+    const {
+  return GetKeyboardWindow();
 }
 
 ui::InputMethod* TestKeyboardUIFactory::TestKeyboardUI::GetInputMethod() {

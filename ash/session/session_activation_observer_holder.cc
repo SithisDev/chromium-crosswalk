@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "ash/public/cpp/session/session_activation_observer.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/notreached.h"
 
 namespace ash {
 
@@ -66,9 +66,7 @@ void SessionActivationObserverHolder::NotifyLockStateChanged(bool locked) {
 }
 
 void SessionActivationObserverHolder::PruneObserverMap() {
-  base::EraseIf(observer_map_, [](auto& item) {
-    return !item.second->might_have_observers();
-  });
+  base::EraseIf(observer_map_, [](auto& item) { return item.second->empty(); });
 }
 
 }  // namespace ash

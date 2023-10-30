@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/public/cpp/shutdown_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace ash {
 
@@ -14,13 +14,10 @@ ShutdownController* g_instance = nullptr;
 
 }  // namespace
 
-ShutdownController::ScopedResetterForTest::ScopedResetterForTest()
-    : instance_(g_instance) {
-  g_instance = nullptr;
-}
-
-ShutdownController::ScopedResetterForTest::~ScopedResetterForTest() {
-  g_instance = instance_;
+template <>
+ShutdownController*&
+ShutdownController::ScopedResetterForTest::GetGlobalInstanceHolder() {
+  return g_instance;
 }
 
 // static

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,12 +20,27 @@ class LoginBubbleHandler;
 class ASH_EXPORT LoginBaseBubbleView : public views::View,
                                        public ui::LayerAnimationObserver {
  public:
+  enum class PositioningStrategy {
+    // Try to show the bubble after the anchor (on the right side in LTR), if
+    // there is no space show before.
+    kTryAfterThenBefore,
+    // Try to show the bubble before the anchor (on the left side in LTR), if
+    // there is no space show after.
+    kTryBeforeThenAfter,
+    // Show the bubble above the anchor.
+    kShowAbove,
+    // Show the bubble on the bottom left of the anchor.
+    kShowBelow,
+  };
+
   // Without specifying a parent_window, the bubble will default to being in the
   // same container as anchor_view.
   explicit LoginBaseBubbleView(views::View* anchor_view);
   explicit LoginBaseBubbleView(views::View* anchor_view,
                                gfx::NativeView parent_window);
   ~LoginBaseBubbleView() override;
+  LoginBaseBubbleView(const LoginBaseBubbleView&) = delete;
+  LoginBaseBubbleView& operator=(const LoginBaseBubbleView&) = delete;
 
   void Show();
   void Hide();
@@ -34,19 +49,16 @@ class ASH_EXPORT LoginBaseBubbleView : public views::View,
   virtual LoginButton* GetBubbleOpener() const;
 
   // Returns whether or not this bubble should show persistently.
-  virtual bool IsPersistent() const;
+  bool is_persistent() const { return is_persistent_; }
   // Change the persistence of the bubble.
-  virtual void SetPersistent(bool persistent);
-
-  // Determine the position of the bubble prior to showing.
-  virtual gfx::Point CalculatePosition();
+  void set_persistent(bool is_persistent) { is_persistent_ = is_persistent; }
 
   void SetAnchorView(views::View* anchor_view);
   views::View* GetAnchorView() const { return anchor_view_; }
 
   // ui::LayerAnimationObserver:
   void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) override;
-  void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override {}
+  void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override;
   void OnLayerAnimationScheduled(
       ui::LayerAnimationSequence* sequence) override {}
 
@@ -54,15 +66,49 @@ class ASH_EXPORT LoginBaseBubbleView : public views::View,
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   void OnBlur() override;
+  // Persistent bubbles need to react to theme changes.
+  void OnThemeChanged() override;
+
+  void set_positioning_strategy(PositioningStrategy positioning_strategy) {
+    positioning_strategy_ = positioning_strategy;
+  }
+  void SetPadding(int horizontal_padding, int vertical_padding);
+
+ protected:
+  // Return area where bubble could be shown in.
+  gfx::Rect GetBoundsAvailableToShowBubble() const;
+
+  void set_notify_alert_on_show(bool notify_alert_on_show) {
+    notify_a11y_alert_on_show_ = notify_alert_on_show;
+  }
 
  private:
+  // Create a layer for this view if doesn't exist.
+  void EnsureLayer();
+
+  // Return bounds of the anchors root view. This bounds excludes virtual
+  // keyboard.
+  gfx::Rect GetRootViewBounds() const;
+  // Return bounds of working area. This bounds excludes shelf.
+  gfx::Rect GetWorkArea() const;
   void ScheduleAnimation(bool visible);
+
+  // Determine the position of the bubble prior to showing.
+  virtual gfx::Point CalculatePosition();
 
   views::View* anchor_view_;
 
   std::unique_ptr<LoginBubbleHandler> bubble_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(LoginBaseBubbleView);
+  bool is_persistent_ = false;
+
+  // Positioning strategy of the bubble.
+  PositioningStrategy positioning_strategy_ = PositioningStrategy::kShowBelow;
+  int horizontal_padding_ = 0;
+  int vertical_padding_ = 0;
+
+  // Whether or not to read an alert when the bubble is shown.
+  bool notify_a11y_alert_on_show_ = true;
 };
 
 }  // namespace ash

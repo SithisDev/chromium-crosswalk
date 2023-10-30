@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,32 +8,39 @@
 #include <string>
 
 #include "ash/login_status.h"
+#include "ash/system/network/tray_network_state_observer.h"
 #include "ash/system/tray/tray_detailed_view.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 
 namespace views {
 class Button;
 }
 
 namespace ash {
-
 class TrayNetworkStateModel;
 
-namespace tray {
+bool CanNetworkConnect(
+    chromeos::network_config::mojom::ConnectionStateType connection_state,
+    chromeos::network_config::mojom::NetworkType type,
+    chromeos::network_config::mojom::ActivationStateType activation_state,
+    bool is_connectable,
+    std::string sim_eid);
 
 // Exported for tests.
-class ASH_EXPORT NetworkStateListDetailedView : public TrayDetailedView {
+class ASH_EXPORT NetworkStateListDetailedView
+    : public TrayDetailedView,
+      public TrayNetworkStateObserver {
  public:
+  NetworkStateListDetailedView(const NetworkStateListDetailedView&) = delete;
+  NetworkStateListDetailedView& operator=(const NetworkStateListDetailedView&) =
+      delete;
+
   ~NetworkStateListDetailedView() override;
 
   void Init();
-
-  // Called when the contents of the network list have changed or when any
-  // Manager properties (e.g. technology state) have changed.
-  void Update();
 
   void ToggleInfoBubbleForTesting();
 
@@ -55,13 +62,20 @@ class ASH_EXPORT NetworkStateListDetailedView : public TrayDetailedView {
   // leaves |guid| unchanged and returns |false|.
   virtual bool IsNetworkEntry(views::View* view, std::string* guid) const = 0;
 
+  // Called when the network model changes or when a network icon changes.
+  void Update();
+
+  TrayNetworkStateModel* model() { return model_; }
+
  private:
   class InfoBubble;
 
+  // TrayNetworkStateObserver:
+  void ActiveNetworkStateChanged() override;
+  void NetworkListChanged() override;
+
   // TrayDetailedView:
   void HandleViewClicked(views::View* view) override;
-  void HandleButtonPressed(views::Button* sender,
-                           const ui::Event& event) override;
   void CreateExtraTitleRowButtons() override;
 
   // Implementation of 'HandleViewClicked' once networks are received.
@@ -109,11 +123,8 @@ class ASH_EXPORT NetworkStateListDetailedView : public TrayDetailedView {
   base::RepeatingTimer network_scan_repeating_timer_;
 
   base::WeakPtrFactory<NetworkStateListDetailedView> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkStateListDetailedView);
 };
 
-}  // namespace tray
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_NETWORK_NETWORK_STATE_LIST_DETAILED_VIEW_H_

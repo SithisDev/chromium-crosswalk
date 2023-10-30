@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,18 +23,13 @@ class TeleportWarningDialog : public views::DialogDelegateView {
   typedef base::OnceCallback<void(bool, bool)> OnAcceptCallback;
 
   explicit TeleportWarningDialog(OnAcceptCallback callback);
+
+  TeleportWarningDialog(const TeleportWarningDialog&) = delete;
+  TeleportWarningDialog& operator=(const TeleportWarningDialog&) = delete;
+
   ~TeleportWarningDialog() override;
 
   static void Show(OnAcceptCallback callback);
-
-  // views::DialogDelegate overrides.
-  bool Cancel() override;
-  bool Accept() override;
-
-  // views::WidgetDelegate overrides.
-  ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
 
   // views::View overrides.
   gfx::Size CalculatePreferredSize() const override;
@@ -45,8 +40,6 @@ class TeleportWarningDialog : public views::DialogDelegateView {
   views::Checkbox* never_show_again_checkbox_;
 
   OnAcceptCallback on_accept_;
-
-  DISALLOW_COPY_AND_ASSIGN(TeleportWarningDialog);
 };
 
 }  // namespace ash

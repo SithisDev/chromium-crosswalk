@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,23 @@
 #define ASH_SYSTEM_NETWORK_ACTIVE_NETWORK_ICON_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "ash/ash_export.h"
 #include "ash/system/network/network_icon.h"
-#include "ash/system/network/tray_network_state_model.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "ash/system/network/tray_network_state_observer.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
 
 namespace gfx {
 class ImageSkia;
 }  // namespace gfx
 
-namespace service_manager {
-class Connector;
-}
-
 namespace ash {
+
+class TrayNetworkStateModel;
 
 // Provides an interface to network_icon for the default network. This class
 // supports two interfaces:
@@ -40,7 +37,7 @@ namespace ash {
 // TODO(stevenjb): Move all test coverage to active_network_icon_unittest.cc and
 // test Dual icon methods.
 // This class is also responsible for periodically purging the icon cache.
-class ASH_EXPORT ActiveNetworkIcon : public TrayNetworkStateModel::Observer {
+class ASH_EXPORT ActiveNetworkIcon : public TrayNetworkStateObserver {
  public:
   enum class Type {
     kSingle,    // A single network icon in the tray.
@@ -48,16 +45,19 @@ class ASH_EXPORT ActiveNetworkIcon : public TrayNetworkStateModel::Observer {
     kCellular,  // Multiple network icons: cellular icon.
   };
 
-  ActiveNetworkIcon(service_manager::Connector* connector,
-                    TrayNetworkStateModel* model);
+  explicit ActiveNetworkIcon(TrayNetworkStateModel* model);
+
+  ActiveNetworkIcon(const ActiveNetworkIcon&) = delete;
+  ActiveNetworkIcon& operator=(const ActiveNetworkIcon&) = delete;
+
   ~ActiveNetworkIcon() override;
 
   // Provides the a11y and tooltip strings for |type|. Output parameters can
   // be null.
   void GetConnectionStatusStrings(Type type,
-                                  base::string16* a11y_name,
-                                  base::string16* a11y_desc,
-                                  base::string16* tooltip);
+                                  std::u16string* a11y_name,
+                                  std::u16string* a11y_desc,
+                                  std::u16string* tooltip);
 
   // Returns a network icon (which may be empty) and sets |animating| if
   // provided.
@@ -65,9 +65,9 @@ class ASH_EXPORT ActiveNetworkIcon : public TrayNetworkStateModel::Observer {
                           network_icon::IconType icon_type,
                           bool* animating);
 
- private:
-  void BindCrosNetworkConfig(service_manager::Connector* connector);
+  void PurgeNetworkIconCache();
 
+ private:
   gfx::ImageSkia GetSingleImage(network_icon::IconType icon_type,
                                 bool* animating);
   gfx::ImageSkia GetDualImagePrimary(network_icon::IconType icon_type,
@@ -87,25 +87,20 @@ class ASH_EXPORT ActiveNetworkIcon : public TrayNetworkStateModel::Observer {
 
   void SetCellularUninitializedMsg();
 
-  // TrayNetworkStateModel::Observer
+  // TrayNetworkStateObserver
   void ActiveNetworkStateChanged() override;
   void NetworkListChanged() override;
+  void DeviceStateListChanged() override;
 
-  void PurgeNetworkIconCache();
   const chromeos::network_config::mojom::NetworkStateProperties*
   GetNetworkForType(Type type);
 
   TrayNetworkStateModel* model_;
 
-  chromeos::network_config::mojom::CrosNetworkConfigPtr
-      cros_network_config_ptr_;
-
   int cellular_uninitialized_msg_ = 0;
   base::Time uninitialized_state_time_;
   base::OneShotTimer purge_timer_;
-  base::WeakPtrFactory<ActiveNetworkIcon> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ActiveNetworkIcon);
+  base::WeakPtrFactory<ActiveNetworkIcon> weak_ptr_factory_{this};
 };
 
 }  // namespace ash

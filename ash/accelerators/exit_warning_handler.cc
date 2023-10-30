@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -64,6 +65,10 @@ class ExitWarningWidgetDelegateView : public views::WidgetDelegateView {
     SetLayoutManager(std::make_unique<views::FillLayout>());
   }
 
+  ExitWarningWidgetDelegateView(const ExitWarningWidgetDelegateView&) = delete;
+  ExitWarningWidgetDelegateView& operator=(
+      const ExitWarningWidgetDelegateView&) = delete;
+
   void OnPaint(gfx::Canvas* canvas) override {
     cc::PaintFlags flags;
     flags.setStyle(cc::PaintFlags::kFill_Style);
@@ -73,16 +78,14 @@ class ExitWarningWidgetDelegateView : public views::WidgetDelegateView {
   }
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
-    node_data->SetName(accessible_name_);
     node_data->role = ax::mojom::Role::kAlert;
+    node_data->SetName(accessible_name_);
   }
 
  private:
-  base::string16 text_;
-  base::string16 accessible_name_;
+  std::u16string text_;
+  std::u16string accessible_name_;
   int text_width_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExitWarningWidgetDelegateView);
 };
 
 }  // namespace
@@ -124,8 +127,7 @@ void ExitWarningHandler::TimerAction() {
 void ExitWarningHandler::StartTimer() {
   if (stub_timer_for_test_)
     return;
-  timer_.Start(FROM_HERE,
-               base::TimeDelta::FromMilliseconds(kTimeOutMilliseconds), this,
+  timer_.Start(FROM_HERE, base::Milliseconds(kTimeOutMilliseconds), this,
                &ExitWarningHandler::TimerAction);
 }
 
@@ -144,7 +146,7 @@ void ExitWarningHandler::Show() {
                    (rs.height() - ps.height()) / 3, ps.width(), ps.height());
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_POPUP;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.accept_events = false;
   params.z_order = ui::ZOrderLevel::kFloatingUIElement;
@@ -154,7 +156,7 @@ void ExitWarningHandler::Show() {
   params.parent =
       root_window->GetChildById(kShellWindowId_SettingBubbleContainer);
   widget_ = std::make_unique<views::Widget>();
-  widget_->Init(params);
+  widget_->Init(std::move(params));
   widget_->Show();
 
   delegate->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);

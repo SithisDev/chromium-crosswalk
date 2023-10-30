@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_LOGIN_MOCK_LOGIN_SCREEN_CLIENT_H_
 #define ASH_LOGIN_MOCK_LOGIN_SCREEN_CLIENT_H_
 
+#include "ash/public/cpp/child_accounts/parent_access_controller.h"
 #include "ash/public/cpp/login_screen_client.h"
+#include "base/time/time.h"
 #include "components/password_manager/core/browser/hash_password_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -14,32 +16,38 @@ namespace ash {
 class MockLoginScreenClient : public LoginScreenClient {
  public:
   MockLoginScreenClient();
+
+  MockLoginScreenClient(const MockLoginScreenClient&) = delete;
+  MockLoginScreenClient& operator=(const MockLoginScreenClient&) = delete;
+
   ~MockLoginScreenClient() override;
 
-  MOCK_METHOD4(AuthenticateUserWithPasswordOrPin_,
-               void(const AccountId& account_id,
-                    const std::string& password,
-                    bool authenticated_by_pin,
-                    base::OnceCallback<void(bool)>& callback));
-  MOCK_METHOD2(AuthenticateUserWithExternalBinary_,
-               void(const AccountId& account_id,
-                    base::OnceCallback<void(bool)>& callback));
-  MOCK_METHOD1(EnrollUserWithExternalBinary_,
-               void(base::OnceCallback<void(bool)>& callback));
-  MOCK_METHOD2(ValidateParentAccessCode_,
-               bool(const AccountId& account_id,
-                    const std::string& access_code));
+  MOCK_METHOD(void,
+              AuthenticateUserWithPasswordOrPin_,
+              (const AccountId& account_id,
+               const std::string& password,
+               bool authenticated_by_pin,
+               base::OnceCallback<void(bool)>& callback));
+  MOCK_METHOD(void,
+              AuthenticateUserWithChallengeResponse_,
+              (const AccountId& account_id,
+               base::OnceCallback<void(bool)>& callback));
+  MOCK_METHOD(ParentCodeValidationResult,
+              ValidateParentAccessCode_,
+              (const AccountId& account_id,
+               const std::string& access_code,
+               base::Time validation_time));
 
   // Set the result that should be passed to |callback| in
-  // |AuthenticateUserWithPasswordOrPin| or
-  // |AuthenticateUserWithExternalBinary|.
+  // |AuthenticateUserWithPasswordOrPin|.
   void set_authenticate_user_callback_result(bool value) {
     authenticate_user_callback_result_ = value;
   }
 
   // Sets the result that should be passed to |callback| in
   // |ValidateParentAccessCode|.
-  void set_validate_parent_access_code_result(bool value) {
+  void set_validate_parent_access_code_result(
+      ParentCodeValidationResult value) {
     validate_parent_access_code_result_ = value;
   }
 
@@ -49,14 +57,6 @@ class MockLoginScreenClient : public LoginScreenClient {
       base::OnceCallback<void(bool)>* storage) {
     authenticate_user_with_password_or_pin_callback_storage_ = storage;
   }
-  void set_authenticate_user_with_external_binary_storage(
-      base::OnceCallback<void(bool)>* storage) {
-    authenticate_user_with_external_binary_callback_storage_ = storage;
-  }
-  void set_enroll_user_with_external_binary_storage(
-      base::OnceCallback<void(bool)>* storage) {
-    enroll_user_with_external_binary_callback_storage_ = storage;
-  }
 
   // LoginScreenClient:
   void AuthenticateUserWithPasswordOrPin(
@@ -64,54 +64,67 @@ class MockLoginScreenClient : public LoginScreenClient {
       const std::string& password,
       bool authenticated_by_pin,
       base::OnceCallback<void(bool)> callback) override;
-  void AuthenticateUserWithExternalBinary(
+  void AuthenticateUserWithChallengeResponse(
       const AccountId& account_id,
       base::OnceCallback<void(bool)> callback) override;
-  void EnrollUserWithExternalBinary(
-      base::OnceCallback<void(bool)> callback) override;
-  bool ValidateParentAccessCode(const AccountId& account_id,
-                                const std::string& code) override;
-  MOCK_METHOD1(AuthenticateUserWithEasyUnlock,
-               void(const AccountId& account_id));
-  MOCK_METHOD1(HardlockPod, void(const AccountId& account_id));
-  MOCK_METHOD1(OnFocusPod, void(const AccountId& account_id));
-  MOCK_METHOD0(OnNoPodFocused, void());
-  MOCK_METHOD1(LoadWallpaper, void(const AccountId& account_id));
-  MOCK_METHOD0(SignOutUser, void());
-  MOCK_METHOD0(CancelAddUser, void());
-  MOCK_METHOD0(LoginAsGuest, void());
-  MOCK_METHOD1(OnMaxIncorrectPasswordAttempted,
-               void(const AccountId& account_id));
-  MOCK_METHOD1(FocusLockScreenApps, void(bool reverse));
-  MOCK_METHOD2(ShowGaiaSignin,
-               void(bool can_close, const AccountId& prefilled_account));
-  MOCK_METHOD0(OnRemoveUserWarningShown, void());
-  MOCK_METHOD1(RemoveUser, void(const AccountId& account_id));
-  MOCK_METHOD3(LaunchPublicSession,
-               void(const AccountId& account_id,
-                    const std::string& locale,
-                    const std::string& input_method));
-  MOCK_METHOD2(RequestPublicSessionKeyboardLayouts,
-               void(const AccountId& account_id, const std::string& locale));
-  MOCK_METHOD0(ShowFeedback, void());
-  MOCK_METHOD0(ShowResetScreen, void());
-  MOCK_METHOD0(ShowAccountAccessHelpApp, void());
-  MOCK_METHOD0(ShowLockScreenNotificationSettings, void());
-  MOCK_METHOD0(FocusOobeDialog, void());
-  MOCK_METHOD1(OnFocusLeavingSystemTray, void(bool reverse));
-  MOCK_METHOD0(OnUserActivity, void());
+  ParentCodeValidationResult ValidateParentAccessCode(
+      const AccountId& account_id,
+      const std::string& code,
+      base::Time validation_time) override;
+  MOCK_METHOD(void,
+              AuthenticateUserWithEasyUnlock,
+              (const AccountId& account_id),
+              (override));
+  MOCK_METHOD(void, HardlockPod, (const AccountId& account_id), (override));
+  MOCK_METHOD(void, OnFocusPod, (const AccountId& account_id), (override));
+  MOCK_METHOD(void, OnNoPodFocused, (), (override));
+  MOCK_METHOD(void, LoadWallpaper, (const AccountId& account_id), (override));
+  MOCK_METHOD(void, SignOutUser, (), (override));
+  MOCK_METHOD(void, CancelAddUser, (), (override));
+  MOCK_METHOD(void, LoginAsGuest, (), (override));
+  MOCK_METHOD(void, ShowGuestTosScreen, (), (override));
+  MOCK_METHOD(void,
+              OnMaxIncorrectPasswordAttempted,
+              (const AccountId& account_id),
+              (override));
+  MOCK_METHOD(void, FocusLockScreenApps, (bool reverse), (override));
+  MOCK_METHOD(void,
+              ShowGaiaSignin,
+              (const AccountId& prefilled_account),
+              (override));
+  MOCK_METHOD(void, ShowOsInstallScreen, (), (override));
+  MOCK_METHOD(void, OnRemoveUserWarningShown, (), (override));
+  MOCK_METHOD(void, RemoveUser, (const AccountId& account_id), (override));
+  MOCK_METHOD(void,
+              LaunchPublicSession,
+              (const AccountId& account_id,
+               const std::string& locale,
+               const std::string& input_method),
+              (override));
+  MOCK_METHOD(void,
+              RequestPublicSessionKeyboardLayouts,
+              (const AccountId& account_id, const std::string& locale),
+              (override));
+  MOCK_METHOD(void,
+              HandleAccelerator,
+              (ash::LoginAcceleratorAction action),
+              (override));
+  MOCK_METHOD(void, ShowAccountAccessHelpApp, (gfx::NativeWindow), (override));
+  MOCK_METHOD(void, ShowParentAccessHelpApp, (), (override));
+  MOCK_METHOD(void, ShowLockScreenNotificationSettings, (), (override));
+  MOCK_METHOD(void, FocusOobeDialog, (), (override));
+  MOCK_METHOD(void, OnFocusLeavingSystemTray, (bool reverse), (override));
+  MOCK_METHOD(void, OnUserActivity, (), (override));
+  MOCK_METHOD(void, OnLoginScreenShown, (), (override));
+  MOCK_METHOD(void, OnSystemTrayBubbleShown, (), (override));
+  MOCK_METHOD(views::Widget*, GetLoginWindowWidget, (), (override));
 
  private:
   bool authenticate_user_callback_result_ = true;
-  bool validate_parent_access_code_result_ = true;
+  ParentCodeValidationResult validate_parent_access_code_result_ =
+      ParentCodeValidationResult::kValid;
   base::OnceCallback<void(bool)>*
       authenticate_user_with_password_or_pin_callback_storage_ = nullptr;
-  base::OnceCallback<void(bool)>*
-      authenticate_user_with_external_binary_callback_storage_ = nullptr;
-  base::OnceCallback<void(bool)>*
-      enroll_user_with_external_binary_callback_storage_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(MockLoginScreenClient);
 };
 
 }  // namespace ash

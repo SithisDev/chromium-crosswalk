@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define ASH_PUBLIC_CPP_SHUTDOWN_CONTROLLER_H_
 
 #include "ash/public/cpp/ash_public_export.h"
+#include "ash/public/cpp/scoped_singleton_resetter_for_test.h"
 
 namespace ash {
 
@@ -15,16 +16,8 @@ enum class ShutdownReason;
 // information. Exists because device policy is owned by chrome, not ash.
 class ASH_PUBLIC_EXPORT ShutdownController {
  public:
-  // Helper class to reset ShutdowController instance in constructor and
-  // restore it in destructor so that tests could create its own instance.
-  class ScopedResetterForTest {
-   public:
-    ScopedResetterForTest();
-    ~ScopedResetterForTest();
-
-   private:
-    ShutdownController* const instance_;
-  };
+  using ScopedResetterForTest =
+      ScopedSingletonResetterForTest<ShutdownController>;
 
   // Gets the singleton ShutdownController instance.
   static ShutdownController* Get();

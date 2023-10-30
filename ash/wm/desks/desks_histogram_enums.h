@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,12 @@ namespace ash {
 enum class DesksCreationRemovalSource {
   kButton = 0,
   kKeyboard = 1,
-  kMaxValue = kKeyboard,
+  kDesksRestore = 2,
+  kLaunchTemplate = 3,
+  kDragToNewDeskButton = 4,
+  kSaveAndRecall = 5,
+  kApi = 6,
+  kMaxValue = kApi,
 };
 
 // These values are logged to UMA. Entries should not be renumbered and
@@ -23,7 +28,9 @@ enum class DesksCreationRemovalSource {
 enum class DesksMoveWindowFromActiveDeskSource {
   kDragAndDrop = 0,
   kShortcut = 1,
-  kMaxValue = kShortcut,
+  kSendToDesk = 2,
+  kVisibleOnAllDesks = 3,
+  kMaxValue = kVisibleOnAllDesks,
 };
 
 // These values are logged to UMA. Entries should not be renumbered and
@@ -36,7 +43,12 @@ enum class DesksSwitchSource {
   kMiniViewButton = 3,
   kWindowActivated = 4,
   kDeskSwitchTouchpad = 5,
-  kMaxValue = kDeskSwitchTouchpad,
+  kUserSwitch = 6,
+  kPersistentDesksBar = 7,
+  kLaunchTemplate = 8,
+  kIndexedDeskSwitchShortcut = 9,
+  kRemovalUndone = 10,
+  kMaxValue = kRemovalUndone,
 };
 
 }  // namespace ash

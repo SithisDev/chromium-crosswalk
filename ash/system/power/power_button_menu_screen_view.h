@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 #include "ash/ash_export.h"
 #include "ash/display/screen_orientation_controller.h"
 #include "ash/system/power/power_button_controller.h"
-#include "base/macros.h"
 #include "ui/display/display_observer.h"
 #include "ui/views/view.h"
 
 namespace ash {
+enum class ShutdownReason;
 class PowerButtonMenuView;
 
 // PowerButtonMenuScreenView is the top-level view of power button menu UI. It
@@ -26,9 +26,13 @@ class ASH_EXPORT PowerButtonMenuScreenView : public views::View,
   // |show_animation_done| is a callback for when the animation that shows the
   // power menu has finished.
   PowerButtonMenuScreenView(
+      ShutdownReason shutdown_reason,
       PowerButtonController::PowerButtonPosition power_button_position,
       double power_button_offset,
       base::RepeatingClosure show_animation_done);
+  PowerButtonMenuScreenView(const PowerButtonMenuScreenView&) = delete;
+  PowerButtonMenuScreenView& operator=(const PowerButtonMenuScreenView&) =
+      delete;
   ~PowerButtonMenuScreenView() override;
 
   PowerButtonMenuView* power_button_menu_view() const {
@@ -37,6 +41,15 @@ class ASH_EXPORT PowerButtonMenuScreenView : public views::View,
 
   // Schedules an animation to show or hide the view.
   void ScheduleShowHideAnimation(bool show);
+
+  // Resets the shield and menu's opacity to 0. Used when dismissing the menu
+  // without animation to prepare for the next fade in animation.
+  void ResetOpacity();
+
+  // Called when the associated widget is shown. Updates power button related
+  // info and calculates |menu_bounds_origins_| if needed. Recreates menu items.
+  void OnWidgetShown(PowerButtonController::PowerButtonPosition position,
+                     double offset_percentage);
 
   // views::View:
   const char* GetClassName() const override;
@@ -60,8 +73,8 @@ class ASH_EXPORT PowerButtonMenuScreenView : public views::View,
   // Lays out the view without animation transform.
   void LayoutWithoutTransform();
 
-  // Initializes |menu_bounds_origins_| according to power button position info.
-  void InitializeMenuBoundsOrigins();
+  // Updates |menu_bounds_origins_| according to power button position info.
+  void UpdateMenuBoundsOrigins();
 
   // Gets the bounds of power button menu.
   gfx::Rect GetMenuBounds();
@@ -81,9 +94,10 @@ class ASH_EXPORT PowerButtonMenuScreenView : public views::View,
   double power_button_offset_percentage_ = 0.f;
 
   // The origin of the menu bounds in different screen orientations.
-  std::unordered_map<OrientationLockType, gfx::Point> menu_bounds_origins_;
+  std::unordered_map<chromeos::OrientationType, gfx::Point>
+      menu_bounds_origins_;
 
-  DISALLOW_COPY_AND_ASSIGN(PowerButtonMenuScreenView);
+  display::ScopedDisplayObserver display_observer_{this};
 };
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "ash/public/cpp/ash_public_export.h"
 #include "ash/public/cpp/keyboard/keyboard_config.h"
 #include "ash/public/cpp/keyboard/keyboard_types.h"
-#include "base/optional.h"
+#include "base/callback_forward.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ash {
@@ -26,6 +26,8 @@ enum class HideReason {
   // a menu or other on screen UI).
   kSystem,
 };
+
+struct KeyRepeatSettings;
 
 class ASH_PUBLIC_EXPORT KeyboardController {
  public:
@@ -79,7 +81,7 @@ class ASH_PUBLIC_EXPORT KeyboardController {
   // container type changes (or fails to change).
   using SetContainerTypeCallback = base::OnceCallback<void(bool)>;
   virtual void SetContainerType(keyboard::ContainerType container_type,
-                                const base::Optional<gfx::Rect>& target_bounds,
+                                const gfx::Rect& target_bounds,
                                 SetContainerTypeCallback callback) = 0;
 
   // If |locked| is true, the keyboard remains visible even when no window has
@@ -92,11 +94,34 @@ class ASH_PUBLIC_EXPORT KeyboardController {
   // Sets the regions of the keyboard window where events should be handled.
   virtual void SetHitTestBounds(const std::vector<gfx::Rect>& bounds) = 0;
 
+  // Set the area of the keyboard window that should not move off screen. Any
+  // area outside of this bounds can be moved off the user's screen. Note the
+  // bounds here are relative to the keyboard window origin.
+  virtual bool SetAreaToRemainOnScreen(const gfx::Rect& bounds) = 0;
+
   // Sets the region of the keyboard window that can be used as a drag handle.
   virtual void SetDraggableArea(const gfx::Rect& bounds) = 0;
 
-  // Adds a KeyboardControllerObserver.
+  // Sets the bounds of the keyboard window in screen coordinates.
+  virtual bool SetWindowBoundsInScreen(const gfx::Rect& bounds) = 0;
+
+  // Sets the keyboard config from the preference service.
+  virtual void SetKeyboardConfigFromPref(bool enabled) = 0;
+
+  // Whether to adjust the viewport of child windows in the current root window,
+  // in order for the keyboard to avoid occluding the window contents.
+  virtual bool ShouldOverscroll() = 0;
+
+  // Adds/removes a KeyboardControllerObserver.
   virtual void AddObserver(KeyboardControllerObserver* observer) = 0;
+  virtual void RemoveObserver(KeyboardControllerObserver* observer) = 0;
+
+  // Returns current key repeat settings, derived from the active user's prefs.
+  virtual KeyRepeatSettings GetKeyRepeatSettings() = 0;
+
+  // Return true if pressing the top row of the keyboard sends F<number> keys,
+  // rather than media keys (back/forward/refresh/etc.)
+  virtual bool AreTopRowKeysFunctionKeys() = 0;
 
  protected:
   static KeyboardController* g_instance_;

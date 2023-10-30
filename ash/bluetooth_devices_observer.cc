@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,9 @@ namespace ash {
 
 BluetoothDevicesObserver::BluetoothDevicesObserver(
     const AdapterOrDeviceChangedCallback& device_changed_callback)
-    : adapter_or_device_changed_callback_(device_changed_callback),
-      weak_factory_(this) {
+    : adapter_or_device_changed_callback_(device_changed_callback) {
   if (device::BluetoothAdapterFactory::IsBluetoothSupported()) {
-    device::BluetoothAdapterFactory::GetAdapter(
+    device::BluetoothAdapterFactory::Get()->GetAdapter(
         base::BindOnce(&BluetoothDevicesObserver::InitializeOnAdapterReady,
                        weak_factory_.GetWeakPtr()));
   } else {

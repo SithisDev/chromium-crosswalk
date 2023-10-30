@@ -1,35 +1,36 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/session/session_controller_impl.h"
 
-#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "ash/constants/ash_features.h"
+#include "ash/glanceables/glanceables_controller.h"
+#include "ash/glanceables/signout_screenshot_handler.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/session/session_activation_observer.h"
 #include "ash/public/cpp/session/session_controller_client.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "ash/public/cpp/session/user_info.h"
+#include "ash/session/fullscreen_controller.h"
 #include "ash/session/multiprofiles_intro_dialog.h"
 #include "ash/session/session_aborted_dialog.h"
-#include "ash/session/session_observer.h"
 #include "ash/session/teleport_warning_dialog.h"
 #include "ash/shell.h"
 #include "ash/system/power/power_event_observer.h"
-#include "ash/system/screen_security/screen_switch_check_controller.h"
+#include "ash/system/privacy/screen_switch_check_controller.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/mru_window_tracker.h"
-#include "ash/wm/overview/overview_controller.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -40,7 +41,11 @@ using session_manager::SessionState;
 
 namespace ash {
 
-SessionControllerImpl::SessionControllerImpl() = default;
+SessionControllerImpl::SessionControllerImpl()
+    : fullscreen_controller_(std::make_unique<FullscreenController>(this)) {
+  if (features::AreGlanceablesEnabled())
+    signout_screenshot_handler_ = std::make_unique<SignoutScreenshotHandler>();
+}
 
 SessionControllerImpl::~SessionControllerImpl() {
   // Abort pending start lock request.
@@ -67,10 +72,6 @@ bool SessionControllerImpl::IsActiveUserSessionStarted() const {
 
 bool SessionControllerImpl::CanLockScreen() const {
   return IsActiveUserSessionStarted() && can_lock_;
-}
-
-bool SessionControllerImpl::IsScreenLocked() const {
-  return state_ == SessionState::LOCKED;
 }
 
 bool SessionControllerImpl::ShouldLockScreenAutomatically() const {
@@ -110,20 +111,16 @@ SessionState SessionControllerImpl::GetSessionState() const {
 }
 
 bool SessionControllerImpl::ShouldEnableSettings() const {
-  // Settings opens a web UI window, so it is not available at the lock screen.
-  if (!IsActiveUserSessionStarted() || IsScreenLocked() ||
-      IsInSecondaryLoginScreen()) {
-    return false;
-  }
-
-  return user_sessions_[0]->should_enable_settings;
+  // Settings opens a web UI window, so it is only available at active session
+  // at the moment.
+  return !IsUserSessionBlocked();
 }
 
 bool SessionControllerImpl::ShouldShowNotificationTray() const {
   if (!IsActiveUserSessionStarted() || IsInSecondaryLoginScreen())
     return false;
 
-  return user_sessions_[0]->should_show_notification_tray;
+  return true;
 }
 
 const SessionControllerImpl::UserSessions&
@@ -139,32 +136,25 @@ const UserSession* SessionControllerImpl::GetUserSession(
   return user_sessions_[index].get();
 }
 
-const UserSession* SessionControllerImpl::GetPrimaryUserSession() const {
-  auto it = std::find_if(user_sessions_.begin(), user_sessions_.end(),
-                         [this](const std::unique_ptr<UserSession>& session) {
-                           return session->session_id == primary_session_id_;
-                         });
+const UserSession* SessionControllerImpl::GetUserSessionByAccountId(
+    const AccountId& account_id) const {
+  auto it = base::ranges::find(user_sessions_, account_id,
+                               [](const std::unique_ptr<UserSession>& session) {
+                                 return session->user_info.account_id;
+                               });
   if (it == user_sessions_.end())
     return nullptr;
 
   return (*it).get();
 }
 
-bool SessionControllerImpl::IsUserSupervised() const {
-  if (!IsActiveUserSessionStarted())
-    return false;
+const UserSession* SessionControllerImpl::GetPrimaryUserSession() const {
+  auto it = base::ranges::find(user_sessions_, primary_session_id_,
+                               &UserSession::session_id);
+  if (it == user_sessions_.end())
+    return nullptr;
 
-  user_manager::UserType active_user_type = GetUserSession(0)->user_info.type;
-  return active_user_type == user_manager::USER_TYPE_SUPERVISED ||
-         active_user_type == user_manager::USER_TYPE_CHILD;
-}
-
-bool SessionControllerImpl::IsUserLegacySupervised() const {
-  if (!IsActiveUserSessionStarted())
-    return false;
-
-  user_manager::UserType active_user_type = GetUserSession(0)->user_info.type;
-  return active_user_type == user_manager::USER_TYPE_SUPERVISED;
+  return (*it).get();
 }
 
 bool SessionControllerImpl::IsUserChild() const {
@@ -183,12 +173,12 @@ bool SessionControllerImpl::IsUserPublicAccount() const {
   return active_user_type == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
 }
 
-base::Optional<user_manager::UserType> SessionControllerImpl::GetUserType()
+absl::optional<user_manager::UserType> SessionControllerImpl::GetUserType()
     const {
   if (!IsActiveUserSessionStarted())
-    return base::nullopt;
+    return absl::nullopt;
 
-  return base::make_optional(GetUserSession(0)->user_info.type);
+  return absl::make_optional(GetUserSession(0)->user_info.type);
 }
 
 bool SessionControllerImpl::IsUserPrimary() const {
@@ -205,6 +195,10 @@ bool SessionControllerImpl::IsUserFirstLogin() const {
   return GetUserSession(0)->user_info.is_new_profile;
 }
 
+bool SessionControllerImpl::IsEnterpriseManaged() const {
+  return client_ && client_->IsEnterpriseManaged();
+}
+
 bool SessionControllerImpl::ShouldDisplayManagedUI() const {
   if (!IsActiveUserSessionStarted())
     return false;
@@ -217,9 +211,48 @@ void SessionControllerImpl::LockScreen() {
     client_->RequestLockScreen();
 }
 
+void SessionControllerImpl::HideLockScreen() {
+  if (client_)
+    client_->RequestHideLockScreen();
+}
+
 void SessionControllerImpl::RequestSignOut() {
+  if (features::AreGlanceablesEnabled() &&
+      Shell::Get()->glanceables_controller()->ShouldTakeSignoutScreenshot()) {
+    DCHECK(IsActiveUserSessionStarted());
+    signout_screenshot_handler_->TakeScreenshot(
+        base::BindOnce(&SessionControllerImpl::ProceedWithSignOut,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+  ProceedWithSignOut();
+}
+
+void SessionControllerImpl::ProceedWithSignOut() {
   if (client_)
     client_->RequestSignOut();
+}
+
+void SessionControllerImpl::RequestRestartForUpdate() {
+  if (features::AreGlanceablesEnabled() &&
+      Shell::Get()->glanceables_controller()->ShouldTakeSignoutScreenshot()) {
+    DCHECK(IsActiveUserSessionStarted());
+    signout_screenshot_handler_->TakeScreenshot(
+        base::BindOnce(&SessionControllerImpl::ProceedWithRestartToUpdate,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+  ProceedWithRestartToUpdate();
+}
+
+void SessionControllerImpl::ProceedWithRestartToUpdate() {
+  if (client_)
+    client_->RequestRestartForUpdate();
+}
+
+void SessionControllerImpl::AttemptRestartChrome() {
+  if (client_)
+    client_->AttemptRestartChrome();
 }
 
 void SessionControllerImpl::SwitchActiveUser(const AccountId& account_id) {
@@ -235,11 +268,6 @@ void SessionControllerImpl::CycleActiveUser(CycleUserDirection direction) {
 void SessionControllerImpl::ShowMultiProfileLogin() {
   if (client_)
     client_->ShowMultiProfileLogin();
-}
-
-void SessionControllerImpl::EmitAshInitialized() {
-  if (client_)
-    client_->EmitAshInitialized();
 }
 
 PrefService* SessionControllerImpl::GetSigninScreenPrefService() const {
@@ -277,6 +305,10 @@ void SessionControllerImpl::RemoveObserver(SessionObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
+bool SessionControllerImpl::IsScreenLocked() const {
+  return state_ == SessionState::LOCKED;
+}
+
 void SessionControllerImpl::SetClient(SessionControllerClient* client) {
   client_ = client;
 }
@@ -292,11 +324,8 @@ void SessionControllerImpl::SetSessionInfo(const SessionInfo& info) {
 }
 
 void SessionControllerImpl::UpdateUserSession(const UserSession& user_session) {
-  auto it = std::find_if(
-      user_sessions_.begin(), user_sessions_.end(),
-      [&user_session](const std::unique_ptr<UserSession>& session) {
-        return session->session_id == user_session.session_id;
-      });
+  auto it = base::ranges::find(user_sessions_, user_session.session_id,
+                               &UserSession::session_id);
   if (it == user_sessions_.end()) {
     AddUserSession(user_session);
     return;
@@ -320,11 +349,11 @@ void SessionControllerImpl::SetUserSessionOrder(
   // Adjusts |user_sessions_| to match the given order.
   std::vector<std::unique_ptr<UserSession>> sessions;
   for (const auto& session_id : user_session_order) {
-    auto it =
-        std::find_if(user_sessions_.begin(), user_sessions_.end(),
-                     [session_id](const std::unique_ptr<UserSession>& session) {
-                       return session && session->session_id == session_id;
-                     });
+    auto it = base::ranges::find_if(
+        user_sessions_,
+        [session_id](const std::unique_ptr<UserSession>& session) {
+          return session && session->session_id == session_id;
+        });
     if (it == user_sessions_.end()) {
       LOG(ERROR) << "Unknown session id =" << session_id;
       continue;
@@ -353,34 +382,22 @@ void SessionControllerImpl::SetUserSessionOrder(
     // most-recently active user with a loaded PrefService.
     PrefService* user_pref_service =
         GetUserPrefServiceForUser(user_sessions_[0]->user_info.account_id);
-    if (user_pref_service)
+    if (user_pref_service && last_active_user_prefs_ != user_pref_service) {
       last_active_user_prefs_ = user_pref_service;
+      MaybeNotifyOnActiveUserPrefServiceChanged();
+    }
 
     for (auto& observer : observers_) {
       observer.OnActiveUserSessionChanged(
           user_sessions_[0]->user_info.account_id);
     }
 
-    if (user_pref_service)
-      MaybeNotifyOnActiveUserPrefServiceChanged();
-
     UpdateLoginStatus();
   }
 }
 
 void SessionControllerImpl::PrepareForLock(PrepareForLockCallback callback) {
-  // If the active window is fullscreen, exit fullscreen to avoid the web page
-  // or app mimicking the lock screen. Do not exit fullscreen if the shelf is
-  // visible while in fullscreen because the shelf makes it harder for a web
-  // page or app to mimick the lock screen.
-  WindowState* active_window_state = WindowState::ForActiveWindow();
-  if (active_window_state && active_window_state->IsFullscreen() &&
-      active_window_state->GetHideShelfWhenFullscreen()) {
-    const WMEvent event(WM_EVENT_TOGGLE_FULLSCREEN);
-    active_window_state->OnWMEvent(&event);
-  }
-
-  std::move(callback).Run();
+  fullscreen_controller_->MaybeExitFullscreenBeforeLock(std::move(callback));
 }
 
 void SessionControllerImpl::StartLock(StartLockCallback callback) {
@@ -393,7 +410,6 @@ void SessionControllerImpl::StartLock(StartLockCallback callback) {
   lock_state_controller->SetLockScreenDisplayedCallback(
       base::BindOnce(&SessionControllerImpl::OnLockAnimationFinished,
                      weak_ptr_factory_.GetWeakPtr()));
-  lock_state_controller->OnStartingLock();
 }
 
 void SessionControllerImpl::NotifyChromeLockAnimationsComplete() {
@@ -416,7 +432,7 @@ void SessionControllerImpl::NotifyChromeTerminating() {
 }
 
 void SessionControllerImpl::SetSessionLengthLimit(base::TimeDelta length_limit,
-                                                  base::TimeTicks start_time) {
+                                                  base::Time start_time) {
   session_length_limit_ = length_limit;
   session_start_time_ = start_time;
   for (auto& observer : observers_)
@@ -425,12 +441,8 @@ void SessionControllerImpl::SetSessionLengthLimit(base::TimeDelta length_limit,
 
 void SessionControllerImpl::CanSwitchActiveUser(
     CanSwitchActiveUserCallback callback) {
-  // Cancel overview mode when switching user profiles.
-  Shell::Get()->overview_controller()->EndOverview();
-
-  ash::Shell::Get()
-      ->screen_switch_check_controller()
-      ->CanSwitchAwayFromActiveUser(std::move(callback));
+  Shell::Get()->screen_switch_check_controller()->CanSwitchAwayFromActiveUser(
+      std::move(callback));
 }
 
 void SessionControllerImpl::ShowMultiprofilesIntroDialog(
@@ -470,6 +482,11 @@ void SessionControllerImpl::ClearUserSessionsForTest() {
   last_active_user_prefs_ = nullptr;
   active_session_id_ = 0u;
   primary_session_id_ = 0u;
+}
+
+void SessionControllerImpl::SetSignoutScreenshotHandlerForTest(
+    std::unique_ptr<SignoutScreenshotHandler> handler) {
+  signout_screenshot_handler_ = std::move(handler);
 }
 
 void SessionControllerImpl::SetIsDemoSession() {
@@ -512,15 +529,17 @@ void SessionControllerImpl::SetSessionState(SessionState state) {
 }
 
 void SessionControllerImpl::AddUserSession(const UserSession& user_session) {
-  const AccountId account_id(user_session.user_info.account_id);
-
   if (primary_session_id_ == 0u)
     primary_session_id_ = user_session.session_id;
 
   user_sessions_.push_back(std::make_unique<UserSession>(user_session));
 
-  OnProfilePrefServiceInitialized(account_id,
-                                  GetUserPrefServiceForUser(account_id));
+  const AccountId account_id(user_session.user_info.account_id);
+  PrefService* user_prefs = GetUserPrefServiceForUser(account_id);
+  // |user_prefs| could be null in tests.
+  if (user_prefs)
+    OnProfilePrefServiceInitialized(account_id, user_prefs);
+
   UpdateLoginStatus();
   for (auto& observer : observers_)
     observer.OnUserSessionAdded(account_id);
@@ -534,6 +553,7 @@ LoginStatus SessionControllerImpl::CalculateLoginStatus() const {
     case SessionState::OOBE:
     case SessionState::LOGIN_PRIMARY:
     case SessionState::LOGGED_IN_NOT_ACTIVE:
+    case SessionState::RMA:
       return LoginStatus::NOT_LOGGED_IN;
 
     case SessionState::ACTIVE:
@@ -543,7 +563,7 @@ LoginStatus SessionControllerImpl::CalculateLoginStatus() const {
       return LoginStatus::LOCKED;
 
     case SessionState::LOGIN_SECONDARY:
-      // TODO: There is no LoginStatus for this.
+      // TODO(jamescook): There is no LoginStatus for this.
       return LoginStatus::USER;
   }
   NOTREACHED();
@@ -564,17 +584,17 @@ LoginStatus SessionControllerImpl::CalculateLoginStatusForActiveSession()
       return LoginStatus::GUEST;
     case user_manager::USER_TYPE_PUBLIC_ACCOUNT:
       return LoginStatus::PUBLIC;
-    case user_manager::USER_TYPE_SUPERVISED:
-      return LoginStatus::SUPERVISED;
     case user_manager::USER_TYPE_KIOSK_APP:
       return LoginStatus::KIOSK_APP;
     case user_manager::USER_TYPE_CHILD:
-      return LoginStatus::SUPERVISED;
+      return LoginStatus::CHILD;
     case user_manager::USER_TYPE_ARC_KIOSK_APP:
-      return LoginStatus::ARC_KIOSK_APP;
+      return LoginStatus::KIOSK_APP;
     case user_manager::USER_TYPE_ACTIVE_DIRECTORY:
-      // TODO: There is no LoginStatus for this.
+      // TODO(jamescook): There is no LoginStatus for this.
       return LoginStatus::USER;
+    case user_manager::USER_TYPE_WEB_KIOSK_APP:
+      return LoginStatus::KIOSK_APP;
     case user_manager::NUM_USER_TYPES:
       // Avoid having a "default" case so the compiler catches new enum values.
       NOTREACHED();

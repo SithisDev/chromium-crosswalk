@@ -1,14 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/cast/cast_notification_controller.h"
 
+#include "ash/constants/notifier_catalogs.h"
 #include "ash/public/cpp/notification_utils.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/bind.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
@@ -27,7 +29,7 @@ bool ShouldShowNotification() {
          cast_config->HasActiveRoute();
 }
 
-base::string16 GetNotificationTitle(const CastSink& sink,
+std::u16string GetNotificationTitle(const CastSink& sink,
                                     const CastRoute& route) {
   switch (route.content_source) {
     case ContentSource::kUnknown:
@@ -40,10 +42,10 @@ base::string16 GetNotificationTitle(const CastSink& sink,
   }
 }
 
-base::string16 GetNotificationMessage(const CastRoute& route) {
+std::u16string GetNotificationMessage(const CastRoute& route) {
   switch (route.content_source) {
     case ContentSource::kUnknown:
-      return base::string16();
+      return std::u16string();
     case ContentSource::kTab:
       return base::UTF8ToUTF16(route.title);
     case ContentSource::kDesktop:
@@ -95,9 +97,10 @@ void CastNotificationController::OnDevicesUpdated(
     std::unique_ptr<Notification> notification = CreateSystemNotification(
         message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId,
         GetNotificationTitle(sink, route), GetNotificationMessage(route),
-        base::string16() /* display_source */, GURL(),
+        std::u16string() /* display_source */, GURL(),
         message_center::NotifierId(
-            message_center::NotifierType::SYSTEM_COMPONENT, kNotifierId),
+            message_center::NotifierType::SYSTEM_COMPONENT, kNotifierId,
+            NotificationCatalogName::kCast),
         data,
         base::MakeRefCounted<message_center::HandleNotificationClickDelegate>(
             base::BindRepeating(&CastNotificationController::StopCasting,
@@ -111,10 +114,9 @@ void CastNotificationController::OnDevicesUpdated(
   }
 }
 
-void CastNotificationController::StopCasting() {
+void CastNotificationController::StopCasting(absl::optional<int> button_index) {
   CastConfigController::Get()->StopCasting(displayed_route_id_);
-  Shell::Get()->metrics()->RecordUserMetricsAction(
-      UMA_STATUS_AREA_CAST_STOP_CAST);
+  base::RecordAction(base::UserMetricsAction("StatusArea_Cast_StopCast"));
 }
 
 }  // namespace ash

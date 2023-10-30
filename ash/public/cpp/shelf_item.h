@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_PUBLIC_CPP_SHELF_ITEM_H_
 #define ASH_PUBLIC_CPP_SHELF_ITEM_H_
 
+#include <string>
 #include <vector>
 
 #include "ash/public/cpp/ash_public_export.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "base/strings/string16.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace ash {
@@ -31,12 +32,23 @@ struct ASH_PUBLIC_EXPORT ShelfItem {
   ShelfID id;
 
   // The title to display for tooltips, etc.
-  base::string16 title;
+  std::u16string title;
+
+  SkColor notification_badge_color = SK_ColorWHITE;
+
+  // App status.
+  AppStatus app_status = AppStatus::kReady;
+
+  // Whether the item is associated with a window in the currently active desk.
+  // This value is valid only when |features::kPerDeskShelf| is enabled.
+  // Otherwise it won't be updated and will always be true.
+  bool is_on_active_desk = true;
 
   // Whether the tooltip should be shown on hover; generally true.
   bool shows_tooltip = true;
 
-  // Whether the item is pinned by a policy preference (ie. user cannot un-pin).
+  // Whether the item is pinned by a policy preference. If so, pin state should
+  // not be modifiable by user.
   bool pinned_by_policy = false;
 
   // Whether the item has a notification.

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,10 +19,13 @@
 #include "ash/wm/wm_event.h"
 #include "ash/wm/work_area_insets.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
 namespace ash {
+
+using ::chromeos::WindowStateType;
 
 LockWindowState::LockWindowState(aura::Window* window, bool exclude_shelf)
     : current_state_type_(WindowState::Get(window)->GetStateType()),
@@ -40,6 +43,7 @@ void LockWindowState::OnWMEvent(WindowState* window_state,
       UpdateWindow(window_state, WindowStateType::kFullscreen);
       break;
     case WM_EVENT_PIP:
+    case WM_EVENT_FLOAT:
     case WM_EVENT_PIN:
     case WM_EVENT_TRUSTED_PIN:
       NOTREACHED();
@@ -48,12 +52,13 @@ void LockWindowState::OnWMEvent(WindowState* window_state,
     case WM_EVENT_TOGGLE_VERTICAL_MAXIMIZE:
     case WM_EVENT_TOGGLE_HORIZONTAL_MAXIMIZE:
     case WM_EVENT_TOGGLE_MAXIMIZE:
-    case WM_EVENT_CYCLE_SNAP_LEFT:
-    case WM_EVENT_CYCLE_SNAP_RIGHT:
+    case WM_EVENT_CYCLE_SNAP_PRIMARY:
+    case WM_EVENT_CYCLE_SNAP_SECONDARY:
     case WM_EVENT_CENTER:
-    case WM_EVENT_SNAP_LEFT:
-    case WM_EVENT_SNAP_RIGHT:
+    case WM_EVENT_SNAP_PRIMARY:
+    case WM_EVENT_SNAP_SECONDARY:
     case WM_EVENT_NORMAL:
+    case WM_EVENT_RESTORE:
     case WM_EVENT_MAXIMIZE:
       UpdateWindow(window_state,
                    GetMaximizedOrCenteredWindowType(window_state));
@@ -67,8 +72,8 @@ void LockWindowState::OnWMEvent(WindowState* window_state,
       if (window_state->IsMaximized() || window_state->IsFullscreen()) {
         UpdateBounds(window_state);
       } else {
-        const ash::SetBoundsWMEvent* bounds_event =
-            static_cast<const ash::SetBoundsWMEvent*>(event);
+        const SetBoundsWMEvent* bounds_event =
+            static_cast<const SetBoundsWMEvent*>(event);
         window_state->SetBoundsConstrained(bounds_event->requested_bounds());
       }
       break;
@@ -189,10 +194,13 @@ gfx::Rect LockWindowState::GetWindowBounds(aura::Window* window) {
           ? keyboard_controller->GetKeyboardLockScreenOffsetBounds().height()
           : 0;
   gfx::Rect bounds = screen_util::GetDisplayBoundsWithShelf(window);
-  bounds.Inset(0,
-               WorkAreaInsets::ForWindow(window->GetRootWindow())
-                   ->accessibility_panel_height(),
-               0, keyboard_height);
+  gfx::Insets insets(WorkAreaInsets::ForWindow(window->GetRootWindow())
+                         ->GetAccessibilityInsets());
+
+  if (keyboard_height > 0)
+    insets.set_bottom(keyboard_height);
+
+  bounds.Inset(insets);
   return bounds;
 }
 

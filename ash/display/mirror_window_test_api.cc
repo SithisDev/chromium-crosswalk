@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,11 +25,11 @@ std::vector<aura::WindowTreeHost*> MirrorWindowTestApi::GetHosts() const {
   return hosts;
 }
 
-ui::CursorType MirrorWindowTestApi::GetCurrentCursorType() const {
+ui::mojom::CursorType MirrorWindowTestApi::GetCurrentCursorType() const {
   return Shell::Get()
       ->window_tree_host_manager()
       ->cursor_window_controller()
-      ->cursor_.native_type();
+      ->cursor_.type();
 }
 
 const gfx::Point& MirrorWindowTestApi::GetCursorHotPoint() const {

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,11 @@
 #include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
-#include "base/strings/string16.h"
+#include "base/strings/string_piece.h"
+#include "components/access_code_cast/common/access_code_cast_metrics.h"
+#include "components/version_info/channel.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/gurl.h"
 
 namespace ash {
 
@@ -18,20 +22,20 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   virtual ~SystemTrayClient() {}
 
   // Shows general settings UI.
-  virtual void ShowSettings() = 0;
+  virtual void ShowSettings(int64_t display_id) = 0;
 
   // Shows settings related to Bluetooth devices (e.g. to add a device).
   virtual void ShowBluetoothSettings() = 0;
 
-  // Shows the web UI dialog to pair a Bluetooth device.
-  // |address| is the unique device address in the form "XX:XX:XX:XX:XX:XX"
-  // with hex digits X. |name_for_display| is a human-readable name, not
-  // necessarily the device name.
+  // Shows the detailed settings for the Bluetooth device with ID |device_id|.
+  virtual void ShowBluetoothSettings(const std::string& device_id) = 0;
+
+  // Show the Bluetooth pairing dialog. When provided, |device_address| is the
+  // unique device address that the dialog should attempt to pair with and
+  // should be in the form "XX:XX:XX:XX:XX:XX". When |device_address| is not
+  // provided the dialog will show the device list instead.
   virtual void ShowBluetoothPairingDialog(
-      const std::string& address,
-      const base::string16& name_for_display,
-      bool paired,
-      bool connected) = 0;
+      absl::optional<base::StringPiece> device_address) = 0;
 
   // Shows the settings related to date, timezone etc.
   virtual void ShowDateSettings() = 0;
@@ -42,8 +46,20 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows settings related to multiple displays.
   virtual void ShowDisplaySettings() = 0;
 
+  // Shows settings related to multiple displays.
+  virtual void ShowDarkModeSettings() = 0;
+
+  // Shows settings related to storage.
+  virtual void ShowStorageSettings() = 0;
+
   // Shows settings related to power.
   virtual void ShowPowerSettings() = 0;
+
+  // Shows OS settings related to privacy and security.
+  virtual void ShowPrivacyAndSecuritySettings() = 0;
+
+  // Show OS smart privacy settings.
+  virtual void ShowSmartPrivacySettings() = 0;
 
   // Shows the page that lets you disable performance tracing.
   virtual void ShowChromeSlow() = 0;
@@ -54,12 +70,18 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows settings related to MultiDevice features.
   virtual void ShowConnectedDevicesSettings() = 0;
 
+  // Shows settings related to tether network.
+  virtual void ShowTetherNetworkSettings() = 0;
+
+  // Shows settings related to Wi-Fi Sync v2.
+  virtual void ShowWifiSyncSettings() = 0;
+
   // Shows the about chrome OS page and checks for updates after the page is
   // loaded.
   virtual void ShowAboutChromeOS() = 0;
 
-  // Shows the Chromebook help app.
-  virtual void ShowHelp() = 0;
+  // Shows the about chrome OS additional details page.
+  virtual void ShowAboutChromeOSDetails() = 0;
 
   // Shows accessibility help.
   virtual void ShowAccessibilityHelp() = 0;
@@ -67,14 +89,14 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows the settings related to accessibility.
   virtual void ShowAccessibilitySettings() = 0;
 
+  // Shows gesture education help.
+  virtual void ShowGestureEducationHelp() = 0;
+
   // Shows the help center article for the stylus tool palette.
   virtual void ShowPaletteHelp() = 0;
 
   // Shows the settings related to the stylus tool palette.
   virtual void ShowPaletteSettings() = 0;
-
-  // Shows information about public account mode.
-  virtual void ShowPublicAccountInfo() = 0;
 
   // Shows information about enterprise enrolled devices.
   virtual void ShowEnterpriseInfo() = 0;
@@ -86,6 +108,14 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows UI to create a new network connection. |type| is the ONC network type
   // (see onc_spec.md). TODO(stevenjb): Use NetworkType from onc.mojo (TBD).
   virtual void ShowNetworkCreate(const std::string& type) = 0;
+
+  // Opens the cellular setup flow in OS Settings. |show_psim_flow| indicates
+  // if we should navigate to the physical SIM setup flow or to the page that
+  // allows the user to select which flow they wish to enter (pSIM or eSIM).
+  virtual void ShowSettingsCellularSetup(bool show_psim_flow) = 0;
+
+  // Opens SIM unlock dialog in OS Settings.
+  virtual void ShowSettingsSimUnlock() = 0;
 
   // Shows the "add network" UI to create a third-party extension-backed VPN
   // connection (e.g. Cisco AnyConnect).
@@ -103,12 +133,43 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows the MultiDevice setup flow dialog.
   virtual void ShowMultiDeviceSetup() = 0;
 
-  // Attempts to restart the system for update.
-  virtual void RequestRestartForUpdate() = 0;
+  // Shows the Firmware update app.
+  virtual void ShowFirmwareUpdate() = 0;
 
   // Sets the UI locale to |locale_iso_code| and exit the session to take
   // effect.
   virtual void SetLocaleAndExit(const std::string& locale_iso_code) = 0;
+
+  // Shows the access code casting dialog. |open_location| is the location
+  // where the dialog was opened.
+  virtual void ShowAccessCodeCastingDialog(
+      AccessCodeCastDialogOpenLocation open_location) = 0;
+
+  // Shows a calendar event. If an event is present then it's opened, otherwise
+  // Google Calendar is opened to `date`. Open in the calendar PWA if
+  // installed (and assign true to `opened_pwa`), in a new browser tab otherwise
+  // (and assign false to |opened_pwa|).
+  //
+  // The calendar PWA requires the event URL to have a specific prefix,
+  // so the URL actually opened may not be the same as the passed-in URL.  This
+  // is guaranteed to be the case if no event URL was passed in.  The URL that's
+  // actually opened is assigned to `finalized_event_url`.
+  virtual void ShowCalendarEvent(const absl::optional<GURL>& event_url,
+                                 const base::Time& date,
+                                 bool& opened_pwa,
+                                 GURL& finalized_event_url) = 0;
+
+  // Shown when the device is on a non-stable release track and the user clicks
+  // the channel/version button from quick settings.
+  virtual void ShowChannelInfoAdditionalDetails() = 0;
+
+  // Shown when the device is on a non-stable release track and the user clicks
+  // the "send feedback" button.
+  virtual void ShowChannelInfoGiveFeedback() = 0;
+
+  // Returns 'true' if the user preference is set to allow users to submit
+  // feedback, 'false' otherwise.
+  virtual bool IsUserFeedbackEnabled() = 0;
 
  protected:
   SystemTrayClient() {}

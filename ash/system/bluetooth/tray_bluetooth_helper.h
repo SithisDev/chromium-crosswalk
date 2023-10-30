@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "base/macros.h"
+#include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/timer/timer.h"
 #include "device/bluetooth/bluetooth_common.h"
 #include "services/device/public/mojom/bluetooth_system.mojom.h"
@@ -41,6 +42,10 @@ class ASH_EXPORT TrayBluetoothHelper {
   };
 
   TrayBluetoothHelper();
+
+  TrayBluetoothHelper(const TrayBluetoothHelper&) = delete;
+  TrayBluetoothHelper& operator=(const TrayBluetoothHelper&) = delete;
+
   virtual ~TrayBluetoothHelper();
 
   void AddObserver(Observer* observer);
@@ -110,8 +115,6 @@ class ASH_EXPORT TrayBluetoothHelper {
   base::RepeatingTimer timer_;
 
   base::WeakPtrFactory<TrayBluetoothHelper> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TrayBluetoothHelper);
 };
 
 }  // namespace ash

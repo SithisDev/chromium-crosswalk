@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,37 +6,62 @@
 #define ASH_PUBLIC_CPP_SHELF_TYPES_H_
 
 #include <cstdint>
+#include <ostream>
 #include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
 
 namespace ash {
 
-enum ShelfAlignment {
-  SHELF_ALIGNMENT_BOTTOM,
-  SHELF_ALIGNMENT_LEFT,
-  SHELF_ALIGNMENT_RIGHT,
+enum class ShelfAlignment {
+  kBottom,
+  kLeft,
+  kRight,
   // Top has never been supported.
 
   // The locked alignment is set temporarily and not saved to preferences.
-  SHELF_ALIGNMENT_BOTTOM_LOCKED,
+  kBottomLocked,
 };
 
-enum ShelfAutoHideBehavior {
-  // Always auto-hide.
-  SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+enum class HotseatState {
+  // Hotseat is shown off screen.
+  kHidden,
 
-  // Never auto-hide.
-  SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
+  // Hotseat is shown within the shelf in clamshell mode.
+  kShownClamshell,
 
-  // Always hide.
-  SHELF_AUTO_HIDE_ALWAYS_HIDDEN,
+  // Hotseat is shown in the tablet mode home launcher's shelf.
+  // Compared to kShownClamshell state, in this state, the shelf background is
+  // not visible behind the hotseat (shelf itself is transparent on the home
+  // screen). The hotseat also differs in size, and its bounds are moved
+  // slightly up to leave more space between the hotseat background and the
+  // bottom of the screen.
+  kShownHomeLauncher,
+
+  // Hotseat is shown above the shelf.
+  kExtended,
+
+  // No value,
+  kNone
+};
+
+// Defines the density of hotseat. Hotseat is "denser" if it can accommodate
+// more shelf buttons without scrolling for the given available space.
+enum class HotseatDensity { kNormal, kSemiDense, kDense };
+
+enum class ShelfAutoHideBehavior {
+  kAlways,        // Always auto-hide.
+  kNever,         // Never auto-hide.
+  kAlwaysHidden,  // Always hide.
 };
 
 enum ShelfAutoHideState {
   SHELF_AUTO_HIDE_SHOWN,
   SHELF_AUTO_HIDE_HIDDEN,
 };
+
+ASH_PUBLIC_EXPORT std::ostream& operator<<(std::ostream& out,
+                                           ShelfAutoHideState state);
 
 enum ShelfVisibilityState {
   // Always visible.
@@ -49,30 +74,36 @@ enum ShelfVisibilityState {
   SHELF_HIDDEN,
 };
 
-enum ShelfBackgroundType {
+enum class ShelfBackgroundType {
   // The default transparent background.
-  SHELF_BACKGROUND_DEFAULT,
+  kDefaultBg,
 
   // The background when a window is maximized or two windows are maximized
   // for a split view.
-  SHELF_BACKGROUND_MAXIMIZED,
+  kMaximized,
 
-  // The background when fullscreen app list is visible.
-  SHELF_BACKGROUND_APP_LIST,
+  // The background when the app list is visible in tablet mode.
+  kHomeLauncher,
 
   // The background when OOBE is active.
-  SHELF_BACKGROUND_OOBE,
+  kOobe,
 
   // The background when login/lock/user-add is active.
-  SHELF_BACKGROUND_LOGIN,
+  kLogin,
 
   // The background when login/lock/user-add is active and the wallpaper is not
   // blurred.
-  SHELF_BACKGROUND_LOGIN_NONBLURRED_WALLPAPER,
+  kLoginNonBlurredWallpaper,
 
   // The background when overview is active.
-  SHELF_BACKGROUND_OVERVIEW,
+  kOverview,
+
+  // The background for the in-app shelf in tablet mode.
+  kInApp,
 };
+
+ASH_PUBLIC_EXPORT std::ostream& operator<<(std::ostream& out,
+                                           ShelfBackgroundType type);
 
 // Source of the launch or activation request, for tracking.
 enum ShelfLaunchSource {
@@ -85,8 +116,14 @@ enum ShelfLaunchSource {
   // The item was launched from an app list search view.
   LAUNCH_FROM_APP_LIST_SEARCH,
 
+  // The item was launched from an app list search Recommendation.
+  LAUNCH_FROM_APP_LIST_RECOMMENDATION,
+
   // The item was launched from the shelf itself.
   LAUNCH_FROM_SHELF,
+
+  // The item was launched internally, for example from test.
+  LAUNCH_FROM_INTERNAL,
 };
 
 // The actions that may be performed when a shelf item is selected.
@@ -108,6 +145,9 @@ enum ShelfAction {
 
   // The app list launcher menu was dismissed.
   SHELF_ACTION_APP_LIST_DISMISSED,
+
+  // The back action was performed on the app list.
+  SHELF_ACTION_APP_LIST_BACK,
 };
 
 // The type of a shelf item.
@@ -122,7 +162,14 @@ enum ShelfItemType {
   // - Extension "V1" (legacy packaged and hosted) apps,
   // - Extension "V2" (platform) apps,
   // - ARC (App Runtime for Chrome - Android Play Store) apps.
+  // - Lacros.
   TYPE_APP,
+
+  // Similar to TYPE_BROWSER_SHORTCUT, but not pinned.
+  // This is for the Lacros migration.
+  // After Lacros is completely made, TYPE_BROWSER_SHORTCUT and
+  // TYPE_UNPINNED_BROWSER_SHORTCUT will be removed, eventually.
+  TYPE_UNPINNED_BROWSER_SHORTCUT,
 
   // Represents an open dialog.
   TYPE_DIALOG,
@@ -133,6 +180,9 @@ enum ShelfItemType {
 
 // Returns true if |type| is a valid ShelfItemType.
 ASH_PUBLIC_EXPORT bool IsValidShelfItemType(int64_t type);
+
+// Returns true if |type| is a pinned type (i.e. not a running app or dialog).
+ASH_PUBLIC_EXPORT bool IsPinnedShelfItemType(ShelfItemType type);
 
 // Returns true if types |a| and |b| have the same pin state, i.e. if they
 // are both pinned apps (or a browser shortcut which is always pinned) or both
@@ -147,6 +197,16 @@ enum ShelfItemStatus {
   STATUS_RUNNING,
   // A shelf item that needs user's attention.
   STATUS_ATTENTION,
+};
+
+// Represents the app status in the shelf or app_list.
+enum AppStatus {
+  // The app is ready.
+  kReady,
+  // The app is blocked.
+  kBlocked,
+  // The app is paused.
+  kPaused,
 };
 
 // A unique shelf item id composed of an |app_id| and a |launch_id|.

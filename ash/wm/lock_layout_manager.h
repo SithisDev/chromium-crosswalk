@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,15 @@
 #include "ash/ash_export.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_observer.h"
-#include "ash/shell_observer.h"
 #include "ash/wm/wm_default_layout_manager.h"
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "ui/aura/window_observer.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ash {
 
-class Shelf;
 class WindowState;
 class WMEvent;
 
@@ -35,11 +33,14 @@ class WMEvent;
 // with LockWindowState.
 class ASH_EXPORT LockLayoutManager : public WmDefaultLayoutManager,
                                      public aura::WindowObserver,
-                                     public ShellObserver,
                                      public ShelfObserver,
                                      public KeyboardControllerObserver {
  public:
   LockLayoutManager(aura::Window* window, Shelf* shelf);
+
+  LockLayoutManager(const LockLayoutManager&) = delete;
+  LockLayoutManager& operator=(const LockLayoutManager&) = delete;
+
   ~LockLayoutManager() override;
 
   // Overridden from WmDefaultLayoutManager:
@@ -77,9 +78,7 @@ class ASH_EXPORT LockLayoutManager : public WmDefaultLayoutManager,
   aura::Window* window_;
   aura::Window* root_window_;
 
-  ScopedObserver<Shelf, ShelfObserver> shelf_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(LockLayoutManager);
+  base::ScopedObservation<Shelf, ShelfObserver> shelf_observation_{this};
 };
 
 }  // namespace ash

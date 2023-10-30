@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,10 @@
 
 #include <memory>
 
-#include "ash/app_list/app_list_controller_observer.h"
-#include "ash/public/cpp/assistant/default_voice_interaction_observer.h"
+#include "ash/assistant/model/assistant_ui_model_observer.h"
+#include "ash/public/cpp/app_list/app_list_controller_observer.h"
+#include "ash/public/cpp/assistant/assistant_state.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
-#include "ash/session/session_observer.h"
-#include "base/macros.h"
-
-namespace base {
-class OneShotTimer;
-}  // namespace base
 
 namespace ui {
 class GestureEvent;
@@ -31,64 +25,61 @@ class HomeButton;
 // action (for Assistant).
 // Behavior is tested indirectly in HomeButtonTest and ShelfViewInkDropTest.
 class HomeButtonController : public AppListControllerObserver,
-                             public SessionObserver,
                              public TabletModeObserver,
-                             public DefaultVoiceInteractionObserver {
+                             public AssistantStateObserver,
+                             public AssistantUiModelObserver {
  public:
   explicit HomeButtonController(HomeButton* button);
+
+  HomeButtonController(const HomeButtonController&) = delete;
+  HomeButtonController& operator=(const HomeButtonController&) = delete;
+
   ~HomeButtonController() override;
 
-  // Maybe handles a gesture event based on the event and whether voice
-  // interaction is available. Returns true if the event is consumed; otherwise,
-  // HomeButton should pass the event along to Button to consume.
+  // Maybe handles a gesture event based on the event and whether the Assistant
+  // is available. Returns true if the event is consumed; otherwise, HomeButton
+  // should pass the event along to Button to consume.
   bool MaybeHandleGestureEvent(ui::GestureEvent* event);
 
-  // Whether voice interaction is available via long-press.
-  bool IsVoiceInteractionAvailable();
+  // Whether the Assistant is available via long-press.
+  bool IsAssistantAvailable();
 
-  // Whether voice interaction is currently running.
-  bool IsVoiceInteractionRunning();
-
-  bool is_showing_app_list() const { return is_showing_app_list_; }
+  // Whether the Assistant UI currently showing.
+  bool IsAssistantVisible();
 
  private:
   // AppListControllerObserver:
-  void OnAppListVisibilityChanged(bool shown, int64_t display_id) override;
-
-  // SessionObserver:
-  void OnActiveUserSessionChanged(const AccountId& account_id) override;
+  void OnAppListVisibilityWillChange(bool shown, int64_t display_id) override;
 
   // TabletModeObserver:
   void OnTabletModeStarted() override;
 
-  // mojom::VoiceInteractionObserver:
-  void OnVoiceInteractionStatusChanged(
-      mojom::VoiceInteractionState state) override;
-  void OnVoiceInteractionSettingsEnabled(bool enabled) override;
+  // AssistantStateObserver:
+  void OnAssistantFeatureAllowedChanged(
+      assistant::AssistantAllowedState) override;
+  void OnAssistantSettingsEnabled(bool enabled) override;
+
+  // AssistantUiModelObserver:
+  void OnUiVisibilityChanged(
+      AssistantVisibility new_visibility,
+      AssistantVisibility old_visibility,
+      absl::optional<AssistantEntryPoint> entry_point,
+      absl::optional<AssistantExitPoint> exit_point) override;
 
   void OnAppListShown();
   void OnAppListDismissed();
 
-  void StartVoiceInteractionAnimation();
+  void StartAssistantAnimation();
 
-  // Initialize the voice interaction overlay.
-  void InitializeVoiceInteractionOverlay();
-
-  // True if the app list is currently showing for the button's display.
-  // This is useful because other app_list_visible functions aren't per-display.
-  bool is_showing_app_list_ = false;
+  // Initialize the Assistant overlay.
+  void InitializeAssistantOverlay();
 
   // The button that owns this controller.
   HomeButton* const button_;
 
-  // Owned by the button's view hierarchy. Null if voice interaction is not
-  // enabled.
+  // Owned by the button's view hierarchy.
   AssistantOverlay* assistant_overlay_ = nullptr;
   std::unique_ptr<base::OneShotTimer> assistant_animation_delay_timer_;
-  std::unique_ptr<base::OneShotTimer> assistant_animation_hide_delay_timer_;
-  base::TimeTicks voice_interaction_start_timestamp_;
-
-  DISALLOW_COPY_AND_ASSIGN(HomeButtonController);
 };
 
 }  // namespace ash

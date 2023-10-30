@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,15 @@
 
 #include <vector>
 
+#include "ash/ime/ime_controller_impl.h"
 #include "ash/shell.h"
-#include "ash/ime/ime_controller.h"
 #include "ash/system/unified/feature_pod_button.h"
 #include "ash/system/unified/unified_system_tray_controller.h"
 #include "ash/system/unified/unified_system_tray_model.h"
 #include "ash/test/ash_test_base.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-
 
 namespace ash {
 
@@ -22,12 +22,17 @@ namespace ash {
 class IMEFeaturePodControllerTest : public NoSessionAshTestBase {
  public:
   IMEFeaturePodControllerTest() = default;
+
+  IMEFeaturePodControllerTest(const IMEFeaturePodControllerTest&) = delete;
+  IMEFeaturePodControllerTest& operator=(const IMEFeaturePodControllerTest&) =
+      delete;
+
   ~IMEFeaturePodControllerTest() override = default;
 
   void SetUp() override {
     NoSessionAshTestBase::SetUp();
 
-    tray_model_ = std::make_unique<UnifiedSystemTrayModel>();
+    tray_model_ = base::MakeRefCounted<UnifiedSystemTrayModel>(nullptr);
     tray_controller_ =
         std::make_unique<UnifiedSystemTrayController>(tray_model_.get());
   }
@@ -42,8 +47,7 @@ class IMEFeaturePodControllerTest : public NoSessionAshTestBase {
 
  protected:
   void SetUpButton() {
-    controller_ =
-        std::make_unique<IMEFeaturePodController>(tray_controller());
+    controller_ = std::make_unique<IMEFeaturePodController>(tray_controller());
     button_.reset(controller_->CreateButton());
   }
 
@@ -62,31 +66,28 @@ class IMEFeaturePodControllerTest : public NoSessionAshTestBase {
   }
 
   void RefreshImeController() {
-    std::vector<mojom::ImeInfoPtr> available_ime_ptrs;
+    std::vector<ImeInfo> available_imes;
     for (const auto& ime : available_imes_)
-      available_ime_ptrs.push_back(ime.Clone());
+      available_imes.push_back(ime);
 
-    std::vector<mojom::ImeMenuItemPtr> menu_item_ptrs;
+    std::vector<ImeMenuItem> menu_items;
     for (const auto& item : menu_items_)
-      menu_item_ptrs.push_back(item.Clone());
+      menu_items_.push_back(item);
 
-    Shell::Get()->ime_controller()->RefreshIme(current_ime_.id,
-                                              std::move(available_ime_ptrs),
-                                              std::move(menu_item_ptrs));
+    Shell::Get()->ime_controller()->RefreshIme(
+        current_ime_.id, std::move(available_imes), std::move(menu_items));
   }
 
  private:
-  std::unique_ptr<UnifiedSystemTrayModel> tray_model_;
+  scoped_refptr<UnifiedSystemTrayModel> tray_model_;
   std::unique_ptr<UnifiedSystemTrayController> tray_controller_;
   std::unique_ptr<IMEFeaturePodController> controller_;
   std::unique_ptr<FeaturePodButton> button_;
 
   // IMEs
-  mojom::ImeInfo current_ime_;
-  std::vector<mojom::ImeInfo> available_imes_;
-  std::vector<mojom::ImeMenuItem> menu_items_;
-
-  DISALLOW_COPY_AND_ASSIGN(IMEFeaturePodControllerTest);
+  ImeInfo current_ime_;
+  std::vector<ImeInfo> available_imes_;
+  std::vector<ImeMenuItem> menu_items_;
 };
 
 // Tests that if the pod button is hidden if less than 2 IMEs are present.

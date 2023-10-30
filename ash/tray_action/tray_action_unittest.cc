@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/tray_action/test_tray_action_client.h"
 #include "ash/tray_action/tray_action_observer.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 
 using ash::mojom::TrayActionState;
@@ -26,6 +25,9 @@ class ScopedTestStateObserver : public TrayActionObserver {
       : tray_action_(tray_action) {
     tray_action_->AddObserver(this);
   }
+
+  ScopedTestStateObserver(const ScopedTestStateObserver&) = delete;
+  ScopedTestStateObserver& operator=(const ScopedTestStateObserver&) = delete;
 
   ~ScopedTestStateObserver() override { tray_action_->RemoveObserver(this); }
 
@@ -44,8 +46,6 @@ class ScopedTestStateObserver : public TrayActionObserver {
   TrayAction* tray_action_;
 
   std::vector<TrayActionState> observed_states_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedTestStateObserver);
 };
 
 using TrayActionTest = AshTestBase;
@@ -69,7 +69,7 @@ TEST_F(TrayActionTest, NoTrayActionClient) {
 
   std::unique_ptr<TestTrayActionClient> action_client =
       std::make_unique<TestTrayActionClient>();
-  tray_action->SetClient(action_client->CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client->CreateRemoteAndBind(),
                          TrayActionState::kLaunching);
 
   EXPECT_EQ(TrayActionState::kLaunching, tray_action->GetLockScreenNoteState());
@@ -91,7 +91,7 @@ TEST_F(TrayActionTest, SettingInitialState) {
 
   ScopedTestStateObserver observer(tray_action);
   TestTrayActionClient action_client;
-  tray_action->SetClient(action_client.CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client.CreateRemoteAndBind(),
                          TrayActionState::kAvailable);
 
   EXPECT_EQ(TrayActionState::kAvailable, tray_action->GetLockScreenNoteState());
@@ -105,7 +105,7 @@ TEST_F(TrayActionTest, StateChangeNotificationOnConnectionLoss) {
   ScopedTestStateObserver observer(tray_action);
   std::unique_ptr<TestTrayActionClient> action_client(
       new TestTrayActionClient());
-  tray_action->SetClient(action_client->CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client->CreateRemoteAndBind(),
                          TrayActionState::kAvailable);
 
   EXPECT_EQ(TrayActionState::kAvailable, tray_action->GetLockScreenNoteState());
@@ -127,7 +127,7 @@ TEST_F(TrayActionTest, NormalStateProgression) {
 
   ScopedTestStateObserver observer(tray_action);
   TestTrayActionClient action_client;
-  tray_action->SetClient(action_client.CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client.CreateRemoteAndBind(),
                          TrayActionState::kNotAvailable);
 
   tray_action->UpdateLockScreenNoteState(TrayActionState::kAvailable);
@@ -164,7 +164,7 @@ TEST_F(TrayActionTest, ObserversNotNotifiedOnDuplicateState) {
 
   ScopedTestStateObserver observer(tray_action);
   TestTrayActionClient action_client;
-  tray_action->SetClient(action_client.CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client.CreateRemoteAndBind(),
                          TrayActionState::kNotAvailable);
 
   tray_action->UpdateLockScreenNoteState(TrayActionState::kAvailable);
@@ -182,7 +182,7 @@ TEST_F(TrayActionTest, RequestAction) {
   TrayAction* tray_action = Shell::Get()->tray_action();
 
   TestTrayActionClient action_client;
-  tray_action->SetClient(action_client.CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client.CreateRemoteAndBind(),
                          TrayActionState::kNotAvailable);
 
   EXPECT_TRUE(action_client.note_origins().empty());
@@ -212,7 +212,7 @@ TEST_F(TrayActionTest, CloseLockScreenNote) {
   TrayAction* tray_action = Shell::Get()->tray_action();
 
   TestTrayActionClient action_client;
-  tray_action->SetClient(action_client.CreateInterfacePtrAndBind(),
+  tray_action->SetClient(action_client.CreateRemoteAndBind(),
                          TrayActionState::kNotAvailable);
 
   tray_action->UpdateLockScreenNoteState(TrayActionState::kActive);

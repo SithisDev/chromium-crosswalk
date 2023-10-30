@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <utility>
 
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/keyboard/ui/keyboard_util.h"
 #include "ash/shell.h"
-#include "base/logging.h"
 #include "ui/aura/env.h"
 #include "ui/events/event.h"
 #include "ui/wm/core/cursor_manager.h"
@@ -40,8 +40,15 @@ bool CursorManager::ShouldHideCursorOnKeyEvent(
   // not hide the cursor.
   if (keyboard::GetAccessibilityKeyboardEnabled())
     return false;
-  // All alt and control key commands are ignored.
-  if (event.IsAltDown() || event.IsControlDown())
+
+  // Clicking on a key in the virtual keyboard should not hide the cursor.
+  if (keyboard::KeyboardUIController::HasInstance() &&
+      keyboard::KeyboardUIController::Get()->IsKeyboardVisible()) {
+    return false;
+  }
+
+  // All alt, control and command key commands are ignored.
+  if (event.IsAltDown() || event.IsControlDown() || event.IsCommandDown())
     return false;
 
   ui::KeyboardCode code = event.key_code();
@@ -62,6 +69,8 @@ bool CursorManager::ShouldHideCursorOnKeyEvent(
     case ui::VKEY_BRIGHTNESS_UP:
     case ui::VKEY_KBD_BRIGHTNESS_UP:
     case ui::VKEY_KBD_BRIGHTNESS_DOWN:
+    case ui::VKEY_PRIVACY_SCREEN_TOGGLE:
+    case ui::VKEY_ZOOM:
       return false;
     default:
       return true;

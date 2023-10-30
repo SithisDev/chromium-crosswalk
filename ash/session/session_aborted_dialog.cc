@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "base/macros.h"
+#include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -44,36 +44,9 @@ void SessionAbortedDialog::Show(const std::string& user_email) {
   std::vector<RootWindowController*> controllers =
       Shell::GetAllRootWindowControllers();
   for (RootWindowController* controller : controllers) {
-    controller->shelf()->SetAutoHideBehavior(SHELF_AUTO_HIDE_ALWAYS_HIDDEN);
+    controller->shelf()->SetAutoHideBehavior(
+        ShelfAutoHideBehavior::kAlwaysHidden);
   }
-}
-
-bool SessionAbortedDialog::Accept() {
-  Shell::Get()->session_controller()->RequestSignOut();
-  return true;
-}
-
-int SessionAbortedDialog::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
-}
-
-base::string16 SessionAbortedDialog::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(
-      IDS_ASH_MULTIPROFILES_SESSION_ABORT_BUTTON_LABEL);
-}
-
-ui::ModalType SessionAbortedDialog::GetModalType() const {
-  return ui::MODAL_TYPE_SYSTEM;
-}
-
-base::string16 SessionAbortedDialog::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(
-      IDS_ASH_MULTIPROFILES_SESSION_ABORT_HEADLINE);
-}
-
-bool SessionAbortedDialog::ShouldShowCloseButton() const {
-  return false;
 }
 
 gfx::Size SessionAbortedDialog::CalculatePreferredSize() const {
@@ -82,13 +55,26 @@ gfx::Size SessionAbortedDialog::CalculatePreferredSize() const {
       GetLayoutManager()->GetPreferredHeightForWidth(this, kDefaultWidth));
 }
 
-SessionAbortedDialog::SessionAbortedDialog() = default;
+SessionAbortedDialog::SessionAbortedDialog() {
+  SetModalType(ui::MODAL_TYPE_SYSTEM);
+  SetTitle(
+      l10n_util::GetStringUTF16(IDS_ASH_MULTIPROFILES_SESSION_ABORT_HEADLINE));
+  SetShowCloseButton(false);
+
+  SetButtons(ui::DIALOG_BUTTON_OK);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(
+                     IDS_ASH_MULTIPROFILES_SESSION_ABORT_BUTTON_LABEL));
+  SetAcceptCallback(base::BindOnce(
+      []() { Shell::Get()->session_controller()->RequestSignOut(); }));
+}
+
 SessionAbortedDialog::~SessionAbortedDialog() = default;
 
 void SessionAbortedDialog::InitDialog(const std::string& user_email) {
   const views::LayoutProvider* provider = views::LayoutProvider::Get();
-  SetBorder(views::CreateEmptyBorder(
-      provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT)));
+  SetBorder(views::CreateEmptyBorder(provider->GetDialogInsetsForContentType(
+      views::DialogContentType::kText, views::DialogContentType::kText)));
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
   // Explanation string.

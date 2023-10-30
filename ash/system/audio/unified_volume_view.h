@@ -1,25 +1,27 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_SYSTEM_AUDIO_UNIFIED_VOLUME_VIEW_H_
 #define ASH_SYSTEM_AUDIO_UNIFIED_VOLUME_VIEW_H_
 
+#include "ash/system/audio/unified_volume_slider_controller.h"
 #include "ash/system/unified/unified_slider_view.h"
-#include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/ash/components/audio/cras_audio_handler.h"
 
 namespace ash {
 
-class UnifiedVolumeSliderController;
-
 // View of a slider that can change audio volume.
 class UnifiedVolumeView : public UnifiedSliderView,
-                          public chromeos::CrasAudioHandler::AudioObserver {
+                          public CrasAudioHandler::AudioObserver {
  public:
-  explicit UnifiedVolumeView(UnifiedVolumeSliderController* controller);
-  ~UnifiedVolumeView() override;
+  UnifiedVolumeView(UnifiedVolumeSliderController* controller,
+                    UnifiedVolumeSliderController::Delegate* delegate);
 
-  views::Button* more_button() { return more_button_; }
+  UnifiedVolumeView(const UnifiedVolumeView&) = delete;
+  UnifiedVolumeView& operator=(const UnifiedVolumeView&) = delete;
+
+  ~UnifiedVolumeView() override;
 
   // views::View:
   const char* GetClassName() const override;
@@ -38,8 +40,6 @@ class UnifiedVolumeView : public UnifiedSliderView,
   void ChildVisibilityChanged(views::View* child) override;
 
   views::Button* const more_button_;
-
-  DISALLOW_COPY_AND_ASSIGN(UnifiedVolumeView);
 };
 
 }  // namespace ash

@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/window_animations.h"
 
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_animation_types.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state.h"
@@ -20,26 +20,39 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/wm/core/window_util.h"
 
 using aura::Window;
 using ui::Layer;
 
 namespace ash {
 
+namespace {
+
+void WaitForMilliseconds(int ms) {
+  base::RunLoop loop;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, loop.QuitClosure(), base::Milliseconds(ms));
+  loop.Run();
+}
+
+}  // namespace
+
 class WindowAnimationsTest : public AshTestBase {
  public:
   WindowAnimationsTest() = default;
+
+  WindowAnimationsTest(const WindowAnimationsTest&) = delete;
+  WindowAnimationsTest& operator=(const WindowAnimationsTest&) = delete;
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
     AshTestBase::SetUp();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WindowAnimationsTest);
 };
 
 // Listens to animation scheduled notifications. Remembers the transition
@@ -52,6 +65,11 @@ class MinimizeAnimationObserver : public ui::LayerAnimationObserver {
     // RemoveObserver is called when the first animation is scheduled and so
     // there should be no need for now to remove it in destructor.
   }
+
+  MinimizeAnimationObserver(const MinimizeAnimationObserver&) = delete;
+  MinimizeAnimationObserver& operator=(const MinimizeAnimationObserver&) =
+      delete;
+
   base::TimeDelta duration() { return duration_; }
 
  protected:
@@ -67,8 +85,56 @@ class MinimizeAnimationObserver : public ui::LayerAnimationObserver {
  private:
   ui::LayerAnimator* animator_;
   base::TimeDelta duration_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(MinimizeAnimationObserver);
+// This is the class that simulates the behavior of
+// `FrameHeader::FrameAnimatorView` which may recreate the window layer in the
+// middle of setting the animation of the old and new layer.
+class FrameAnimator : public ui::ImplicitAnimationObserver {
+ public:
+  explicit FrameAnimator(aura::Window* window) : window_(window) {
+    // Set up an animation which will be stopped before the old layer animation.
+    SetOpacityAnimation(window_->layer());
+  }
+
+  FrameAnimator(const FrameAnimator&) = delete;
+  FrameAnimator& operator=(const FrameAnimator&) = delete;
+  ~FrameAnimator() override = default;
+
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override {
+    // Once the initial animation is stopped by the old layer, start a new
+    // opacity animation and recreate the window layer at the same time. The
+    // opacity animation will be stopped when the layer set opacity and the
+    // layer is destroyed.
+    if (!animation_started_)
+      StartAnimation();
+    else
+      layer_owner_.reset();
+  }
+
+ private:
+  // Set an opacity animation which should last longer than the cross fade
+  // animation.
+  void SetOpacityAnimation(ui::Layer* layer) {
+    layer->SetOpacity(1.f);
+    ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
+    settings.AddObserver(this);
+    settings.SetTransitionDuration(base::Milliseconds(1000));
+    layer->SetOpacity(0.f);
+  }
+
+  // Recreate the window layer and start a new opacity animation.
+  void StartAnimation() {
+    layer_owner_ =
+        std::make_unique<ui::LayerTreeOwner>(window_->RecreateLayer());
+    SetOpacityAnimation(layer_owner_->root());
+    animation_started_ = true;
+  }
+
+  aura::Window* window_;
+  std::unique_ptr<ui::LayerTreeOwner> layer_owner_;
+  bool animation_started_ = false;
 };
 
 TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
@@ -97,7 +163,7 @@ TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
 
   // Stays shown.
   window->layer()->GetAnimator()->Step(base::TimeTicks::Now() +
-                                       base::TimeDelta::FromSeconds(5));
+                                       base::Seconds(5));
   EXPECT_EQ(0.0f, window->layer()->GetTargetBrightness());
   EXPECT_EQ(0.0f, window->layer()->GetTargetGrayscale());
   EXPECT_TRUE(window->layer()->visible());
@@ -143,10 +209,9 @@ TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
   EXPECT_EQ(gfx::Transform(), window->layer()->GetTargetTransform());
 
   // Run the animations to completion.
-  old_layer->GetAnimator()->Step(base::TimeTicks::Now() +
-                                 base::TimeDelta::FromSeconds(1));
+  old_layer->GetAnimator()->Step(base::TimeTicks::Now() + base::Seconds(1));
   window->layer()->GetAnimator()->Step(base::TimeTicks::Now() +
-                                       base::TimeDelta::FromSeconds(1));
+                                       base::Seconds(1));
 
   // Cross fade to a smaller size, as in a restore animation.
   old_layer = window->layer();
@@ -165,10 +230,9 @@ TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
   EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
   EXPECT_EQ(gfx::Transform(), window->layer()->GetTargetTransform());
 
-  old_layer->GetAnimator()->Step(base::TimeTicks::Now() +
-                                 base::TimeDelta::FromSeconds(1));
+  old_layer->GetAnimator()->Step(base::TimeTicks::Now() + base::Seconds(1));
   window->layer()->GetAnimator()->Step(base::TimeTicks::Now() +
-                                       base::TimeDelta::FromSeconds(1));
+                                       base::Seconds(1));
 }
 
 // Tests that when crossfading from a window which has a transform, the cross
@@ -201,6 +265,40 @@ TEST_F(WindowAnimationsTest, CrossFadeToBoundsFromTransform) {
   EXPECT_EQ(half_size, old_layer->transform());
 }
 
+// Tests that if we recreate the window layers during a cross fade animation,
+// there is no crash.
+// Regression test for https://crbug.com/1088169.
+TEST_F(WindowAnimationsTest, CrossFadeThenRecreate) {
+  auto window = CreateTestWindow(gfx::Rect(100, 100));
+
+  // Use a bit more time than NON_ZERO_DURATION as its possible with non zero we
+  // finish the animation instantly.
+  ui::ScopedAnimationDurationScaleMode test_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+
+  WindowState* window_state = WindowState::Get(window.get());
+  window_state->Maximize();
+  ASSERT_TRUE(window->layer()->GetAnimator()->is_animating());
+
+  // Recreate the layers and then delete |window|. There should be no crash when
+  // stopping the old layers animation.
+  std::unique_ptr<ui::LayerTreeOwner> tree = wm::RecreateLayers(window.get());
+  window.reset();
+  tree->root()->GetAnimator()->StopAnimating();
+}
+
+// Tests that if the window layer is recreated after setting the old layer's
+// animation (e.g., by `FrameHeader::FrameAnimatorView::StartAnimation`). There
+// should be no crash. Regression test for https://crbug.com/1313977.
+TEST_F(WindowAnimationsTest, RecreateWhenSettingCrossFade) {
+  auto window = CreateTestWindow(gfx::Rect(100, 100));
+  ui::ScopedAnimationDurationScaleMode test_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+
+  auto frame_animator = std::make_unique<FrameAnimator>(window.get());
+  WindowState::Get(window.get())->Maximize();
+}
+
 TEST_F(WindowAnimationsTest, LockAnimationDuration) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
@@ -214,11 +312,11 @@ TEST_F(WindowAnimationsTest, LockAnimationDuration) {
   // locked.
   {
     ui::ScopedLayerAnimationSettings settings1(layer->GetAnimator());
-    settings1.SetTransitionDuration(base::TimeDelta::FromMilliseconds(1000));
+    settings1.SetTransitionDuration(base::Milliseconds(1000));
     {
       ui::ScopedLayerAnimationSettings settings2(layer->GetAnimator());
       // Duration is not locked so it gets overridden.
-      settings2.SetTransitionDuration(base::TimeDelta::FromMilliseconds(50));
+      settings2.SetTransitionDuration(base::Milliseconds(50));
       WindowState::Get(window.get())->Minimize();
       EXPECT_TRUE(layer->GetAnimator()->is_animating());
       // Expect duration from the inner scope
@@ -234,13 +332,13 @@ TEST_F(WindowAnimationsTest, LockAnimationDuration) {
     // Update layer as minimizing will replace the window's layer.
     layer = window->layer();
     ui::ScopedLayerAnimationSettings settings1(layer->GetAnimator());
-    settings1.SetTransitionDuration(base::TimeDelta::FromMilliseconds(1000));
+    settings1.SetTransitionDuration(base::Milliseconds(1000));
     // Duration is locked in outer scope.
     settings1.LockTransitionDuration();
     {
       ui::ScopedLayerAnimationSettings settings2(layer->GetAnimator());
       // Transition duration setting is ignored.
-      settings2.SetTransitionDuration(base::TimeDelta::FromMilliseconds(50));
+      settings2.SetTransitionDuration(base::Milliseconds(50));
       WindowState::Get(window.get())->Minimize();
       EXPECT_TRUE(layer->GetAnimator()->is_animating());
       // Expect duration from the outer scope
@@ -266,7 +364,7 @@ TEST_F(WindowAnimationsTest, LockAnimationDuration) {
     ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
     settings.LockTransitionDuration();
     // Setting transition duration is ignored since duration is locked
-    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(1000));
+    settings.SetTransitionDuration(base::Milliseconds(1000));
     WindowState::Get(window.get())->Minimize();
     EXPECT_TRUE(layer->GetAnimator()->is_animating());
     // Expect default duration (200ms for stock ash minimizing animation).
@@ -379,7 +477,7 @@ TEST_F(WindowAnimationsTest, ResetAnimationAfterDismissingArcPip) {
   WindowState::Get(window.get())->Maximize();
   EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
   EXPECT_TRUE(window->layer()->visible());
-  EXPECT_EQ(gfx::Rect(0, 0, 800, 600 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(0, 0, 800, 600 - ShelfConfig::Get()->shelf_size()),
             window->layer()->GetTargetBounds());
 
   // Ensure the window is not slided out.
@@ -387,8 +485,62 @@ TEST_F(WindowAnimationsTest, ResetAnimationAfterDismissingArcPip) {
   EXPECT_EQ(0.0f, window->layer()->GetTargetOpacity());
   EXPECT_FALSE(window->layer()->GetTargetVisibility());
   EXPECT_FALSE(window->layer()->visible());
-  EXPECT_EQ(gfx::Rect(0, 0, 800, 600 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(0, 0, 800, 600 - ShelfConfig::Get()->shelf_size()),
             window->layer()->GetTargetBounds());
+}
+
+// Tests a version of the cross fade animation which animates the transform and
+// opacity of the new layer, but only the opacity of the old layer. The old
+// layer transform is updated manually when the animation ticks so that it
+// has the same visible bounds as the new layer.
+// Flaky on Chrome OS. https://crbug.com/1113901
+TEST_F(WindowAnimationsTest, DISABLED_CrossFadeAnimateNewLayerOnly) {
+  ui::ScopedAnimationDurationScaleMode test_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+
+  std::unique_ptr<Window> window(CreateTestWindowInShellWithId(0));
+  window->SetBounds(gfx::Rect(10, 10, 200, 200));
+  window->Show();
+  window->layer()->GetAnimator()->StopAnimating();
+
+  Layer* old_layer = window->layer();
+  EXPECT_EQ(1.f, old_layer->GetTargetOpacity());
+
+  const gfx::Rect target_bounds(40, 40, 400, 400);
+  CrossFadeAnimationAnimateNewLayerOnly(
+      window.get(), target_bounds, base::Milliseconds(200), gfx::Tween::LINEAR,
+      "test-histogram-name");
+
+  // Window's layer has been replaced.
+  EXPECT_NE(old_layer, window->layer());
+
+  // Original layer fades away. Transform is updated as the animation steps.
+  EXPECT_EQ(0.f, old_layer->GetTargetOpacity());
+  EXPECT_EQ(gfx::Rect(10, 10, 200, 200), old_layer->bounds());
+  EXPECT_EQ(gfx::Transform(), old_layer->GetTargetTransform());
+
+  // New layer animates in to the identity transform.
+  EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
+  EXPECT_EQ(gfx::Transform(), window->layer()->GetTargetTransform());
+
+  // Start the animations, then set the bounds of the new window during the
+  // animation.
+  WaitForMilliseconds(10);
+
+  // Set the bounds halfway through the animation. The bounds of the old layer
+  // remain the same, but the transform has updated to match the bounds of the
+  // new layer.
+  window->SetBounds(gfx::Rect(80, 80, 200, 200));
+  WaitForMilliseconds(100);
+  EXPECT_EQ(gfx::Rect(10, 10, 200, 200), old_layer->bounds());
+  EXPECT_NE(gfx::Transform(), old_layer->GetTargetTransform());
+
+  // New layer targets remain the same.
+  EXPECT_EQ(1.0f, window->layer()->GetTargetOpacity());
+  EXPECT_EQ(gfx::Transform(), window->layer()->GetTargetTransform());
+
+  WaitForMilliseconds(300);
+  EXPECT_FALSE(window->layer()->GetAnimator()->is_animating());
 }
 
 }  // namespace ash

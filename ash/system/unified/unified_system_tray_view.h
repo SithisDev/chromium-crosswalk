@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,9 @@ namespace ash {
 class FeaturePodButton;
 class FeaturePodsContainerView;
 class TopShortcutsView;
+class UnifiedMediaControlsContainer;
 class NotificationHiddenView;
 class PageIndicatorView;
-class UnifiedManagedDeviceView;
-class UnifiedMessageCenterView;
 class UnifiedSystemInfoView;
 class UnifiedSystemTrayController;
 
@@ -27,6 +26,11 @@ class UnifiedSystemTrayController;
 class UnifiedSlidersContainerView : public views::View {
  public:
   explicit UnifiedSlidersContainerView(bool initially_expanded);
+
+  UnifiedSlidersContainerView(const UnifiedSlidersContainerView&) = delete;
+  UnifiedSlidersContainerView& operator=(const UnifiedSlidersContainerView&) =
+      delete;
+
   ~UnifiedSlidersContainerView() override;
 
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
@@ -46,8 +50,6 @@ class UnifiedSlidersContainerView : public views::View {
 
  private:
   double expanded_amount_;
-
-  DISALLOW_COPY_AND_ASSIGN(UnifiedSlidersContainerView);
 };
 
 // View class of the main bubble in UnifiedSystemTray.
@@ -58,10 +60,15 @@ class UnifiedSlidersContainerView : public views::View {
 // Note that the term "UnifiedSystemTray" refers to entire bubble containing
 // both (1) and (2).
 class ASH_EXPORT UnifiedSystemTrayView : public views::View,
-                                         public views::FocusTraversable {
+                                         public views::FocusTraversable,
+                                         public views::FocusChangeListener {
  public:
   UnifiedSystemTrayView(UnifiedSystemTrayController* controller,
                         bool initially_expanded);
+
+  UnifiedSystemTrayView(const UnifiedSystemTrayView&) = delete;
+  UnifiedSystemTrayView& operator=(const UnifiedSystemTrayView&) = delete;
+
   ~UnifiedSystemTrayView() override;
 
   // Set the maximum height that the view can take.
@@ -72,6 +79,9 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
 
   // Add slider view.
   void AddSliderView(views::View* slider_view);
+
+  // Add media controls view to |media_controls_container_|;
+  void AddMediaControlsView(views::View* media_controls);
 
   // Hide the main view and show the given |detailed_view|.
   void SetDetailedView(views::View* detailed_view);
@@ -85,8 +95,14 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   void SaveFocus();
   void RestoreFocus();
 
+  // Set the first child view to be focused when focus is acquired.
+  // This is the first visible child unless reverse is true, in which case
+  // it is the last visible child.
+  void FocusEntered(bool reverse);
+
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
-  // Otherwise, it shows intermediate state.
+  // Otherwise, it shows intermediate state. This is triggered during the
+  // progress of expand/collapse animation, updating the children accordingly.
   void SetExpandedAmount(double expanded_amount);
 
   // Get height of the system tray (excluding the message center) when
@@ -104,44 +120,64 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // Get current height of the view (including the message center).
   int GetCurrentHeight() const;
 
-  // Return true if layer transform can be used against the view. During
-  // animation, the height of the view changes, but resizing of the bubble
-  // is performance bottleneck. If this method returns true, the embedder can
-  // call SetTransform() to move this view in order to avoid resizing.
-  bool IsTransformEnabled() const;
-
-  // Update the top of the SystemTray part to imitate notification list
-  // scrolling under SystemTray. |rect_below_scroll| is the region of
-  // notifications covered by SystemTray part, and its coordinate is relative to
-  // UnifiedSystemTrayView. It can be empty.
-  void SetNotificationRectBelowScroll(const gfx::Rect& rect_below_scroll);
-
   // Returns the number of visible feature pods.
   int GetVisibleFeaturePodCount() const;
 
-  // Create background of UnifiedSystemTray that is semi-transparent and has
-  // rounded corners.
-  static std::unique_ptr<views::Background> CreateBackground();
+  // Get the accessible name for the currently shown detailed view.
+  std::u16string GetDetailedViewAccessibleName() const;
+
+  // Returns true if a detailed view is being shown in the tray. (e.g Bluetooth
+  // Settings).
+  bool IsDetailedViewShown() const;
+
+  // Show media controls view.
+  void ShowMediaControls();
 
   // views::View:
+  gfx::Size CalculatePreferredSize() const override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  void Layout() override;
   void ChildPreferredSizeChanged(views::View* child) override;
   const char* GetClassName() const override;
   views::FocusTraversable* GetFocusTraversable() override;
+  void AddedToWidget() override;
+  void RemovedFromWidget() override;
 
   // views::FocusTraversable:
   views::FocusSearch* GetFocusSearch() override;
   views::FocusTraversable* GetFocusTraversableParent() override;
   views::View* GetFocusTraversableParentView() override;
 
+  // views::FocusChangeListener:
+  void OnWillChangeFocus(views::View* before, views::View* now) override;
+  void OnDidChangeFocus(views::View* before, views::View* now) override;
+
+  FeaturePodsContainerView* feature_pods_container() {
+    return feature_pods_container_;
+  }
+
   NotificationHiddenView* notification_hidden_view_for_testing() {
     return notification_hidden_view_;
   }
 
+  View* detailed_view() { return detailed_view_container_; }
   View* detailed_view_for_testing() { return detailed_view_container_; }
+  PageIndicatorView* page_indicator_view_for_test() {
+    return page_indicator_view_;
+  }
+  UnifiedMediaControlsContainer* media_controls_container_for_testing() {
+    return media_controls_container_;
+  }
 
  private:
-  class FocusSearch;
+  class SystemTrayContainer;
+  friend class UnifiedMessageCenterBubbleTest;
+
+  // Get first and last focusable child views. These functions are used to
+  // figure out if we need to focus out or to set the correct focused view
+  // when focus is acquired from another widget.
+  View* GetFirstFocusableChild();
+  View* GetLastFocusableChild();
 
   double expanded_amount_;
 
@@ -155,12 +191,11 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   PageIndicatorView* const page_indicator_view_;
   UnifiedSlidersContainerView* const sliders_container_;
   UnifiedSystemInfoView* const system_info_view_;
-  views::View* const system_tray_container_;
+  SystemTrayContainer* const system_tray_container_;
   views::View* const detailed_view_container_;
-  UnifiedMessageCenterView* const message_center_view_;
 
-  // Null if kManagedDeviceUIRedesign is disabled.
-  UnifiedManagedDeviceView* managed_device_view_ = nullptr;
+  // Null if media::kGlobalMediaControlsForChromeOS is disabled.
+  UnifiedMediaControlsContainer* media_controls_container_ = nullptr;
 
   // The maximum height available to the view.
   int max_height_ = 0;
@@ -168,10 +203,11 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // The view that is saved by calling SaveFocus().
   views::View* saved_focused_view_ = nullptr;
 
-  const std::unique_ptr<FocusSearch> focus_search_;
-  const std::unique_ptr<ui::EventHandler> interacted_by_tap_recorder_;
+  const std::unique_ptr<views::FocusSearch> focus_search_;
 
-  DISALLOW_COPY_AND_ASSIGN(UnifiedSystemTrayView);
+  views::FocusManager* focus_manager_ = nullptr;
+
+  const std::unique_ptr<ui::EventHandler> interacted_by_tap_recorder_;
 };
 
 }  // namespace ash

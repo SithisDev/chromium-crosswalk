@@ -1,13 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shelf/shelf_tooltip_preview_bubble.h"
 
-#include "ash/shelf/shelf_constants.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/wm/collision_detection/collision_detection_utils.h"
 #include "ash/wm/window_preview_view.h"
+#include "base/bind.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/display/screen.h"
 #include "ui/views/bubble/bubble_frame_view.h"
@@ -30,18 +32,12 @@ constexpr int kPreviewPadding = 10;
 // The border radius of the whole bubble
 constexpr int kPreviewBubbleBorderRadius = 16;
 
-// The margin between the bubble and the shelf.
-constexpr int kDistanceToShelf = 8;
-
 ShelfTooltipPreviewBubble::ShelfTooltipPreviewBubble(
     views::View* anchor,
     const std::vector<aura::Window*>& windows,
     ShelfTooltipManager* manager,
-    ShelfAlignment alignment,
-    SkColor background_color)
-    : ShelfBubble(anchor, alignment, background_color),
-      manager_(manager),
-      shelf_alignment_(alignment) {
+    ShelfAlignment alignment)
+    : ShelfBubble(anchor, alignment), manager_(manager) {
   set_border_radius(kPreviewBubbleBorderRadius);
   SetCanActivate(false);
   set_close_on_deactivate(false);
@@ -49,18 +45,16 @@ ShelfTooltipPreviewBubble::ShelfTooltipPreviewBubble(
   set_margins(gfx::Insets());
   // We hide this tooltip on mouse exit, so we want to get enter/exit events
   // at this level, even for subviews.
-  set_notify_enter_exit_on_child(true);
+  SetNotifyEnterExitOnChild(true);
 
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal,
-      gfx::Insets(kTooltipPaddingTop, kTooltipPaddingLeftRight,
-                  kTooltipPaddingBottom, kTooltipPaddingLeftRight),
+      gfx::Insets::TLBR(kTooltipPaddingTop, kTooltipPaddingLeftRight,
+                        kTooltipPaddingBottom, kTooltipPaddingLeftRight),
       kPreviewPadding));
 
-  const ui::NativeTheme* theme = anchor_widget()->GetNativeTheme();
-
   for (auto* window : windows) {
-    WindowPreview* preview = new WindowPreview(window, this, theme);
+    WindowPreview* preview = new WindowPreview(window, this);
     AddChildView(preview);
     previews_.push_back(preview);
   }
@@ -82,20 +76,6 @@ void ShelfTooltipPreviewBubble::RemovePreview(WindowPreview* to_remove) {
     manager_->Close();
 }
 
-gfx::Rect ShelfTooltipPreviewBubble::GetBubbleBounds() {
-  // TODO(manucornet): Find out why |set_arrow_offset| doesn't work for the
-  // same purpose. This would allow us to remove this method and the
-  // |shelf_alignment_| field.
-  gfx::Rect bounds = BubbleDialogDelegateView::GetBubbleBounds();
-  if (shelf_alignment_ == SHELF_ALIGNMENT_BOTTOM ||
-      shelf_alignment_ == SHELF_ALIGNMENT_BOTTOM_LOCKED) {
-    bounds.set_y(bounds.y() - kDistanceToShelf);
-  } else {
-    bounds.set_x(bounds.x() - kDistanceToShelf);
-  }
-  return bounds;
-}
-
 void ShelfTooltipPreviewBubble::OnMouseExited(const ui::MouseEvent& event) {
   DismissAfterDelay();
 }
@@ -109,21 +89,22 @@ bool ShelfTooltipPreviewBubble::ShouldCloseOnMouseExit() {
 }
 
 float ShelfTooltipPreviewBubble::GetMaxPreviewRatio() const {
-  float max_ratio = kShelfTooltipPreviewMinRatio;
+  float max_ratio = ShelfConfig::Get()->shelf_tooltip_preview_min_ratio();
   for (WindowPreview* window : previews_) {
     gfx::Size mirror_size = window->preview_view()->CalculatePreferredSize();
     float ratio = static_cast<float>(mirror_size.width()) /
                   static_cast<float>(mirror_size.height());
     max_ratio = std::max(max_ratio, ratio);
   }
-  return std::min(max_ratio, kShelfTooltipPreviewMaxRatio);
+  return std::min(max_ratio,
+                  ShelfConfig::Get()->shelf_tooltip_preview_max_ratio());
 }
 
 void ShelfTooltipPreviewBubble::DismissAfterDelay() {
-  dismiss_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromMilliseconds(kPreviewBubbleDismissDelay),
-      base::BindOnce(&ShelfTooltipPreviewBubble::Dismiss,
-                     base::Unretained(this)));
+  dismiss_timer_.Start(FROM_HERE,
+                       base::Milliseconds(kPreviewBubbleDismissDelay),
+                       base::BindOnce(&ShelfTooltipPreviewBubble::Dismiss,
+                                      base::Unretained(this)));
 }
 
 void ShelfTooltipPreviewBubble::Dismiss() {

@@ -1,20 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shelf/shelf_controller.h"
 
-#include "ash/public/cpp/ash_pref_names.h"
+#include <memory>
+
+#include "ash/constants/ash_pref_names.h"
+#include "ash/public/cpp/message_center/arc_notification_constants.h"
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_prefs.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller_impl.h"
+#include "ash/shelf/launcher_nudge_controller.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
-#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/message_center/arc/arc_notification_constants.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/bind.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
@@ -22,11 +23,10 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/services/app_service/public/cpp/app_registry_cache_wrapper.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/message_center/message_center.h"
 
 namespace ash {
 
@@ -55,7 +55,7 @@ void SetShelfAutoHideFromPrefs() {
     auto value = GetShelfAutoHideBehaviorPref(prefs, display.id());
     // Don't show the shelf in app mode.
     if (session_controller->IsRunningInAppMode())
-      value = SHELF_AUTO_HIDE_ALWAYS_HIDDEN;
+      value = ShelfAutoHideBehavior::kAlwaysHidden;
     if (Shelf* shelf = GetShelfForDisplay(display.id()))
       shelf->SetAutoHideBehavior(value);
   }
@@ -100,25 +100,25 @@ void SetShelfBehaviorsFromPrefs() {
 
 }  // namespace
 
-ShelfController::ShelfController()
-    : is_notification_indicator_enabled_(
-          features::IsNotificationIndicatorEnabled()),
-      message_center_observer_(this) {
+ShelfController::ShelfController() {
   ShelfModel::SetInstance(&model_);
 
   Shell::Get()->session_controller()->AddObserver(this);
   Shell::Get()->tablet_mode_controller()->AddObserver(this);
   Shell::Get()->window_tree_host_manager()->AddObserver(this);
-
-  if (is_notification_indicator_enabled_)
-    message_center_observer_.Add(message_center::MessageCenter::Get());
+  model_.AddObserver(this);
 }
 
 ShelfController::~ShelfController() {
   model_.DestroyItemDelegates();
 }
 
+void ShelfController::Init() {
+  launcher_nudge_controller_ = std::make_unique<LauncherNudgeController>();
+}
+
 void ShelfController::Shutdown() {
+  model_.RemoveObserver(this);
   Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
   Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
   Shell::Get()->session_controller()->RemoveObserver(this);
@@ -126,21 +126,32 @@ void ShelfController::Shutdown() {
 
 // static
 void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  // These prefs are public for ChromeLauncherController's OnIsSyncingChanged.
+  // These prefs are public for ChromeShelfController's OnIsSyncingChanged.
   // See the pref names definitions for explanations of the synced, local, and
   // per-display behaviors.
   registry->RegisterStringPref(
       prefs::kShelfAutoHideBehavior, kShelfAutoHideBehaviorNever,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterStringPref(prefs::kShelfAutoHideBehaviorLocal,
-                               std::string(), PrefRegistry::PUBLIC);
+                               std::string());
   registry->RegisterStringPref(
       prefs::kShelfAlignment, kShelfAlignmentBottom,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
-  registry->RegisterStringPref(prefs::kShelfAlignmentLocal, std::string(),
-                               PrefRegistry::PUBLIC);
-  registry->RegisterDictionaryPref(prefs::kShelfPreferences,
-                                   PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+  registry->RegisterStringPref(prefs::kShelfAlignmentLocal, std::string());
+  registry->RegisterDictionaryPref(prefs::kShelfPreferences);
+
+  LauncherNudgeController::RegisterProfilePrefs(registry);
+}
+
+void ShelfController::OnActiveUserSessionChanged(const AccountId& account_id) {
+  if (model_.in_shelf_party())
+    model_.ToggleShelfParty();
+}
+
+void ShelfController::OnSessionStateChanged(
+    session_manager::SessionState state) {
+  if (model_.in_shelf_party())
+    model_.ToggleShelfParty();
 }
 
 void ShelfController::OnActiveUserPrefServiceChanged(
@@ -154,6 +165,28 @@ void ShelfController::OnActiveUserPrefServiceChanged(
                               base::BindRepeating(&SetShelfAutoHideFromPrefs));
   pref_change_registrar_->Add(prefs::kShelfPreferences,
                               base::BindRepeating(&SetShelfBehaviorsFromPrefs));
+
+  pref_change_registrar_->Add(
+      prefs::kAppNotificationBadgingEnabled,
+      base::BindRepeating(&ShelfController::UpdateAppNotificationBadging,
+                          base::Unretained(this)));
+
+  // Observe AppRegistryCache for the current active account to get
+  // notification updates.
+  AccountId account_id =
+      Shell::Get()->session_controller()->GetActiveAccountId();
+  cache_ = apps::AppRegistryCacheWrapper::Get().GetAppRegistryCache(account_id);
+  Observe(cache_);
+
+  // Resetting the recorded pref forces the next call to
+  // UpdateAppNotificationBadging() to update notification badging for every
+  // app item.
+  notification_badging_pref_enabled_.reset();
+
+  // Update the notification badge indicator for all apps. This will also
+  // ensure that apps have the correct notification badge value for the
+  // multiprofile case when switching between users.
+  UpdateAppNotificationBadging();
 }
 
 void ShelfController::OnTabletModeStarted() {
@@ -168,8 +201,7 @@ void ShelfController::OnTabletModeStarted() {
       // Only animate into tablet mode if the shelf alignment will not change.
       if (shelf->IsHorizontalAlignment())
         shelf->set_is_tablet_mode_animation_running(true);
-      shelf->SetAlignment(SHELF_ALIGNMENT_BOTTOM);
-      shelf->shelf_widget()->OnTabletModeChanged();
+      shelf->SetAlignment(ShelfAlignment::kBottom);
     }
   }
 }
@@ -185,13 +217,14 @@ void ShelfController::OnTabletModeEnded() {
     if (Shelf* shelf = GetShelfForDisplay(display.id())) {
       if (shelf->IsHorizontalAlignment())
         shelf->set_is_tablet_mode_animation_running(true);
-      shelf->shelf_widget()->OnTabletModeChanged();
     }
   }
 }
 
 void ShelfController::OnDisplayConfigurationChanged() {
-  // Set/init the shelf behaviors from preferences, in case a display was added.
+  // Update the alignment and auto-hide state from prefs, because a display may
+  // have been added, or the display ids for existing shelf instances may have
+  // changed. See https://crbug.com/748291
   SetShelfBehaviorsFromPrefs();
 
   // Update shelf visibility to adapt to display changes. For instance shelf
@@ -199,61 +232,54 @@ void ShelfController::OnDisplayConfigurationChanged() {
   UpdateShelfVisibility();
 }
 
-void ShelfController::OnWindowTreeHostReusedForDisplay(
-    AshWindowTreeHost* window_tree_host,
-    const display::Display& display) {
-  // See comment in OnWindowTreeHostsSwappedDisplays().
-  SetShelfBehaviorsFromPrefs();
-
-  // Update shelf visibility to adapt to display changes. For instance shelf
-  // should be hidden on secondary display during inactive session states.
-  UpdateShelfVisibility();
+void ShelfController::OnAppUpdate(const apps::AppUpdate& update) {
+  if (update.HasBadgeChanged() &&
+      notification_badging_pref_enabled_.value_or(false)) {
+    bool has_badge = update.HasBadge().value_or(false);
+    model_.UpdateItemNotification(update.AppId(), has_badge);
+  }
 }
 
-void ShelfController::OnWindowTreeHostsSwappedDisplays(
-    AshWindowTreeHost* host1,
-    AshWindowTreeHost* host2) {
-  // The display ids for existing shelf instances may have changed, so update
-  // the alignment and auto-hide state from prefs. See http://crbug.com/748291
-  SetShelfBehaviorsFromPrefs();
-
-  // Update shelf visibility to adapt to display changes. For instance shelf
-  // should be hidden on secondary display during inactive session states.
-  UpdateShelfVisibility();
+void ShelfController::OnAppRegistryCacheWillBeDestroyed(
+    apps::AppRegistryCache* cache) {
+  Observe(nullptr);
 }
 
-void ShelfController::OnNotificationAdded(const std::string& notification_id) {
-  if (!is_notification_indicator_enabled_)
+void ShelfController::ShelfItemAdded(int index) {
+  if (!cache_ || !notification_badging_pref_enabled_.value_or(false))
     return;
 
-  message_center::Notification* notification =
-      message_center::MessageCenter::Get()->FindVisibleNotificationById(
-          notification_id);
+  auto app_id = model_.items()[index].id.app_id;
 
-  if (!notification)
-    return;
+  // Update the notification badge indicator for the newly added shelf item.
+  cache_->ForOneApp(app_id, [this](const apps::AppUpdate& update) {
+    bool has_badge = update.HasBadge().value_or(false);
+    model_.UpdateItemNotification(update.AppId(), has_badge);
+  });
+}
 
-  // Skip this if the notification shouldn't badge an app.
-  if (notification->notifier_id().type !=
-          message_center::NotifierType::APPLICATION &&
-      notification->notifier_id().type !=
-          message_center::NotifierType::ARC_APPLICATION) {
+void ShelfController::UpdateAppNotificationBadging() {
+  bool new_badging_enabled = pref_change_registrar_
+                                 ? pref_change_registrar_->prefs()->GetBoolean(
+                                       prefs::kAppNotificationBadgingEnabled)
+                                 : false;
+
+  if (notification_badging_pref_enabled_.has_value() &&
+      notification_badging_pref_enabled_.value() == new_badging_enabled) {
     return;
   }
+  notification_badging_pref_enabled_ = new_badging_enabled;
 
-  // Skip this if the notification doesn't have a valid app id.
-  if (notification->notifier_id().id == kDefaultArcNotifierId)
-    return;
+  if (cache_) {
+    cache_->ForEachApp([this](const apps::AppUpdate& update) {
+      // Set the app notification badge hidden when the pref is disabled.
+      bool has_badge = notification_badging_pref_enabled_.value()
+                           ? update.HasBadge().value_or(false)
+                           : false;
 
-  model_.AddNotificationRecord(notification->notifier_id().id, notification_id);
-}
-
-void ShelfController::OnNotificationRemoved(const std::string& notification_id,
-                                            bool by_user) {
-  if (!is_notification_indicator_enabled_)
-    return;
-
-  model_.RemoveNotificationRecord(notification_id);
+      model_.UpdateItemNotification(update.AppId(), has_badge);
+    });
+  }
 }
 
 }  // namespace ash

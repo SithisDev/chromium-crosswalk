@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/model/enterprise_domain_model.h"
 
+#include "ash/public/cpp/login_types.h"
 #include "ash/system/enterprise/enterprise_domain_observer.h"
 
 namespace ash {
@@ -20,17 +21,18 @@ void EnterpriseDomainModel::RemoveObserver(EnterpriseDomainObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void EnterpriseDomainModel::SetEnterpriseDisplayDomain(
-    const std::string& enterprise_display_domain,
-    bool active_directory_managed) {
-  enterprise_display_domain_ = enterprise_display_domain;
-  active_directory_managed_ = active_directory_managed;
-  NotifyChanged();
+void EnterpriseDomainModel::SetDeviceEnterpriseInfo(
+    const DeviceEnterpriseInfo& device_enterprise_info) {
+  device_enterprise_info_ = device_enterprise_info;
+  for (auto& observer : observers_)
+    observer.OnDeviceEnterpriseInfoChanged();
 }
 
-void EnterpriseDomainModel::NotifyChanged() {
+void EnterpriseDomainModel::SetEnterpriseAccountDomainInfo(
+    const std::string& account_domain_manager) {
+  account_domain_manager_ = account_domain_manager;
   for (auto& observer : observers_)
-    observer.OnEnterpriseDomainChanged();
+    observer.OnEnterpriseAccountDomainChanged();
 }
 
 }  // namespace ash

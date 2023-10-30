@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <memory>
 #include <string>
 
-#include "ash/assistant/assistant_prefs_controller.h"
+#include "ash/public/cpp/assistant/assistant_state.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "ui/views/view.h"
 
 namespace ui {
@@ -25,9 +24,13 @@ class SuggestionContainerView;
 
 class COMPONENT_EXPORT(ASSISTANT_UI) AssistantFooterView
     : public views::View,
-      public AssistantPrefsObserver {
+      public AssistantStateObserver {
  public:
   explicit AssistantFooterView(AssistantViewDelegate* delegate);
+
+  AssistantFooterView(const AssistantFooterView&) = delete;
+  AssistantFooterView& operator=(const AssistantFooterView&) = delete;
+
   ~AssistantFooterView() override;
 
   // views::View:
@@ -35,8 +38,10 @@ class COMPONENT_EXPORT(ASSISTANT_UI) AssistantFooterView
   gfx::Size CalculatePreferredSize() const override;
   int GetHeightForWidth(int width) const override;
 
-  // AssistantPrefsObserver:
-  void OnAssistantConsentStatusUpdated(int consent_status) override;
+  // AssistantStateObserver:
+  void OnAssistantConsentStatusChanged(int consent_status) override;
+
+  void InitializeUIForBubbleView();
 
  private:
   void InitLayout();
@@ -50,8 +55,6 @@ class COMPONENT_EXPORT(ASSISTANT_UI) AssistantFooterView
   AssistantOptInView* opt_in_view_;                // Owned by view hierarchy.
 
   std::unique_ptr<ui::CallbackLayerAnimationObserver> animation_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(AssistantFooterView);
 };
 
 }  // namespace ash

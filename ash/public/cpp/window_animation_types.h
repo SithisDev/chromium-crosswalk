@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,6 @@ enum WindowVisibilityAnimationType {
       ::wm::WINDOW_VISIBILITY_ANIMATION_MAX,
   // Fade in/out using brightness and grayscale web filters.
   WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE,
-  // Window slides down from above screen to show and, meanwhile, home launcher
-  // slides down off screen.
-  WINDOW_VISIBILITY_ANIMATION_TYPE_SLIDE_DOWN,
   // Animate a window out of the closest side of the screen. Fade in if it
   // re-appears.
   WINDOW_VISIBILITY_ANIMATION_TYPE_FADE_IN_SLIDE_OUT,

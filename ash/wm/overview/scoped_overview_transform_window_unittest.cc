@@ -1,16 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/overview/scoped_overview_transform_window.h"
 
-#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/overview/overview_utils.h"
 #include "ash/wm/window_state.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/numerics/safe_conversions.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/layer.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
@@ -118,7 +118,7 @@ TEST_F(ScopedOverviewTransformWindowTest, TransformedRectIsCenteredWithInset) {
   EXPECT_LE(transformed_rect.x(), bounds.x());
   EXPECT_GE(transformed_rect.right(), bounds.right());
   EXPECT_GE(
-      transformed_rect.y() + gfx::ToCeiledInt(scale * inset) - header_height,
+      transformed_rect.y() + base::ClampCeil(scale * inset) - header_height,
       bounds.y());
   EXPECT_LE(transformed_rect.bottom(), bounds.bottom());
   EXPECT_NEAR(transformed_rect.x() - bounds.x(),
@@ -136,8 +136,7 @@ TEST_F(ScopedOverviewTransformWindowTest, TransformingLetteredRect) {
   const int scale = 3;
   std::unique_ptr<aura::Window> window = CreateTestWindow(original_bounds);
   ScopedOverviewTransformWindow transform_window(nullptr, window.get());
-  EXPECT_EQ(ScopedOverviewTransformWindow::GridWindowFillMode::kLetterBoxed,
-            transform_window.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kLetterBoxed, transform_window.type());
 
   // Without any headers, the width should match the target, and the height
   // should be such that the aspect ratio of |original_bounds| is maintained.
@@ -160,25 +159,17 @@ TEST_F(ScopedOverviewTransformWindowTest, TransformingLetteredRect) {
   EXPECT_NEAR((overview_bounds.height() - original_header) / scale,
               transformed_rect.height() - original_header / scale, 1);
   EXPECT_TRUE(overview_bounds.Contains(transformed_rect));
-
-  // Verify that for an extreme window, the transform window stores the
-  // original overview item bounds, minus the header.
-  gfx::RectF new_overview_bounds = overview_bounds;
-  new_overview_bounds.Inset(0, overview_header, 0, 0);
-  ASSERT_TRUE(transform_window.overview_bounds().has_value());
-  EXPECT_EQ(transform_window.overview_bounds().value(), new_overview_bounds);
 }
 
 // Verify that a window which will be displayed like a pillar box on the window
 // grid has the correct bounds.
 TEST_F(ScopedOverviewTransformWindowTest, TransformingPillaredRect) {
   // Create a window whose height is more than twice the width.
-  const gfx::Rect original_bounds(10, 10, 100, 300);
+  const gfx::Rect original_bounds(10, 10, 150, 450);
   const int scale = 3;
   std::unique_ptr<aura::Window> window = CreateTestWindow(original_bounds);
   ScopedOverviewTransformWindow transform_window(nullptr, window.get());
-  EXPECT_EQ(ScopedOverviewTransformWindow::GridWindowFillMode::kPillarBoxed,
-            transform_window.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kPillarBoxed, transform_window.type());
 
   // Without any headers, the height should match the target, and the width
   // should be such that the aspect ratio of |original_bounds| is maintained.
@@ -197,16 +188,12 @@ TEST_F(ScopedOverviewTransformWindowTest, TransformingPillaredRect) {
   transformed_rect = transform_window.ShrinkRectToFitPreservingAspectRatio(
       gfx::RectF(original_bounds), overview_bounds, original_header,
       overview_header);
-  EXPECT_NEAR(overview_bounds.height() - overview_header,
-              transformed_rect.height() - original_header / scale, 1);
+  const float overview_scale =
+      original_bounds.height() / overview_bounds.height();
+  const float expected_height = overview_bounds.height() - overview_header +
+                                original_header / overview_scale;
+  EXPECT_NEAR(expected_height, transformed_rect.height(), 1);
   EXPECT_TRUE(overview_bounds.Contains(transformed_rect));
-
-  // Verify that for an extreme window, the transform window stores the
-  // original overview item bounds, minus the header.
-  gfx::RectF new_overview_bounds = overview_bounds;
-  new_overview_bounds.Inset(0, overview_header, 0, 0);
-  ASSERT_TRUE(transform_window.overview_bounds().has_value());
-  EXPECT_EQ(transform_window.overview_bounds().value(), new_overview_bounds);
 }
 
 // Tests the cases when very wide or tall windows enter overview mode.
@@ -226,10 +213,10 @@ TEST_F(ScopedOverviewTransformWindowTest, ExtremeWindowBounds) {
 
   // Verify the window dimension type is as expected after entering overview
   // mode.
-  using GridWindowFillMode = ScopedOverviewTransformWindow::GridWindowFillMode;
-  EXPECT_EQ(GridWindowFillMode::kLetterBoxed, scoped_wide.type());
-  EXPECT_EQ(GridWindowFillMode::kPillarBoxed, scoped_tall.type());
-  EXPECT_EQ(GridWindowFillMode::kNormal, scoped_normal.type());
+  using OverviewGridWindowFillMode = OverviewGridWindowFillMode;
+  EXPECT_EQ(OverviewGridWindowFillMode::kLetterBoxed, scoped_wide.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kPillarBoxed, scoped_tall.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kNormal, scoped_normal.type());
 
   display::Screen* screen = display::Screen::GetScreen();
   const display::Display& display = screen->GetPrimaryDisplay();
@@ -242,9 +229,9 @@ TEST_F(ScopedOverviewTransformWindowTest, ExtremeWindowBounds) {
 
   // Verify that |wide| has its window dimension type updated after the display
   // change.
-  EXPECT_EQ(GridWindowFillMode::kNormal, scoped_wide.type());
-  EXPECT_EQ(GridWindowFillMode::kPillarBoxed, scoped_tall.type());
-  EXPECT_EQ(GridWindowFillMode::kNormal, scoped_normal.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kNormal, scoped_wide.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kPillarBoxed, scoped_tall.type());
+  EXPECT_EQ(OverviewGridWindowFillMode::kNormal, scoped_normal.type());
 }
 
 // Tests that transients which should be invisible in overview do not have their
@@ -279,6 +266,61 @@ TEST_F(ScopedOverviewTransformWindowTest, InvisibleTransients) {
   EXPECT_EQ(transform, window->transform());
   EXPECT_EQ(transform, child->transform());
   EXPECT_TRUE(child2->transform().IsIdentity());
+}
+
+// Tests that the transient window which should be invisible in overview is not
+// visible even if the window property is changed after initializing
+// ScopedOverviewTransformWindow.
+TEST_F(ScopedOverviewTransformWindowTest,
+       InvisibleTransientsPropertyChangeAfterInit) {
+  auto window = CreateTestWindow(gfx::Rect(200, 200));
+  auto child = CreateTestWindow(gfx::Rect(100, 190, 100, 10),
+                                aura::client::WINDOW_TYPE_POPUP);
+  ::wm::AddTransientChild(window.get(), child.get());
+
+  ScopedOverviewTransformWindow scoped_window(nullptr, window.get());
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  // Change property after construction of |scoped_window|.
+  child->SetProperty(kHideInOverviewKey, true);
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  // Clear property after construction of |scoped_window|.
+  child->ClearProperty(kHideInOverviewKey);
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  // Change to hide again.
+  child->SetProperty(kHideInOverviewKey, true);
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+}
+
+// Tests that the transient window which should be invisible in overview is not
+// visible even if the window is added after initializing
+// ScopedOverviewTransformWindow.
+TEST_F(ScopedOverviewTransformWindowTest, InvisibleTransientsAddedAfterInit) {
+  auto window = CreateTestWindow(gfx::Rect(200, 200));
+  auto child = CreateTestWindow(gfx::Rect(100, 190, 100, 10),
+                                aura::client::WINDOW_TYPE_POPUP);
+  auto child2 = CreateTestWindow(gfx::Rect(0, 190, 100, 10),
+                                 aura::client::WINDOW_TYPE_POPUP);
+  child2->SetProperty(kHideInOverviewKey, true);
+
+  ScopedOverviewTransformWindow scoped_window(nullptr, window.get());
+
+  // Add visible transient after construction of |scoped_window|.
+  ::wm::AddTransientChild(window.get(), child.get());
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  // Add invisible transient after construction of |scoped_window|.
+  ::wm::AddTransientChild(window.get(), child2.get());
+  EXPECT_TRUE(window->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+  EXPECT_FALSE(child2->IsVisible());
 }
 
 // Tests that the event targeting policies of a given window and transient

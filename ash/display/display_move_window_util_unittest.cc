@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,17 @@
 #include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/accessibility/test_accessibility_controller_client.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/test_window_builder.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
@@ -54,7 +54,7 @@ views::Widget* CreateTestWidgetWithParent(views::Widget::InitParams::Type type,
   params.bounds = bounds;
   params.child = child;
   views::Widget* widget = new views::Widget;
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->Show();
   return widget;
 }
@@ -131,7 +131,7 @@ TEST_F(DisplayMoveWindowUtilTest, WindowState) {
 
   // Set window to left snapped state.
   PerformMoveWindowAccel();
-  const WMEvent snap_left(WM_EVENT_SNAP_LEFT);
+  const WindowSnapWMEvent snap_left(WM_EVENT_SNAP_PRIMARY);
   window_state->OnWMEvent(&snap_left);
   EXPECT_EQ(display_manager()->GetDisplayAt(0).id(),
             screen->GetDisplayNearestWindow(window).id());
@@ -139,7 +139,7 @@ TEST_F(DisplayMoveWindowUtilTest, WindowState) {
   EXPECT_EQ(GetDefaultLeftSnappedBoundsInDisplay(
                 screen->GetDisplayNearestWindow(window)),
             window->GetBoundsInScreen());
-  EXPECT_EQ(0.5f, *window_state->snapped_width_ratio());
+  EXPECT_EQ(0.5f, *window_state->snap_ratio());
   PerformMoveWindowAccel();
   EXPECT_EQ(display_manager()->GetDisplayAt(1).id(),
             screen->GetDisplayNearestWindow(window).id());
@@ -148,7 +148,7 @@ TEST_F(DisplayMoveWindowUtilTest, WindowState) {
   EXPECT_EQ(GetDefaultLeftSnappedBoundsInDisplay(
                 screen->GetDisplayNearestWindow(window)),
             window->GetBoundsInScreen());
-  EXPECT_EQ(0.5f, *window_state->snapped_width_ratio());
+  EXPECT_EQ(0.5f, *window_state->snap_ratio());
 }
 
 // Tests that movement follows cycling through sorted display id list.
@@ -158,8 +158,8 @@ TEST_F(DisplayMoveWindowUtilTest, FourDisplays) {
   // Layout:
   // [3][2]
   // [1][p]
-  display::DisplayIdList list = display::test::CreateDisplayIdListN(
-      4, primary_id, primary_id + 1, primary_id + 2, primary_id + 3);
+  display::DisplayIdList list =
+      display::test::CreateDisplayIdListN(primary_id, 4);
   display::DisplayLayoutBuilder builder(primary_id);
   builder.AddDisplayPlacement(list[1], primary_id,
                               display::DisplayPlacement::LEFT, 0);
@@ -216,9 +216,12 @@ TEST_F(DisplayMoveWindowUtilTest, NoMovementIfNotInCycleWindowList) {
   UpdateDisplay("400x300,400x300");
   // Create a window in app list container, which would be excluded in cycle
   // window list.
-  std::unique_ptr<aura::Window> window = CreateChildWindow(
-      Shell::GetPrimaryRootWindow(), gfx::Rect(10, 20, 200, 100),
-      kShellWindowId_AppListContainer);
+  std::unique_ptr<aura::Window> window =
+      ChildTestWindowBuilder(Shell::GetPrimaryRootWindow(),
+                             gfx::Rect(10, 20, 200, 100),
+                             kShellWindowId_AppListContainer)
+          .Build();
+
   wm::ActivateWindow(window.get());
   display::Screen* screen = display::Screen::GetScreen();
   EXPECT_EQ(display_manager()->GetDisplayAt(0).id(),
@@ -244,7 +247,7 @@ TEST_F(DisplayMoveWindowUtilTest, KeepWindowBoundsIfNotChangedByUser) {
   //     |   |
   //     +---+
   UpdateDisplay("400x300,400x600");
-  const int shelf_inset = 300 - ShelfConstants::shelf_size();
+  const int shelf_inset = 300 - ShelfConfig::Get()->shelf_size();
   // Create and activate window on display [1].
   aura::Window* window =
       CreateTestWindowInShellWithBounds(gfx::Rect(410, 20, 200, 400));
@@ -333,7 +336,7 @@ TEST_F(DisplayMoveWindowUtilTest, WindowWithTransientChild) {
 
   // Create a |child| window and make it a transient child of |window|.
   std::unique_ptr<aura::Window> child =
-      CreateChildWindow(window, gfx::Rect(20, 30, 40, 50));
+      ChildTestWindowBuilder(window, gfx::Rect(20, 30, 40, 50)).Build();
   ::wm::AddTransientChild(window, child.get());
   display::Screen* screen = display::Screen::GetScreen();
   EXPECT_EQ(display_manager()->GetDisplayAt(0).id(),
@@ -397,8 +400,10 @@ TEST_F(DisplayMoveWindowUtilTest, TransientParentNotInCycleWindowList) {
   aura::Window* setting_bubble_container =
       Shell::GetPrimaryRootWindowController()->GetContainer(
           kShellWindowId_SettingBubbleContainer);
-  std::unique_ptr<aura::Window> w2 = CreateChildWindow(
-      setting_bubble_container, gfx::Rect(10, 20, 200, 100), -1);
+  std::unique_ptr<aura::Window> w2 =
+      ChildTestWindowBuilder(setting_bubble_container,
+                             gfx::Rect(10, 20, 200, 100))
+          .Build();
   wm::ActivateWindow(w2.get());
 
   // Create a |child| transient widget of |w2|. When |child| is shown, it is
@@ -436,11 +441,11 @@ TEST_F(DisplayMoveWindowUtilTest, RestoreMaximizedWindowAfterMovement) {
 
   WindowState* window_state = WindowState::Get(w);
   window_state->Maximize();
-  EXPECT_EQ(gfx::Rect(0, 0, 400, 300 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(0, 0, 400, 300 - ShelfConfig::Get()->shelf_size()),
             w->GetBoundsInScreen());
 
   PerformMoveWindowAccel();
-  EXPECT_EQ(gfx::Rect(400, 0, 400, 300 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(400, 0, 400, 300 - ShelfConfig::Get()->shelf_size()),
             w->GetBoundsInScreen());
   window_state->Restore();
   EXPECT_EQ(gfx::Rect(410, 20, 200, 100), w->GetBoundsInScreen());

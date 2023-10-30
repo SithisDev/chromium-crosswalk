@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "ash/public/cpp/shelf_model.h"
+#include "ash/public/cpp/test/test_shelf_item_delegate.h"
 #include "ash/shelf/home_button.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_bubble.h"
@@ -26,14 +27,19 @@ namespace ash {
 class ShelfTooltipManagerTest : public AshTestBase {
  public:
   ShelfTooltipManagerTest() = default;
+
+  ShelfTooltipManagerTest(const ShelfTooltipManagerTest&) = delete;
+  ShelfTooltipManagerTest& operator=(const ShelfTooltipManagerTest&) = delete;
+
   ~ShelfTooltipManagerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
     shelf_view_ = GetPrimaryShelf()->GetShelfViewForTesting();
-    ShelfViewTestAPI test_api(shelf_view_);
-    test_api.AddItem(TYPE_PINNED_APP);
-    tooltip_manager_ = test_api.tooltip_manager();
+    test_api_ = std::make_unique<ShelfViewTestAPI>(shelf_view_);
+    test_api_->AddItem(TYPE_PINNED_APP);
+    test_api_->RunMessageLoopUntilAnimationsDone();
+    tooltip_manager_ = test_api_->tooltip_manager();
     tooltip_manager_->set_timer_delay_for_test(0);
   }
 
@@ -41,7 +47,7 @@ class ShelfTooltipManagerTest : public AshTestBase {
   views::Widget* GetTooltip() { return tooltip_manager_->bubble_->GetWidget(); }
 
   void ShowTooltipForFirstAppIcon() {
-    EXPECT_GE(shelf_view_->number_of_visible_apps(), 1);
+    EXPECT_GE(shelf_view_->number_of_visible_apps(), 1u);
     tooltip_manager_->ShowTooltip(
         shelf_view_->first_visible_button_for_testing());
   }
@@ -49,9 +55,7 @@ class ShelfTooltipManagerTest : public AshTestBase {
  protected:
   ShelfView* shelf_view_;
   ShelfTooltipManager* tooltip_manager_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShelfTooltipManagerTest);
+  std::unique_ptr<ShelfViewTestAPI> test_api_;
 };
 
 TEST_F(ShelfTooltipManagerTest, ShowTooltip) {
@@ -88,9 +92,14 @@ TEST_F(ShelfTooltipManagerTest, DoNotShowForInvalidView) {
   ShelfItem item;
   item.id = ShelfID("foo");
   item.type = TYPE_PINNED_APP;
-  const int index = model->Add(item);
-  // Note: There's no easy way to correlate shelf a model index/id to its view.
-  tooltip_manager_->ShowTooltipWithDelay(shelf_view_->children().back());
+  const int index =
+      model->Add(item, std::make_unique<TestShelfItemDelegate>(item.id));
+  ShelfViewTestAPI(GetPrimaryShelf()->GetShelfViewForTesting())
+      .RunMessageLoopUntilAnimationsDone();
+
+  // The index of a ShelfItem in the model should be the same as its index
+  // within the |shelf_view_|'s list of children.
+  tooltip_manager_->ShowTooltipWithDelay(shelf_view_->children().at(index));
   EXPECT_TRUE(IsTimerRunning());
 
   // Removing the view won't stop the timer, but the tooltip shouldn't be shown.
@@ -129,9 +138,9 @@ TEST_F(ShelfTooltipManagerTest, HideWhenShelfIsAutoHideHidden) {
   ShowTooltipForFirstAppIcon();
   ASSERT_TRUE(tooltip_manager_->IsVisible());
 
-  GetPrimaryShelf()->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  GetPrimaryShelf()->SetAutoHideBehavior(ShelfAutoHideBehavior::kAlways);
   GetPrimaryShelf()->UpdateAutoHideState();
-  ASSERT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+  ASSERT_EQ(ShelfAutoHideBehavior::kAlways,
             GetPrimaryShelf()->auto_hide_behavior());
   ASSERT_EQ(SHELF_AUTO_HIDE_HIDDEN, GetPrimaryShelf()->GetAutoHideState());
   EXPECT_FALSE(tooltip_manager_->IsVisible());
@@ -148,7 +157,7 @@ TEST_F(ShelfTooltipManagerTest, HideWhenShelfIsAutoHideHidden) {
   // Close the window to show the auto-hide shelf; tooltips should now show.
   widget.reset();
   GetPrimaryShelf()->UpdateAutoHideState();
-  ASSERT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+  ASSERT_EQ(ShelfAutoHideBehavior::kAlways,
             GetPrimaryShelf()->auto_hide_behavior());
   ASSERT_EQ(SHELF_AUTO_HIDE_SHOWN, GetPrimaryShelf()->GetAutoHideState());
 
@@ -179,6 +188,7 @@ TEST_F(ShelfTooltipManagerTest, HideForEvents) {
   generator->MoveMouseTo(shelf_bounds.CenterPoint());
   generator->PressLeftButton();
   EXPECT_FALSE(tooltip_manager_->IsVisible());
+  generator->ReleaseLeftButton();
 
   // Should hide for touch events in the shelf.
   ShowTooltipForFirstAppIcon();
@@ -243,6 +253,18 @@ TEST_F(ShelfTooltipManagerTest, ShelfTooltipDoesNotAffectPipWindow) {
             CollisionDetectionUtils::GetRestingPosition(
                 display, tooltip_bounds,
                 CollisionDetectionUtils::RelativePriority::kPictureInPicture));
+}
+
+TEST_F(ShelfTooltipManagerTest, ShelfTooltipClosesIfScroll) {
+  ui::test::EventGenerator* generator = GetEventGenerator();
+
+  ShowTooltipForFirstAppIcon();
+  ASSERT_TRUE(tooltip_manager_->IsVisible());
+  gfx::Point cursor_position_in_screen =
+      display::Screen::GetScreen()->GetCursorScreenPoint();
+  generator->ScrollSequence(cursor_position_in_screen, base::TimeDelta(), 0, 3,
+                            10, 1);
+  EXPECT_FALSE(tooltip_manager_->IsVisible());
 }
 
 }  // namespace ash

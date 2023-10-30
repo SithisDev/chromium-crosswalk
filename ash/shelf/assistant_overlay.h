@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,35 +8,38 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "base/macros.h"
+#include "ash/shelf/home_button.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/views/animation/ink_drop_painted_layer_delegates.h"
 #include "ui/views/view.h"
 
 namespace ash {
 
-class HomeButton;
-class AssistantIconBackground;
-class AssistantIcon;
-
-class ASH_EXPORT AssistantOverlay : public views::View {
+class ASH_EXPORT AssistantOverlay : public views::View,
+                                    public ui::ImplicitAnimationObserver {
  public:
   explicit AssistantOverlay(HomeButton* host_view);
+
+  AssistantOverlay(const AssistantOverlay&) = delete;
+  AssistantOverlay& operator=(const AssistantOverlay&) = delete;
+
   ~AssistantOverlay() override;
 
   void StartAnimation(bool show_icon);
   void EndAnimation();
   void BurstAnimation();
-  void WaitingAnimation();
   void HideAnimation();
   bool IsBursting() const {
     return AnimationState::BURSTING == animation_state_;
   }
-  bool IsWaiting() const { return AnimationState::WAITING == animation_state_; }
   bool IsHidden() const { return AnimationState::HIDDEN == animation_state_; }
 
   // views::View:
   const char* GetClassName() const override;
+  void OnThemeChanged() override;
+
+  // ui::ImplicitAnimationObserver
+  void OnImplicitAnimationsCompleted() override;
 
  private:
   enum class AnimationState {
@@ -46,14 +49,10 @@ class ASH_EXPORT AssistantOverlay : public views::View {
     STARTING,
     // Indicates the current animation is in the bursting phase, which means no
     // turning back.
-    BURSTING,
-    // Indicates currently playing the waiting animation.
-    WAITING
+    BURSTING
   };
 
   std::unique_ptr<ui::Layer> ripple_layer_;
-  std::unique_ptr<AssistantIcon> icon_layer_;
-  std::unique_ptr<AssistantIconBackground> background_layer_;
 
   HomeButton* host_view_;
 
@@ -63,8 +62,7 @@ class ASH_EXPORT AssistantOverlay : public views::View {
   bool show_icon_ = false;
 
   views::CircleLayerDelegate circle_layer_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(AssistantOverlay);
+  std::unique_ptr<HomeButton::ScopedNoClipRect> scoped_no_clip_rect_;
 };
 
 }  // namespace ash

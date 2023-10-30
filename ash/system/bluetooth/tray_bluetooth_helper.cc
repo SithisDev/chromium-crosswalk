@@ -1,9 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/bluetooth/tray_bluetooth_helper.h"
+#include "ash/constants/ash_features.h"
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/time/time.h"
 
 using device::mojom::BluetoothSystem;
@@ -12,12 +14,13 @@ namespace ash {
 
 namespace {
 
-constexpr base::TimeDelta kUpdateFrequencyMs =
-    base::TimeDelta::FromMilliseconds(1000);
+constexpr base::TimeDelta kUpdateFrequencyMs = base::Milliseconds(1000);
 
 }  // namespace
 
-TrayBluetoothHelper::TrayBluetoothHelper() = default;
+TrayBluetoothHelper::TrayBluetoothHelper() {
+  DCHECK(!ash::features::IsBluetoothRevampEnabled());
+}
 
 TrayBluetoothHelper::~TrayBluetoothHelper() = default;
 

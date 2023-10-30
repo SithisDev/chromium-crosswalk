@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,14 @@
 #include "ash/display/display_configuration_controller.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
-#include "ash/shell_observer.h"
-#include "base/macros.h"
+#include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_observer.h"
 #include "base/observer_list.h"
+#include "chromeos/ui/base/display_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display.h"
+#include "ui/display/display_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 namespace aura {
@@ -26,29 +29,12 @@ class Window;
 
 namespace ash {
 
-enum class OrientationLockType {
-  kAny,
-  kNatural,
-  kCurrent,
-  kPortrait,
-  kLandscape,
-  kPortraitPrimary,
-  kPortraitSecondary,
-  kLandscapePrimary,
-  kLandscapeSecondary,
-};
-
-// Test if the orientation lock type is primary/landscape/portrait.
-bool IsPrimaryOrientation(OrientationLockType type);
-bool IsLandscapeOrientation(OrientationLockType type);
-bool IsPortraitOrientation(OrientationLockType type);
-
-ASH_EXPORT OrientationLockType GetCurrentScreenOrientation();
+ASH_EXPORT chromeos::OrientationType GetCurrentScreenOrientation();
 ASH_EXPORT bool IsCurrentScreenOrientationLandscape();
 ASH_EXPORT bool IsCurrentScreenOrientationPrimary();
 
 ASH_EXPORT std::ostream& operator<<(std::ostream& out,
-                                    const OrientationLockType& lock);
+                                    const chromeos::OrientationType& lock);
 
 // Implements ChromeOS specific functionality for ScreenOrientationProvider.
 class ASH_EXPORT ScreenOrientationController
@@ -57,7 +43,8 @@ class ASH_EXPORT ScreenOrientationController
       public AccelerometerReader::Observer,
       public WindowTreeHostManager::Observer,
       public TabletModeObserver,
-      public ShellObserver {
+      public SplitViewObserver,
+      public display::DisplayObserver {
  public:
   // Observer that reports changes to the state of ScreenOrientationProvider's
   // rotation lock.
@@ -67,7 +54,7 @@ class ASH_EXPORT ScreenOrientationController
     virtual void OnUserRotationLockChanged() {}
 
    protected:
-    virtual ~Observer() {}
+    virtual ~Observer() = default;
   };
 
   // Controls the behavior after lock is applied to the window (when the window
@@ -82,9 +69,14 @@ class ASH_EXPORT ScreenOrientationController
   };
 
   ScreenOrientationController();
+
+  ScreenOrientationController(const ScreenOrientationController&) = delete;
+  ScreenOrientationController& operator=(const ScreenOrientationController&) =
+      delete;
+
   ~ScreenOrientationController() override;
 
-  OrientationLockType natural_orientation() const {
+  chromeos::OrientationType natural_orientation() const {
     return natural_orientation_;
   }
 
@@ -94,19 +86,23 @@ class ASH_EXPORT ScreenOrientationController
 
   // Allows/unallows a window to lock the screen orientation.
   void LockOrientationForWindow(aura::Window* requesting_window,
-                                OrientationLockType orientation_lock);
+                                chromeos::OrientationType orientation_lock);
 
   void UnlockOrientationForWindow(aura::Window* window);
 
   // Unlock all and set the rotation back to the user specified rotation.
   void UnlockAll();
 
-  bool ScreenOrientationProviderSupported() const;
-
   // Returns true if the user has locked the orientation to portrait, false if
   // the user has locked the orientation to landscape or not locked the
   // orientation.
   bool IsUserLockedOrientationPortrait();
+
+  // Returns the chromeos::OrientationType that is applied on based on whether a
+  // rotation lock was requested for an app window, and whether the current
+  // system state allows it to lock the rotation (e.g. being in tablet mode, on
+  // the internal display, and splitview is inactive).
+  chromeos::OrientationType GetCurrentAppRequestedOrientationLock() const;
 
   bool ignore_display_configuration_updates() const {
     return ignore_display_configuration_updates_;
@@ -117,7 +113,7 @@ class ASH_EXPORT ScreenOrientationController
   bool rotation_locked() const { return rotation_locked_; }
 
   bool user_rotation_locked() const {
-    return user_locked_orientation_ != OrientationLockType::kAny;
+    return user_locked_orientation_ != chromeos::OrientationType::kAny;
   }
 
   // Trun on/off the user rotation lock. When turned on, it will lock
@@ -130,7 +126,11 @@ class ASH_EXPORT ScreenOrientationController
   void SetLockToRotation(display::Display::Rotation rotation);
 
   // Gets current screen orientation type.
-  OrientationLockType GetCurrentOrientation() const;
+  chromeos::OrientationType GetCurrentOrientation() const;
+
+  // Returns true if auto-rotation is allowed. It happens when the device is in
+  // a physical tablet state or kSupportsClamshellAutoRotation is set.
+  bool IsAutoRotationAllowed() const;
 
   // wm::ActivationChangeObserver:
   void OnWindowActivated(
@@ -139,32 +139,41 @@ class ASH_EXPORT ScreenOrientationController
       aura::Window* lost_active) override;
 
   // aura::WindowObserver:
+  void OnWindowHierarchyChanged(const HierarchyChangeParams& params) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowVisibilityChanged(aura::Window* window, bool visible) override;
 
   // AccelerometerReader::Observer:
-  void OnAccelerometerUpdated(
-      scoped_refptr<const AccelerometerUpdate> update) override;
+  void OnECLidAngleDriverStatusChanged(bool is_supported) override {}
+  void OnAccelerometerUpdated(const AccelerometerUpdate& update) override;
 
   // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
 
   // TabletModeObserver:
   void OnTabletModeStarted() override;
-  void OnTabletModeEnding() override;
   void OnTabletModeEnded() override;
+  void OnTabletPhysicalStateChanged() override;
 
-  // ShellObserver:
-  void OnSplitViewModeStarted() override;
-  void OnSplitViewModeEnded() override;
+  // SplitViewObserver:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
+
+  // display::DisplayObserver:
+  void OnWillProcessDisplayChanges() override;
+  void OnDidProcessDisplayChanges() override;
 
  private:
   friend class ScreenOrientationControllerTestApi;
 
   struct LockInfo {
-    LockInfo() {}
-    LockInfo(OrientationLockType lock) : orientation_lock(lock) {}
-    OrientationLockType orientation_lock = OrientationLockType::kAny;
+    LockInfo(chromeos::OrientationType lock, aura::Window* root)
+        : orientation_lock(lock), root_window(root) {}
+    chromeos::OrientationType orientation_lock =
+        chromeos::OrientationType::kAny;
+    // Tracks the requesting window's root window and is updated whenever it
+    // changes.
+    aura::Window* root_window = nullptr;
     LockCompletionBehavior lock_completion_behavior =
         LockCompletionBehavior::None;
   };
@@ -181,7 +190,7 @@ class ASH_EXPORT ScreenOrientationController
   void SetRotationLockedInternal(bool rotation_locked);
 
   // A helper method that set locked to the given |orientation| and save it.
-  void SetLockToOrientation(OrientationLockType orientation);
+  void SetLockToOrientation(chromeos::OrientationType orientation);
 
   // Sets the display rotation to |rotation|. Future accelerometer updates
   // should not be used to change the rotation. SetRotationLocked(false) removes
@@ -192,12 +201,13 @@ class ASH_EXPORT ScreenOrientationController
   // Sets the display rotation based on |lock_orientation|. Future accelerometer
   // updates should not be used to change the rotation. SetRotationLocked(false)
   // removes the rotation lock.
-  void LockRotationToOrientation(OrientationLockType lock_orientation);
+  void LockRotationToOrientation(chromeos::OrientationType lock_orientation);
 
   // For orientations that do not specify primary or secondary, locks to the
   // current rotation if it matches |lock_orientation|. Otherwise locks to a
   // matching rotation.
-  void LockToRotationMatchingOrientation(OrientationLockType lock_orientation);
+  void LockToRotationMatchingOrientation(
+      chromeos::OrientationType lock_orientation);
 
   // Detect screen rotation from |lid| accelerometer and automatically rotate
   // screen.
@@ -207,15 +217,18 @@ class ASH_EXPORT ScreenOrientationController
   // preferences. These are then applied.
   void LoadDisplayRotationProperties();
 
-  // Determines the rotation lock, and orientation, for the currently active
-  // window, and applies it. If there is none, rotation lock will be removed.
-  void ApplyLockForActiveWindow();
+  // Determines the rotation lock, and orientation, for the top-most window on
+  // the internal display, and applies it. If there is none, rotation lock will
+  // be removed.
+  // TODO(oshima|afakhry): This behavior needs to be revised when Android
+  // implements multi-display support.
+  void ApplyLockForTopMostWindowOnInternalDisplay();
 
   // If there is a rotation lock that can be applied to window, applies it and
   // returns true. Otherwise returns false.
   bool ApplyLockForWindowIfPossible(const aura::Window* window);
 
-  // Both |OrientationLockType::kLandscape| and
+  // Both |chromeos::OrientationType::kLandscape| and
   // |OrientationLock::kPortrait| allow for rotation between the
   // two angles of the same screen orientation
   // (http://www.w3.org/TR/screen-orientation/). Returns true if |rotation| is
@@ -230,7 +243,7 @@ class ASH_EXPORT ScreenOrientationController
   void UpdateNaturalOrientationForTest();
 
   // The orientation of the display when at a rotation of 0.
-  OrientationLockType natural_orientation_;
+  chromeos::OrientationType natural_orientation_;
 
   // True when changes being applied cause OnDisplayConfigurationChanged() to be
   // called, and for which these changes should be ignored.
@@ -239,15 +252,30 @@ class ASH_EXPORT ScreenOrientationController
   // When true then accelerometer updates should not rotate the display.
   bool rotation_locked_;
 
+  // True while the displays are being updated by the display manager, so that
+  // we don't set the display rotation while this operation is in progress.
+  bool suspend_orientation_lock_refreshes_ = false;
+
+  // True if there was a request to refresh the orientation lock while the
+  // display manager is in the process of updating the displays. When the
+  // display manager is done, we check this value to see if we need to refresh
+  // the orientation lock.
+  bool is_orientation_lock_refresh_pending_ = false;
+
   // The orientation to which the current |rotation_locked_| was applied.
-  OrientationLockType rotation_locked_orientation_;
+  chromeos::OrientationType rotation_locked_orientation_;
 
   // The rotation of the display set by the user. This rotation will be
   // restored upon exiting tablet mode.
   display::Display::Rotation user_rotation_;
 
   // The orientation of the device locked by the user.
-  OrientationLockType user_locked_orientation_ = OrientationLockType::kAny;
+  chromeos::OrientationType user_locked_orientation_ =
+      chromeos::OrientationType::kAny;
+
+  // The currently applied orientation lock that was requested by an app if any.
+  absl::optional<chromeos::OrientationType>
+      current_app_requested_orientation_lock_ = absl::nullopt;
 
   // The current rotation set by ScreenOrientationController for the internal
   // display.
@@ -260,7 +288,8 @@ class ASH_EXPORT ScreenOrientationController
   // orientation.
   std::unordered_map<aura::Window*, LockInfo> lock_info_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScreenOrientationController);
+  // Register for DisplayObserver callbacks.
+  display::ScopedDisplayObserver display_observer_{this};
 };
 
 }  // namespace ash

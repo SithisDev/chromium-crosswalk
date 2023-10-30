@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,14 @@
 
 #include "base/bind.h"
 
-namespace app_list {
+namespace ash {
 
 SearchModel::SearchModel()
     : search_box_(std::make_unique<SearchBoxModel>()),
-      results_(std::make_unique<SearchResults>()) {}
+      results_(std::make_unique<SearchResults>()),
+      ordered_categories_(std::vector<ash::AppListSearchResultCategory>()) {}
 
 SearchModel::~SearchModel() {}
-
-void SearchModel::SetTabletMode(bool is_tablet_mode) {
-  search_box_->SetTabletMode(is_tablet_mode);
-}
 
 void SearchModel::SetSearchEngineIsGoogle(bool is_google) {
   search_box_->SetSearchEngineIsGoogle(is_google);
@@ -53,15 +50,17 @@ std::vector<SearchResult*> SearchModel::FilterSearchResultsByFunction(
     if (matches.size() == max_results)
       break;
     SearchResult* item = results->GetItemAt(i);
-    if (result_filter.Run(*item)) {
+    if (result_filter.Run(*item))
       matches.push_back(item);
-    }
   }
   return matches;
 }
 
 void SearchModel::PublishResults(
-    std::vector<std::unique_ptr<SearchResult>> new_results) {
+    std::vector<std::unique_ptr<SearchResult>> new_results,
+    const std::vector<ash::AppListSearchResultCategory>& categories) {
+  ordered_categories_ = categories;
+
   // The following algorithm is used:
   // 1. Transform the |results_| list into an unordered map from result ID
   // to item.
@@ -84,8 +83,8 @@ void SearchModel::PublishResults(
       // Update and use the old result if it exists.
       std::unique_ptr<SearchResult> ui_result = std::move(ui_result_it->second);
       ui_result->SetMetadata(new_result->TakeMetadata());
-      results_->Add(std::move(ui_result));
 
+      results_->Add(std::move(ui_result));
       // Remove the item from the map so that it ends up only with unused
       // results.
       results_map.erase(ui_result_it);
@@ -116,7 +115,8 @@ SearchResult* SearchModel::GetFirstVisibleResult() {
 }
 
 void SearchModel::DeleteAllResults() {
-  PublishResults(std::vector<std::unique_ptr<SearchResult>>());
+  PublishResults(std::vector<std::unique_ptr<SearchResult>>(),
+                 std::vector<ash::AppListSearchResultCategory>());
 }
 
 void SearchModel::DeleteResultById(const std::string& id) {
@@ -129,4 +129,4 @@ void SearchModel::DeleteResultById(const std::string& id) {
   }
 }
 
-}  // namespace app_list
+}  // namespace ash

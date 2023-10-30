@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,44 +7,46 @@
 #include <algorithm>
 #include <memory>
 
+#include "ash/app_list/views/assistant/assistant_dialog_plate.h"
 #include "ash/app_list/views/assistant/assistant_main_stage.h"
-#include "ash/app_list/views/assistant/dialog_plate.h"
+#include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/assistant_view_ids.h"
 #include "ash/assistant/util/animation_util.h"
 #include "ash/assistant/util/assistant_util.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
-#include "ui/chromeos/search_box/search_box_constants.h"
+#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
+#include "ash/search_box/search_box_constants.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animator.h"
 #include "ui/views/layout/box_layout.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
 // Dialog plate animation.
 constexpr base::TimeDelta kDialogPlateAnimationFadeInDelay =
-    base::TimeDelta::FromMilliseconds(283);
+    base::Milliseconds(283);
 constexpr base::TimeDelta kDialogPlateAnimationFadeInDuration =
-    base::TimeDelta::FromMilliseconds(167);
+    base::Milliseconds(167);
 
 }  // namespace
 
-AssistantMainView::AssistantMainView(ash::AssistantViewDelegate* delegate)
+AssistantMainView::AssistantMainView(AssistantViewDelegate* delegate)
     : delegate_(delegate) {
+  SetID(AssistantViewID::kMainView);
   InitLayout();
 
-  // The view hierarchy will be destructed before AssistantController in Shell,
-  // which owns AssistantViewDelegate, so AssistantViewDelegate is guaranteed to
-  // outlive the AssistantMainStage.
-  delegate_->AddUiModelObserver(this);
+  assistant_controller_observation_.Observe(AssistantController::Get());
+  AssistantUiController::Get()->GetModel()->AddObserver(this);
 }
 
 AssistantMainView::~AssistantMainView() {
-  delegate_->RemoveUiModelObserver(this);
-}
-
-const char* AssistantMainView::GetClassName() const {
-  return "AssistantMainView";
+  if (AssistantUiController::Get())
+    AssistantUiController::Get()->GetModel()->RemoveObserver(this);
 }
 
 void AssistantMainView::ChildPreferredSizeChanged(views::View* child) {
@@ -74,20 +76,26 @@ void AssistantMainView::RequestFocus() {
   dialog_plate_->RequestFocus();
 }
 
+void AssistantMainView::OnAssistantControllerDestroying() {
+  AssistantUiController::Get()->GetModel()->RemoveObserver(this);
+  DCHECK(assistant_controller_observation_.IsObservingSource(
+      AssistantController::Get()));
+  assistant_controller_observation_.Reset();
+}
+
 void AssistantMainView::OnUiVisibilityChanged(
-    ash::AssistantVisibility new_visibility,
-    ash::AssistantVisibility old_visibility,
-    base::Optional<ash::AssistantEntryPoint> entry_point,
-    base::Optional<ash::AssistantExitPoint> exit_point) {
-  if (!ash::assistant::util::IsStartingSession(new_visibility,
-                                               old_visibility)) {
+    AssistantVisibility new_visibility,
+    AssistantVisibility old_visibility,
+    absl::optional<AssistantEntryPoint> entry_point,
+    absl::optional<AssistantExitPoint> exit_point) {
+  if (!assistant::util::IsStartingSession(new_visibility, old_visibility)) {
     return;
   }
 
   // When Assistant is starting a new session, we animate in the appearance of
   // the dialog plate.
-  using ash::assistant::util::CreateLayerAnimationSequence;
-  using ash::assistant::util::CreateOpacityElement;
+  using assistant::util::CreateLayerAnimationSequence;
+  using assistant::util::CreateOpacityElement;
 
   // Animate the dialog plate from 0% to 100% opacity with delay.
   dialog_plate_->layer()->SetOpacity(0.f);
@@ -100,7 +108,7 @@ void AssistantMainView::OnUiVisibilityChanged(
 }
 
 void AssistantMainView::InitLayout() {
-  constexpr int radius = search_box::kSearchBoxBorderCornerRadiusSearchResult;
+  constexpr int radius = kSearchBoxBorderCornerRadiusSearchResult;
 
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
@@ -113,16 +121,19 @@ void AssistantMainView::InitLayout() {
       views::BoxLayout::CrossAxisAlignment::kCenter);
 
   // Dialog plate, which will be animated on its own layer.
-  dialog_plate_ = new DialogPlate(delegate_);
+  dialog_plate_ =
+      AddChildView(std::make_unique<AssistantDialogPlate>(delegate_));
   dialog_plate_->SetPaintToLayer();
   dialog_plate_->layer()->SetFillsBoundsOpaquely(false);
-  AddChildView(dialog_plate_);
 
   // Main stage.
-  main_stage_ = new AssistantMainStage(delegate_);
-  AddChildView(main_stage_);
+  main_stage_ =
+      AddChildView(std::make_unique<AppListAssistantMainStage>(delegate_));
 
   layout->SetFlexForView(main_stage_, 1);
 }
 
-}  // namespace app_list
+BEGIN_METADATA(AssistantMainView, views::View)
+END_METADATA
+
+}  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 #define ASH_SYSTEM_STATUS_AREA_WIDGET_DELEGATE_H_
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "base/macros.h"
+#include "ash/system/status_area_widget.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -21,10 +22,22 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
                                             public views::WidgetDelegate {
  public:
   explicit StatusAreaWidgetDelegate(Shelf* shelf);
+
+  StatusAreaWidgetDelegate(const StatusAreaWidgetDelegate&) = delete;
+  StatusAreaWidgetDelegate& operator=(const StatusAreaWidgetDelegate&) = delete;
+
   ~StatusAreaWidgetDelegate() override;
 
-  // Called whenever layout might change (e.g. alignment changed).
-  void UpdateLayout();
+  // Calculates the bounds that this view should have given its constraints,
+  // but does not actually update bounds yet.
+  void CalculateTargetBounds();
+
+  // Returns the bounds that this view should have given its constraints.
+  gfx::Rect GetTargetBounds() const;
+
+  // Performs the actual changes in bounds for this view to match its target
+  // bounds.
+  void UpdateLayout(bool animate);
 
   // Sets the focus cycler.
   void SetFocusCyclerForTesting(const FocusCycler* focus_cycler);
@@ -34,32 +47,36 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
   // designated focusing direction, otherwise false.
   bool ShouldFocusOut(bool reverse);
 
-  // Overridden from views::AccessiblePaneView.
-  View* GetDefaultFocusableChild() override;
+  // Called by StatusAreaWidget when its collapse state changes.
+  void OnStatusAreaCollapseStateChanged(
+      StatusAreaWidget::CollapseState new_collapse_state);
 
-  // Overridden from views::View:
+  // Clears most of the Widget to prevent destruction problems before ~Widget.
+  void Shutdown();
+
+  // views::AccessiblePaneView:
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  View* GetDefaultFocusableChild() override;
+  const char* GetClassName() const override;
   views::Widget* GetWidget() override;
   const views::Widget* GetWidget() const override;
 
-  // Overridden from ui::EventHandler:
+  // ui::EventHandler:
   void OnGestureEvent(ui::GestureEvent* event) override;
 
-  // views::WidgetDelegate overrides:
+  // views::WidgetDelegate:
   bool CanActivate() const override;
-  void DeleteDelegate() override;
 
   void set_default_last_focusable_child(bool default_last_focusable_child) {
     default_last_focusable_child_ = default_last_focusable_child;
   }
 
  protected:
-  // Overridden from views::View:
+  // views::View:
   void ChildPreferredSizeChanged(views::View* child) override;
   void ChildVisibilityChanged(views::View* child) override;
 
  private:
-  void UpdateWidgetSize();
-
   // Sets a border on |child|. If |extend_border_to_edge| is true, then an extra
   // wide border is added to extend the view's hit region to the edge of the
   // screen.
@@ -67,12 +84,11 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
 
   Shelf* const shelf_;
   const FocusCycler* focus_cycler_for_testing_;
+  gfx::Rect target_bounds_;
 
   // When true, the default focus of the status area widget is the last
   // focusable child.
   bool default_last_focusable_child_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(StatusAreaWidgetDelegate);
 };
 
 }  // namespace ash

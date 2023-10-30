@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "ash/system/unified/unified_system_tray_controller.h"
 #include "ash/system/unified/unified_system_tray_model.h"
 #include "ash/test/ash_test_base.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/strings/utf_string_conversions.h"
 
 namespace ash {
@@ -23,12 +23,18 @@ namespace {
 class LocaleFeaturePodControllerTest : public NoSessionAshTestBase {
  public:
   LocaleFeaturePodControllerTest() = default;
+
+  LocaleFeaturePodControllerTest(const LocaleFeaturePodControllerTest&) =
+      delete;
+  LocaleFeaturePodControllerTest& operator=(
+      const LocaleFeaturePodControllerTest&) = delete;
+
   ~LocaleFeaturePodControllerTest() override = default;
 
   void SetUp() override {
     NoSessionAshTestBase::SetUp();
 
-    tray_model_ = std::make_unique<UnifiedSystemTrayModel>();
+    tray_model_ = base::MakeRefCounted<UnifiedSystemTrayModel>(nullptr);
     tray_controller_ =
         std::make_unique<UnifiedSystemTrayController>(tray_model_.get());
     controller_ =
@@ -46,10 +52,8 @@ class LocaleFeaturePodControllerTest : public NoSessionAshTestBase {
   std::unique_ptr<LocaleFeaturePodController> controller_;
 
  private:
-  std::unique_ptr<UnifiedSystemTrayModel> tray_model_;
+  scoped_refptr<UnifiedSystemTrayModel> tray_model_;
   std::unique_ptr<UnifiedSystemTrayController> tray_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(LocaleFeaturePodControllerTest);
 };
 
 TEST_F(LocaleFeaturePodControllerTest, ButtonVisibility) {
@@ -66,8 +70,7 @@ TEST_F(LocaleFeaturePodControllerTest, ButtonVisibility) {
 
   // The button is visible if the locale list is non-empty.
   std::vector<LocaleInfo> locale_list;
-  locale_list.emplace_back(kDefaultLocaleIsoCode,
-                           base::UTF8ToUTF16("English (United States)"));
+  locale_list.emplace_back(kDefaultLocaleIsoCode, u"English (United States)");
   Shell::Get()->system_tray_model()->SetLocaleList(std::move(locale_list),
                                                    kDefaultLocaleIsoCode);
   button.reset(controller_->CreateButton());

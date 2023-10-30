@@ -1,13 +1,18 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_WM_DESKS_DESK_PREVIEW_VIEW_H_
 #define ASH_WM_DESKS_DESK_PREVIEW_VIEW_H_
 
-#include "base/macros.h"
+#include <memory>
+
+#include "ash/ash_export.h"
+#include "ash/style/system_shadow.h"
+#include "ash/wm/overview/overview_highlightable_view.h"
 #include "ui/aura/window_occlusion_tracker.h"
-#include "ui/views/view.h"
+#include "ui/compositor/layer.h"
+#include "ui/views/controls/button/button.h"
 
 namespace ui {
 class LayerTreeOwner;
@@ -17,23 +22,29 @@ namespace ash {
 
 class DeskMiniView;
 class WallpaperBaseView;
+class WmHighlightItemBorder;
 
 // A view that shows the contents of the corresponding desk in its mini_view.
 // This view has the following layer hierarchy:
 //
-//                +-----+
-//                |  <--+------  This view's layer.
-//                +-----+
-//              /    |    \     ----->>>>> Higher in Z-order.
-//             /     |     \
-//     +-----+    +-----+    +-----+
-//     |     |    |     |    |     |
-//     +-----+    +-----+    +-----+
-//        ^          ^          ^    \
-//        |          |          |     \ +-----+
-//        |          |          |       |     |
-//        |          |          |       +-----+
-//        |          |          |          ^
+//                +---------------------------+
+//                |             <-------------+------  This view's layer.
+//                +---------------------------+
+//              /    |          |               \  ----->>>>> Higher in Z-order.
+//             /     |          |                \
+//     +-----+    +-----+    +-----+               +-----+
+//     |     |    |     |    |     |               |     |
+//     +-----+    +-----+    +-----+               +-----+
+//        ^          ^          ^    \                ^
+//        |          |          |     \ +-----+       |
+//        |          |          |       |     |       |
+//        |          |          |       +-----+       |
+//        |          |          |          ^          |
+//        |          |          |          |   `highlight_overlay_`'s layer:
+//        |          |          |          |   A solid color layer that is
+//        |          |          |          |   visible when `mini_view_`'s
+//        |          |          |          |   `DeskActionContextMenu` is open.
+//        |          |          |          |
 //        |          |          |          |
 //        |          |          |    The root layer of the desk's mirrored
 //        |          |          |    contents layer tree. This tree is owned by
@@ -49,26 +60,39 @@ class WallpaperBaseView;
 //        |      without the dimming and blur that overview mode adds.
 //        |
 //        |
-//     `background_view_`'s layer: A solid color layer to paint a background
-//      behind everything else, simulating a colored border around the view.
+//     `shadow_layer_`: A layer that paints a shadow behind this view.
 //
-// `background_view_` has the same size as this view, while `wallpaper_preview_`
-// and `desk_mirrored_contents_view_` are inset by an amount equal to the border
-// size from all sides (See `kBorderSize`).
-//
-// Note that both |background_view_| and |wallpaper_preview_| paint to layers
-// with rounded corners. In order to use the fast rounded corners implementation
-// we must make them sibling layers, rather than one being a descendant of the
-// other. Otherwise, this will trigger a render surface.
-class DeskPreviewView : public views::View {
+// Note that `desk_mirrored_contents_view_`, `wallpaper_preview_`, and
+// `highlight_overlay_` paint to layers with rounded corners. In order to use
+// the fast rounded corners implementation we must make them sibling layers,
+// rather than one being a descendant of the other. Otherwise, this will trigger
+// a render surface.
+class ASH_EXPORT DeskPreviewView : public views::Button,
+                                   public OverviewHighlightableView {
  public:
-  explicit DeskPreviewView(DeskMiniView* mini_view);
+  DeskPreviewView(PressedCallback callback, DeskMiniView* mini_view);
+
+  DeskPreviewView(const DeskPreviewView&) = delete;
+  DeskPreviewView& operator=(const DeskPreviewView&) = delete;
+
   ~DeskPreviewView() override;
 
-  // Returns the height of the DeskPreviewView.
-  static int GetHeight();
+  static constexpr SystemShadow::Type kDefaultShadowType =
+      SystemShadow::Type::kElevation4;
+  static constexpr SystemShadow::Type kDraggedShadowType =
+      SystemShadow::Type::kElevation12;
+
+  // Returns the height of the DeskPreviewView, which is a function of the
+  // |root| window's height.
+  static int GetHeight(aura::Window* root);
+
+  SystemShadow* shadow() const { return shadow_.get(); }
 
   void SetBorderColor(SkColor color);
+
+  // Sets the visibility of `highlight_overlay_` to `visible`. If `visible` is
+  // true, this `DeskPreviewView` becomes highlighted.
+  void SetHighlightOverlayVisibility(bool visible);
 
   // This should be called when there is a change in the desk contents so that
   // we can recreate the mirrored layer tree.
@@ -76,14 +100,30 @@ class DeskPreviewView : public views::View {
 
   // views::View:
   const char* GetClassName() const override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void Layout() override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnThemeChanged() override;
+  void OnFocus() override;
+  void OnBlur() override;
+
+  // OverviewHighlightableView:
+  views::View* GetView() override;
+  void MaybeActivateHighlightedView() override;
+  void MaybeCloseHighlightedView(bool primary_action) override;
+  void MaybeSwapHighlightedView(bool right) override;
+  bool MaybeActivateHighlightedViewOnOverviewExit(
+      OverviewSession* overview_session) override;
+  void OnViewHighlighted() override;
+  void OnViewUnhighlighted() override;
 
  private:
-  DeskMiniView* const mini_view_;
+  friend class DesksTestApi;
 
-  // A view to paint a background color behind the |wallpaper_preview_| to
-  // simulate a border. Owned by the views hierarchy.
-  views::View* background_view_;
+  DeskMiniView* const mini_view_;
 
   // A view that paints the wallpaper in the mini_view. It avoids the dimming
   // and blur overview mode adds to the original wallpaper. Owned by the views
@@ -94,6 +134,15 @@ class DeskPreviewView : public views::View {
   // A view whose layer will act as the parent of desk's mirrored contents layer
   // tree. Owned by the views hierarchy.
   views::View* desk_mirrored_contents_view_;
+
+  // An overlay that becomes visible on top of the
+  // `desk_mirrored_contents_view_` when the `mini_view_`'s
+  // `DeskActionContextMenu` is active. Owned by the views hierarchy.
+  views::View* highlight_overlay_ = nullptr;
+
+  // Owned by this View via `View::border_`. This is just a convenient pointer
+  // to it.
+  WmHighlightItemBorder* border_ptr_;
 
   // Owns the layer tree of the desk's contents mirrored layers.
   std::unique_ptr<ui::LayerTreeOwner> desk_mirrored_contents_layer_tree_owner_;
@@ -107,7 +156,7 @@ class DeskPreviewView : public views::View {
   std::unique_ptr<aura::WindowOcclusionTracker::ScopedForceVisible>
       force_occlusion_tracker_visible_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeskPreviewView);
+  std::unique_ptr<SystemShadow> shadow_;
 };
 
 }  // namespace ash

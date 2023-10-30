@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "ash/public/cpp/ash_pref_names.h"
+#include "ash/constants/ash_pref_names.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "components/prefs/pref_service.h"
@@ -20,6 +20,8 @@ namespace ash {
 const char kShelfAutoHideBehaviorAlways[] = "Always";
 const char kShelfAutoHideBehaviorNever[] = "Never";
 
+// If any of the following ShelfAlignment values changed, the ShelfAlignment
+// policy should be updated.
 const char kShelfAlignmentBottom[] = "Bottom";
 const char kShelfAlignmentLeft[] = "Left";
 const char kShelfAlignmentRight[] = "Right";
@@ -53,22 +55,21 @@ std::string GetPerDisplayPref(PrefService* prefs,
   std::string pref_key = base::NumberToString(display_id);
   bool has_per_display_prefs = false;
   if (!pref_key.empty()) {
-    const base::DictionaryValue* shelf_prefs =
-        prefs->GetDictionary(prefs::kShelfPreferences);
-    const base::DictionaryValue* display_pref = nullptr;
-    std::string per_display_value;
-    if (shelf_prefs->GetDictionary(pref_key, &display_pref) &&
-        display_pref->GetString(path, &per_display_value))
-      return per_display_value;
+    const base::Value::Dict& shelf_prefs =
+        prefs->GetDict(prefs::kShelfPreferences);
+    const base::Value::Dict* display_pref = shelf_prefs.FindDict(pref_key);
+    if (display_pref) {
+      const std::string* per_display_value =
+          display_pref->FindStringByDottedPath(path);
+      if (per_display_value)
+        return *per_display_value;
+    }
 
     // If the pref for the specified display is not found, scan the whole prefs
     // and check if the prefs for other display is already specified.
     std::string unused_value;
-    for (base::DictionaryValue::Iterator iter(*shelf_prefs); !iter.IsAtEnd();
-         iter.Advance()) {
-      const base::DictionaryValue* display_pref = nullptr;
-      if (iter.value().GetAsDictionary(&display_pref) &&
-          display_pref->GetString(path, &unused_value)) {
+    for (const auto iter : shelf_prefs) {
+      if (iter.second.is_dict() && iter.second.FindStringPath(path)) {
         has_per_display_prefs = true;
         break;
       }
@@ -78,9 +79,9 @@ std::string GetPerDisplayPref(PrefService* prefs,
   if (local_pref->IsRecommended() || !has_per_display_prefs)
     return value;
 
-  std::string default_string;
-  prefs->GetDefaultPrefValue(local_path)->GetAsString(&default_string);
-  return default_string;
+  const std::string* default_string =
+      prefs->GetDefaultPrefValue(local_path)->GetIfString();
+  return default_string ? *default_string : std::string();
 }
 
 // Sets the preference value for the display with the given |display_id|.
@@ -92,47 +93,46 @@ void SetPerDisplayPref(PrefService* prefs,
     return;
 
   // Avoid DictionaryPrefUpdate's notifications for read but unmodified prefs.
-  const base::DictionaryValue* current_shelf_prefs =
-      prefs->GetDictionary(prefs::kShelfPreferences);
-  DCHECK(current_shelf_prefs);
+  const base::Value::Dict& current_shelf_prefs =
+      prefs->GetDict(prefs::kShelfPreferences);
   std::string display_key = base::NumberToString(display_id);
-  const base::DictionaryValue* current_display_prefs = nullptr;
-  std::string current_value;
-  if (current_shelf_prefs->GetDictionary(display_key, &current_display_prefs) &&
-      current_display_prefs->GetString(pref_key, &current_value) &&
-      current_value == value) {
-    return;
+  const base::Value::Dict* current_display_prefs =
+      current_shelf_prefs.FindDict(display_key);
+  if (current_display_prefs) {
+    const std::string* current_value =
+        current_display_prefs->FindStringByDottedPath(pref_key);
+    if (current_value && *current_value == value)
+      return;
   }
 
   DictionaryPrefUpdate update(prefs, prefs::kShelfPreferences);
-  base::DictionaryValue* shelf_prefs = update.Get();
-  base::DictionaryValue* display_prefs_weak = nullptr;
-  if (!shelf_prefs->GetDictionary(display_key, &display_prefs_weak)) {
-    auto display_prefs = std::make_unique<base::DictionaryValue>();
-    display_prefs_weak = display_prefs.get();
-    shelf_prefs->Set(display_key, std::move(display_prefs));
+  base::Value* shelf_prefs = update.Get();
+  base::Value* display_prefs_weak = shelf_prefs->FindDictKey(display_key);
+  if (!display_prefs_weak) {
+    display_prefs_weak = shelf_prefs->SetKey(
+        display_key, base::Value(base::Value::Type::DICTIONARY));
   }
   display_prefs_weak->SetKey(pref_key, base::Value(value));
 }
 
 ShelfAlignment AlignmentFromPref(const std::string& value) {
   if (value == kShelfAlignmentLeft)
-    return SHELF_ALIGNMENT_LEFT;
+    return ShelfAlignment::kLeft;
   if (value == kShelfAlignmentRight)
-    return SHELF_ALIGNMENT_RIGHT;
+    return ShelfAlignment::kRight;
   // Default to bottom.
-  return SHELF_ALIGNMENT_BOTTOM;
+  return ShelfAlignment::kBottom;
 }
 
 const char* AlignmentToPref(ShelfAlignment alignment) {
   switch (alignment) {
-    case SHELF_ALIGNMENT_BOTTOM:
+    case ShelfAlignment::kBottom:
       return kShelfAlignmentBottom;
-    case SHELF_ALIGNMENT_LEFT:
+    case ShelfAlignment::kLeft:
       return kShelfAlignmentLeft;
-    case SHELF_ALIGNMENT_RIGHT:
+    case ShelfAlignment::kRight:
       return kShelfAlignmentRight;
-    case SHELF_ALIGNMENT_BOTTOM_LOCKED:
+    case ShelfAlignment::kBottomLocked:
       // This should not be a valid preference option for now. We only want to
       // lock the shelf during login or when adding a user.
       return nullptr;
@@ -147,17 +147,17 @@ ShelfAutoHideBehavior AutoHideBehaviorFromPref(const std::string& value) {
   // "Default" as well as "Never" and "Always", "Default" should now
   // be treated as "Never" (http://crbug.com/146773).
   if (value == kShelfAutoHideBehaviorAlways)
-    return SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
-  return SHELF_AUTO_HIDE_BEHAVIOR_NEVER;
+    return ShelfAutoHideBehavior::kAlways;
+  return ShelfAutoHideBehavior::kNever;
 }
 
 const char* AutoHideBehaviorToPref(ShelfAutoHideBehavior behavior) {
   switch (behavior) {
-    case SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
+    case ShelfAutoHideBehavior::kAlways:
       return kShelfAutoHideBehaviorAlways;
-    case SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
+    case ShelfAutoHideBehavior::kNever:
       return kShelfAutoHideBehaviorNever;
-    case SHELF_AUTO_HIDE_ALWAYS_HIDDEN:
+    case ShelfAutoHideBehavior::kAlwaysHidden:
       // This should not be a valid preference option for now. We only want to
       // completely hide it when we run in app mode - or while we temporarily
       // hide the shelf (e.g. SessionAbortedDialog).

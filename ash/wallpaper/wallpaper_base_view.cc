@@ -1,59 +1,34 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wallpaper/wallpaper_base_view.h"
 
-#include "ash/public/cpp/login_constants.h"
-#include "ash/public/cpp/wallpaper_types.h"
+#include "ash/public/cpp/wallpaper/wallpaper_types.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/style/ash_color_id.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
-#include "ash/wm/overview/overview_controller.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "base/numerics/safe_conversions.h"
+#include "cc/paint/paint_flags.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/color_analysis.h"
-#include "ui/gfx/color_utils.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
 
 namespace ash {
 
 namespace {
 
-// The value used for alpha to apply a dark filter to the wallpaper in tablet
-// mode. A higher number up to 255 results in a darker wallpaper.
-constexpr int kTabletModeWallpaperAlpha = 102;
-
-// Returns the color used to dim the wallpaper.
-SkColor GetWallpaperDarkenColor() {
-  SkColor darken_color =
-      Shell::Get()->wallpaper_controller()->GetProminentColor(
-          color_utils::ColorProfile(color_utils::LumaRange::DARK,
-                                    color_utils::SaturationRange::MUTED));
-  if (darken_color == kInvalidWallpaperColor)
-    darken_color = login_constants::kDefaultBaseColor;
-
-  darken_color = color_utils::GetResultingPaintColor(
-      SkColorSetA(login_constants::kDefaultBaseColor,
-                  login_constants::kTranslucentColorDarkenAlpha),
-      SkColorSetA(darken_color, 0xFF));
-
-  int alpha = login_constants::kTranslucentAlpha;
-  if (Shell::Get()->tablet_mode_controller()->InTabletMode()) {
-    alpha = kTabletModeWallpaperAlpha;
-  } else if (Shell::Get()->overview_controller()->InOverviewSession()) {
-    // Overview mode will apply its own brightness filter on a downscaled image,
-    // so color with full opacity here.
-    alpha = 255;
-  }
-
-  return SkColorSetA(darken_color, alpha);
+// Gets the shield color based on the state. This is used for the login, lock,
+// overview and tablet mode.
+SkColor GetWallpaperShieldColor(const views::Widget* widget) {
+  DCHECK(widget);
+  return widget->GetColorProvider()->GetColor(
+      Shell::Get()->session_controller()->IsUserSessionBlocked()
+          ? kColorAshShieldAndBase40
+          : kColorAshShieldAndBase80);
 }
 
 }  // namespace
-
-const char* WallpaperBaseView::GetClassName() const {
-  return "WallpaperBaseView";
-}
 
 void WallpaperBaseView::OnPaint(gfx::Canvas* canvas) {
   // Scale the image while maintaining the aspect ratio, cropping as necessary
@@ -72,11 +47,6 @@ void WallpaperBaseView::OnPaint(gfx::Canvas* canvas) {
     return;
 
   cc::PaintFlags flags;
-  if (controller->ShouldApplyDimming()) {
-    flags.setColorFilter(
-        SkColorFilters::Blend(GetWallpaperDarkenColor(), SkBlendMode::kDarken));
-  }
-
   switch (layout) {
     case WALLPAPER_LAYOUT_CENTER_CROPPED: {
       // The dimension with the smallest ratio must be cropped, the other one
@@ -89,12 +59,12 @@ void WallpaperBaseView::OnPaint(gfx::Canvas* canvas) {
       gfx::Size cropped_size;
       if (vertical_ratio > horizontal_ratio) {
         cropped_size = gfx::Size(
-            gfx::ToFlooredInt(static_cast<double>(width()) / vertical_ratio),
+            base::ClampFloor(static_cast<double>(width()) / vertical_ratio),
             wallpaper.height());
       } else {
         cropped_size = gfx::Size(
-            wallpaper.width(), gfx::ToFlooredInt(static_cast<double>(height()) /
-                                                 horizontal_ratio));
+            wallpaper.width(),
+            base::ClampFloor(static_cast<double>(height()) / horizontal_ratio));
       }
 
       gfx::Rect wallpaper_cropped_rect(wallpaper.size());
@@ -118,7 +88,9 @@ void WallpaperBaseView::OnPaint(gfx::Canvas* canvas) {
       const float image_scale = canvas->image_scale();
       // Simply centered and not scaled (but may be clipped).
       gfx::Rect wallpaper_rect = gfx::ScaleToRoundedRect(
-          gfx::Rect(wallpaper.size()), 1.f / image_scale);
+          gfx::Rect(wallpaper.size()),
+          centered_layout_image_scale_.x() / image_scale,
+          centered_layout_image_scale_.y() / image_scale);
       wallpaper_rect.set_x((width() - wallpaper_rect.width()) / 2);
       wallpaper_rect.set_y((height() - wallpaper_rect.height()) / 2);
       DrawWallpaper(wallpaper, gfx::Rect(wallpaper.size()), wallpaper_rect,
@@ -130,6 +102,14 @@ void WallpaperBaseView::OnPaint(gfx::Canvas* canvas) {
       break;
     }
   }
+
+  if (controller->ShouldApplyShield())
+    canvas->FillRect(GetLocalBounds(), GetWallpaperShieldColor(GetWidget()));
+}
+
+void WallpaperBaseView::OnThemeChanged() {
+  views::View::OnThemeChanged();
+  SchedulePaint();
 }
 
 void WallpaperBaseView::DrawWallpaper(const gfx::ImageSkia& wallpaper,
@@ -141,5 +121,8 @@ void WallpaperBaseView::DrawWallpaper(const gfx::ImageSkia& wallpaper,
                        dst.x(), dst.y(), dst.width(), dst.height(),
                        /*filter=*/true, flags);
 }
+
+BEGIN_METADATA(WallpaperBaseView, views::View)
+END_METADATA
 
 }  // namespace ash

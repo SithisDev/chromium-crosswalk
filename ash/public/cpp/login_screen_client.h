@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,17 @@
 #include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
+#include "ash/public/cpp/login_accelerators.h"
 #include "base/callback_forward.h"
+#include "base/time/time.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/views/widget/widget.h"
 
 class AccountId;
 
 namespace ash {
+
+enum class ParentCodeValidationResult;
 
 // An interface allows Ash to trigger certain login steps that Chrome is
 // responsible for.
@@ -38,15 +44,6 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
       bool authenticated_by_pin,
       base::OnceCallback<void(bool)> callback) = 0;
 
-  // Attempt to authenticate the user with with an external binary.
-  virtual void AuthenticateUserWithExternalBinary(
-      const AccountId& account_id,
-      base::OnceCallback<void(bool)> callback) = 0;
-
-  // Attempt to enroll a user in the external binary authentication system.
-  virtual void EnrollUserWithExternalBinary(
-      base::OnceCallback<void(bool)> callback) = 0;
-
   // Try to authenticate |account_id| using easy unlock. This can be used on the
   // login or lock screen.
   // |account_id|: The account id of the user we are authenticating.
@@ -55,14 +52,24 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // the other auth methods above.
   virtual void AuthenticateUserWithEasyUnlock(const AccountId& account_id) = 0;
 
+  // Try to authenticate |account_id| using the challenge-response protocol
+  // against a security token.
+  // |account_id|: The account id of the user we are authenticating.
+  virtual void AuthenticateUserWithChallengeResponse(
+      const AccountId& account_id,
+      base::OnceCallback<void(bool)> callback) = 0;
+
   // Validates parent access code for the user identified by |account_id|. When
   // |account_id| is empty it tries to validate the access code for any child
-  // that is signed in the device. Returns validation result.
-  // Note: This should only be used for child user, it will always return false
-  // when a non-child id is used.
+  // that is signed in the device. Returns validation result. |validation_time|
+  // is the time that will be used to validate the code, validation will succeed
+  // if the code was valid this given time. Note: This should only be used for
+  // child user, it will always return false when a non-child id is used.
   // TODO(crbug.com/965479): move this to a more appropriate place.
-  virtual bool ValidateParentAccessCode(const AccountId& account_id,
-                                        const std::string& access_code) = 0;
+  virtual ParentCodeValidationResult ValidateParentAccessCode(
+      const AccountId& account_id,
+      const std::string& access_code,
+      base::Time validation_time) = 0;
 
   // Request to hard lock the user pod.
   // |account_id|:    The account id of the user in the user pod.
@@ -86,6 +93,9 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // Launches guest mode.
   virtual void LoginAsGuest() = 0;
 
+  // Show guest terms of service screen.
+  virtual void ShowGuestTosScreen() = 0;
+
   // User with |account_id| has reached maximum incorrect password attempts.
   virtual void OnMaxIncorrectPasswordAttempted(const AccountId& account_id) = 0;
 
@@ -100,11 +110,13 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // Passes focus to the OOBE dialog if it is showing. No-op otherwise.
   virtual void FocusOobeDialog() = 0;
 
-  // Show the gaia sign-in dialog. If |can_close| is true, the dialog can be
-  // closed. The value in |prefilled_account| will be used to prefill the
-  // sign-in dialog so the user does not need to type the account email.
-  virtual void ShowGaiaSignin(bool can_close,
-                              const AccountId& prefilled_account) = 0;
+  // Show the gaia sign-in dialog.
+  // The value in |prefilled_account| will be used to prefill the sign-in dialog
+  // so the user does not need to type the account email.
+  virtual void ShowGaiaSignin(const AccountId& prefilled_account) = 0;
+
+  // Show OS-Install screen.
+  virtual void ShowOsInstallScreen() = 0;
 
   // Notification that the remove user warning was shown.
   virtual void OnRemoveUserWarningShown() = 0;
@@ -131,14 +143,14 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
       const AccountId& account_id,
       const std::string& locale) = 0;
 
-  // Request to show a feedback report dialog in chrome.
-  virtual void ShowFeedback() = 0;
-
-  // Show the powerwash (device reset) dialog.
-  virtual void ShowResetScreen() = 0;
+  // Request to handle a login-specific accelerator action.
+  virtual void HandleAccelerator(ash::LoginAcceleratorAction action) = 0;
 
   // Show the help app for when users have trouble signing in to their account.
-  virtual void ShowAccountAccessHelpApp() = 0;
+  virtual void ShowAccountAccessHelpApp(gfx::NativeWindow parent_window) = 0;
+
+  // Shows help app for users that have trouble using parent access code.
+  virtual void ShowParentAccessHelpApp() = 0;
 
   // Show the lockscreen notification settings page.
   virtual void ShowLockScreenNotificationSettings() = 0;
@@ -148,8 +160,18 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // reversed direction.
   virtual void OnFocusLeavingSystemTray(bool reverse) = 0;
 
+  // Called when the system tray bubble is shown.
+  virtual void OnSystemTrayBubbleShown() = 0;
+
+  // Called when the lock screen is shown.
+  virtual void OnLoginScreenShown() = 0;
+
   // Used by Ash to signal that user activity occurred on the login screen.
   virtual void OnUserActivity() = 0;
+
+  // Get login screen widget. Currently used to set proper accessibility
+  // navigation.
+  virtual views::Widget* GetLoginWindowWidget() = 0;
 
  protected:
   virtual ~LoginScreenClient() = default;

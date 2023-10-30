@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,30 +6,40 @@
 #define ASH_APP_LIST_MODEL_APP_LIST_ITEM_OBSERVER_H_
 
 #include "ash/app_list/model/app_list_model_export.h"
+#include "base/observer_list_types.h"
 
-namespace app_list {
+namespace ash {
+enum class AppListConfigType;
 
-class APP_LIST_MODEL_EXPORT AppListItemObserver {
+class APP_LIST_MODEL_EXPORT AppListItemObserver : public base::CheckedObserver {
  public:
   // Invoked after item's icon is changed.
-  virtual void ItemIconChanged() {}
+  // |config_type| The app list configuration type for which the item icon
+  // changed.
+  virtual void ItemIconChanged(AppListConfigType config_type) {}
+
+  // Invoked after item's icon version number is changed.
+  virtual void ItemIconVersionChanged() {}
 
   // Invoked after item's name is changed.
   virtual void ItemNameChanged() {}
 
-  // Invoked after item begins or finishes installing.
-  virtual void ItemIsInstallingChanged() {}
+  // Invoked when the item's notification badge visibility is changed.
+  virtual void ItemBadgeVisibilityChanged() {}
 
-  // Invoked after item's download percentage changes.
-  virtual void ItemPercentDownloadedChanged() {}
+  // Invoked when the item's notification badge color is changed.
+  virtual void ItemBadgeColorChanged() {}
+
+  // Invoked when the item's "new install" badge is added or removed.
+  virtual void ItemIsNewInstallChanged() {}
 
   // Invoked when the item is about to be destroyed.
   virtual void ItemBeingDestroyed() {}
 
  protected:
-  virtual ~AppListItemObserver() {}
+  ~AppListItemObserver() override;
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_MODEL_APP_LIST_ITEM_OBSERVER_H_

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include <stddef.h>
 
 #include "ash/keyboard/ui/keyboard_export.h"
-
-struct GritResourceMap;
+#include "ui/base/webui/resource_path.h"
 
 namespace keyboard {
 
@@ -21,7 +20,7 @@ KEYBOARD_EXPORT extern const char kKeyboardHost[];
 
 // Get the list of keyboard resources. |size| is populated with the number of
 // resources in the returned array.
-KEYBOARD_EXPORT const GritResourceMap* GetKeyboardExtensionResources(
+KEYBOARD_EXPORT const webui::ResourcePath* GetKeyboardExtensionResources(
     size_t* size);
 
 // Initializes the keyboard module. This includes adding the necessary pak files

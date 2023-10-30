@@ -1,19 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/system/audio/unified_volume_slider_controller.h"
 
-#include "ash/metrics/user_metrics_action.h"
-#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/shell.h"
 #include "ash/system/audio/unified_volume_view.h"
+#include "ash/system/machine_learning/user_settings_event_logger.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 
-using chromeos::CrasAudioHandler;
-
 namespace ash {
+
+UnifiedVolumeSliderController::Delegate::Delegate() = default;
+
+UnifiedVolumeSliderController::Delegate::~Delegate() = default;
 
 UnifiedVolumeSliderController::UnifiedVolumeSliderController(
     UnifiedVolumeSliderController::Delegate* delegate)
@@ -24,23 +25,7 @@ UnifiedVolumeSliderController::UnifiedVolumeSliderController(
 UnifiedVolumeSliderController::~UnifiedVolumeSliderController() = default;
 
 views::View* UnifiedVolumeSliderController::CreateView() {
-  DCHECK(!slider_);
-  slider_ = new UnifiedVolumeView(this);
-  return slider_;
-}
-
-void UnifiedVolumeSliderController::ButtonPressed(views::Button* sender,
-                                                  const ui::Event& event) {
-  if (sender == slider_->button()) {
-    bool mute_on = !CrasAudioHandler::Get()->IsOutputMuted();
-    if (mute_on)
-      base::RecordAction(base::UserMetricsAction("StatusArea_Audio_Muted"));
-    else
-      base::RecordAction(base::UserMetricsAction("StatusArea_Audio_Unmuted"));
-    CrasAudioHandler::Get()->SetOutputMute(mute_on);
-  } else if (sender == slider_->more_button()) {
-    delegate_->OnAudioSettingsButtonClicked();
-  }
+  return new UnifiedVolumeView(this, delegate_);
 }
 
 void UnifiedVolumeSliderController::SliderValueChanged(
@@ -48,14 +33,14 @@ void UnifiedVolumeSliderController::SliderValueChanged(
     float value,
     float old_value,
     views::SliderChangeReason reason) {
-  if (reason != views::VALUE_CHANGED_BY_USER)
+  if (reason != views::SliderChangeReason::kByUser)
     return;
 
   const int level = value * 100;
 
   if (level != CrasAudioHandler::Get()->GetOutputVolumePercent()) {
-    Shell::Get()->metrics()->RecordUserMetricsAction(
-        UMA_STATUS_AREA_CHANGED_VOLUME_MENU);
+    base::RecordAction(
+        base::UserMetricsAction("StatusArea_Volume_ChangedMenu"));
   }
 
   CrasAudioHandler::Get()->SetOutputVolumePercent(level);
@@ -65,6 +50,16 @@ void UnifiedVolumeSliderController::SliderValueChanged(
       level > CrasAudioHandler::Get()->GetOutputDefaultVolumeMuteThreshold()) {
     CrasAudioHandler::Get()->SetOutputMute(false);
   }
+}
+
+void UnifiedVolumeSliderController::SliderButtonPressed() {
+  auto* const audio_handler = CrasAudioHandler::Get();
+  const bool mute = !audio_handler->IsOutputMuted();
+  if (mute)
+    base::RecordAction(base::UserMetricsAction("StatusArea_Audio_Muted"));
+  else
+    base::RecordAction(base::UserMetricsAction("StatusArea_Audio_Unmuted"));
+  audio_handler->SetOutputMute(mute);
 }
 
 }  // namespace ash

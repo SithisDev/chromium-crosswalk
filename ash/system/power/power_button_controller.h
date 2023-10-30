@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,12 @@
 
 #include "ash/accelerometer/accelerometer_reader.h"
 #include "ash/ash_export.h"
+#include "ash/public/cpp/session/session_observer.h"
+#include "ash/public/cpp/system/power/power_button_controller_base.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
+#include "ash/shutdown_reason.h"
 #include "ash/system/power/backlights_forced_off_setter.h"
 #include "ash/wm/lock_state_observer.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chromeos/dbus/power/power_manager_client.h"
@@ -37,12 +39,14 @@ class PowerButtonScreenshotController;
 // devices. In tablet mode, power button may also be consumed to take a
 // screenshot.
 class ASH_EXPORT PowerButtonController
-    : public display::DisplayConfigurator::Observer,
+    : public PowerButtonControllerBase,
+      public display::DisplayConfigurator::Observer,
       public chromeos::PowerManagerClient::Observer,
       public AccelerometerReader::Observer,
-      public BacklightsForcedOffSetter::Observer,
+      public ScreenBacklightObserver,
       public TabletModeObserver,
-      public LockStateObserver {
+      public LockStateObserver,
+      public SessionObserver {
  public:
   enum class ButtonType {
     // Indicates normal power button type.
@@ -60,18 +64,18 @@ class ASH_EXPORT PowerButtonController
   // Amount of time since last screen state change that power button event needs
   // to be ignored.
   static constexpr base::TimeDelta kScreenStateChangeDelay =
-      base::TimeDelta::FromMilliseconds(500);
+      base::Milliseconds(500);
 
   // Ignore button-up events occurring within this many milliseconds of the
   // previous button-up event. This prevents us from falling behind if the power
   // button is pressed repeatedly.
   static constexpr base::TimeDelta kIgnoreRepeatedButtonUpDelay =
-      base::TimeDelta::FromMilliseconds(500);
+      base::Milliseconds(500);
 
   // Amount of time since last SuspendDone() that power button event needs to be
   // ignored.
   static constexpr base::TimeDelta kIgnorePowerButtonAfterResumeDelay =
-      base::TimeDelta::FromSeconds(2);
+      base::Seconds(2);
 
   // Value of switches::kAshPowerButtonPosition stored in JSON format. These
   // are the field names of the flag.
@@ -86,6 +90,10 @@ class ASH_EXPORT PowerButtonController
 
   explicit PowerButtonController(
       BacklightsForcedOffSetter* backlights_forced_off_setter);
+
+  PowerButtonController(const PowerButtonController&) = delete;
+  PowerButtonController& operator=(const PowerButtonController&) = delete;
+
   ~PowerButtonController() override;
 
   // Handles events from "legacy" ACPI power buttons. On devices with these
@@ -101,10 +109,6 @@ class ASH_EXPORT PowerButtonController
   // Handles lock button behavior.
   void OnLockButtonEvent(bool down, const base::TimeTicks& timestamp);
 
-  // Cancels the ongoing power button behavior. This can be called while the
-  // button is still held to prevent any action from being taken on release.
-  void CancelPowerButtonEvent();
-
   // True if the menu is opened.
   bool IsMenuOpened() const;
 
@@ -114,6 +118,10 @@ class ASH_EXPORT PowerButtonController
   // Do not force backlights to be turned off.
   void StopForcingBacklightsOff();
 
+  // PowerButtonControllerBase:
+  void OnArcPowerButtonMenuEvent() override;
+  void CancelPowerButtonEvent() override;
+
   // display::DisplayConfigurator::Observer:
   void OnDisplayModeChanged(
       const display::DisplayConfigurator::DisplayStateList& outputs) override;
@@ -121,26 +129,28 @@ class ASH_EXPORT PowerButtonController
   // chromeos::PowerManagerClient::Observer:
   void ScreenBrightnessChanged(
       const power_manager::BacklightBrightnessChange& change) override;
-  void PowerButtonEventReceived(bool down,
-                                const base::TimeTicks& timestamp) override;
+  void PowerButtonEventReceived(bool down, base::TimeTicks timestamp) override;
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
+
+  // SessionObserver:
+  void OnLoginStatusChanged(LoginStatus status) override;
 
   // Initializes |screenshot_controller_| according to the tablet mode switch in
   // |result|.
   void OnGetSwitchStates(
-      base::Optional<chromeos::PowerManagerClient::SwitchStates> result);
+      absl::optional<chromeos::PowerManagerClient::SwitchStates> result);
 
   // TODO(minch): Remove this if/when all applicable devices expose a tablet
   // mode switch: https://crbug.com/798646.
   // AccelerometerReader::Observer:
-  void OnAccelerometerUpdated(
-      scoped_refptr<const AccelerometerUpdate> update) override;
+  void OnECLidAngleDriverStatusChanged(bool is_supported) override {}
+  void OnAccelerometerUpdated(const AccelerometerUpdate& update) override;
 
   // BacklightsForcedOffSetter::Observer:
   void OnBacklightsForcedOffChanged(bool forced_off) override;
-  void OnScreenStateChanged(
-      BacklightsForcedOffSetter::ScreenState screen_state) override;
+  void OnScreenBacklightStateChanged(
+      ScreenBacklightState screen_backlight_state) override;
 
   // TabletModeObserver:
   void OnTabletModeStarted() override;
@@ -161,8 +171,9 @@ class ASH_EXPORT PowerButtonController
   void StopTimersAndDismissMenu();
 
   // Starts the power menu animation. Called when a clamshell device's power
-  // button is pressed or when |power_button_menu_timer_| fires.
-  void StartPowerMenuAnimation();
+  // button is pressed, or when |power_button_menu_timer_| fires, or by arc
+  // power button to show the PowerButtonMenu.
+  void StartPowerMenuAnimation(ShutdownReason reason);
 
   // Called by |pre_shutdown_timer_| to start the cancellable pre-shutdown
   // animation.
@@ -196,7 +207,12 @@ class ASH_EXPORT PowerButtonController
   bool power_button_down_ = false;
   bool lock_button_down_ = false;
 
-  // True if the device is curently in tablet mode (per TabletModeController).
+  // Passed in StartPowerMenuAnimation(ShutdownReason reason). When it is not
+  // POWER_BUTTON such as when called from arc, we do not start
+  // |pre_shutdown_timer_|.
+  ShutdownReason shutdown_reason_ = ShutdownReason::POWER_BUTTON;
+
+  // True if the device is currently in tablet mode (per TabletModeController).
   bool in_tablet_mode_ = false;
 
   // Has the screen brightness been reduced to 0%?
@@ -213,16 +229,9 @@ class ASH_EXPORT PowerButtonController
   // Saves the button type for this power button.
   ButtonType button_type_ = ButtonType::NORMAL;
 
-  // True if the device should observe accelerometer events to enter tablet
-  // mode.
-  bool observe_accelerometer_events_ = false;
-
   // True if the kForceTabletPowerButton flag is set. This forces tablet power
   // button behavior even while in laptop mode.
   bool force_tablet_power_button_ = false;
-
-  // True if the device has tablet mode switch.
-  bool has_tablet_mode_switch_ = false;
 
   // True if the screen was off when the power button was pressed.
   bool screen_off_when_power_button_down_ = false;
@@ -276,17 +285,15 @@ class ASH_EXPORT PowerButtonController
   // display's height or width, respectively.
   double power_button_offset_percentage_ = 0.f;
 
-  ScopedObserver<BacklightsForcedOffSetter, BacklightsForcedOffSetter::Observer>
-      backlights_forced_off_observer_;
+  base::ScopedObservation<BacklightsForcedOffSetter, ScreenBacklightObserver>
+      backlights_forced_off_observation_{this};
 
   // Used to maintain active state of the active window that exists before
   // showing menu.
   std::unique_ptr<views::Widget::PaintAsActiveLock>
       active_window_paint_as_active_lock_;
 
-  base::WeakPtrFactory<PowerButtonController> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PowerButtonController);
+  base::WeakPtrFactory<PowerButtonController> weak_factory_{this};
 };
 
 }  // namespace ash

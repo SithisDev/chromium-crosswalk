@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "base/macros.h"
+#include "ash/public/cpp/login_types.h"
 #include "base/observer_list.h"
 
 namespace ash {
@@ -19,32 +19,45 @@ class EnterpriseDomainObserver;
 class ASH_EXPORT EnterpriseDomainModel {
  public:
   EnterpriseDomainModel();
+
+  EnterpriseDomainModel(const EnterpriseDomainModel&) = delete;
+  EnterpriseDomainModel& operator=(const EnterpriseDomainModel&) = delete;
+
   ~EnterpriseDomainModel();
 
   void AddObserver(EnterpriseDomainObserver* observer);
   void RemoveObserver(EnterpriseDomainObserver* observer);
 
-  void SetEnterpriseDisplayDomain(const std::string& enterprise_display_domain,
-                                  bool active_directory_managed);
+  void SetDeviceEnterpriseInfo(
+      const DeviceEnterpriseInfo& device_enterprise_info);
 
-  const std::string& enterprise_display_domain() const {
-    return enterprise_display_domain_;
+  // |account_domain_manager| should be either an empty string, a domain name
+  // (foo.com) or an email address (user@foo.com). This string will be displayed
+  // to the user without modification.
+  void SetEnterpriseAccountDomainInfo(
+      const std::string& account_domain_manager);
+
+  const std::string& enterprise_domain_manager() const {
+    return device_enterprise_info_.enterprise_domain_manager;
   }
-  bool active_directory_managed() const { return active_directory_managed_; }
+
+  bool active_directory_managed() const {
+    return device_enterprise_info_.active_directory_managed;
+  }
+
+  ManagementDeviceMode management_device_mode() const {
+    return device_enterprise_info_.management_device_mode;
+  }
+
+  const std::string& account_domain_manager() const {
+    return account_domain_manager_;
+  }
 
  private:
-  void NotifyChanged();
-
-  // The domain name of the organization that manages the device. Empty if the
-  // device is not enterprise enrolled or if it uses Active Directory.
-  std::string enterprise_display_domain_;
-
-  // Whether this is an Active Directory managed enterprise device.
-  bool active_directory_managed_ = false;
+  DeviceEnterpriseInfo device_enterprise_info_;
+  std::string account_domain_manager_;
 
   base::ObserverList<EnterpriseDomainObserver>::Unchecked observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(EnterpriseDomainModel);
 };
 
 }  // namespace ash

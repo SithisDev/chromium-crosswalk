@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,10 @@
 
 namespace ash {
 
+namespace assistant {
 enum class AssistantEntryPoint;
+}
+
 enum class AssistantVisibility;
 
 namespace assistant {
@@ -31,9 +34,11 @@ bool IsFinishingSession(AssistantVisibility new_visibility);
 COMPONENT_EXPORT(ASSISTANT_UTIL)
 bool IsVoiceEntryPoint(AssistantEntryPoint entry_point, bool prefer_voice);
 
-// Returns true if the |entry_point| should attempt warmer welcome.
 COMPONENT_EXPORT(ASSISTANT_UTIL)
-bool ShouldAttemptWarmerWelcome(AssistantEntryPoint entry_point);
+bool IsGoogleDevice();
+
+COMPONENT_EXPORT(ASSISTANT_UTIL)
+void OverrideIsGoogleDeviceForTesting(bool is_google_device);
 
 }  // namespace util
 }  // namespace assistant

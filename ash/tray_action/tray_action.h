@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,17 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
-#include "base/macros.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "base/observer_list.h"
-#include "base/scoped_observer.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/scoped_observation.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "ui/events/devices/device_data_manager.h"
 #include "ui/events/devices/input_device_event_observer.h"
 
 namespace ui {
-class DeviceDataManager;
 enum class StylusState;
 }  // namespace ui
 
@@ -39,6 +41,10 @@ class ASH_EXPORT TrayAction : public mojom::TrayAction,
                               public ui::InputDeviceEventObserver {
  public:
   explicit TrayAction(BacklightsForcedOffSetter* backlights_forced_off_setter);
+
+  TrayAction(const TrayAction&) = delete;
+  TrayAction& operator=(const TrayAction&) = delete;
+
   ~TrayAction() override;
 
   LockScreenNoteDisplayStateHandler*
@@ -49,7 +55,7 @@ class ASH_EXPORT TrayAction : public mojom::TrayAction,
   void AddObserver(TrayActionObserver* observer);
   void RemoveObserver(TrayActionObserver* observer);
 
-  void BindRequest(mojom::TrayActionRequest request);
+  void BindReceiver(mojo::PendingReceiver<mojom::TrayAction> receiver);
 
   // Gets last known handler state for the lock screen note action.
   // It will return kNotAvailable if an action handler has not been set using
@@ -67,7 +73,7 @@ class ASH_EXPORT TrayAction : public mojom::TrayAction,
   void CloseLockScreenNote(mojom::CloseLockScreenNoteReason reason);
 
   // mojom::TrayAction:
-  void SetClient(mojom::TrayActionClientPtr action_handler,
+  void SetClient(mojo::PendingRemote<mojom::TrayActionClient> action_handler,
                  mojom::TrayActionState lock_screen_note_state) override;
   void UpdateLockScreenNoteState(mojom::TrayActionState state) override;
 
@@ -92,15 +98,13 @@ class ASH_EXPORT TrayAction : public mojom::TrayAction,
 
   base::ObserverList<TrayActionObserver>::Unchecked observers_;
 
-  // Bindings for users of the mojo interface.
-  mojo::BindingSet<mojom::TrayAction> bindings_;
+  // Receivers for users of the mojo interface.
+  mojo::ReceiverSet<mojom::TrayAction> receivers_;
 
-  mojom::TrayActionClientPtr tray_action_client_;
+  mojo::Remote<mojom::TrayActionClient> tray_action_client_;
 
-  ScopedObserver<ui::DeviceDataManager, ui::InputDeviceEventObserver>
-      stylus_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrayAction);
+  base::ScopedObservation<ui::DeviceDataManager, ui::InputDeviceEventObserver>
+      stylus_observation_{this};
 };
 
 }  // namespace ash

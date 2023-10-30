@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,17 @@
 #include <string>
 #include <vector>
 
+#include "ash/constants/ash_features.h"
+#include "ash/constants/ash_switches.h"
+#include "ash/system/bluetooth/bluetooth_power_controller.h"
 #include "ash/system/bluetooth/tray_bluetooth_helper.h"
 #include "ash/test/ash_test_base.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "dbus/object_path.h"
-#include "device/base/features.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "device/bluetooth/dbus/fake_bluetooth_adapter_client.h"
 #include "device/bluetooth/dbus/fake_bluetooth_device_client.h"
@@ -81,7 +84,24 @@ class TestTrayBluetoothHelperObserver : public TrayBluetoothHelper::Observer {
   size_t device_list_changed_count_ = 0;
 };
 
-using TrayBluetoothHelperLegacyTest = AshTestBase;
+class TrayBluetoothHelperLegacyTest : public AshTestBase {
+ public:
+  void SetUp() override {
+    // These tests should only be run with the kBluetoothRevamp feature flag is
+    // disabled, and so we force it off here and ensure that the local state
+    // prefs that would have been registered had the feature flag been off are
+    // registered.
+    if (ash::features::IsBluetoothRevampEnabled()) {
+      feature_list_.InitAndDisableFeature(features::kBluetoothRevamp);
+      BluetoothPowerController::RegisterLocalStatePrefs(
+          local_state()->registry());
+    }
+    AshTestBase::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
 
 // Tests basic functionality.
 TEST_F(TrayBluetoothHelperLegacyTest, Basics) {
@@ -120,6 +140,7 @@ TEST_F(TrayBluetoothHelperLegacyTest, Basics) {
   EXPECT_FALSE(devices.empty());
   EXPECT_TRUE(ExistInFilteredDevices(kDisplayPinCodeAddress, devices));
   EXPECT_FALSE(ExistInFilteredDevices(kLowEnergyAddress, devices));
+  ASSERT_FALSE(devices[0]->is_blocked_by_policy);
 
   helper.StartBluetoothDiscovering();
   base::RunLoop().RunUntilIdle();
@@ -141,16 +162,16 @@ TEST_F(TrayBluetoothHelperLegacyTest, GetBluetoothState) {
       static_cast<FakeBluetoothAdapterClient*>(
           BluezDBusManager::Get()->GetBluetoothAdapterClient());
 
-  // Mark all adapters as not-visible to simulate no adapters.
-  adapter_client->SetVisible(false);
-  adapter_client->SetSecondVisible(false);
+  // Mark all adapters as not present to simulate no adapters.
+  adapter_client->SetPresent(false);
+  adapter_client->SetSecondPresent(false);
   helper.Initialize();
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(BluetoothSystem::State::kUnavailable, helper.GetBluetoothState());
 
-  // Make adapter visible but turn it off.
-  adapter_client->SetVisible(true);
+  // Make adapter present but turn it off.
+  adapter_client->SetPresent(true);
   adapter_client
       ->GetProperties(
           dbus::ObjectPath(bluez::FakeBluetoothAdapterClient::kAdapterPath))
@@ -182,22 +203,22 @@ TEST_F(TrayBluetoothHelperLegacyTest, OnBluetoothSystemStateChanged) {
       static_cast<FakeBluetoothAdapterClient*>(
           BluezDBusManager::Get()->GetBluetoothAdapterClient());
 
-  // Mark all adapters as not-visible to simulate no adapters.
-  adapter_client->SetVisible(false);
-  adapter_client->SetSecondVisible(false);
+  // Mark all adapters as not present to simulate no adapters.
+  adapter_client->SetPresent(false);
+  adapter_client->SetSecondPresent(false);
   helper.Initialize();
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(BluetoothSystem::State::kUnavailable, helper.GetBluetoothState());
   EXPECT_EQ(0u, observer.system_state_changed_count_);
 
-  // Turn off the adapter and make it visible to simulate a powered off adapter
+  // Turn off the adapter and make it present to simulate a powered off adapter
   // being added.
   adapter_client
       ->GetProperties(
           dbus::ObjectPath(bluez::FakeBluetoothAdapterClient::kAdapterPath))
       ->powered.ReplaceValue(false);
-  adapter_client->SetVisible(true);
+  adapter_client->SetPresent(true);
 
   EXPECT_EQ(BluetoothSystem::State::kPoweredOff, helper.GetBluetoothState());
   EXPECT_EQ(1u, observer.system_state_changed_count_);
@@ -220,7 +241,7 @@ TEST_F(TrayBluetoothHelperLegacyTest, OnBluetoothSystemStateChanged) {
   observer.Reset();
 
   // Remove the adapter.
-  adapter_client->SetVisible(false);
+  adapter_client->SetPresent(false);
   EXPECT_EQ(BluetoothSystem::State::kUnavailable, helper.GetBluetoothState());
   EXPECT_EQ(1u, observer.system_state_changed_count_);
   EXPECT_EQ(std::vector<BluetoothSystem::State>(
@@ -228,13 +249,13 @@ TEST_F(TrayBluetoothHelperLegacyTest, OnBluetoothSystemStateChanged) {
             observer.system_states_);
   observer.Reset();
 
-  // Turn on the adapter and make it visible to simulate a powered on adapter
+  // Turn on the adapter and make it present to simulate a powered on adapter
   // being added.
   adapter_client
       ->GetProperties(
           dbus::ObjectPath(bluez::FakeBluetoothAdapterClient::kAdapterPath))
       ->powered.ReplaceValue(true);
-  adapter_client->SetVisible(true);
+  adapter_client->SetPresent(true);
 
   EXPECT_EQ(BluetoothSystem::State::kPoweredOn, helper.GetBluetoothState());
   EXPECT_EQ(1u, observer.system_state_changed_count_);
@@ -260,9 +281,8 @@ TEST_F(TrayBluetoothHelperLegacyTest, OnBluetoothSystemStateChanged) {
 // Tests the Bluetooth device list when UnfilteredBluetoothDevices feature is
 // enabled.
 TEST_F(TrayBluetoothHelperLegacyTest, UnfilteredBluetoothDevices) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitFromCommandLine(device::kUnfilteredBluetoothDevices.name,
-                                   "");
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  cmd_line->AppendSwitch(switches::kUnfilteredBluetoothDevices);
 
   // Set Bluetooth discovery simulation delay to 0 so the test doesn't have to
   // wait or use timers.
@@ -320,15 +340,8 @@ TEST_F(TrayBluetoothHelperLegacyTest, BluetoothAddress) {
   base::RunLoop().RunUntilIdle();
 
   const BluetoothDeviceList& devices = helper.GetAvailableBluetoothDevices();
-  ASSERT_EQ(3u, devices.size());
-  EXPECT_EQ(base::UTF8ToUTF16(
-                FakeBluetoothDeviceClient::kPairedUnconnectableDeviceAddress),
-            device::GetBluetoothAddressForDisplay(devices[0]->address));
-  EXPECT_EQ(base::UTF8ToUTF16(FakeBluetoothDeviceClient::kPairedDeviceAddress),
-            device::GetBluetoothAddressForDisplay(devices[1]->address));
-  EXPECT_EQ(
-      base::UTF8ToUTF16(FakeBluetoothDeviceClient::kDisplayPinCodeAddress),
-      device::GetBluetoothAddressForDisplay(devices[2]->address));
+  ASSERT_EQ(1u, devices.size());
+  EXPECT_EQ(kDisplayPinCodeAddress, devices[0]->address);
 }
 
 }  // namespace

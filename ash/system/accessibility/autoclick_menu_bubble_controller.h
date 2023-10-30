@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,14 @@
 #include "ash/system/locale/locale_update_controller_impl.h"
 #include "ash/system/tray/tray_bubble_view.h"
 
+namespace views {
+class Widget;
+}  // namespace views
+
 namespace ash {
 
 class AutoclickScrollBubbleController;
+class TrayBubbleView;
 
 // Manages the bubble which contains an AutoclickMenuView.
 class ASH_EXPORT AutoclickMenuBubbleController
@@ -25,21 +30,25 @@ class ASH_EXPORT AutoclickMenuBubbleController
   static const int kAnimationDurationMs = 150;
 
   AutoclickMenuBubbleController();
+
+  AutoclickMenuBubbleController(const AutoclickMenuBubbleController&) = delete;
+  AutoclickMenuBubbleController& operator=(
+      const AutoclickMenuBubbleController&) = delete;
+
   ~AutoclickMenuBubbleController() override;
 
   // Sets the currently selected event type.
   void SetEventType(AutoclickEventType type);
 
   // Sets the menu's position on the screen.
-  void SetPosition(AutoclickMenuPosition position);
+  void SetPosition(FloatingMenuPosition position);
 
   // Set the scroll menu's position on the screen. The rect is the bounds of
   // the scrollable area, and the point is the user-selected scroll point.
   void SetScrollPosition(gfx::Rect scroll_bounds_in_dips,
                          const gfx::Point& scroll_point_in_dips);
 
-  void ShowBubble(AutoclickEventType event_type,
-                  AutoclickMenuPosition position);
+  void ShowBubble(AutoclickEventType event_type, FloatingMenuPosition position);
 
   void CloseBubble();
 
@@ -65,14 +74,18 @@ class ASH_EXPORT AutoclickMenuBubbleController
   // LocaleChangeObserver:
   void OnLocaleChanged() override;
 
+  // For tests only.
+  views::Widget* GetBubbleWidgetForTesting() { return bubble_widget_; }
+
  private:
   friend class AutoclickMenuBubbleControllerTest;
   friend class AutoclickTest;
+  friend class FloatingAccessibilityControllerTest;
 
   // Owned by views hierarchy.
-  AutoclickMenuBubbleView* bubble_view_ = nullptr;
+  TrayBubbleView* bubble_view_ = nullptr;
   AutoclickMenuView* menu_view_ = nullptr;
-  AutoclickMenuPosition position_ = kDefaultAutoclickMenuPosition;
+  FloatingMenuPosition position_ = kDefaultAutoclickMenuPosition;
 
   views::Widget* bubble_widget_ = nullptr;
 
@@ -80,8 +93,6 @@ class ASH_EXPORT AutoclickMenuBubbleController
   // by this class so that positioning calculations can take place using both
   // classes at once.
   std::unique_ptr<AutoclickScrollBubbleController> scroll_bubble_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutoclickMenuBubbleController);
 };
 
 }  // namespace ash

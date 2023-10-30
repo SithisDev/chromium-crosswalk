@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,37 +10,21 @@
 #include "ash/login/ui/lock_screen.h"
 #include "ash/login/ui/login_test_utils.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "base/strings/strcat.h"
+#include "components/user_manager/known_user.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
 
-// A WidgetDelegate which ensures that |initially_focused| gets focus.
-class LoginTestBase::WidgetDelegate : public views::WidgetDelegate {
- public:
-  explicit WidgetDelegate(views::View* content) : content_(content) {}
-  ~WidgetDelegate() override = default;
-
-  // views::WidgetDelegate:
-  void DeleteDelegate() override { delete this; }
-  views::View* GetInitiallyFocusedView() override { return content_; }
-  views::Widget* GetWidget() override { return content_->GetWidget(); }
-  const views::Widget* GetWidget() const override {
-    return content_->GetWidget();
-  }
-
- private:
-  views::View* content_;
-
-  DISALLOW_COPY_AND_ASSIGN(WidgetDelegate);
-};
-
-LoginTestBase::LoginTestBase() = default;
+LoginTestBase::LoginTestBase()
+    : NoSessionAshTestBase(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
+  user_manager::KnownUser::RegisterPrefs(local_state()->registry());
+}
 
 LoginTestBase::~LoginTestBase() = default;
 
@@ -54,11 +38,13 @@ void LoginTestBase::ShowLockScreen() {
   base::RunLoop().RunUntilIdle();
 }
 
-void LoginTestBase::ShowLoginScreen() {
+void LoginTestBase::ShowLoginScreen(bool set_wallpaper) {
   GetSessionControllerClient()->SetSessionState(
       session_manager::SessionState::LOGIN_PRIMARY);
   // The login screen can't be shown without a wallpaper.
-  Shell::Get()->wallpaper_controller()->ShowDefaultWallpaperForTesting();
+  if (set_wallpaper)
+    Shell::Get()->wallpaper_controller()->ShowDefaultWallpaperForTesting();
+
   Shell::Get()->login_screen_controller()->ShowLoginScreen();
   // Allow focus to reach the appropriate View.
   base::RunLoop().RunUntilIdle();
@@ -75,7 +61,10 @@ std::unique_ptr<views::Widget> LoginTestBase::CreateWidgetWithContent(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(0, 0, 800, 800);
-  params.delegate = new WidgetDelegate(content);
+
+  params.delegate = new views::WidgetDelegate();
+  params.delegate->SetInitiallyFocusedView(content);
+  params.delegate->SetOwnedByWidget(true);
 
   // Set the widget to the lock screen container, since a test may change the
   // session state to locked, which will hide all widgets not associated with
@@ -84,7 +73,7 @@ std::unique_ptr<views::Widget> LoginTestBase::CreateWidgetWithContent(
                                       kShellWindowId_LockScreenContainer);
 
   auto new_widget = std::make_unique<views::Widget>();
-  new_widget->Init(params);
+  new_widget->Init(std::move(params));
   new_widget->SetContentsView(content);
   new_widget->Show();
   return new_widget;
@@ -137,6 +126,16 @@ void LoginTestBase::AddChildUsers(size_t num_users) {
 
   // Notify any listeners that the user count has changed.
   DataDispatcher()->SetUserList(users_);
+}
+
+void LoginTestBase::RemoveUser(const AccountId& account_id) {
+  for (auto it = users().cbegin(); it != users().cend(); ++it)
+    if (it->basic_user_info.account_id == account_id) {
+      users().erase(it);
+      DataDispatcher()->SetUserList(users());
+      return;
+    }
+  ADD_FAILURE() << "User not found: " << account_id.Serialize();
 }
 
 LoginDataDispatcher* LoginTestBase::DataDispatcher() {

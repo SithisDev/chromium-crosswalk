@@ -1,30 +1,30 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ASH_IME_TEST_IME_CONTROLLER_CLIENT_H_
 #define ASH_IME_TEST_IME_CONTROLLER_CLIENT_H_
 
-#include "ash/public/interfaces/ime_controller.mojom.h"
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "ash/public/cpp/ime_controller_client.h"
 
 namespace ash {
 
-class TestImeControllerClient : public mojom::ImeControllerClient {
+class TestImeControllerClient : public ImeControllerClient {
  public:
   TestImeControllerClient();
-  ~TestImeControllerClient() override;
 
-  mojom::ImeControllerClientPtr CreateInterfacePtr();
+  TestImeControllerClient(const TestImeControllerClient&) = delete;
+  TestImeControllerClient& operator=(const TestImeControllerClient&) = delete;
 
-  // mojom::ImeControllerClient:
+  ~TestImeControllerClient();
+
+  // ImeControllerClient:
   void SwitchToNextIme() override;
   void SwitchToLastUsedIme() override;
   void SwitchImeById(const std::string& id, bool show_message) override;
   void ActivateImeMenuItem(const std::string& key) override;
   void SetCapsLockEnabled(bool enabled) override;
-  void OverrideKeyboardKeyset(chromeos::input_method::mojom::ImeKeyset keyset,
+  void OverrideKeyboardKeyset(input_method::ImeKeyset keyset,
                               OverrideKeyboardKeysetCallback callback) override;
   void UpdateMirroringState(bool enabled) override;
   void UpdateCastingState(bool enabled) override;
@@ -36,16 +36,10 @@ class TestImeControllerClient : public mojom::ImeControllerClient {
   int set_caps_lock_count_ = 0;
   std::string last_switch_ime_id_;
   bool last_show_message_ = false;
-  chromeos::input_method::mojom::ImeKeyset last_keyset_ =
-      chromeos::input_method::mojom::ImeKeyset::kNone;
+  input_method::ImeKeyset last_keyset_ = input_method::ImeKeyset::kNone;
   bool is_mirroring_ = false;
   bool is_casting_ = false;
   int show_mode_indicator_count_ = 0;
-
- private:
-  mojo::Binding<mojom::ImeControllerClient> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestImeControllerClient);
 };
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,16 +42,15 @@ void FocusCycler::RemoveWidget(views::Widget* widget) {
 }
 
 void FocusCycler::RotateFocus(Direction direction) {
-  aura::Window* window = window_util::GetActiveWindow();
-  if (window) {
+  if (aura::Window* window = window_util::GetActiveWindow(); window) {
     views::Widget* widget = views::Widget::GetWidgetForNativeView(window);
     // First try to rotate focus within the active widget. If that succeeds,
     // we're done.
     if (widget &&
         widget->GetFocusManager()->RotatePaneFocus(
-            direction == BACKWARD ? views::FocusManager::kBackward
-                                  : views::FocusManager::kForward,
-            views::FocusManager::kNoWrap)) {
+            direction == BACKWARD ? views::FocusManager::Direction::kBackward
+                                  : views::FocusManager::Direction::kForward,
+            views::FocusManager::FocusCycleWrapping::kDisabled)) {
       return;
     }
   }
@@ -94,10 +93,10 @@ void FocusCycler::RotateFocus(Direction direction) {
         break;
       views::FocusManager* focus_manager = widget->GetFocusManager();
       focus_manager->ClearFocus();
-      focus_manager->RotatePaneFocus(direction == BACKWARD
-                                         ? views::FocusManager::kBackward
-                                         : views::FocusManager::kForward,
-                                     views::FocusManager::kWrap);
+      focus_manager->RotatePaneFocus(
+          direction == BACKWARD ? views::FocusManager::Direction::kBackward
+                                : views::FocusManager::Direction::kForward,
+          views::FocusManager::FocusCycleWrapping::kEnabled);
       break;
     } else {
       if (FocusWidget(widgets_[index]))

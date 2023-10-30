@@ -1,18 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/shelf/shelf_view_test_api.h"
 
+#include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_model.h"
-#include "ash/shelf/overflow_button.h"
+#include "ash/public/cpp/test/test_shelf_item_delegate.h"
 #include "ash/shelf/shelf_app_button.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_menu_model_adapter.h"
+#include "ash/shelf/shelf_navigation_widget.h"
 #include "ash/shelf/shelf_view.h"
+#include "ash/shelf/shelf_widget.h"
 #include "base/run_loop.h"
+#include "base/time/time.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/separator.h"
 #include "ui/views/view_model.h"
 
 namespace {
@@ -21,6 +25,10 @@ namespace {
 class TestAPIAnimationObserver : public views::BoundsAnimatorObserver {
  public:
   TestAPIAnimationObserver() = default;
+
+  TestAPIAnimationObserver(const TestAPIAnimationObserver&) = delete;
+  TestAPIAnimationObserver& operator=(const TestAPIAnimationObserver&) = delete;
+
   ~TestAPIAnimationObserver() override = default;
 
   // views::BoundsAnimatorObserver overrides:
@@ -28,9 +36,6 @@ class TestAPIAnimationObserver : public views::BoundsAnimatorObserver {
   void OnBoundsAnimatorDone(views::BoundsAnimator* animator) override {
     base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestAPIAnimationObserver);
 };
 
 }  // namespace
@@ -42,7 +47,7 @@ ShelfViewTestAPI::ShelfViewTestAPI(ShelfView* shelf_view)
 
 ShelfViewTestAPI::~ShelfViewTestAPI() = default;
 
-int ShelfViewTestAPI::GetButtonCount() {
+size_t ShelfViewTestAPI::GetButtonCount() {
   return shelf_view_->view_model_->view_size();
 }
 
@@ -54,22 +59,13 @@ ShelfID ShelfViewTestAPI::AddItem(ShelfItemType type) {
   ShelfItem item;
   item.type = type;
   item.id = ShelfID(base::NumberToString(id_++));
-  shelf_view_->model_->Add(item);
+  shelf_view_->model_->Add(item,
+                           std::make_unique<TestShelfItemDelegate>(item.id));
   return item.id;
 }
 
 views::View* ShelfViewTestAPI::GetViewAt(int index) {
   return shelf_view_->view_model_->view_at(index);
-}
-
-void ShelfViewTestAPI::ShowOverflowBubble() {
-  DCHECK(!shelf_view_->IsShowingOverflowBubble());
-  shelf_view_->ToggleOverflowBubble();
-}
-
-void ShelfViewTestAPI::HideOverflowBubble() {
-  DCHECK(shelf_view_->IsShowingOverflowBubble());
-  shelf_view_->ToggleOverflowBubble();
 }
 
 const gfx::Rect& ShelfViewTestAPI::GetBoundsByIndex(int index) {
@@ -80,28 +76,37 @@ const gfx::Rect& ShelfViewTestAPI::GetIdealBoundsByIndex(int index) {
   return shelf_view_->view_model_->ideal_bounds(index);
 }
 
-int ShelfViewTestAPI::GetAnimationDuration() const {
+base::TimeDelta ShelfViewTestAPI::GetAnimationDuration() const {
   DCHECK(shelf_view_->bounds_animator_);
   return shelf_view_->bounds_animator_->GetAnimationDuration();
 }
 
-void ShelfViewTestAPI::SetAnimationDuration(int duration_ms) {
-  shelf_view_->bounds_animator_->SetAnimationDuration(duration_ms);
+void ShelfViewTestAPI::SetAnimationDuration(base::TimeDelta duration) {
+  shelf_view_->bounds_animator_->SetAnimationDuration(duration);
+}
+
+void ShelfViewTestAPI::RunMessageLoopUntilAnimationsDone(
+    views::BoundsAnimator* bounds_animator) {
+  if (!bounds_animator->IsAnimating())
+    return;
+
+  std::unique_ptr<TestAPIAnimationObserver> observer(
+      new TestAPIAnimationObserver());
+
+  bounds_animator->AddObserver(observer.get());
+
+  // This nested loop will quit when TestAPIAnimationObserver's
+  // OnBoundsAnimatorDone is called.
+  base::RunLoop().Run();
+
+  bounds_animator->RemoveObserver(observer.get());
 }
 
 void ShelfViewTestAPI::RunMessageLoopUntilAnimationsDone() {
   if (!shelf_view_->bounds_animator_->IsAnimating())
     return;
 
-  std::unique_ptr<TestAPIAnimationObserver> observer(
-      new TestAPIAnimationObserver());
-  shelf_view_->bounds_animator_->AddObserver(observer.get());
-
-  // This nested loop will quit when TestAPIAnimationObserver's
-  // OnBoundsAnimatorDone is called.
-  base::RunLoop().Run();
-
-  shelf_view_->bounds_animator_->RemoveObserver(observer.get());
+  RunMessageLoopUntilAnimationsDone(shelf_view_->bounds_animator_.get());
 }
 
 gfx::Rect ShelfViewTestAPI::GetMenuAnchorRect(const views::View& source,
@@ -118,12 +123,12 @@ bool ShelfViewTestAPI::CloseMenu() {
   return true;
 }
 
-OverflowBubble* ShelfViewTestAPI::overflow_bubble() {
-  return shelf_view_->overflow_bubble_.get();
+const gfx::Rect& ShelfViewTestAPI::visible_shelf_item_bounds_union() const {
+  return shelf_view_->visible_shelf_item_bounds_union_;
 }
 
 ShelfTooltipManager* ShelfViewTestAPI::tooltip_manager() {
-  return &shelf_view_->tooltip_;
+  return shelf_view_->shelf()->tooltip();
 }
 
 int ShelfViewTestAPI::GetMinimumDragDistance() const {
@@ -143,13 +148,23 @@ bool ShelfViewTestAPI::IsRippedOffFromShelf() {
   return shelf_view_->dragged_off_shelf_;
 }
 
-bool ShelfViewTestAPI::DraggedItemToAnotherShelf() {
-  return shelf_view_->dragged_to_another_shelf_;
-}
-
 ShelfButtonPressedMetricTracker*
 ShelfViewTestAPI::shelf_button_pressed_metric_tracker() {
   return &(shelf_view_->shelf_button_pressed_metric_tracker_);
+}
+
+void ShelfViewTestAPI::SetShelfContextMenuCallback(
+    base::RepeatingClosure closure) {
+  DCHECK(shelf_view_->context_menu_shown_callback_.is_null());
+  shelf_view_->context_menu_shown_callback_ = std::move(closure);
+}
+
+absl::optional<size_t> ShelfViewTestAPI::GetSeparatorIndex() const {
+  return shelf_view_->separator_index_;
+}
+
+bool ShelfViewTestAPI::IsSeparatorVisible() const {
+  return shelf_view_->separator_->GetVisible();
 }
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,36 @@
 
 #include "ash/assistant/model/assistant_interaction_model_observer.h"
 #include "ash/assistant/ui/base/assistant_button.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/scoped_observation.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 
 namespace ash {
 
-enum class AssistantButtonId;
-class AssistantViewDelegate;
 class LogoView;
 
 // A stateful view belonging to DialogPlate which indicates current mic state
 // and delivers notification of press events.
 class COMPONENT_EXPORT(ASSISTANT_UI) MicView
     : public AssistantButton,
+      public AssistantControllerObserver,
       public AssistantInteractionModelObserver {
  public:
-  MicView(views::ButtonListener* listener,
-          AssistantViewDelegate* delegate,
+  METADATA_HEADER(MicView);
+
+  MicView(AssistantButtonListener* listener,
           AssistantButtonId button_id);
+  MicView(const MicView&) = delete;
+  MicView& operator=(const MicView&) = delete;
   ~MicView() override;
 
-  // AssistantButton:
-  const char* GetClassName() const override;
   gfx::Size CalculatePreferredSize() const override;
   int GetHeightForWidth(int width) const override;
+
+  // AssistantControllerObserver:
+  void OnAssistantControllerDestroying() override;
 
   // AssistantInteractionModelObserver:
   void OnMicStateChanged(MicState mic_state) override;
@@ -45,15 +51,14 @@ class COMPONENT_EXPORT(ASSISTANT_UI) MicView
   // immediately to the next state regardless of |animate|.
   void UpdateState(bool animate);
 
-  AssistantViewDelegate* const delegate_;
-
   LogoView* logo_view_;  // Owned by view hierarchy.
 
   // True when speech level goes above a threshold and sets LogoView in
   // kUserSpeaks state.
   bool is_user_speaking_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(MicView);
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 };
 
 }  // namespace ash

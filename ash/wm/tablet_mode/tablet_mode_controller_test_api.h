@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "ash/wm/tablet_mode/internal_input_devices_event_blocker.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
-#include "base/macros.h"
 
 namespace ash {
 
@@ -21,9 +20,13 @@ class TabletModeWindowManager;
 class TabletModeControllerTestApi {
  public:
   static constexpr float kDegreesToRadians = 3.1415926f / 180.0f;
-  static constexpr float kMeanGravity = 9.8066f;
 
   TabletModeControllerTestApi();
+
+  TabletModeControllerTestApi(const TabletModeControllerTestApi&) = delete;
+  TabletModeControllerTestApi& operator=(const TabletModeControllerTestApi&) =
+      delete;
+
   ~TabletModeControllerTestApi();
 
   // Enters or exits tablet mode. Use these instead when stuff such as tray
@@ -31,9 +34,14 @@ class TabletModeControllerTestApi {
   void EnterTabletMode();
   void LeaveTabletMode();
 
-  // Called to attach an external mouse. If we're currently in tablet mode,
-  // tablet mode will be ended because of this.
+  // Called to attach an external mouse/touchpad. If we're currently in tablet
+  // mode, tablet mode will be ended because of this.
   void AttachExternalMouse();
+  void AttachExternalTouchpad();
+
+  // Called in association with the above to remove all mice/touchpads.
+  void DetachAllMice();
+  void DetachAllTouchpads();
 
   void TriggerLidUpdate(const gfx::Vector3dF& lid);
   void TriggerBaseAndLidUpdate(const gfx::Vector3dF& base,
@@ -83,10 +91,18 @@ class TabletModeControllerTestApi {
     return tablet_mode_controller_->AreInternalInputDeviceEventsBlocked();
   }
 
+  bool IsScreenshotShown() const {
+    return !!tablet_mode_controller_->screenshot_layer_;
+  }
+
+  bool IsInPhysicalTabletState() const {
+    return tablet_mode_controller_->is_in_tablet_physical_state();
+  }
+
+  float GetLidAngle() const { return tablet_mode_controller_->lid_angle(); }
+
  private:
   TabletModeController* tablet_mode_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabletModeControllerTestApi);
 };
 
 }  // namespace ash

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 #define ASH_LOGIN_UI_LOGIN_PIN_VIEW_H_
 
 #include <memory>
+#include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/login/ui/login_palette.h"
 #include "ash/login/ui/non_accessible_view.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "ui/views/view.h"
 
 namespace base {
@@ -39,10 +41,13 @@ namespace ash {
 //   |   7   |  |   8   |  |   9   |
 //   |P Q R S|  | T U V |  |W X Y Z|
 //    -------    -------    -------
-//               _______    _______
-//              |   0   |  |  <-   |
-//              |   +   |  |       |
-//               -------    -------
+//    _______    _______    _______
+//   |  <-   |  |   0   |  |  ->   |
+//   |       |  |   +   |  |       |
+//    -------    -------    -------
+//
+// The <- represents the delete button while -> represents the submit button.
+// The submit button is optional.
 //
 class ASH_EXPORT LoginPinView : public NonAccessibleView {
  public:
@@ -66,6 +71,7 @@ class ASH_EXPORT LoginPinView : public NonAccessibleView {
 
     views::View* GetButton(int number) const;
     views::View* GetBackspaceButton() const;
+    views::View* GetSubmitButton() const;
 
     // Sets the timers that are used for backspace auto-submit. |delay_timer| is
     // the initial delay before an auto-submit, and |repeat_timer| fires
@@ -73,33 +79,58 @@ class ASH_EXPORT LoginPinView : public NonAccessibleView {
     void SetBackspaceTimers(std::unique_ptr<base::OneShotTimer> delay_timer,
                             std::unique_ptr<base::RepeatingTimer> repeat_timer);
 
+    void ClickOnDigit(int number) const;
+
    private:
     LoginPinView* const view_;
   };
 
   using OnPinKey = base::RepeatingCallback<void(int value)>;
   using OnPinBackspace = base::RepeatingClosure;
+  using OnPinSubmit = base::RepeatingClosure;
 
   // Creates PIN view with the specified |keyboard_style|.
-  // |on_key| is called whenever the user taps one of the pin buttons.
+  // |on_key| is called whenever the user taps one of the pin buttons; must be
+  // non-null.
   // |on_backspace| is called when the user wants to erase the most recently
-  // tapped key. Neither callback can be null.
-  explicit LoginPinView(Style keyboard_style,
-                        const OnPinKey& on_key,
-                        const OnPinBackspace& on_backspace);
+  // tapped key; must be non-null.
+  // If |on_submit| is valid, there will be a submit button on the pinpad that
+  // calls it when the user wants to submit the PIN / password.
+  LoginPinView(Style keyboard_style,
+               const LoginPalette& palette,
+               const OnPinKey& on_key,
+               const OnPinBackspace& on_backspace,
+               const OnPinSubmit& on_submit = base::NullCallback());
+
+  LoginPinView(const LoginPinView&) = delete;
+  LoginPinView& operator=(const LoginPinView&) = delete;
+
   ~LoginPinView() override;
+
+  // Notify accessibility that location of rows and LoginPinView changed.
+  void NotifyAccessibilityLocationChanged();
 
   // Called when the password field text changed.
   void OnPasswordTextChanged(bool is_empty);
 
+  void UpdatePalette(const LoginPalette& palette);
+
  private:
   class BackspacePinButton;
+  class DigitPinButton;
+  class SubmitPinButton;
 
-  BackspacePinButton* backspace_;
-  OnPinKey on_key_;
-  OnPinBackspace on_backspace_;
+  // Builds and returns a new view which contains a row of the PIN keyboard.
+  NonAccessibleView* BuildAndAddRow();
 
-  DISALLOW_COPY_AND_ASSIGN(LoginPinView);
+  LoginPalette palette_;
+
+  BackspacePinButton* backspace_ = nullptr;
+  // The submit button does not exist when no |on_submit| callback is passed.
+  SubmitPinButton* submit_button_ = nullptr;
+
+  std::vector<NonAccessibleView*> rows_;
+  std::vector<DigitPinButton*> digit_buttons_;
 };
 
 }  // namespace ash

@@ -1,20 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/assistant/assistant_setup_controller.h"
 
-#include "ash/assistant/assistant_controller.h"
-#include "ash/assistant/assistant_ui_controller.h"
+#include "ash/assistant/assistant_controller_impl.h"
 #include "ash/assistant/util/deep_link_util.h"
 #include "ash/assistant/util/i18n_util.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
-#include "ash/shell.h"
+#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
-#include "chromeos/services/assistant/public/features.h"
+#include "base/callback_helpers.h"
+#include "chromeos/ash/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/ash/services/assistant/public/cpp/features.h"
 
 namespace {
 
@@ -26,14 +23,12 @@ constexpr char kGSuiteAdministratorInstructionsUrl[] =
 namespace ash {
 
 AssistantSetupController::AssistantSetupController(
-    AssistantController* assistant_controller)
-    : assistant_controller_(assistant_controller), weak_ptr_factory_(this) {
-  assistant_controller_->AddObserver(this);
+    AssistantControllerImpl* assistant_controller)
+    : assistant_controller_(assistant_controller) {
+  assistant_controller_observation_.Observe(AssistantController::Get());
 }
 
-AssistantSetupController::~AssistantSetupController() {
-  assistant_controller_->RemoveObserver(this);
-}
+AssistantSetupController::~AssistantSetupController() = default;
 
 void AssistantSetupController::OnAssistantControllerConstructed() {
   assistant_controller_->view_delegate()->AddObserver(this);
@@ -46,22 +41,20 @@ void AssistantSetupController::OnAssistantControllerDestroying() {
 void AssistantSetupController::OnDeepLinkReceived(
     assistant::util::DeepLinkType type,
     const std::map<std::string, std::string>& params) {
-  using namespace assistant::util;
-
-  if (type != DeepLinkType::kOnboarding)
+  if (type != assistant::util::DeepLinkType::kOnboarding)
     return;
 
-  base::Optional<bool> relaunch =
-      GetDeepLinkParamAsBool(params, DeepLinkParam::kRelaunch);
+  absl::optional<bool> relaunch = assistant::util::GetDeepLinkParamAsBool(
+      params, assistant::util::DeepLinkParam::kRelaunch);
 
   StartOnboarding(relaunch.value_or(false));
 }
 
 void AssistantSetupController::OnOptInButtonPressed() {
-  if (assistant_controller_->prefs_controller()->prefs()->GetInteger(
-          chromeos::assistant::prefs::kAssistantConsentStatus) ==
-      chromeos::assistant::prefs::ConsentStatus::kUnauthorized) {
-    assistant_controller_->OpenUrl(assistant::util::CreateLocalizedGURL(
+  using assistant::prefs::ConsentStatus;
+  if (AssistantState::Get()->consent_status().value_or(
+          ConsentStatus::kUnknown) == ConsentStatus::kUnauthorized) {
+    AssistantController::Get()->OpenUrl(assistant::util::CreateLocalizedGURL(
         kGSuiteAdministratorInstructionsUrl));
   } else {
     StartOnboarding(/*relaunch=*/true);
@@ -73,21 +66,19 @@ void AssistantSetupController::StartOnboarding(bool relaunch, FlowType type) {
   if (!assistant_setup)
     return;
 
-  if (relaunch) {
-    assistant_setup->StartAssistantOptInFlow(
-        type, base::BindOnce(&AssistantSetupController::OnOptInFlowFinished,
-                             weak_ptr_factory_.GetWeakPtr()));
-  } else {
-    assistant_setup->StartAssistantOptInFlow(type, base::DoNothing());
-  }
+  AssistantUiController::Get()->CloseUi(assistant::AssistantExitPoint::kSetup);
 
-  // Assistant UI should be hidden while the user onboards.
-  assistant_controller_->ui_controller()->HideUi(AssistantExitPoint::kSetup);
+  assistant_setup->StartAssistantOptInFlow(
+      type, base::BindOnce(&AssistantSetupController::OnOptInFlowFinished,
+                           weak_ptr_factory_.GetWeakPtr(), relaunch));
 }
 
-void AssistantSetupController::OnOptInFlowFinished(bool completed) {
-  if (completed)
-    assistant_controller_->ui_controller()->ShowUi(AssistantEntryPoint::kSetup);
+void AssistantSetupController::OnOptInFlowFinished(bool relaunch,
+                                                   bool completed) {
+  if (relaunch && completed) {
+    AssistantUiController::Get()->ShowUi(
+        assistant::AssistantEntryPoint::kSetup);
+  }
 }
 
 }  // namespace ash

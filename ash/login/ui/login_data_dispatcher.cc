@@ -1,8 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/login/ui/login_data_dispatcher.h"
+#include "ash/constants/ash_features.h"
+
+class AccountId;
 
 namespace ash {
 
@@ -19,11 +22,26 @@ void LoginDataDispatcher::Observer::OnPinEnabledForUserChanged(
     const AccountId& user,
     bool enabled) {}
 
+void LoginDataDispatcher::Observer::
+    OnChallengeResponseAuthEnabledForUserChanged(const AccountId& user,
+                                                 bool enabled) {}
+
 void LoginDataDispatcher::Observer::OnFingerprintStateChanged(
     const AccountId& account_id,
     FingerprintState state) {}
 
+void LoginDataDispatcher::Observer::OnResetFingerprintUIState(
+    const AccountId& account_id) {}
+
 void LoginDataDispatcher::Observer::OnFingerprintAuthResult(
+    const AccountId& account_id,
+    bool successful) {}
+
+void LoginDataDispatcher::Observer::OnSmartLockStateChanged(
+    const AccountId& user,
+    SmartLockState state) {}
+
+void LoginDataDispatcher::Observer::OnSmartLockAuthResult(
     const AccountId& account_id,
     bool successful) {}
 
@@ -33,6 +51,11 @@ void LoginDataDispatcher::Observer::OnAuthEnabledForUser(
 void LoginDataDispatcher::Observer::OnAuthDisabledForUser(
     const AccountId& user,
     const AuthDisabledData& auth_disabled_data) {}
+
+void LoginDataDispatcher::Observer::OnSetTpmLockedState(
+    const AccountId& user,
+    bool is_locked,
+    base::TimeDelta time_left) {}
 
 void LoginDataDispatcher::Observer::OnTapToUnlockEnabledForUserChanged(
     const AccountId& user,
@@ -46,16 +69,18 @@ void LoginDataDispatcher::Observer::OnLockScreenNoteStateChanged(
 
 void LoginDataDispatcher::Observer::OnShowEasyUnlockIcon(
     const AccountId& user,
-    const EasyUnlockIconOptions& icon) {}
+    const EasyUnlockIconInfo& icon_info) {}
 
 void LoginDataDispatcher::Observer::OnWarningMessageUpdated(
-    const base::string16& message) {}
+    const std::u16string& message) {}
 
 void LoginDataDispatcher::Observer::OnSystemInfoChanged(
     bool show,
+    bool enforced,
     const std::string& os_version_label_text,
     const std::string& enterprise_info_text,
-    const std::string& bluetooth_name) {}
+    const std::string& bluetooth_name,
+    bool adb_sideloading_enabled) {}
 
 void LoginDataDispatcher::Observer::OnPublicSessionDisplayNameChanged(
     const AccountId& account_id,
@@ -85,6 +110,8 @@ void LoginDataDispatcher::Observer::OnFocusLeavingLockScreenApps(bool reverse) {
 void LoginDataDispatcher::Observer::OnOobeDialogStateChanged(
     OobeDialogState state) {}
 
+void LoginDataDispatcher::Observer::OnFocusPod(const AccountId& account_id) {}
+
 LoginDataDispatcher::LoginDataDispatcher() = default;
 
 LoginDataDispatcher::~LoginDataDispatcher() = default;
@@ -95,12 +122,6 @@ void LoginDataDispatcher::AddObserver(Observer* observer) {
 
 void LoginDataDispatcher::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void LoginDataDispatcher::SetTapToUnlockEnabledForUser(const AccountId& user,
-                                                       bool enabled) {
-  for (auto& observer : observers_)
-    observer.OnTapToUnlockEnabledForUserChanged(user, enabled);
 }
 
 void LoginDataDispatcher::SetUserList(const std::vector<LoginUserInfo>& users) {
@@ -116,10 +137,11 @@ void LoginDataDispatcher::SetPinEnabledForUser(const AccountId& user,
     observer.OnPinEnabledForUserChanged(user, enabled);
 }
 
-void LoginDataDispatcher::SetFingerprintState(const AccountId& account_id,
-                                              FingerprintState state) {
+void LoginDataDispatcher::SetChallengeResponseAuthEnabledForUser(
+    const AccountId& user,
+    bool enabled) {
   for (auto& observer : observers_)
-    observer.OnFingerprintStateChanged(account_id, state);
+    observer.OnChallengeResponseAuthEnabledForUserChanged(user, enabled);
 }
 
 void LoginDataDispatcher::SetAvatarForUser(const AccountId& account_id,
@@ -128,11 +150,28 @@ void LoginDataDispatcher::SetAvatarForUser(const AccountId& account_id,
     observer.OnUserAvatarChanged(account_id, avatar);
 }
 
+void LoginDataDispatcher::SetFingerprintState(const AccountId& account_id,
+                                              FingerprintState state) {
+  for (auto& observer : observers_)
+    observer.OnFingerprintStateChanged(account_id, state);
+}
+
 void LoginDataDispatcher::NotifyFingerprintAuthResult(
     const AccountId& account_id,
     bool successful) {
   for (auto& observer : observers_)
     observer.OnFingerprintAuthResult(account_id, successful);
+}
+
+void LoginDataDispatcher::ResetFingerprintUIState(const AccountId& account_id) {
+  for (auto& observer : observers_)
+    observer.OnResetFingerprintUIState(account_id);
+}
+
+void LoginDataDispatcher::NotifySmartLockAuthResult(const AccountId& account_id,
+                                                    bool successful) {
+  for (auto& observer : observers_)
+    observer.OnSmartLockAuthResult(account_id, successful);
 }
 
 void LoginDataDispatcher::EnableAuthForUser(const AccountId& account_id) {
@@ -147,8 +186,17 @@ void LoginDataDispatcher::DisableAuthForUser(
     observer.OnAuthDisabledForUser(account_id, auth_disabled_data);
 }
 
-void LoginDataDispatcher::EnableTapToUnlockForUser(const AccountId& user) {
-  SetTapToUnlockEnabledForUser(user, true);
+void LoginDataDispatcher::SetTpmLockedState(const AccountId& account_id,
+                                            bool is_locked,
+                                            base::TimeDelta time_left) {
+  for (auto& observer : observers_)
+    observer.OnSetTpmLockedState(account_id, is_locked, time_left);
+}
+
+void LoginDataDispatcher::SetTapToUnlockEnabledForUser(const AccountId& user,
+                                                       bool enabled) {
+  for (auto& observer : observers_)
+    observer.OnTapToUnlockEnabledForUserChanged(user, enabled);
 }
 
 void LoginDataDispatcher::ForceOnlineSignInForUser(const AccountId& user) {
@@ -163,24 +211,36 @@ void LoginDataDispatcher::SetLockScreenNoteState(mojom::TrayActionState state) {
 
 void LoginDataDispatcher::ShowEasyUnlockIcon(
     const AccountId& user,
-    const EasyUnlockIconOptions& icon) {
+    const EasyUnlockIconInfo& icon_info) {
+  if (base::FeatureList::IsEnabled(ash::features::kSmartLockUIRevamp))
+    return;
+
   for (auto& observer : observers_)
-    observer.OnShowEasyUnlockIcon(user, icon);
+    observer.OnShowEasyUnlockIcon(user, icon_info);
 }
 
-void LoginDataDispatcher::UpdateWarningMessage(const base::string16& message) {
+void LoginDataDispatcher::SetSmartLockState(const AccountId& user,
+                                            SmartLockState state) {
+  for (auto& observer : observers_)
+    observer.OnSmartLockStateChanged(user, state);
+}
+
+void LoginDataDispatcher::UpdateWarningMessage(const std::u16string& message) {
   for (auto& observer : observers_)
     observer.OnWarningMessageUpdated(message);
 }
 
 void LoginDataDispatcher::SetSystemInfo(
-    bool show_if_hidden,
+    bool show,
+    bool enforced,
     const std::string& os_version_label_text,
     const std::string& enterprise_info_text,
-    const std::string& bluetooth_name) {
+    const std::string& bluetooth_name,
+    bool adb_sideloading_enabled) {
   for (auto& observer : observers_) {
-    observer.OnSystemInfoChanged(show_if_hidden, os_version_label_text,
-                                 enterprise_info_text, bluetooth_name);
+    observer.OnSystemInfoChanged(show, enforced, os_version_label_text,
+                                 enterprise_info_text, bluetooth_name,
+                                 adb_sideloading_enabled);
   }
 }
 
@@ -234,6 +294,11 @@ void LoginDataDispatcher::HandleFocusLeavingLockScreenApps(bool reverse) {
 void LoginDataDispatcher::NotifyOobeDialogState(OobeDialogState state) {
   for (auto& observer : observers_)
     observer.OnOobeDialogStateChanged(state);
+}
+
+void LoginDataDispatcher::NotifyFocusPod(const AccountId& account_id) {
+  for (auto& observer : observers_)
+    observer.OnFocusPod(account_id);
 }
 
 }  // namespace ash

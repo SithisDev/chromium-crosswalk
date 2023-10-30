@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_util.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/work_area_insets.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
@@ -43,26 +44,39 @@ gfx::Rect GetFullscreenWindowBoundsInParent(aura::Window* window) {
   gfx::Rect result = GetDisplayBoundsInParent(window);
   const WorkAreaInsets* const work_area_insets =
       WorkAreaInsets::ForWindow(window->GetRootWindow());
-  result.Inset(0,
-               work_area_insets->accessibility_panel_height() +
-                   work_area_insets->docked_magnifier_height(),
-               0, 0);
+  result.Inset(
+      gfx::Insets().set_top(work_area_insets->accessibility_panel_height() +
+                            work_area_insets->docked_magnifier_height()));
   return result;
 }
 
 gfx::Rect GetDisplayWorkAreaBoundsInParent(aura::Window* window) {
-  gfx::Rect result =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
-  ::wm::ConvertRectFromScreen(window->parent(), &result);
-  return result;
+  // If it is application window under `non_lock_screen_containers`, use
+  // `in_session_user_work_area_insets`, otherwise, use `user_work_area_insets`.
+  const aura::Window* non_lock_screen_containers = Shell::GetContainer(
+      window->GetRootWindow(), kShellWindowId_NonLockScreenContainersContainer);
+  gfx::Insets insets =
+      non_lock_screen_containers->Contains(window)
+          ? WorkAreaInsets::ForWindow(window)
+                ->in_session_user_work_area_insets()
+          : WorkAreaInsets::ForWindow(window)->user_work_area_insets();
+  gfx::Rect bounds =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds();
+  bounds.Inset(insets);
+  ::wm::ConvertRectFromScreen(window->parent(), &bounds);
+  return bounds;
 }
 
+// TODO(yongshun): Remove or consolidate this function with
+// `GetDisplayWorkAreaBoundsInParent`.
 gfx::Rect GetDisplayWorkAreaBoundsInParentForLockScreen(aura::Window* window) {
   gfx::Rect bounds = WorkAreaInsets::ForWindow(window)->user_work_area_bounds();
   ::wm::ConvertRectFromScreen(window->parent(), &bounds);
   return bounds;
 }
 
+// TODO(yongshun): Remove or consolidate this function with
+// `GetDisplayWorkAreaBoundsInParent`.
 gfx::Rect GetDisplayWorkAreaBoundsInParentForActiveDeskContainer(
     aura::Window* window) {
   aura::Window* root_window = window->GetRootWindow();
@@ -70,6 +84,8 @@ gfx::Rect GetDisplayWorkAreaBoundsInParentForActiveDeskContainer(
       desks_util::GetActiveDeskContainerForRoot(root_window));
 }
 
+// TODO(yongshun): Remove or consolidate this function with
+// `GetDisplayWorkAreaBoundsInParent`.
 gfx::Rect GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(
     aura::Window* window) {
   gfx::Rect bounds =
@@ -79,8 +95,11 @@ gfx::Rect GetDisplayWorkAreaBoundsInScreenForActiveDeskContainer(
 }
 
 gfx::Rect GetDisplayBoundsWithShelf(aura::Window* window) {
-  if (!Shell::Get()->display_manager()->IsInUnifiedMode())
-    return window->GetRootWindow()->bounds();
+  if (!Shell::Get()->display_manager()->IsInUnifiedMode()) {
+    return display::Screen::GetScreen()
+        ->GetDisplayNearestWindow(window)
+        .bounds();
+  }
 
   // In Unified Mode, the display that should contain the shelf depends on the
   // current shelf alignment.
@@ -101,36 +120,64 @@ gfx::Rect GetDisplayBoundsWithShelf(aura::Window* window) {
 
 gfx::Rect SnapBoundsToDisplayEdge(const gfx::Rect& bounds,
                                   const aura::Window* window) {
-  const aura::WindowTreeHost* host = window->GetHost();
-  if (!host)
-    return bounds;
+  display::Display display =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(
+          const_cast<aura::Window*>(window));
 
-  const float dsf = host->device_scale_factor();
-  const gfx::Rect display_bounds_in_pixel = host->GetBoundsInPixels();
-  const gfx::Rect display_bounds_in_dip = window->GetRootWindow()->bounds();
-  const gfx::Rect bounds_in_pixel = gfx::ScaleToEnclosedRect(bounds, dsf);
+  const float dsf = display.device_scale_factor();
+  const gfx::Size display_size_in_pixel = display.GetSizeInPixel();
+  const gfx::Size scaled_size_in_pixel =
+      gfx::ScaleToFlooredSize(display.size(), dsf);
 
   // Adjusts |bounds| such that the scaled enclosed bounds are atleast as big as
   // the scaled enclosing unadjusted bounds.
   gfx::Rect snapped_bounds = bounds;
-  if ((display_bounds_in_dip.width() == bounds.width() &&
-       bounds_in_pixel.width() != display_bounds_in_pixel.width()) ||
-      (bounds.right() == display_bounds_in_dip.width() &&
-       bounds_in_pixel.right() != display_bounds_in_pixel.width())) {
-    snapped_bounds.Inset(0, 0, -1, 0);
+  if (scaled_size_in_pixel.width() < display_size_in_pixel.width() &&
+      display.bounds().right() == bounds.right()) {
+    snapped_bounds.Inset(gfx::Insets::TLBR(0, 0, 0, -1));
     DCHECK_GE(gfx::ScaleToEnclosedRect(snapped_bounds, dsf).right(),
               gfx::ScaleToEnclosingRect(bounds, dsf).right());
   }
-  if ((display_bounds_in_dip.height() == bounds.height() &&
-       bounds_in_pixel.height() != display_bounds_in_pixel.height()) ||
-      (bounds.bottom() == display_bounds_in_dip.height() &&
-       bounds_in_pixel.bottom() != display_bounds_in_pixel.height())) {
-    snapped_bounds.Inset(0, 0, 0, -1);
+  if (scaled_size_in_pixel.height() < display_size_in_pixel.height() &&
+      display.bounds().bottom() == bounds.bottom()) {
+    snapped_bounds.Inset(gfx::Insets::TLBR(0, 0, -1, 0));
     DCHECK_GE(gfx::ScaleToEnclosedRect(snapped_bounds, dsf).bottom(),
               gfx::ScaleToEnclosingRect(bounds, dsf).bottom());
   }
 
   return snapped_bounds;
+}
+
+gfx::Rect GetIdealBoundsForMaximizedOrFullscreenOrPinnedState(
+    aura::Window* window) {
+  auto* window_state = WindowState::Get(window);
+  if (window_state->IsMaximized()) {
+    auto* shelf = ash::Shelf::ForWindow(window);
+    if (shelf->auto_hide_behavior() == ash::ShelfAutoHideBehavior::kAlways) {
+      gfx::Rect bounds =
+          ash::screen_util::GetFullscreenWindowBoundsInParent(window);
+      ::wm::ConvertRectToScreen(window->parent(), &bounds);
+      return bounds;
+    }
+    if (shelf->auto_hide_behavior() ==
+        ash::ShelfAutoHideBehavior::kAlwaysHidden) {
+      return display::Screen::GetScreen()
+          ->GetDisplayNearestWindow(const_cast<aura::Window*>(window))
+          .work_area();
+    }
+    auto work_area =
+        ash::WorkAreaInsets::ForWindow(window)->ComputeStableWorkArea();
+    return work_area;
+  }
+  if (window_state->IsFullscreen() || window_state->IsPinned()) {
+    gfx::Rect bounds =
+        ash::screen_util::GetFullscreenWindowBoundsInParent(window);
+    ::wm::ConvertRectToScreen(window->parent(), &bounds);
+    return bounds;
+  }
+  NOTREACHED() << "The window is not maximzied or fullscreen or pinned. state="
+               << window_state->GetStateType();
+  return window->GetBoundsInScreen();
 }
 
 }  // namespace screen_util

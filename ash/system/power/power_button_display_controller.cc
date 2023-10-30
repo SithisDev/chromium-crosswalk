@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,14 +32,12 @@ PowerButtonDisplayController::PowerButtonDisplayController(
     BacklightsForcedOffSetter* backlights_forced_off_setter,
     const base::TickClock* tick_clock)
     : backlights_forced_off_setter_(backlights_forced_off_setter),
-      backlights_forced_off_observer_(this),
-      tick_clock_(tick_clock),
-      weak_ptr_factory_(this) {
+      tick_clock_(tick_clock) {
   chromeos::PowerManagerClient::Get()->AddObserver(this);
   ui::DeviceDataManager::GetInstance()->AddObserver(this);
   Shell::Get()->AddPreTargetHandler(this, ui::EventTarget::Priority::kSystem);
 
-  backlights_forced_off_observer_.Add(backlights_forced_off_setter_);
+  backlights_forced_off_observation_.Observe(backlights_forced_off_setter_);
 }
 
 PowerButtonDisplayController::~PowerButtonDisplayController() {
@@ -49,8 +47,8 @@ PowerButtonDisplayController::~PowerButtonDisplayController() {
 }
 
 bool PowerButtonDisplayController::IsScreenOn() const {
-  return backlights_forced_off_setter_->screen_state() ==
-         BacklightsForcedOffSetter::ScreenState::ON;
+  return backlights_forced_off_setter_->GetScreenBacklightState() ==
+         ScreenBacklightState::ON;
 }
 
 void PowerButtonDisplayController::SetBacklightsForcedOff(bool forced_off) {
@@ -85,13 +83,12 @@ void PowerButtonDisplayController::OnBacklightsForcedOffChanged(
   send_accessibility_alert_on_backlights_forced_off_change_ = false;
 }
 
-void PowerButtonDisplayController::OnScreenStateChanged(
-    BacklightsForcedOffSetter::ScreenState screen_state) {
+void PowerButtonDisplayController::OnScreenBacklightStateChanged(
+    ScreenBacklightState screen_backlight_state) {
   screen_state_last_changed_ = tick_clock_->NowTicks();
 }
 
-void PowerButtonDisplayController::SuspendDone(
-    const base::TimeDelta& sleep_duration) {
+void PowerButtonDisplayController::SuspendDone(base::TimeDelta sleep_duration) {
   // Stop forcing backlights off on resume to handle situations where the power
   // button resumed but we didn't receive the event (crbug.com/735291).
   SetBacklightsForcedOff(false);
@@ -99,13 +96,13 @@ void PowerButtonDisplayController::SuspendDone(
 
 void PowerButtonDisplayController::LidEventReceived(
     chromeos::PowerManagerClient::LidState state,
-    const base::TimeTicks& timestamp) {
+    base::TimeTicks timestamp) {
   SetBacklightsForcedOff(false);
 }
 
 void PowerButtonDisplayController::TabletModeEventReceived(
     chromeos::PowerManagerClient::TabletMode mode,
-    const base::TimeTicks& timestamp) {
+    base::TimeTicks timestamp) {
   SetBacklightsForcedOff(false);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,7 @@ bool ArcNotificationManagerDelegateImpl::IsPublicSessionOrKiosk() const {
       Shell::Get()->session_controller()->login_status();
 
   return login_status == LoginStatus::PUBLIC ||
-         login_status == LoginStatus::KIOSK_APP ||
-         login_status == LoginStatus::ARC_KIOSK_APP;
+         login_status == LoginStatus::KIOSK_APP;
 }
 
 void ArcNotificationManagerDelegateImpl::ShowMessageCenter() {
@@ -33,7 +32,7 @@ void ArcNotificationManagerDelegateImpl::ShowMessageCenter() {
       ->GetPrimaryRootWindowController()
       ->GetStatusAreaWidget()
       ->unified_system_tray()
-      ->ShowBubble(false /* show_by_click */);
+      ->ShowBubble();
 }
 
 void ArcNotificationManagerDelegateImpl::HideMessageCenter() {

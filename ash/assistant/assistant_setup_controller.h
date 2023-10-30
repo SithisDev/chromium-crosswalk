@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,26 @@
 #include <map>
 #include <string>
 
-#include "ash/assistant/assistant_controller_observer.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/public/cpp/assistant/assistant_setup.h"
-#include "base/macros.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 
 namespace ash {
 
-class AssistantController;
+class AssistantControllerImpl;
 
 class AssistantSetupController : public AssistantControllerObserver,
                                  public AssistantViewDelegateObserver {
  public:
-  explicit AssistantSetupController(AssistantController* assistant_controller);
+  explicit AssistantSetupController(
+      AssistantControllerImpl* assistant_controller);
+
+  AssistantSetupController(const AssistantSetupController&) = delete;
+  AssistantSetupController& operator=(const AssistantSetupController&) = delete;
+
   ~AssistantSetupController() override;
 
   // AssistantControllerObserver:
@@ -37,13 +43,14 @@ class AssistantSetupController : public AssistantControllerObserver,
   void StartOnboarding(bool relaunch, FlowType type = FlowType::kConsentFlow);
 
  private:
-  void OnOptInFlowFinished(bool completed);
+  void OnOptInFlowFinished(bool relaunch, bool completed);
 
-  AssistantController* const assistant_controller_;  // Owned by Shell.
+  AssistantControllerImpl* const assistant_controller_;  // Owned by Shell.
 
-  base::WeakPtrFactory<AssistantSetupController> weak_ptr_factory_;
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(AssistantSetupController);
+  base::WeakPtrFactory<AssistantSetupController> weak_ptr_factory_{this};
 };
 
 }  // namespace ash

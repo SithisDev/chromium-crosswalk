@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "base/callback.h"
 #include "ui/base/models/list_model.h"
 
-namespace app_list {
+namespace ash {
 
 class SearchBoxModel;
 
@@ -28,11 +28,11 @@ class APP_LIST_MODEL_EXPORT SearchModel {
   using SearchResults = ui::ListModel<SearchResult>;
 
   SearchModel();
-  ~SearchModel();
 
-  // Whether tablet mode is active. Controlled by AppListView.
-  void SetTabletMode(bool is_tablet_mode);
-  bool tablet_mode() const { return search_box_->is_tablet_mode(); }
+  SearchModel(const SearchModel&) = delete;
+  SearchModel& operator=(const SearchModel&) = delete;
+
+  ~SearchModel();
 
   void SetSearchEngineIsGoogle(bool is_google);
   bool search_engine_is_google() const {
@@ -57,8 +57,13 @@ class APP_LIST_MODEL_EXPORT SearchModel {
 
   SearchBoxModel* search_box() { return search_box_.get(); }
   SearchResults* results() { return results_.get(); }
+  std::vector<ash::AppListSearchResultCategory>* ordered_categories() {
+    return &ordered_categories_;
+  }
 
-  void PublishResults(std::vector<std::unique_ptr<SearchResult>> new_results);
+  void PublishResults(
+      std::vector<std::unique_ptr<SearchResult>> new_results,
+      const std::vector<ash::AppListSearchResultCategory>& categories);
 
   SearchResult* FindSearchResult(const std::string& id);
 
@@ -66,7 +71,8 @@ class APP_LIST_MODEL_EXPORT SearchModel {
   // hidden by its source. Returns null if no such result exists.
   SearchResult* GetFirstVisibleResult();
 
-  // Deletes all search results. This is used in profile switches.
+  // Deletes all search results. This is used when moving from zero-state to a
+  // search query.
   void DeleteAllResults();
 
   // Delete result by the given id.
@@ -75,10 +81,9 @@ class APP_LIST_MODEL_EXPORT SearchModel {
  private:
   std::unique_ptr<SearchBoxModel> search_box_;
   std::unique_ptr<SearchResults> results_;
-
-  DISALLOW_COPY_AND_ASSIGN(SearchModel);
+  std::vector<ash::AppListSearchResultCategory> ordered_categories_;
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_MODEL_SEARCH_SEARCH_MODEL_H_

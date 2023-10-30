@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "ash/lock_screen_action/lock_screen_action_background_view.h"
 #include "base/bind.h"
 #include "ui/aura/window.h"
-#include "ui/views/widget/widget.h"
 
 namespace ash {
 
@@ -19,8 +18,7 @@ constexpr char kLockScreenActionBackgroundWidgetName[] =
 }  // namespace
 
 LockScreenActionBackgroundControllerImpl::
-    LockScreenActionBackgroundControllerImpl()
-    : widget_observer_(this), weak_ptr_factory_(this) {}
+    LockScreenActionBackgroundControllerImpl() = default;
 
 LockScreenActionBackgroundControllerImpl::
     ~LockScreenActionBackgroundControllerImpl() {
@@ -87,7 +85,8 @@ void LockScreenActionBackgroundControllerImpl::OnWidgetDestroyed(
     views::Widget* widget) {
   if (widget != background_widget_)
     return;
-  widget_observer_.Remove(widget);
+  DCHECK(widget_observation_.IsObservingSource(widget));
+  widget_observation_.Reset();
 
   background_widget_ = nullptr;
   contents_view_ = nullptr;
@@ -101,15 +100,15 @@ views::Widget* LockScreenActionBackgroundControllerImpl::CreateWidget() {
 
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.name = kLockScreenActionBackgroundWidgetName;
   params.parent = parent_window_;
   params.delegate = contents_view_;
 
   views::Widget* widget = new views::Widget();
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->SetVisibilityChangedAnimationsEnabled(false);
-  widget_observer_.Add(widget);
+  widget_observation_.Observe(widget);
 
   return widget;
 }

@@ -1,12 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/toplevel_window_event_handler.h"
 
+#include "ash/accelerators/accelerator_controller_impl.h"
+#include "ash/constants/app_types.h"
 #include "ash/display/screen_orientation_controller.h"
 #include "ash/display/screen_orientation_controller_test_api.h"
-#include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
@@ -14,7 +15,6 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/status_area_widget_test_helper.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/window_factory.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_grid.h"
@@ -35,6 +35,7 @@
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/test_window_delegate.h"
+#include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/hit_test.h"
@@ -51,6 +52,8 @@ namespace ash {
 
 namespace {
 
+using ::chromeos::WindowStateType;
+
 // A simple window delegate that returns the specified hit-test code when
 // requested and applies a minimum size constraint if there is one.
 class TestWindowDelegate : public aura::test::TestWindowDelegate {
@@ -58,13 +61,15 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
   explicit TestWindowDelegate(int hittest_code) {
     set_window_component(hittest_code);
   }
+
+  TestWindowDelegate(const TestWindowDelegate&) = delete;
+  TestWindowDelegate& operator=(const TestWindowDelegate&) = delete;
+
   ~TestWindowDelegate() override = default;
 
  private:
   // Overridden from aura::Test::TestWindowDelegate:
   void OnWindowDestroyed(aura::Window* window) override { delete this; }
-
-  DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
 };
 
 class ResizeLoopWindowObserver : public aura::WindowObserver {
@@ -72,6 +77,10 @@ class ResizeLoopWindowObserver : public aura::WindowObserver {
   explicit ResizeLoopWindowObserver(aura::Window* w) : window_(w) {
     window_->AddObserver(this);
   }
+
+  ResizeLoopWindowObserver(const ResizeLoopWindowObserver&) = delete;
+  ResizeLoopWindowObserver& operator=(const ResizeLoopWindowObserver&) = delete;
+
   ~ResizeLoopWindowObserver() override {
     if (window_)
       window_->RemoveObserver(this);
@@ -96,22 +105,24 @@ class ResizeLoopWindowObserver : public aura::WindowObserver {
  private:
   aura::Window* window_;
   bool in_resize_loop_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ResizeLoopWindowObserver);
 };
 
 class ToplevelWindowEventHandlerTest : public AshTestBase {
  public:
   ToplevelWindowEventHandlerTest() = default;
+
+  ToplevelWindowEventHandlerTest(const ToplevelWindowEventHandlerTest&) =
+      delete;
+  ToplevelWindowEventHandlerTest& operator=(
+      const ToplevelWindowEventHandlerTest&) = delete;
+
   ~ToplevelWindowEventHandlerTest() override = default;
 
  protected:
   aura::Window* CreateWindow(int hittest_code) {
     TestWindowDelegate* d1 = new TestWindowDelegate(hittest_code);
-    aura::Window* w1 =
-        window_factory::NewWindow(d1, aura::client::WINDOW_TYPE_NORMAL)
-            .release();
-    w1->set_id(1);
+    aura::Window* w1 = new aura::Window(d1, aura::client::WINDOW_TYPE_NORMAL);
+    w1->SetId(1);
     w1->Init(ui::LAYER_TEXTURED);
     aura::Window* parent = Shell::GetContainer(
         Shell::GetPrimaryRootWindow(), desks_util::GetActiveDeskContainerId());
@@ -132,9 +143,6 @@ class ToplevelWindowEventHandlerTest : public AshTestBase {
   }
 
   std::unique_ptr<ToplevelWindowEventHandler> handler_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventHandlerTest);
 };
 }  // namespace
 
@@ -172,7 +180,7 @@ void ContinueAndCompleteDrag(ui::test::EventGenerator* generator,
 TEST_F(ToplevelWindowEventHandlerTest, WindowPositionAutoManagement) {
   std::unique_ptr<aura::Window> w1(CreateWindow(HTNOWHERE));
   const gfx::Size size = w1->bounds().size();
-  WindowState* window_state = ash::WindowState::Get(w1.get());
+  WindowState* window_state = WindowState::Get(w1.get());
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(), w1.get());
 
   // Explicitly enable window position auto management, and expect it to be
@@ -502,6 +510,7 @@ TEST_F(ToplevelWindowEventHandlerTest, DontGotWiderThanScreen) {
 
 // Verifies that touch-gestures drag the window correctly.
 TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
+  UpdateDisplay("800x600");
   std::unique_ptr<aura::Window> target(CreateTestWindowInShellWithDelegate(
       new TestWindowDelegate(HTCAPTION), 0, gfx::Rect(0, 0, 100, 100)));
   WindowState* window_state = WindowState::Get(target.get());
@@ -514,30 +523,27 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
                           aura::client::kResizeBehaviorCanMaximize |
                           aura::client::kResizeBehaviorCanMinimize);
 
-  gfx::Point end = location;
-
   // Snap right;
-  end.Offset(100, 0);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  gfx::Point end(790, 0);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
 
   // Verify that the window has moved after the gesture.
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
-  EXPECT_EQ(WindowStateType::kRightSnapped, window_state->GetStateType());
+  EXPECT_EQ(WindowStateType::kSecondarySnapped, window_state->GetStateType());
 
   old_bounds = target->bounds();
 
   // Snap left.
   end = location = target->GetBoundsInRootWindow().CenterPoint();
   end.Offset(-100, 0);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
-  EXPECT_EQ(WindowStateType::kLeftSnapped, window_state->GetStateType());
+  EXPECT_EQ(WindowStateType::kPrimarySnapped, window_state->GetStateType());
 
+  window_state->Restore();
   gfx::Rect bounds_before_maximization = target->bounds();
   bounds_before_maximization.Offset(0, 100);
   target->SetBounds(bounds_before_maximization);
@@ -546,8 +552,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
   // Maximize.
   end = location = target->GetBoundsInRootWindow().CenterPoint();
   end.Offset(0, -100);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
@@ -561,8 +566,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
   // Minimize.
   end = location = target->GetBoundsInRootWindow().CenterPoint();
   end.Offset(0, 100);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
   EXPECT_TRUE(window_state->IsMinimized());
@@ -589,12 +593,11 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragMultiDisplays) {
   // create gesture events with location out of the display bounds. Let |end| be
   // out of the primary display's bounds to emulate this situation.
   end.Offset(800, 0);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
 
   // Verify that the window has moved after the gesture.
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
-  EXPECT_EQ(WindowStateType::kRightSnapped, window_state->GetStateType());
+  EXPECT_EQ(WindowStateType::kSecondarySnapped, window_state->GetStateType());
 }
 
 // Tests that a gesture cannot minimize an unminimizeable window.
@@ -609,8 +612,7 @@ TEST_F(ToplevelWindowEventHandlerTest,
 
   gfx::Point end = location;
   end.Offset(0, 100);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(WindowState::Get(target.get())->IsMinimized());
 }
@@ -627,7 +629,8 @@ TEST_F(ToplevelWindowEventHandlerTest, TwoFingerDragDifferentDelta) {
       gfx::Point(55, 5),  // Within caption.
   };
   gfx::Vector2d delta[kTouchPoints] = {
-      gfx::Vector2d(80, 80), gfx::Vector2d(20, 20),
+      gfx::Vector2d(80, 80),
+      gfx::Vector2d(20, 20),
   };
   int delay_adding_finger_ms[kTouchPoints] = {0, 0};
   int delay_releasing_finger_ms[kTouchPoints] = {150, 150};
@@ -655,7 +658,8 @@ TEST_F(ToplevelWindowEventHandlerTest, TwoFingerDragDelayAddFinger) {
       gfx::Point(55, 5),  // Within caption.
   };
   gfx::Vector2d delta[kTouchPoints] = {
-      gfx::Vector2d(50, 50), gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
   };
   int delay_adding_finger_ms[kTouchPoints] = {0, 90};
   int delay_releasing_finger_ms[kTouchPoints] = {150, 150};
@@ -682,7 +686,8 @@ TEST_F(ToplevelWindowEventHandlerTest, TwoFingerDragDelayReleaseFinger) {
       gfx::Point(55, 5),  // Within caption.
   };
   gfx::Vector2d delta[kTouchPoints] = {
-      gfx::Vector2d(50, 50), gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
   };
   int delay_adding_finger_ms[kTouchPoints] = {0, 0};
   int delay_releasing_finger_ms[kTouchPoints] = {150, 90};
@@ -710,7 +715,8 @@ TEST_F(ToplevelWindowEventHandlerTest,
       gfx::Point(55, 5),  // Within caption.
   };
   gfx::Vector2d delta[kTouchPoints] = {
-      gfx::Vector2d(50, 50), gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
   };
   int delay_adding_finger_ms[kTouchPoints] = {0, 30};
   int delay_releasing_finger_ms[kTouchPoints] = {150, 120};
@@ -739,7 +745,8 @@ TEST_F(ToplevelWindowEventHandlerTest,
       gfx::Point(55, 5),  // Within caption.
   };
   gfx::Vector2d delta[kTouchPoints] = {
-      gfx::Vector2d(50, 50), gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
+      gfx::Vector2d(50, 50),
   };
   int delay_adding_finger_ms[kTouchPoints] = {0, 30};
   int delay_releasing_finger_ms[kTouchPoints] = {120, 150};
@@ -768,8 +775,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragToRestore) {
   gfx::Point location, end;
   end = location = window->GetBoundsInRootWindow().CenterPoint();
   end.Offset(0, 100);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
   EXPECT_NE(old_bounds.ToString(), window->bounds().ToString());
   EXPECT_TRUE(window_state->IsMinimized());
@@ -862,8 +868,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragForUnresizableWindow) {
 
   // Try to snap right. The window is not resizable. So it should not snap.
   end.Offset(100, 0);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
 
   // Verify that the window has moved after the gesture.
@@ -879,8 +884,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragForUnresizableWindow) {
   // Try to snap left. It should not snap.
   end = location = target->GetBoundsInRootWindow().CenterPoint();
   end.Offset(-100, 0);
-  generator.GestureScrollSequence(location, end,
-                                  base::TimeDelta::FromMilliseconds(5), 10);
+  generator.GestureScrollSequence(location, end, base::Milliseconds(5), 10);
   base::RunLoop().RunUntilIdle();
 
   // Verify that the window has moved after the gesture.
@@ -915,8 +919,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragMultipleWindows) {
     ui::test::EventGenerator gen(Shell::GetPrimaryRootWindow(), notmoved.get());
     gfx::Point start = notmoved->bounds().origin() + gfx::Vector2d(10, 10);
     gfx::Point end = start + gfx::Vector2d(100, 10);
-    gen.GestureScrollSequence(start, end, base::TimeDelta::FromMilliseconds(10),
-                              10);
+    gen.GestureScrollSequence(start, end, base::Milliseconds(10), 10);
     EXPECT_EQ(bounds.ToString(), notmoved->bounds().ToString());
   }
 }
@@ -1066,8 +1069,9 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragCaptureLoss) {
 // window's bounds correctly.
 TEST_F(ToplevelWindowEventHandlerTest, DragSnappedWindowToExternalDisplay) {
   UpdateDisplay("940x550,940x550");
+  display::test::DisplayManagerTestApi display_manager_test(display_manager());
   int64_t primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
-  int64_t secondary_id = display_manager()->GetSecondaryDisplay().id();
+  int64_t secondary_id = display_manager_test.GetSecondaryDisplay().id();
   display::DisplayLayoutBuilder builder(primary_id);
   builder.SetSecondaryPlacement(secondary_id, display::DisplayPlacement::TOP,
                                 0);
@@ -1081,13 +1085,21 @@ TEST_F(ToplevelWindowEventHandlerTest, DragSnappedWindowToExternalDisplay) {
   // Snap the window to the right.
   WindowState* window_state = WindowState::Get(w1.get());
   ASSERT_TRUE(window_state->CanSnap());
-  const WMEvent event(WM_EVENT_CYCLE_SNAP_RIGHT);
+  const WindowSnapWMEvent event(WM_EVENT_CYCLE_SNAP_SECONDARY);
   window_state->OnWMEvent(&event);
   ASSERT_TRUE(window_state->IsSnapped());
 
   // Drag the window to the secondary display.
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(), w1.get());
-  generator.DragMouseTo(472, -462);
+  // To determine the state, WindowWorkspaceResizer determines the display by
+  // checking the CursorManager for the correct display. EventGenerator does not
+  // update the display in the CursorManager, so we manually do it here.
+  // TODO(crbug.com/990589): Unit tests should be able to simulate mouse input
+  // without having to call |CursorManager::SetDisplay|.
+  const gfx::Point drag_location = gfx::Point(472, -462);
+  Shell::Get()->cursor_manager()->SetDisplay(
+      display::Screen::GetScreen()->GetDisplayNearestPoint(drag_location));
+  generator.DragMouseTo(drag_location);
 
   // Expect the window is no longer snapped and its size was restored to the
   // initial size.
@@ -1095,7 +1107,7 @@ TEST_F(ToplevelWindowEventHandlerTest, DragSnappedWindowToExternalDisplay) {
   EXPECT_EQ(initial_window_size.ToString(), w1->bounds().size().ToString());
 
   // The window is now fully contained in the secondary display.
-  EXPECT_TRUE(display_manager()->GetSecondaryDisplay().bounds().Contains(
+  EXPECT_TRUE(display_manager_test.GetSecondaryDisplay().bounds().Contains(
       w1->GetBoundsInScreen()));
 }
 
@@ -1130,10 +1142,54 @@ TEST_F(ToplevelWindowEventHandlerTest, EnterResizeLoopOnResize) {
   EXPECT_FALSE(window_observer.in_resize_loop());
 }
 
+// Explicitly start a window drag using a child window as a target of drag
+// events.
+TEST_F(ToplevelWindowEventHandlerTest, ExplicitDragWithChildWindow) {
+  std::unique_ptr<aura::Window> w1(CreateWindow(HTCLIENT));
+  w1->SetName("parent");
+  auto* c1 = new aura::Window(
+      aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate(),
+      aura::client::WINDOW_TYPE_CONTROL);
+  c1->SetName("child");
+  c1->Init(ui::LAYER_TEXTURED);
+  w1->AddChild(c1);
+  c1->SetBounds(gfx::Rect(25, 25, 50, 50));
+  c1->Show();
+  c1->SetBounds(gfx::Rect(1, 1, 100, 100));
+
+  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(), c1);
+  auto* toplevel_window_event_handler =
+      Shell::Get()->toplevel_window_event_handler();
+
+  generator.PressLeftButton();
+
+  // Do not capture where because we're dragging using a window that is
+  // different from w1.
+  ASSERT_TRUE(toplevel_window_event_handler->AttemptToStartDrag(
+      w1.get(), gfx::PointF(50, 50), HTCAPTION, ::wm::WINDOW_MOVE_SOURCE_MOUSE,
+      base::DoNothing(),
+      /*update_gesture_target=*/false,
+      /*grab_capture=*/false));
+
+  EXPECT_TRUE(toplevel_window_event_handler->is_drag_in_progress());
+  generator.MoveMouseBy(20, 10);
+  EXPECT_EQ(gfx::Rect(21, 11, 100, 100), w1->bounds());
+  generator.MoveMouseBy(20, 10);
+  EXPECT_EQ(gfx::Rect(41, 21, 100, 100), w1->bounds());
+}
+
+namespace {
+
 // Provides common setup and convenience for a handful of tests.
 class ToplevelWindowEventHandlerDragTest : public AshTestBase {
  public:
   ToplevelWindowEventHandlerDragTest() = default;
+
+  ToplevelWindowEventHandlerDragTest(
+      const ToplevelWindowEventHandlerDragTest&) = delete;
+  ToplevelWindowEventHandlerDragTest& operator=(
+      const ToplevelWindowEventHandlerDragTest&) = delete;
+
   ~ToplevelWindowEventHandlerDragTest() override = default;
 
   void SetUp() override {
@@ -1161,47 +1217,15 @@ class ToplevelWindowEventHandlerDragTest : public AshTestBase {
         position.x(), position.y(), ui::EF_NONE, base::TimeTicks::Now(),
         ui::GestureEventDetails(type, scroll_x, scroll_y));
     ui::Event::DispatcherApi(&event).set_target(dragged_window_.get());
-    ash::Shell::Get()->toplevel_window_event_handler()->OnGestureEvent(&event);
+    ui::Event::DispatcherApi(&event).set_phase(ui::EP_PRETARGET);
+    Shell::Get()->toplevel_window_event_handler()->OnGestureEvent(&event);
   }
 
   std::unique_ptr<aura::Window> dragged_window_;
   std::unique_ptr<aura::Window> non_dragged_window_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ToplevelWindowEventHandlerDragTest);
 };
 
-// Tests that tap the window in overview grid during window drag should end
-// the overview mode.
-TEST_F(ToplevelWindowEventHandlerDragTest,
-       TapWindowInOverviewGridDuringWindowDrag) {
-  TabletModeControllerTestApi().EnterTabletMode();
-
-  SendGestureEvent(gfx::Point(0, 0), 0, 5, ui::ET_GESTURE_SCROLL_BEGIN);
-  // Drag the window to the right corner to avoid overlap with
-  // |non_dragged_window_| in overview grid.
-  SendGestureEvent(gfx::Point(700, 500), 700, 500,
-                   ui::ET_GESTURE_SCROLL_UPDATE);
-  EXPECT_TRUE(WindowState::Get(dragged_window_.get())->is_dragged());
-
-  OverviewController* overview_controller = Shell::Get()->overview_controller();
-  EXPECT_TRUE(overview_controller->InOverviewSession());
-  EXPECT_TRUE(overview_controller->overview_session()->IsWindowInOverview(
-      non_dragged_window_.get()));
-
-  OverviewGrid* current_grid =
-      overview_controller->overview_session()->GetGridWithRootWindow(
-          non_dragged_window_->GetRootWindow());
-  OverviewItem* item =
-      current_grid->GetOverviewItemContaining(non_dragged_window_.get());
-  GetEventGenerator()->GestureTapAt(
-      gfx::ToRoundedPoint(item->GetTransformedBounds().CenterPoint()));
-
-  // Overview mode is no longer active and |non_dragged_window_| is not in the
-  // overview grid after tapping it in overview grid.
-  EXPECT_FALSE(overview_controller->InOverviewSession());
-  EXPECT_FALSE(overview_controller->overview_session());
-}
+}  // namespace
 
 // In tablet mode, the window's resizability shouldn't be taken into account
 // when dragging from the top. Regression test for https://crbug.com/1444132
@@ -1212,8 +1236,8 @@ TEST_F(ToplevelWindowEventHandlerDragTest,
   dragged_window_->SetProperty(aura::client::kResizeBehaviorKey,
                                aura::client::kResizeBehaviorNone);
 
-  SendGestureEvent(gfx::Point(0, 0), 0, 5, ui::ET_GESTURE_SCROLL_BEGIN);
-  SendGestureEvent(gfx::Point(700, 500), 700, 500,
+  SendGestureEvent(gfx::Point(100, 0), 0, 5, ui::ET_GESTURE_SCROLL_BEGIN);
+  SendGestureEvent(gfx::Point(600, 500), 600, 500,
                    ui::ET_GESTURE_SCROLL_UPDATE);
   EXPECT_TRUE(WindowState::Get(dragged_window_.get())->is_dragged());
 
@@ -1241,44 +1265,41 @@ TEST_F(ToplevelWindowEventHandlerDragTest,
   EXPECT_FALSE(overview_controller->InOverviewSession());
 }
 
-// Tests that the window drag will be reverted if the screen is being rotated.
-TEST_F(ToplevelWindowEventHandlerDragTest, DisplayConfigurationChangeTest) {
-  TabletModeControllerTestApi().EnterTabletMode();
-
-  int64_t display_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
-  display::DisplayManager* display_manager = Shell::Get()->display_manager();
-  display::test::ScopedSetInternalDisplayId set_internal(display_manager,
-                                                         display_id);
-  ScreenOrientationControllerTestApi test_api(
-      Shell::Get()->screen_orientation_controller());
-  // Set the screen orientation to LANDSCAPE_PRIMARY.
-  test_api.SetDisplayRotation(display::Display::ROTATE_0,
-                              display::Display::RotationSource::ACTIVE);
-  EXPECT_EQ(test_api.GetCurrentOrientation(),
-            OrientationLockType::kLandscapePrimary);
-
-  ASSERT_TRUE(TabletModeControllerTestApi().IsTabletModeStarted());
-
+// Test that if window destroyed during resize/dragging, no crash should happen.
+TEST_F(ToplevelWindowEventHandlerDragTest, WindowDestroyedDuringDragging) {
   SendGestureEvent(gfx::Point(0, 0), 0, 5, ui::ET_GESTURE_SCROLL_BEGIN);
-  // Drag the window to the right corner to avoid overlap with
-  // |non_dragged_window_| in overview grid.
   SendGestureEvent(gfx::Point(700, 500), 700, 500,
                    ui::ET_GESTURE_SCROLL_UPDATE);
   EXPECT_TRUE(WindowState::Get(dragged_window_.get())->is_dragged());
+  ToplevelWindowEventHandler* event_handler =
+      Shell::Get()->toplevel_window_event_handler();
+  EXPECT_TRUE(event_handler->is_drag_in_progress());
 
+  dragged_window_.reset();
+  EXPECT_FALSE(event_handler->is_drag_in_progress());
+}
+
+// Test that if window destroyed during resize/dragging in tablet mode, no crash
+// should happen.
+TEST_F(ToplevelWindowEventHandlerDragTest,
+       WindowDestroyedDuringDraggingInTabletMode) {
+  TabletModeControllerTestApi().EnterTabletMode();
+
+  SendGestureEvent(gfx::Point(0, 0), 0, 5, ui::ET_GESTURE_SCROLL_BEGIN);
+  SendGestureEvent(gfx::Point(700, 500), 700, 500,
+                   ui::ET_GESTURE_SCROLL_UPDATE);
+  EXPECT_TRUE(WindowState::Get(dragged_window_.get())->is_dragged());
+  ToplevelWindowEventHandler* event_handler =
+      Shell::Get()->toplevel_window_event_handler();
+  EXPECT_TRUE(event_handler->is_drag_in_progress());
   OverviewController* overview_controller = Shell::Get()->overview_controller();
   EXPECT_TRUE(overview_controller->InOverviewSession());
-  EXPECT_TRUE(overview_controller->overview_session()->IsWindowInOverview(
-      non_dragged_window_.get()));
+  EXPECT_FALSE(overview_controller->overview_session()->IsWindowInOverview(
+      dragged_window_.get()));
 
-  // Rotate the screen during drag.
-  test_api.SetDisplayRotation(display::Display::ROTATE_270,
-                              display::Display::RotationSource::ACTIVE);
-  EXPECT_EQ(test_api.GetCurrentOrientation(),
-            OrientationLockType::kPortraitPrimary);
-  EXPECT_TRUE(WindowState::Get(dragged_window_.get())->IsMaximized());
-  EXPECT_FALSE(overview_controller->InOverviewSession());
-  EXPECT_FALSE(WindowState::Get(dragged_window_.get())->is_dragged());
+  dragged_window_.reset();
+  EXPECT_FALSE(event_handler->is_drag_in_progress());
+  EXPECT_TRUE(overview_controller->InOverviewSession());
 }
 
 // Showing the resize shadows when the mouse is over the window edges is

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,13 @@
 
 #include "ash/ash_export.h"
 
+namespace chromeos {
+enum class WindowStateType;
+}
+
 namespace ash {
 
 class WindowState;
-enum class WindowStateType;
 
 class ASH_EXPORT WindowStateObserver {
  public:
@@ -26,13 +29,14 @@ class ASH_EXPORT WindowStateObserver {
   // This is used to update the shell state such as work area so
   // that the window can use the correct environment to update its bounds.
   virtual void OnPreWindowStateTypeChange(WindowState* window_state,
-                                          WindowStateType old_type) {}
+                                          chromeos::WindowStateType old_type) {}
 
   // Called after the window's state has been updated.
   // This is used to update the shell state that depends on the updated
   // window bounds, such as shelf visibility.
   virtual void OnPostWindowStateTypeChange(WindowState* window_state,
-                                           WindowStateType old_type) {}
+                                           chromeos::WindowStateType old_type) {
+  }
 };
 
 }  // namespace ash

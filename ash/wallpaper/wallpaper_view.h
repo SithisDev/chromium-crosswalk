@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define ASH_WALLPAPER_WALLPAPER_VIEW_H_
 
 #include "ash/wallpaper/wallpaper_base_view.h"
+#include "ash/wallpaper/wallpaper_constants.h"
 #include "ui/views/context_menu_controller.h"
 
 namespace aura {
@@ -14,28 +15,34 @@ class Window;
 
 namespace ash {
 
-class PreEventDispatchHandler;
-
 // The desktop wallpaper view that, in addition to painting the wallpaper, can
 // also add blur and dimming effects, as well as handle context menu requests.
 class WallpaperView : public WallpaperBaseView,
                       public views::ContextMenuController {
  public:
-  WallpaperView(int blur, float opacity);
+  explicit WallpaperView(float blur_sigma);
+
+  WallpaperView(const WallpaperView&) = delete;
+  WallpaperView& operator=(const WallpaperView&) = delete;
+
   ~WallpaperView() override;
 
-  // Schedules a repaint of the wallpaper with blur and opacity changes.
-  void RepaintBlurAndOpacity(int repaint_blur, float repaint_opacity);
+  // Clears cached image. Must be called when wallpaper image is changed.
+  void ClearCachedImage();
 
-  int repaint_blur() const { return repaint_blur_; }
-  float repaint_opacity() const { return repaint_opacity_; }
+  // Enables/Disables the lock shield layer.
+  void SetLockShieldEnabled(bool enabled);
+
+  void set_blur_sigma(float blur_sigma) { blur_sigma_ = blur_sigma; }
+  float blur_sigma() const { return blur_sigma_; }
+
+  views::View* shield_view_for_testing() { return shield_view_; }
 
  private:
-  friend class WallpaperControllerTest;
-
   // views::View:
   const char* GetClassName() const override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
   // views::ContextMenuController:
   void ShowContextMenuForViewImpl(views::View* source,
@@ -49,30 +56,23 @@ class WallpaperView : public WallpaperBaseView,
                      const cc::PaintFlags& flags,
                      gfx::Canvas* canvas) override;
 
-  // These are used by overview mode to animate the blur and opacity on the
-  // wallpaper. If |repaint_blur_| is not 0 and |repaint_opacity_| is not 1, the
-  // wallpaper will be downsampled and a blur and brightness filter will be
-  // applied. It is downsampled to increase performance.
-  int repaint_blur_;
-  float repaint_opacity_;
+  // Blur sigma to draw wallpaper.
+  float blur_sigma_ = wallpaper_constants::kClear;
+
+  // A view to hold solid color layer to hide desktop, in case compositor
+  // failed to draw its content due to memory shortage.
+  views::View* shield_view_ = nullptr;
 
   // A cached downsampled image of the wallpaper image. It will help wallpaper
   // blur/brightness animations be more performant.
-  base::Optional<gfx::ImageSkia> small_image_;
-
-  // A event handler that handles taps and closes overview if we are in that
-  // mode.
-  // TODO(sammiequon): Move this logic into ash/wm/overview.
-  std::unique_ptr<PreEventDispatchHandler> pre_dispatch_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(WallpaperView);
+  absl::optional<gfx::ImageSkia> small_image_;
 };
 
-views::Widget* CreateWallpaperWidget(aura::Window* root_window,
-                                     int container_id,
-                                     int blur,
-                                     float opacity,
-                                     WallpaperView** out_wallpaper_view);
+std::unique_ptr<views::Widget> CreateWallpaperWidget(
+    aura::Window* root_window,
+    float blur_sigma,
+    bool locked,
+    WallpaperView** out_wallpaper_view);
 
 }  // namespace ash
 

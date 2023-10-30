@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,13 @@
 #include <memory>
 
 #include "ash/ash_export.h"
+#include "ash/wallpaper/wallpaper_constants.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "ui/compositor/layer_animation_observer.h"
+
+namespace ui {
+class LayerTreeOwner;
+}
 
 namespace aura {
 class Window;
@@ -26,20 +31,29 @@ class WallpaperView;
 // This class manages widget-based wallpapers.
 // WallpaperWidgetController is owned by RootWindowController.
 // Exported for tests.
-class ASH_EXPORT WallpaperWidgetController {
+class ASH_EXPORT WallpaperWidgetController
+    : public ui::ImplicitAnimationObserver {
  public:
-  explicit WallpaperWidgetController(base::OnceClosure wallpaper_set_callback);
-  ~WallpaperWidgetController();
+  explicit WallpaperWidgetController(aura::Window* root_window);
+
+  WallpaperWidgetController(const WallpaperWidgetController&) = delete;
+  WallpaperWidgetController& operator=(const WallpaperWidgetController&) =
+      delete;
+
+  ~WallpaperWidgetController() override;
+
+  // Initialize the widget. |lock| specifies if the wallpaper should be created
+  // for the locked state.
+  void Init(bool locked);
 
   views::Widget* GetWidget();
-  views::Widget* GetAnimatingWidget();
 
   // Whether a wallpaper change is in progress, i.e. |animating_widget_| exists.
   bool IsAnimating() const;
 
   // If an animating wallpaper change is in progress, it ends the animation and
   // changes the wallpaper immediately. No-op if IsAnimation() returns false.
-  void EndPendingAnimation();
+  void StopAnimating();
 
   // Adds a callback that will be run when the wallpaper animation ends. Used
   // when you're expecting a wallpaper change (e.g. when IsAnimation() returns
@@ -47,69 +61,50 @@ class ASH_EXPORT WallpaperWidgetController {
   // timing that the wallpaper is applied.
   void AddAnimationEndCallback(base::OnceClosure callback);
 
-  // Sets a new wallpaper widget - this will not change the primary widget
-  // immediately. The primary widget will be switched when |widget|'s showing
-  // animation finishes (during which |widget| will be kept by
-  // |animating_widget_|).
-  // |blur_sigma| - if non-zero, the blur that should be applied to the
-  //     wallpaper widget layer.
-  void SetWallpaperWidget(views::Widget* widget,
-                          WallpaperView* wallpaper_view,
-                          float blur_sigma);
-
-  // Move the wallpaper for |root_window| to the specified |container|.
+  // Move the wallpaper widget to the specified |container|.
   // The lock screen moves the wallpaper container to hides the user's windows.
   // Returns true if there was something to reparent.
-  bool Reparent(aura::Window* root_window, int container);
+  bool Reparent(int container);
 
-  // Blur pixels of the wallpaper layer by 3 * the given amount.
-  void SetWallpaperBlur(float blur_sigma);
+  // Sets/Gets the blur used to draw wallpaper. |animation_duration| specifies
+  // the animation to apply the change. If its zero duration, then no animation
+  // will be applied.
+  bool SetWallpaperBlur(
+      float blur,
+      const base::TimeDelta& animation_duration = base::TimeDelta());
+  float GetWallpaperBlur() const;
 
-  // TODO: Get the wallpaper view from |animating_widget_| or |active_widget_|
-  // instead of caching the pointer value.
-  WallpaperView* wallpaper_view() const { return wallpaper_view_; }
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override;
 
-  // Reset, and closes both |active_widget_| and |animating_widget_|. Can be
-  // used in tests to reset the wallpaper widget controller state.
-  void ResetWidgetsForTesting();
+  WallpaperView* wallpaper_view() { return wallpaper_view_; }
+
+  ui::LayerTreeOwner* old_layer_tree_owner_for_testing() {
+    return old_layer_tree_owner_.get();
+  }
 
  private:
-  // Wrapper around wallpaper widgets that manages the widget state.
-  class WidgetHandler;
-
-  // Called when a WidgetHandler for a wallpaper widget is reset - this happens
-  // when the wallpaper widget is being destroyed.
-  void WidgetHandlerReset(WidgetHandler* widget);
-
-  // Called when WidgetHandler |widget| detects its associated widget is done
-  // animating to shown state.
-  void WidgetFinishedAnimating(WidgetHandler* widget);
-
-  // Moves |animated_widget_| to |active_widget_|.
-  void SetAnimatingWidgetAsActive();
-
   // Runs callbacks in |animation_end_callbacks_|.
   void RunAnimationEndCallbacks();
 
-  // Callback that will be run when |active_widget_| is first set.
-  base::OnceClosure wallpaper_set_callback_;
+  // Copies and fades out the existing wallpaper.
+  void ApplyCrossFadeAnimation(base::TimeDelta duration);
+
+  aura::Window* root_window_;
 
   // The current wallpaper widget.
-  std::unique_ptr<WidgetHandler> active_widget_;
+  std::unique_ptr<views::Widget> widget_;
 
-  // The pending wallpaper widget, which is currently in process of being
-  // shown.
-  std::unique_ptr<WidgetHandler> animating_widget_;
+  // The animating layer which contains old content. This is the layer that is
+  // animated when changing wallpapers.
+  std::unique_ptr<ui::LayerTreeOwner> old_layer_tree_owner_;
 
-  // Pointer to the wallpaper view owned by |animating_widget_| if it exists,
-  // otherwise owned by |active_widget_|.
+  // Pointer to the wallpaper view owned by |widget_|.
   WallpaperView* wallpaper_view_ = nullptr;
 
   // Callbacks to be run when the |animating_widget_| stops animating and gets
   // set as the active widget.
   std::list<base::OnceClosure> animation_end_callbacks_;
-
-  DISALLOW_COPY_AND_ASSIGN(WallpaperWidgetController);
 };
 
 }  // namespace ash

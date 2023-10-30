@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,9 @@
 
 #include <utility>
 
+#include "ash/host/ash_window_tree_host_delegate.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/host/transformer_helper.h"
-#include "ash/shell.h"
-#include "ash/shell_delegate.h"
-#include "ash/window_factory.h"
 #include "base/feature_list.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/null_window_targeter.h"
@@ -22,29 +20,56 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
-#include "ui/gfx/transform.h"
-#include "ui/ozone/public/input_controller.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 
 namespace ash {
 
+class ScopedEnableUnadjustedMouseEventsOzone
+    : public aura::ScopedEnableUnadjustedMouseEvents {
+ public:
+  explicit ScopedEnableUnadjustedMouseEventsOzone(
+      ui::InputController* input_controller)
+      : input_controller_(input_controller) {
+    input_controller_->SuspendMouseAcceleration();
+  }
+
+  ~ScopedEnableUnadjustedMouseEventsOzone() override {
+    input_controller_->EndMouseAccelerationSuspension();
+  }
+
+ private:
+  ui::InputController* input_controller_;
+};
+
 AshWindowTreeHostPlatform::AshWindowTreeHostPlatform(
-    ui::PlatformWindowInitProperties properties)
+    ui::PlatformWindowInitProperties properties,
+    AshWindowTreeHostDelegate* delegate)
     : aura::WindowTreeHostPlatform(std::move(properties),
-                                   window_factory::NewWindow()),
-      transformer_helper_(this) {
+                                   std::make_unique<aura::Window>(nullptr)),
+      delegate_(delegate),
+      transformer_helper_(this),
+      input_controller_(
+          ui::OzonePlatform::GetInstance()->GetInputController()) {
+  DCHECK(delegate_);
   CommonInit();
 }
 
-AshWindowTreeHostPlatform::AshWindowTreeHostPlatform()
-    : aura::WindowTreeHostPlatform(window_factory::NewWindow()),
+AshWindowTreeHostPlatform::AshWindowTreeHostPlatform(
+    std::unique_ptr<ui::PlatformWindow> platform_window,
+    AshWindowTreeHostDelegate* delegate,
+    size_t compositor_memory_limit_mb)
+    : aura::WindowTreeHostPlatform(std::make_unique<aura::Window>(nullptr)),
+      delegate_(delegate),
       transformer_helper_(this) {
-  CreateCompositor(viz::FrameSinkId(),
-                   /* force_software_compositor */ false,
-                   /* external_begin_frame_client */ nullptr,
-                   /* are_events_in_pixels */ true);
+  DCHECK(delegate_);
+  CreateCompositor(/* force_software_compositor */ false,
+                   /* use_external_begin_frame_control */ false,
+                   /* enable_compositing_based_throttling */ false,
+                   compositor_memory_limit_mb);
+  SetPlatformWindow(std::move(platform_window));
   CommonInit();
 }
 
@@ -77,22 +102,32 @@ gfx::Rect AshWindowTreeHostPlatform::GetLastCursorConfineBoundsInPixels()
   return last_cursor_confine_bounds_in_pixels_;
 }
 
-void AshWindowTreeHostPlatform::SetCursorConfig(
-    const display::Display& display,
-    display::Display::Rotation rotation) {
-  // Scale all motion on High-DPI displays.
-  float scale = display.device_scale_factor();
+void AshWindowTreeHostPlatform::UpdateCursorConfig() {
+  const display::Display* display = delegate_->GetDisplayById(GetDisplayId());
+  if (!display) {
+    LOG(ERROR)
+        << "While updating cursor config, could not find display with id="
+        << GetDisplayId();
+    return;
+  }
 
-  if (!display.IsInternal())
+  // Scale all motion on High-DPI displays.
+  float scale = display->device_scale_factor();
+
+  if (!display->IsInternal())
     scale *= 1.2;
 
   ui::CursorController::GetInstance()->SetCursorConfigForWindow(
-      GetAcceleratedWidget(), rotation, scale);
+      GetAcceleratedWidget(), display->panel_rotation(), scale);
 }
 
 void AshWindowTreeHostPlatform::ClearCursorConfig() {
   ui::CursorController::GetInstance()->ClearCursorConfigForWindow(
       GetAcceleratedWidget());
+}
+
+void AshWindowTreeHostPlatform::UpdateRootWindowSize() {
+  aura::WindowTreeHostPlatform::UpdateRootWindowSize();
 }
 
 void AshWindowTreeHostPlatform::SetRootWindowTransformer(
@@ -134,7 +169,8 @@ gfx::Transform AshWindowTreeHostPlatform::GetInverseRootTransform() const {
   return transformer_helper_.GetInverseTransform();
 }
 
-gfx::Rect AshWindowTreeHostPlatform::GetTransformedRootWindowBoundsInPixels(
+gfx::Rect
+AshWindowTreeHostPlatform::GetTransformedRootWindowBoundsFromPixelSize(
     const gfx::Size& host_size_in_pixels) const {
   return transformer_helper_.GetTransformedWindowBounds(host_size_in_pixels);
 }
@@ -156,6 +192,12 @@ void AshWindowTreeHostPlatform::SetTapToClickPaused(bool state) {
   // Temporarily pause tap-to-click when the cursor is hidden.
   ui::OzonePlatform::GetInstance()->GetInputController()->SetTapToClickPaused(
       state);
+}
+
+std::unique_ptr<aura::ScopedEnableUnadjustedMouseEvents>
+AshWindowTreeHostPlatform::RequestUnadjustedMovement() {
+  return std::make_unique<ScopedEnableUnadjustedMouseEventsOzone>(
+      input_controller_);
 }
 
 void AshWindowTreeHostPlatform::DispatchEvent(ui::Event* event) {

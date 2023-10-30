@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ NotificationMenuViewTestAPI::NotificationMenuViewTestAPI(
 
 NotificationMenuViewTestAPI::~NotificationMenuViewTestAPI() = default;
 
-base::string16 NotificationMenuViewTestAPI::GetCounterViewContents() const {
+std::u16string NotificationMenuViewTestAPI::GetCounterViewContents() const {
   return notification_menu_view_->header_view_->counter_->GetText();
 }
 
@@ -28,7 +28,7 @@ int NotificationMenuViewTestAPI::GetItemViewCount() const {
 }
 
 NotificationOverflowView* NotificationMenuViewTestAPI::GetOverflowView() const {
-  return notification_menu_view_->overflow_view_.get();
+  return notification_menu_view_->overflow_view_;
 }
 
 }  // namespace ash
